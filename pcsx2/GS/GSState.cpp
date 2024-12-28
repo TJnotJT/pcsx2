@@ -22,6 +22,457 @@ int GSState::s_n = 0;
 int GSState::s_last_transfer_draw_n = 0;
 int GSState::s_transfer_n = 0;
 
+EdgeFunction getEdgeFunction(Point a, Point b)
+{
+	return {a.y - b.y, b.x - a.x, a.x * b.y - a.y * b.x};
+}
+
+bool checkEdgeFunction(double e, EdgeType edgeType)
+{
+	if (edgeType == TOP || edgeType == LEFT)
+	{
+		return e >= 0;
+	}
+	else if (edgeType == RIGHT || edgeType == BOTTOM)
+	{
+		return e > 0;
+	}
+	else
+	{
+		throw std::invalid_argument("Invalid edge type");
+	}
+}
+
+std::tuple<double, double> interpolateEdgeFunctionsUV(double e01, double e12, double e20, Point v0, Point v1, Point v2)
+{
+	return {(e12 * v0.u + e20 * v1.u + e01 * v2.u) / (e01 + e12 + e20), (e01 * v0.v + e12 * v1.v + e20 * v2.v) / (e01 + e12 + e20)};
+}
+
+bool checkXYBounds(double x, double y, Point v0, Point v1)
+{
+	if (std::abs(v1.y - v0.y) > std::abs(v1.x - v0.x))
+	{
+		return std::floor(std::min(v0.y, v1.y)) <= y && y <= std::ceil(std::max(v0.y, v1.y));
+	}
+	else if (std::abs(v1.x - v0.x) > std::abs(v1.y - v0.y))
+	{
+		return std::floor(std::min(v0.x, v1.x)) <= x && x <= std::ceil(std::max(v0.x, v1.x));
+	}
+	else
+	{
+		return (
+			(std::floor(std::min(v0.x, v1.x)) <= x && x <= std::ceil(std::max(v0.x, v1.x))) &&
+			(std::floor(std::min(v0.y, v1.y)) <= y && y <= std::ceil(std::max(v0.y, v1.y))));
+	}
+}
+
+std::tuple<Point, Point, Point> reorderPoints(Point v0, Point v1, Point v2)
+{
+	if ((v1.x - v0.x) * (v2.y - v0.y) - (v1.y - v0.y) * (v2.x - v0.x) < 0)
+	{
+		std::swap(v1, v2);
+	}
+
+	std::vector<Point> v = {v0, v1, v2};
+	int i0 = 0;
+	for (int i = 1; i < 3; ++i)
+	{
+		if (v[i].y < v[i0].y || (v[i].y == v[i0].y && v[i].x < v[i0].x))
+		{
+			i0 = i;
+		}
+	}
+	return {v[i0], v[(i0 + 1) % 3], v[(i0 + 2) % 3]};
+}
+
+std::tuple<Point, Point, Point, EdgeType, EdgeType, EdgeType> reorderAndClassify(Point v0, Point v1, Point v2)
+{
+	std::tie(v0, v1, v2) = reorderPoints(v0, v1, v2);
+	EdgeType t01, t12, t20;
+	if (v0.y == v1.y)
+	{
+		t01 = TOP;
+	}
+	else
+	{
+		t01 = RIGHT;
+	}
+	if (t01 == TOP)
+	{
+		t12 = RIGHT;
+		t20 = LEFT;
+	}
+	else if (v1.y < v2.y)
+	{
+		t12 = RIGHT;
+		t20 = LEFT;
+	}
+	else if (v1.y > v2.y)
+	{
+		t12 = LEFT;
+		t20 = LEFT;
+	}
+	else
+	{ // v1.y == v2.y
+		t12 = BOTTOM;
+		t20 = LEFT;
+	}
+	return {v0, v1, v2, t01, t12, t20};
+}
+
+std::tuple<double, double> calculateUVHelper(double x, double y, double u, double v, int tw, int th, int wms, int wmt, int minu, int maxu, int minv, int maxv, std::vector<Point>& output)
+{
+	// Round to 4 fractional bits
+	int ui = static_cast<int>(16.0 * u + 0.5);
+	int vi = static_cast<int>(16.0 * v + 0.5);
+
+	// Initial clamping done on all UVs
+	ui = std::max(-2047, std::min(2047, ui));
+	vi = std::max(-2047, std::min(2047, vi));
+
+	// Clamping/wrapping for U
+	switch (wms)
+	{
+		case CLAMP_REPEAT:
+			ui &= (tw << 4) - 1;
+		case CLAMP_CLAMP:
+			ui = std::max(0, std::min(tw << 4, ui));
+			break;
+		case CLAMP_REGION_CLAMP:
+			ui = std::max(minu, std::min(maxu, ui));
+			break;
+		case CLAMP_REGION_REPEAT:
+			int umsk = minu;
+			int ufix = maxu;
+			ui = (ui & (umsk << 4)) | (ufix << 4) | (ui & 0xF); // Fractional part not affected by regin repeat
+			break;
+		default:
+			ASSUME(0);
+	}
+
+	// Clamping/wrapping for V
+	switch (wmt)
+	{
+		case CLAMP_REPEAT:
+			vi &= (th << 4) - 1;
+		case CLAMP_CLAMP:
+			vi = std::max(0, std::min(th << 4, vi));
+			break;
+		case CLAMP_REGION_CLAMP:
+			vi = std::max(minv, std::min(maxv, vi));
+			break;
+		case CLAMP_REGION_REPEAT:
+			int vmsk = minv;
+			int vfix = maxv;
+			vi = (vi & (vmsk << 4)) | (vfix << 4) | (vi & 0xF); // Fractional part not affected by regin repeat
+			break;
+		default:
+			ASSUME(0);
+	}
+
+	// Output
+	output.push_back(Point(x, y, static_cast<double>(ui) / 16.0, static_cast<double>(vi) / 16.0));
+}
+
+void calculateUV(double x, double y, double u, double v, int tw, int th, int wms, int wmt, int minu, int maxu, int minv, int maxv, bool bilinear, std::vector<Point>& output)
+{
+	if (bilinear)
+	{
+		calculateUVHelper(x, y, std::floor(u - 0.5), std::floor(v - 0.5), tw, th, wms, wmt, minu, maxu, minv, maxv, output);
+		calculateUVHelper(x, y, std::floor(u + 0.5), std::floor(v - 0.5), tw, th, wms, wmt, minu, maxu, minv, maxv, output);
+		calculateUVHelper(x, y, std::floor(u - 0.5), std::floor(v + 0.5), tw, th, wms, wmt, minu, maxu, minv, maxv, output);
+		calculateUVHelper(x, y, std::floor(u + 0.5), std::floor(v + 0.5), tw, th, wms, wmt, minu, maxu, minv, maxv, output);
+	}
+	else
+	{
+		calculateUVHelper(x, y, std::floor(u), std::floor(v), tw, th, wms, wmt, minu, maxu, minv, maxv, output);
+	}
+}
+
+// Rasterize the boundary of the line interior to the triangle and output x, y, u, v
+void edgeWalkTriangle1(Point v0, Point v1, Point v2, EdgeType t01, EdgeType t12, EdgeType t20, std::vector<Point> output)
+{
+	// Get edge function coefficients
+	EdgeFunction E01 = getEdgeFunction(v0, v1);
+	EdgeFunction E12 = getEdgeFunction(v1, v2);
+	EdgeFunction E20 = getEdgeFunction(v2, v0);
+
+	// Initialize deltas and steps
+	double dx = v1.x - v0.x;
+	double dy = v1.y - v0.y;
+	double sx = (dx > 0) ? 1.0f : -1.0f;
+	double sy = (dy > 0) ? 1.0f : -1.0f;
+
+	// Initialize starting point by rounding correctly
+	// Use right hand rule and brute force case analysis to get the correct starting point
+	double x, y;
+	if (dy == 0.0f)
+	{
+		if (dx > 0.0f)
+		{
+			x = std::floor(v0.x);
+			y = std::ceil(v0.y);
+			sy = 1.0f;
+		}
+		else
+		{
+			x = std::ceil(v0.x);
+			y = std::floor(v0.y);
+			sy = -1.0f;
+		}
+	}
+	else if (dx == 0.0f)
+	{
+		if (dy > 0.0f)
+		{
+			y = std::floor(v0.y);
+			x = std::floor(v0.x);
+			sx = -1.0f;
+		}
+		else
+		{
+			y = std::ceil(v0.y);
+			x = std::ceil(v0.x);
+			sx = 1.0f;
+		}
+	}
+	else if ((dx > 0) && (dy > 0))
+	{
+		double y1 = std::ceil(v0.y);
+		if (E01.a * std::ceil(v0.x) + E01.b * y1 + E01.c >= 0)
+		{
+			x = std::ceil(v0.x);
+			y = y1;
+		}
+		else if (E01.a * std::floor(v0.x) + E01.b * y1 + E01.c >= 0)
+		{
+			x = std::floor(v0.x);
+			y = y1;
+		}
+		else
+		{
+			// Should be unreachable
+			throw std::invalid_argument("Invalid edge function");
+		}
+	}
+	else if ((dx < 0) && (dy > 0))
+	{
+		double x1 = std::floor(v0.x);
+		if (E01.a * x1 + E01.b * std::ceil(v0.y) + E01.c >= 0)
+		{
+			x = x1;
+			y = std::ceil(v0.y);
+		}
+		else if (E01.a * x1 + E01.b * std::floor(v0.y) + E01.c >= 0)
+		{
+			x = x1;
+			y = std::floor(v0.y);
+		}
+		else
+		{
+			throw std::invalid_argument("Invalid edge function");
+		}
+	}
+	else if ((dx < 0) && (dy < 0))
+	{
+		double y1 = std::floor(v0.y);
+		if (E01.a * std::floor(v0.x) + E01.b * y1 + E01.c >= 0)
+		{
+			x = std::floor(v0.x);
+			y = y1;
+		}
+		else if (E01.a * std::ceil(v0.x) + E01.b * y1 + E01.c >= 0)
+		{
+			x = std::ceil(v0.x);
+			y = y1;
+		}
+		else
+		{
+			throw std::invalid_argument("Invalid edge function");
+		}
+	}
+	else if ((dx > 0) && (dy < 0))
+	{
+		double x1 = std::ceil(v0.x);
+		if (E01.a * x1 + E01.b * std::floor(v0.y) + E01.c >= 0)
+		{
+			x = x1;
+			y = std::floor(v0.y);
+		}
+		else if (E01.a * x1 + E01.b * std::ceil(v0.y) + E01.c >= 0)
+		{
+			x = x1;
+			y = std::ceil(v0.y);
+		}
+		else
+		{
+			throw std::invalid_argument("Invalid edge function");
+		}
+	}
+
+	// Initialize edge function values
+	double e01 = E01.a * x + E01.b * y + E01.c;
+	double e12 = E12.a * x + E12.b * y + E12.c;
+	double e20 = E20.a * x + E20.b * y + E20.c;
+	double u, v;
+
+	if (checkEdgeFunction(e01, t01) && checkEdgeFunction(e12, t12) && checkEdgeFunction(e20, t20))
+	{
+		std::tie(u, v) = interpolateEdgeFunctionsUV(e01, e12, e20, v0, v1, v2);
+		output.push_back(Point(x, y, u, v));
+	}
+
+	// Walk along the longest axis
+	if (std::abs(dx) > std::abs(dy))
+	{
+		while (checkXYBounds(x, y, v0, v1))
+		{ // Check if the current point is inside the bounds of the line
+			// Test the horizontal and diagonal edge functions
+			double e01x = e01 + E01.a * sx;
+			double e01xy = e01 + E01.a * sx + E01.b * sy;
+			if (!checkEdgeFunction(e01x, t01))
+			{
+				// Cannot go horizontally, so go diagonally
+				x += sx;
+				y += sy;
+				e01 += E01.a * sx + E01.b * sy;
+				e12 += E12.a * sx + E12.b * sy;
+				e20 += E20.a * sx + E20.b * sy;
+			}
+			else if (!checkEdgeFunction(e01xy, t01))
+			{
+				// Cannot go diagonally, so go horizontally
+				x += sx;
+				e01 += E01.a * sx;
+				e12 += E12.a * sx;
+				e20 += E20.a * sx;
+			}
+			else if (e01x < e01xy)
+			{
+				// Can go both, but horizontal is closer to the line
+				x += sx;
+				e01 += E01.a * sx;
+				e12 += E12.a * sx;
+				e20 += E20.a * sx;
+			}
+			else if (e01x > e01xy)
+			{
+				// Can go both, but diagonal is closer to the line
+				x += sx;
+				y += sy;
+				e01 += E01.a * sx + E01.b * sy;
+				e12 += E12.a * sx + E12.b * sy;
+				e20 += E20.a * sx + E20.b * sy;
+			}
+			else
+			{
+				// Should be unreachable
+				throw std::invalid_argument("Invalid edge function");
+			}
+			if (checkEdgeFunction(e01, t01) && checkEdgeFunction(e12, t12) && checkEdgeFunction(e20, t20))
+			{
+				std::tie(u, v) = interpolateEdgeFunctionsUV(e01, e12, e20, v0, v1, v2);
+				output.push_back(Point(x, y, u, v));
+			}
+		}
+	}
+	else if (std::abs(dy) > std::abs(dx))
+	{
+		while (checkXYBounds(x, y, v0, v1))
+		{ // Check if the current point is inside the bounds of the line
+			// Test the vertical and diagonal edge functions
+			double e01y = e01 + E01.b * sy;
+			double e01xy = e01 + E01.a * sx + E01.b * sy;
+			if (!checkEdgeFunction(e01y, t01))
+			{
+				// Cannot go vertically, so go diagonally
+				x += sx;
+				y += sy;
+				e01 += E01.a * sx + E01.b * sy;
+				e12 += E12.a * sx + E12.b * sy;
+				e20 += E20.a * sx + E20.b * sy;
+			}
+			else if (!checkEdgeFunction(e01xy, t01))
+			{
+				// Cannot go diagonally, so go vertically
+				y += sy;
+				e01 += E01.b * sy;
+				e12 += E12.b * sy;
+				e20 += E20.b * sy;
+			}
+			else if (e01y < e01xy)
+			{
+				// Can go both, but vertical is closer to the line
+				y += sy;
+				e01 += E01.b * sy;
+				e12 += E12.b * sy;
+				e20 += E20.b * sy;
+			}
+			else if (e01y > e01xy)
+			{
+				// Can go both, but diagonal is closer to the line
+				x += sx;
+				y += sy;
+				e01 += E01.a * sx + E01.b * sy;
+				e12 += E12.a * sx + E12.b * sy;
+				e20 += E20.a * sx + E20.b * sy;
+			}
+			else
+			{
+				throw std::invalid_argument("Invalid edge function");
+			}
+			if (checkEdgeFunction(e01, t01) && checkEdgeFunction(e12, t12) && checkEdgeFunction(e20, t20))
+			{
+				std::tie(u, v) = interpolateEdgeFunctionsUV(e01, e12, e20, v0, v1, v2);
+				output.push_back(Point(x, y, u, v));
+			}
+		}
+	}
+	else
+	{
+		// Diagonal line: dx == dy so we can just walk diagonally
+		while (checkXYBounds(x, y, v0, v1))
+		{
+			x += sx;
+			y += sy;
+			e01 += E01.a * sx + E01.b * sy;
+			e12 += E12.a * sx + E12.b * sy;
+			e20 += E20.a * sx + E20.b * sy;
+			if (checkEdgeFunction(e01, t01) && checkEdgeFunction(e12, t12) && checkEdgeFunction(e20, t20))
+			{
+				std::tie(u, v) = interpolateEdgeFunctionsUV(e01, e12, e20, v0, v1, v2);
+				output.push_back(Point(x, y, u, v));
+			}
+		}
+	}
+}
+
+void edgeWalkTriangle(Point v0, Point v1, Point v2, std::vector<Point>& output)
+{
+	// Rearrange the points in the correct order and walk along all edges
+	auto [v0_, v1_, v2_, t01, t12, t20] = reorderAndClassify(v0, v1, v2);
+	edgeWalkTriangle1(v0_, v1_, v2_, t01, t12, t20, output);
+	edgeWalkTriangle1(v1_, v2_, v0_, t12, t20, t01, output);
+	edgeWalkTriangle1(v2_, v0_, v1_, t20, t01, t12, output);
+}
+
+// FIXME: Only applies to triangles!
+void GSState::getPoints(std::vector<Point>& output) const
+{
+	for (u32 idx = 0; idx < m_index.tail; idx += 3)
+	{
+		const u16* const i = m_index.buff + idx;
+		for (int j = 0; j < 3; j++)
+		{
+			double x = static_cast<double>(m_vertex.buff[i[0]].XYZ.X) / 16.0;
+			double y = static_cast<double>(m_vertex.buff[i[0]].XYZ.X) / 16.0;
+			double u = static_cast<double>(m_vertex.buff[i[0]].U) / 16.0;
+			double v = static_cast<double>(m_vertex.buff[i[0]].V) / 16.0;
+			output.push_back(Point(x, y, u, v));
+		}
+	}
+}
+
 static __fi bool IsAutoFlushEnabled()
 {
 	return GSIsHardwareRenderer() ? (GSConfig.UserHacks_AutoFlush != GSHWAutoFlushLevel::Disabled) : GSConfig.AutoFlushSW;
@@ -3762,6 +4213,272 @@ static bool UsesRegionRepeat(int fix, int msk, int min, int max, int* min_out, i
 	return sets_bits || clears_bits;
 }
 
+//GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCLAMP CLAMP, bool linear, bool clamp_to_tsize)
+//{
+//	// TODO: some of the +1s can be removed if linear == false
+//
+//	const int tw = TEX0.TW;
+//	const int th = TEX0.TH;
+//
+//	const int w = 1 << tw;
+//	const int h = 1 << th;
+//	const int tw_mask = (1 << tw) - 1;
+//	const int th_mask = (1 << th) - 1;
+//
+//	GSVector4i tr(0, 0, w, h);
+//
+//	const int wms = CLAMP.WMS;
+//	const int wmt = CLAMP.WMT;
+//
+//	const int minu = (int)CLAMP.MINU;
+//	const int minv = (int)CLAMP.MINV;
+//	const int maxu = (int)CLAMP.MAXU;
+//	const int maxv = (int)CLAMP.MAXV;
+//
+//	GSVector4i vr = tr;
+//
+//	switch (wms)
+//	{
+//		case CLAMP_REPEAT:
+//			break;
+//		case CLAMP_CLAMP:
+//			break;
+//		case CLAMP_REGION_CLAMP:
+//			vr.x = minu;
+//			vr.z = maxu + 1;
+//			break;
+//		case CLAMP_REGION_REPEAT:
+//			vr.x = maxu;
+//			vr.z = (maxu | minu) + 1;
+//			break;
+//		default:
+//			ASSUME(0);
+//	}
+//
+//	switch (wmt)
+//	{
+//		case CLAMP_REPEAT:
+//			break;
+//		case CLAMP_CLAMP:
+//			break;
+//		case CLAMP_REGION_CLAMP:
+//			vr.y = minv;
+//			vr.w = maxv + 1;
+//			break;
+//		case CLAMP_REGION_REPEAT:
+//			vr.y = maxv;
+//			vr.w = (maxv | minv) + 1;
+//			break;
+//		default:
+//			ASSUME(0);
+//	}
+//
+//	// Software renderer fixes TEX0 so that TW/TH contain MAXU/MAXV.
+//	// Hardware renderer doesn't, and handles it in the texture cache, so don't clamp here.
+//	if (clamp_to_tsize)
+//		vr = vr.rintersect(tr);
+//	else
+//		tr = tr.runion(vr);
+//
+//	u8 uses_border = 0;
+//
+//	if (m_vt.m_max.t.x >= FLT_MAX || m_vt.m_min.t.x <= -FLT_MAX ||
+//		m_vt.m_max.t.y >= FLT_MAX || m_vt.m_min.t.y <= -FLT_MAX)
+//	{
+//		// If any of the min/max values are +-FLT_MAX we can't rely on them
+//		// so just assume full texture.
+//		uses_border = 0xF;
+//	}
+//	else
+//	{
+//		const GSVector2 dp(std::max(m_vt.m_max.p.x - m_vt.m_min.p.x, 1.0f), std::max(m_vt.m_max.p.y - m_vt.m_min.p.y, 1.0f));
+//		const GSVector2 dt(m_vt.m_max.t.x - m_vt.m_min.t.x, m_vt.m_max.t.y - m_vt.m_min.t.y); // Format: (du, dv)
+//
+//		// Find the top-left and bottom-right pixels contained in the bounding box
+//		// Format: (x_min, y_min, x_max, y_max)
+//		GSVector4 p_int = m_vt.m_min.p.ceil().xyxy(m_vt.m_max.p.floor());
+//
+//		// FIXME: I don't know how to do this with SIMD...
+//		// We want exclusive range for maximum because right/bottom edges are not drawn by GS rules
+//		if (p_int.z == m_vt.m_max.p.x)
+//		{
+//			p_int.z -= 1.0f;
+//		}
+//		if (p_int.w == m_vt.m_max.p.y)
+//		{
+//			p_int.w -= 1.0f;
+//		}
+//
+//		const GSVector2 dtdp(dt / dp);
+//
+//		// Linear interpolation the UV coordinates at the minimum/maximum pixel centers in the bounding box
+//		// FIXME: This assume that the minmum U corresponds to the minimnum X and same for V/Y =/
+//		// Format: (u_min, v_min, u_max, v_max)
+//		GSVector4 t_int = m_vt.m_min.t.xyxy() + (p_int - m_vt.m_min.p.xyxy()) * GSVector4(dtdp.x, dtdp.y, dtdp.x, dtdp.y);
+//
+//		if (linear)
+//		{
+//			// Get the top-left bilinear interpolation UV for the min values and the bottom-right for the max values
+//			t_int = (t_int - 0.5).floor();
+//			t_int = t_int.xyzw(t_int + 1);
+//		}
+//
+//		// Adjust texture range when sprites get scissor clipped. Since we linearly interpolate, this
+//		// optimization doesn't work when perspective correction is enabled.
+//		if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST == 1 && m_primitive_covers_without_gaps != NoGapsType::GapsFound)
+//		{
+//			// When coordinates are fractional, GS appears to draw to the right/bottom (effectively
+//			// taking the ceiling), not to the top/left (taking the floor).
+//			const GSVector4i scissored_rc(GSVector4i(p_int).rintersect(m_context->scissor.in));
+//			if (!GSVector4i(p_int).eq(scissored_rc))
+//			{
+//				// Note: I believe that it was incorrect to use the floored/ceiled values for interpolation
+//				// Better to use the actual values of X, Y in the registers. (FIXME: remove this comment in final)
+//
+//				const GSVertex* vert_first = &m_vertex.buff[m_index.buff[0]];
+//				const GSVertex* vert_second = &m_vertex.buff[m_index.buff[1]];
+//
+//				// m_primitive_covers_without_gaps guarantees that we are drawing only one sprite
+//				const GSVector4 t_tmp(vert_first->U / 16.0f, vert_first->V / 16.0f, vert_second->U / 16.0f, vert_second->V / 16.0f);
+//				const GSVector4 p_tmp(vert_first->XYZ.X / 16.0f, vert_first->XYZ.Y / 16.0f, vert_second->XYZ.X / 16.0f, vert_second->XYZ.Y / 16.0f);
+//				GSVector4 t_int2;
+//
+//				// Interpolate U
+//				if (p_tmp.x < p_tmp.z)
+//				{
+//					t_int2.x = t_tmp.x + (p_tmp.z - static_cast<float>(scissored_rc.left)) * (t_tmp.z - t_tmp.x) / (p_tmp.z - p_tmp.x);
+//					t_int2.z = t_tmp.x + (p_tmp.z - static_cast<float>(scissored_rc.right)) * (t_tmp.z - t_tmp.x) / (p_tmp.z - p_tmp.x);
+//				}
+//				else {
+//					t_int2.x = t_tmp.x + (p_tmp.z - scissored_rc.right) * (t_tmp.z - t_tmp.x) / (p_tmp.z - p_tmp.x);
+//					t_int2.z = t_tmp.x + (p_tmp.z - scissored_rc.left) * (t_tmp.z - t_tmp.x) / (p_tmp.z - p_tmp.x);
+//				}
+//
+//				// Interpolate V
+//				if (p_tmp.y < p_tmp.w)
+//				{
+//					t_int2.y = t_tmp.y + (p_tmp.w - scissored_rc.left) * (t_tmp.w - t_tmp.y) / (p_tmp.w - p_tmp.y);
+//					t_int2.w = t_tmp.y + (p_tmp.w - scissored_rc.right) * (t_tmp.w - t_tmp.y) / (p_tmp.w - p_tmp.y);
+//				}
+//				else
+//				{
+//					t_int2.y = t_tmp.y + (p_tmp.w - scissored_rc.right) * (t_tmp.w - t_tmp.y) / (p_tmp.w - p_tmp.y);
+//					t_int2.w = t_tmp.y + (p_tmp.w - scissored_rc.left) * (t_tmp.w - t_tmp.y) / (p_tmp.w - p_tmp.y);
+//				}
+//
+//				t_int2 = GSVector4(std::min(t_int2.x, t_int2.z), std::max(t_int2.y, t_int2.w), std::min(t_int2.x, t_int2.z), std::max(t_int.y, t_int.w));
+//				
+//				// Get the top-left interpolation UV for the min values and the bottom-right for the max values
+//				t_int2 = (t_int2 - 0.5).floor();
+//				t_int2 = t_int2.xyzw(t_int2 + 1);
+//
+//				// Why was 1 subtracted from the main point before? That defeats the purpose of calculating the bilinear interped points.
+//				// FIXME: Remove this comment in the final version...
+//
+//				// We need to check that it's not going to repeat over the non-clipped part
+//				if (wms != CLAMP_REGION_REPEAT && (wms != CLAMP_REPEAT || (static_cast<int>(t_int2.x) & ~tw_mask) == (static_cast<int>(t_int2.z) & ~tw_mask)))
+//				{
+//					t_int.x = t_int2.x;
+//					t_int.z = t_int2.z;
+//				}
+//
+//				// We need to check that it's not going to repeat over the non-clipped part
+//				if (wmt != CLAMP_REGION_REPEAT && (wmt != CLAMP_REPEAT || (static_cast<int>(t_int2.y) & ~th_mask) == (static_cast<int>(t_int2.w) & ~th_mask)))
+//				{
+//					t_int.y = t_int2.y;
+//					t_int.w = t_int2.w;
+//				}
+//			}
+//		}
+//
+//		// Format: (u_min, v_min, u_max, v_max)
+//		const GSVector4i t_inti(t_int);
+//
+//		uses_border = GSVector4::cast((t_inti < vr).blend32<0xc>(t_inti >= vr)).mask();
+//
+//		// Roughly cut out the min/max of the read (Clamp)
+//		switch (wms)
+//		{
+//			case CLAMP_REPEAT:
+//				if ((t_inti.x & ~tw_mask) == (t_inti.z & ~tw_mask))
+//				{
+//					vr.x = std::max(vr.x, (t_inti.x & tw_mask));
+//					vr.z = std::min(vr.z, (t_inti.z & tw_mask) + 1); // +1 to convert inclusive to exclusive
+//				}
+//				break;
+//			case CLAMP_CLAMP:
+//			case CLAMP_REGION_CLAMP:
+//				if (vr.x < t_inti.x)
+//					vr.x = std::min(vr.z - 1, t_inti.x);
+//				if (vr.z > (t_inti.z + 1))
+//					vr.z = std::max(vr.x + 1, t_inti.z + 1); // +1 to convert inclusive to exclusive
+//				break;
+//			// Note that UsesRegionRepeat already adds +1 to max result to make it exclusive
+//			case CLAMP_REGION_REPEAT:
+//				if (UsesRegionRepeat(maxu, minu, t_inti.x, t_inti.z, &vr.x, &vr.z) || maxu >= tw)
+//					uses_border |= TextureMinMaxResult::USES_BOUNDARY_U;
+//				break;
+//			default:
+//				ASSUME(0);
+//		}
+//
+//		switch (wmt)
+//		{
+//			case CLAMP_REPEAT:
+//				if ((t_inti.y & ~th_mask) == (t_inti.w & ~th_mask))
+//				{
+//					vr.y = std::max(vr.y, t_inti.y & th_mask);
+//					vr.w = std::min(vr.w, (t_inti.w & th_mask) + 1); // +1 to convert inclusive to exclusive
+//				}
+//				break;
+//			case CLAMP_CLAMP:
+//			case CLAMP_REGION_CLAMP:
+//				if (vr.y < t_inti.y)
+//					vr.y = std::min(vr.w - 1, t_inti.y);
+//				if (vr.w > (t_inti.w + 1))
+//					vr.w = std::max(vr.y + 1, t_inti.w + 1); // +1 to convert inclusive to exclusive
+//				break;
+//			case CLAMP_REGION_REPEAT:
+//				// Note that UsesRegionRepeat already adds +1 to max result to make it exclusive
+//				if (UsesRegionRepeat(maxv, minv, t_inti.y, t_inti.w, &vr.y, &vr.w) || maxv >= th)
+//					uses_border |= TextureMinMaxResult::USES_BOUNDARY_V;
+//				break;
+//			default:
+//				ASSUME(0);
+//		}
+//	}
+//
+//	vr = vr.rintersect(tr);
+//
+//	// This really shouldn't happen now except with the clamping region set entirely outside the texture,
+//	// special handling should be written for that case.
+//	if (vr.rempty())
+//	{
+//		// NOTE: this can happen when texcoords are all outside the texture or clamping area is zero, but we can't
+//		// let the texture cache update nothing, the sampler will still need a single texel from the border somewhere
+//		// examples:
+//		// - THPS (no visible problems)
+//		// - NFSMW (strange rectangles on screen, might be unrelated)
+//		// - Lupin 3rd (huge problems, textures sizes seem to be randomly specified)
+//
+//		const bool inc_x = vr.x < tr.z;
+//		const bool inc_y = vr.y < tr.w;
+//		vr = (vr + GSVector4i(inc_x ? 0 : -1, inc_y ? 0 : -1, inc_x ? 1 : 0, inc_y ? 1 : 0)).rintersect(tr);
+//	}
+//	else if (vr.xxzz().rempty())
+//	{
+//		const bool inc_x = vr.x < tr.z;
+//		vr = (vr + GSVector4i(inc_x ? 0 : -1, 0, inc_x ? 1 : 0, 0)).rintersect(tr);
+//	}
+//	else if (vr.yyww().rempty())
+//	{
+//		const bool inc_y = vr.y < tr.w;
+//		vr = (vr + GSVector4i(0, inc_y ? 0 : -1, 0, inc_y ? 1 : 0)).rintersect(tr);
+//	}
+//
+//	return {vr, uses_border};
+//}
+
 GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCLAMP CLAMP, bool linear, bool clamp_to_tsize)
 {
 	// TODO: some of the +1s can be removed if linear == false
@@ -3845,7 +4562,7 @@ GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCL
 		if (linear)
 		{
 			st += GSVector4(-0.5f, 0.5f).xxyy();
-			
+
 			// If it's the start of the texture and our little adjustment is all that pushed it over, clamp it to 0.
 			// This stops the border check failing when using repeat but needed less than the full texture
 			// since this was making it take the full texture even though it wasn't needed.
@@ -3931,7 +4648,7 @@ GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCL
 		// This may be inaccurate depending on the draw, but adding 1 all the time is wrong too.
 		const int inclusive_x_req = ((m_vt.m_primclass < GS_TRIANGLE_CLASS) || (grad.x < 1.0f || (grad.x == 1.0f && m_vt.m_max.p.x != floor(m_vt.m_max.p.x)))) ? 1 : 0;
 		const int inclusive_y_req = ((m_vt.m_primclass < GS_TRIANGLE_CLASS) || (grad.y < 1.0f || (grad.y == 1.0f && m_vt.m_max.p.y != floor(m_vt.m_max.p.y)))) ? 1 : 0;
-	
+
 		// Roughly cut out the min/max of the read (Clamp)
 		switch (wms)
 		{
@@ -4006,7 +4723,7 @@ GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCL
 		vr = (vr + GSVector4i(0, inc_y ? 0 : -1, 0, inc_y ? 1 : 0)).rintersect(tr);
 	}
 
-	return { vr, uses_border };
+	return {vr, uses_border};
 }
 
 void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)

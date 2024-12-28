@@ -15,6 +15,42 @@
 
 class GSDumpBase;
 
+struct Point
+{
+	double x, y, u, v;
+	Point(double x, double y, double u, double v)
+		: x(x)
+		, y(y)
+		, u(u)
+		, v(v)
+	{
+	}
+	Point(double x, double y)
+		: Point(x, y, NAN, NAN)
+	{
+	}
+	Point()
+		: Point(0, 0)
+	{
+	}
+};
+
+struct EdgeFunction
+{
+	double a, b, c;
+};
+
+enum EdgeType
+{
+	TOP,
+	RIGHT,
+	LEFT,
+	BOTTOM
+};
+
+void calculateUV(double x, double y, double u, double v, int tw, int th, int wms, int wmt, int minu, int maxu, int minv, int maxv, bool bilinear, std::vector<Point>& output);
+void edgeWalkTriangle(Point v0, Point v1, Point v2, std::vector<Point>& output);
+
 class GSState : public GSAlignedClass<32>
 {
 public:
@@ -190,6 +226,8 @@ protected:
 	bool IsCoverageAlpha();
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
+
+	void getPoints(std::vector<Point>& output) const;
 
 public:
 	struct GSUploadQueue
