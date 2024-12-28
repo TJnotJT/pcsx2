@@ -18,6 +18,7 @@
 MULTI_ISA_UNSHARED_IMPL;
 
 int GSRasterizerData::s_counter = 0;
+extern FILE* s_fp;
 
 static int compute_best_thread_height(int threads)
 {
@@ -41,6 +42,7 @@ GSRasterizer::GSRasterizer(GSDrawScanline* ds, int id, int threads)
 {
 	memset(&m_pixels, 0, sizeof(m_pixels));
 	m_primcount = 0;
+	m_local.primcount = 0;
 
 	m_thread_height = compute_best_thread_height(threads);
 
@@ -131,6 +133,7 @@ void GSRasterizer::Draw(GSRasterizerData& data)
 	m_pixels.actual = 0;
 	m_pixels.total = 0;
 	m_primcount = 0;
+	m_local.primcount = 0;
 
 	if constexpr (ENABLE_DRAW_STATS)
 		data.start = GetCPUTicks();
@@ -253,6 +256,7 @@ template <bool scissor_test>
 void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count)
 {
 	m_primcount++;
+	m_local.primcount++;
 
 	if (index)
 	{
@@ -299,6 +303,7 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
+	m_local.primcount++;
 
 	const GSVertexSW& v0 = vertex[index[0]];
 	const GSVertexSW& v1 = vertex[index[1]];
@@ -417,6 +422,7 @@ static const u8 s_ysort[8][4] =
 void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
+	m_local.primcount++;
 
 	GSVertexSW2 edge;
 	GSVertexSW2 dedge;
@@ -598,10 +604,19 @@ void GSRasterizer::DrawTriangleSection(int top, int bottom, GSVertexSW2& RESTRIC
 void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
+	m_local.primcount++;
 
 	GSVertexSW edge;
 	GSVertexSW dedge;
 	GSVertexSW dscan;
+
+	if (m_local.gd->debug_me && m_local.primcount == 8)
+	{
+		fprintf(s_fp, "%04d: x:%f y:%f u:%f v:%f\n", m_local.primcount, vertex[index[0]].p.x, vertex[index[0]].p.y, vertex[index[0]].t.x / 65536, vertex[index[0]].t.y / 65536);
+		fprintf(s_fp, "%04d: x:%f y:%f u:%f v:%f\n", m_local.primcount, vertex[index[1]].p.x, vertex[index[1]].p.y, vertex[index[1]].t.x / 65536, vertex[index[1]].t.y / 65536);
+		fprintf(s_fp, "%04d: x:%f y:%f u:%f v:%f\n", m_local.primcount, vertex[index[2]].p.x, vertex[index[2]].p.y, vertex[index[2]].t.x / 65536, vertex[index[2]].t.y / 65536);
+		fprintf(s_fp, "\n");
+	}
 
 	GSVector4 y0011 = vertex[index[0]].p.yyyy(vertex[index[1]].p);
 	GSVector4 y1221 = vertex[index[1]].p.yyyy(vertex[index[2]].p).xzzx();
@@ -776,6 +791,7 @@ void GSRasterizer::DrawTriangleSection(int top, int bottom, GSVertexSW& RESTRICT
 void GSRasterizer::DrawSprite(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
+	m_local.primcount++;
 
 	const GSVertexSW& v0 = vertex[index[0]];
 	const GSVertexSW& v1 = vertex[index[1]];

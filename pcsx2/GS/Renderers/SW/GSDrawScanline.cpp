@@ -11,7 +11,11 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-#define ENABLE_JIT_RASTERIZER
+//#define ENABLE_JIT_RASTERIZER
+
+#pragma optimize("",off)
+
+extern FILE* s_fp;
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -627,8 +631,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		}
 	}
 
+	int id = 0;
+
 	while (1)
 	{
+		id++;
 		do
 		{
 			int fa = 0, za = 0;
@@ -1155,6 +1162,21 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						VectorI ga00 = c00.srl16<8>();
 						VectorI rb01 = c01.sll16<8>().srl16<8>();
 						VectorI ga01 = c01.srl16<8>();
+
+						if (global.debug_me &&local.primcount == 8)
+						{
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: u0 : %d %d %d %d\n", local.primcount, left + 4 * (id - 1), top, id, uv0.x & 0xFFFF, (uv0.x >> 16) & 0xFFFF, uv0.y & 0xFFFF, (uv0.y >> 16) & 0xFFFF);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: u1: %d %d %d %d\n", local.primcount, left + 4 * (id - 1), top, id, uv1.x & 0xFFFF, (uv1.x >> 16) & 0xFFFF, uv1.y & 0xFFFF, (uv1.y >> 16) & 0xFFFF);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: uf: %f %f %f %f\n", local.primcount, left + 4 * (id - 1), top, id, (uf.x & 0xFFFF) / 16.0f, (uf.y & 0xFFFF) / 16.0f, (uf.z & 0xFFFF) / 16.0f, (uf.w & 0xFFFF) / 16.0f);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: v0: %d %d %d %d\n", local.primcount, left + 4 * (id - 1), top, id, uv0.z & 0xFFFF, (uv0.z >> 16) & 0xFFFF, uv0.w & 0xFFFF, (uv0.w >> 16) & 0xFFFF);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: v1: %d %d %d %d\n", local.primcount, left + 4 * (id - 1), top, id, uv1.z & 0xFFFF, (uv1.z >> 16) & 0xFFFF, uv1.w & 0xFFFF, (uv1.w >> 16) & 0xFFFF);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: vf: %f %f %f %f\n", local.primcount, left + 4 * (id - 1), top, id, (vf.x & 0xFFFF) / 16.0f, (vf.y & 0xFFFF) / 16.0f, (vf.z & 0xFFFF) / 16.0f, (vf.w & 0xFFFF) / 16.0f);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: c00: %x %x %x %x\n", local.primcount, left + 4 * (id - 1), top, id, c00.x, c00.y, c00.z, c00.w);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: c01: %x %x %x %x\n", local.primcount, left + 4 * (id - 1), top, id, c01.x, c01.y, c01.z, c01.w);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: c10: %x %x %x %x\n", local.primcount, left + 4 * (id - 1), top, id, c10.x, c10.y, c10.z, c10.w);
+							fprintf(s_fp, "%04d:(%04d:%04d):%04d: c11: %x %x %x %x\n", local.primcount, left + 4 * (id - 1), top, id, c11.x, c11.y, c11.z, c11.w);
+							fprintf(s_fp, "\n");
+						}
 
 						rb00 = rb00.lerp16_4(rb01, uf);
 						ga00 = ga00.lerp16_4(ga01, uf);
@@ -1988,3 +2010,5 @@ void GSDrawScanline::DrawRect(const GSVector4i& r, const GSVertexSW& v, GSScanli
 		}
 	}
 }
+
+#pragma optimize("", on)

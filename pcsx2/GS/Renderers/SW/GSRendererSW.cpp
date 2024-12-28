@@ -15,9 +15,9 @@ GSRenderer* CURRENT_ISA::makeGSRendererSW(int threads)
 	return new GSRendererSW(threads);
 }
 
-#define LOG 0
+#define LOG 1
 
-[[maybe_unused]] static FILE* s_fp = LOG ? fopen("c:\\temp1\\_.txt", "w") : nullptr;
+FILE* s_fp = LOG ? fopen("C:\\Users\\tchan\\Desktop\\renderer_log.txt", "w") : nullptr;
 
 static constexpr GSVector4 s_pos_scale = GSVector4::cxpr(1.0f / 16, 1.0f / 16, 1.0f, 128.0f);
 
@@ -27,7 +27,7 @@ GSRendererSW::GSRendererSW(int threads)
 	m_nativeres = true; // ignore ini, sw is always native
 
 	m_tc = std::make_unique<GSTextureCacheSW>();
-	m_rl = GSRasterizerList::Create(threads);
+	m_rl = GSRasterizerList::Create(1);
 
 	m_output = (u8*)_aligned_malloc(1024 * 1024 * sizeof(u32), VECTOR_ALIGNMENT);
 
@@ -372,7 +372,7 @@ void GSRendererSW::Draw()
 		return;
 	}
 
-	if constexpr (LOG && false)
+	if (LOG && (s_n == 86))
 	{
 		int n = GSUtil::GetVertexCount(PRIM->PRIM);
 
@@ -383,8 +383,8 @@ void GSRendererSW::Draw()
 				GSVertex* v = &m_vertex.buff[m_index.buff[i + k]];
 				GSVertex* vn = &m_vertex.buff[m_index.buff[i + n - 1]];
 
-				fprintf(s_fp, "%d:%d %f %f %f %f\n",
-					j, k,
+				fprintf(s_fp, "%d:%d:%d %f %f %f %f\n",
+					s_n, j, k,
 					(float)(v->XYZ.X - context->XYOFFSET.OFX) / 16,
 					(float)(v->XYZ.Y - context->XYOFFSET.OFY) / 16,
 					PRIM->FST ? (float)(v->U) / 16 : v->ST.S / (PRIM->PRIM == GS_SPRITE ? vn->RGBAQ.Q : v->RGBAQ.Q),
@@ -556,6 +556,11 @@ void GSRendererSW::Queue(GSRingHeap::SharedPtr<GSRasterizerData>& item)
 		fflush(s_fp);
 	}
 
+	if (s_n == 86)
+	{
+		((SharedData*)item.get())->global.debug_me = true;
+	}
+
 	m_rl->Queue(item);
 
 	// invalidate new parts rendered onto
@@ -579,7 +584,7 @@ void GSRendererSW::Sync(int reason)
 
 	m_rl->Sync();
 
-	if constexpr (LOG && false)
+	if (LOG && (s_n == 86))
 	{
 		std::string s;
 
@@ -1532,6 +1537,10 @@ void GSRendererSW::SharedData::SetSource(GSTextureCacheSW::Texture* t, const GSV
 
 void GSRendererSW::SharedData::UpdateSource()
 {
+	if (s_n == 86)
+	{
+		printf("\n");
+	}
 	for (size_t i = 0; m_tex[i].t; i++)
 	{
 		if (m_tex[i].t->Update(m_tex[i].r))

@@ -117,6 +117,9 @@ union GSScanlineSelector
 
 struct alignas(32) GSScanlineGlobalData // per batch variables, this is like a pixel shader constant buffer
 {
+	int debug_me = false;
+	int prim_count = 0;
+
 	GSScanlineSelector sel;
 
 	// - the data of vm, tex may change, multi-threaded drawing must be finished before that happens, clut and dimx are copies
@@ -240,6 +243,7 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 
 	//
 
+	int primcount = 0;
 	const GSScanlineGlobalData* gd;
 };
 
