@@ -8,11 +8,22 @@
 
 #include "common/StringUtil.h"
 
+extern int s_n_debug;
+extern bool use_hack;
+extern bool do_dump;
+extern bool init_range_hack;
+extern bool save_points;
+
+FILE* filePointsHack_range = fopen("C:\\Users\\tchan\\Desktop\\log_files\\pointsHack_range.txt", "w");
+
+//#pragma optimize("", off)
+
 MULTI_ISA_UNSHARED_IMPL;
 
 GSRenderer* CURRENT_ISA::makeGSRendererSW(int threads)
 {
-	return new GSRendererSW(threads);
+	//return new GSRendererSW(threads);
+	return new GSRendererSW(1);
 }
 
 #define LOG 0
@@ -431,10 +442,7 @@ void GSRendererSW::Draw()
 
 	sd->UsePages(fb_pages, m_context->offset.fb.psm(), zb_pages, m_context->offset.zb.psm());
 
-	//
-
-	if (GSConfig.DumpGSData)
-	{
+	if (GSConfig.DumpGSData)	{
 		Sync(2);
 
 		std::string s;
@@ -929,6 +937,8 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 {
 	GSScanlineGlobalData& gd = data->global;
 
+	gd.s_n = s_n;
+
 	const GSDrawingEnvironment& env = *m_draw_env;
 	const GSDrawingContext* context = m_context;
 	const GS_PRIM_CLASS primclass = m_vt.m_primclass;
@@ -1055,84 +1065,61 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 
 			bool mipmap = IsMipMapActive();
 
-			// FIXME: Is the calculation in GetSizeFixedTEX0 superseded by the method below???
 			GIFRegTEX0 TEX0 = m_context->GetSizeFixedTEX0(m_vt.m_min.t.xyxy(m_vt.m_max.t), m_vt.IsLinear(), mipmap);
 
 			GSVector4i r;
 
-			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+			if (m_vt.m_primclass == GS_TRIANGLE_CLASS && use_hack)
 			{
-				// FIXME: This is currently for debugging.
-				// We can optimize by combining all steps into a single pass.
-
-				// Get the x, y, u, v in the proper format
-				std::vector<Point> points;
-				getPoints(points);
-				std::vector<Point> pointsRast; 
-
-				// Rasterize the edges of each triangle.
-				// TODO: It should not be difficult to make a boolean for each edge
-				// during primitive flushing to detect whether the edge is a boundary edge
-				// or an interior edge for triangles strips or fans.
-				// This could potentially drastically reduce the number of edges to check.
-				for (int i = 0; i < points.size(); i++)
+				int minU = std::numeric_limits<int>::max();
+				int minV = std::numeric_limits<int>::max();
+				int maxU = std::numeric_limits<int>::min();
+				int maxV = std::numeric_limits<int>::min();
+				GetTriangleMinMaxUV(1 << TEX0.TW, 1 << TEX0.TH, gd.sel.ltf, minU, minV, maxU, maxV);
+				if (save_points)
 				{
-					edgeWalkTriangle(points[i], points[i + 1], points[i + 2], pointsRast);
+					if (minU < std::numeric_limits<int>::max() || minV < std::numeric_limits<int>::max() ||
+						maxU > std::numeric_limits<int>::min() || maxV > std::numeric_limits<int>::min())
+						fprintf(filePointsHack_range, "%d,%d,%d,%d,%d\n", gd.s_n, minU, minV, maxU, maxV);
+					fflush(filePointsHack_range);
 				}
 
-				const double sx0 = static_cast<double>(m_context->SCISSOR.SCAX0);
-				const double sy0 = static_cast<double>(m_context->SCISSOR.SCAY0);
-				const double sx1 = static_cast<double>(m_context->SCISSOR.SCAX1);
-				const double sy1 = static_cast<double>(m_context->SCISSOR.SCAY1);
+				r = GSVector4i(minU, minV, maxU + 1, maxV + 1);
 
-				// Do scissoring.
-				// TODO: Should be combined into the rasterization function.
-				std::vector<Point> pointsRastScissor;
-				for (int i = 0; i < pointsRast.size(); i++)
+				GSVector4i r2 = GetTextureMinMax(TEX0, context->CLAMP, gd.sel.ltf, true).coverage;
+				//if (!r.eq(r2) && save_points)
+				//{
+				//	int dx = r.x - r2.x, dy = r.y - r2.y, dz = r.z - r2.z, dw = r.w - r2.w;
+				//	if (abs(dx) > 1 || abs(dy) > 1 || abs(dz) > 1 || abs(dw) > 1)
+				//	{
+				//		printf("\n");
+				//	}
+				//	FILE* diff_file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\diff.txt", "w");
+				//	fprintf(diff_file, "r : %d: %d %d %d %d\n", s_n, r.x, r.y, r.z, r.w);
+				//	fprintf(diff_file, "r2: %d: %d %d %d %d\n", s_n, r2.x, r2.y, r2.z, r2.w);
+				//	fprintf(diff_file, "d : %d: %d %d %d %d\n", s_n, r.x - r2.x, r.y - r2.y, r.z - r2.z, r.w - r2.w);
+				//	fprintf(diff_file, "sn: %d: max%d\n", s_n, std::max(std::max(abs(dx), abs(dy)), std::max(abs(dz), abs(dw))));
+				//	fprintf(diff_file, "\n");
+				//}
+			}
+			else if (m_vt.m_primclass == GS_SPRITE_CLASS && use_hack)
+			{
+				int minU = std::numeric_limits<int>::max();
+				int minV = std::numeric_limits<int>::max();
+				int maxU = std::numeric_limits<int>::min();
+				int maxV = std::numeric_limits<int>::min();
+				GetSpriteMinMaxUV(1 << TEX0.TW, 1 << TEX0.TH, gd.sel.ltf, minU, minV, maxU, maxV);
+				r = GSVector4i(minU, minV, maxU + 1, maxV + 1);
+				GSVector4i r2 = GetTextureMinMax(TEX0, context->CLAMP, gd.sel.ltf, true).coverage;
+				if (save_points)
 				{
-					if (sx0 <= pointsRast[i].x && pointsRast[i] <= sx1 && sy0 <= pointsRast[i].y && pointsRast[i] <= sy1)
-						pointsRastScissor.push_back(pointsRast[i]);
+					if (minU < std::numeric_limits<int>::max() || minV < std::numeric_limits<int>::max() ||
+						maxU > std::numeric_limits<int>::min() || maxV > std::numeric_limits<int>::min())
+						fprintf(filePointsHack_range, "%d,%d,%d,%d,%d\n", gd.s_n, minU, minV, maxU, maxV);
+					fflush(filePointsHack_range);
 				}
-
-				// TODO: Rename this to w, h since tw, th are the log2
-				const int tw = 1 << m_context->TEX0.TW;
-				const int th = 1 << m_context->TEX0.TH;
-
-				const int wms = m_context->CLAMP.WMS;
-				const int wmt = m_context->CLAMP.WMT;
-
-				const int minu = static_cast<int>(m_context->CLAMP.MINU);
-				const int minv = static_cast<int>(m_context->CLAMP.MINV);
-				const int maxu = static_cast<int>(m_context->CLAMP.MAXU);
-				const int maxv = static_cast<int>(m_context->CLAMP.MAXV);
-
-				// Calculate the final UV coordiantes of the rasterized points.
-				// For bilinear filter, this could quadruple the number of UVs
-				// since each vertex uses 4 UVs for interpolation.
-				std::vector<Point> pointsUVCalc;
-				for (int i = 0; i < pointsRastScissor.size(); i++)
-				{
-					// FIXME: Should I be using m_vt.IiLinear() or something else to check for bilinear filtering?
-					calculateUV(pointsRastScissor[i].x, pointsRastScissor[i].y, pointsRastScissor[i].u, pointsRastScissor[i].v, tw, th, wms, wmt, minu, maxu, minv, maxv, m_vt.IsLinear(), pointsUVCalc);
-				}
-
-				// Finally, find the minimum and maximum values
-				double calcUMin = INFINITY;
-				double calcUMax = -INFINITY;
-				double calcVMin = INFINITY;
-				double calcVMax = -INFINITY;
-				for (int i = 0; i < pointsUVCalc.size(); i++)
-				{
-					calcUMin = std::min(pointsUVCalc[i].u, calcUMin);
-					calcUMax = std::max(pointsUVCalc[i].u, calcUMax);
-					calcVMin = std::min(pointsUVCalc[i].v, calcVMin);
-					calcVMax = std::max(pointsUVCalc[i].v, calcVMax);
-				}
-
-				r = GSVector4i(
-					static_cast<int>(16.0 * calcUMin + 0.5), static_cast<int>(16.0 * calcVMin + 0.5),
-					static_cast<int>(16.0 * calcUMax + 0.5), static_cast<int>(16.0 * calcVMax + 0.5)
-				);
+				if (!r.eq(r2))
+					printf("");
 			}
 			else
 			{
@@ -1653,3 +1640,5 @@ void GSRendererSW::SharedData::UpdateSource()
 		}
 	}
 }
+
+//#pragma optimize("", on)

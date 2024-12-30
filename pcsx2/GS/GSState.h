@@ -17,12 +17,12 @@ class GSDumpBase;
 
 struct Point
 {
-	double x, y, u, v;
-	Point(double x, double y, double u, double v)
+	double x, y, U, V;
+	Point(double x, double y, double U, double V)
 		: x(x)
 		, y(y)
-		, u(u)
-		, v(v)
+		, U(U)
+		, V(V)
 	{
 	}
 	Point(double x, double y)
@@ -40,16 +40,13 @@ struct EdgeFunction
 	double a, b, c;
 };
 
-enum EdgeType
+enum class EdgeType
 {
 	TOP,
 	RIGHT,
 	LEFT,
 	BOTTOM
 };
-
-void calculateUV(double x, double y, double u, double v, int tw, int th, int wms, int wmt, int minu, int maxu, int minv, int maxv, bool bilinear, std::vector<Point>& output);
-void edgeWalkTriangle(Point v0, Point v1, Point v2, std::vector<Point>& output);
 
 class GSState : public GSAlignedClass<32>
 {
@@ -58,6 +55,9 @@ public:
 	virtual ~GSState();
 
 	static constexpr int GetSaveStateSize();
+	static bool UsesRegionRepeat(int fix, int msk, int min, int max, int* min_out, int* max_out);
+	static bool GetRegionRepeatMinMaxUV(int MSK, int FIX, int min, int max, int& min_out, int& max_out);
+	static bool GetClampWrapMinMaxUV(int SIZE, int WM, int MSK, int FIX, int min, int max, int& min_out, int& max_out);
 
 private:
 	// RESTRICT prevents multiple loads of the same part of the register when accessing its bitfields (the compiler is happy to know that memory writes in-between will not go there)
@@ -227,7 +227,8 @@ protected:
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
 
-	void getPoints(std::vector<Point>& output) const;
+	void GetTriangleMinMaxUV(int W, int H, bool bilinear, int& minU, int& minV, int& maxU, int& maxV) const;
+	void GetSpriteMinMaxUV(int W, int H, bool bilinear, int& minU, int& minV, int& maxU, int& maxV) const;
 
 public:
 	struct GSUploadQueue

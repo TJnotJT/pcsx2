@@ -17,6 +17,8 @@
 
 MULTI_ISA_UNSHARED_IMPL;
 
+extern int s_n_debug;
+
 int GSRasterizerData::s_counter = 0;
 
 static int compute_best_thread_height(int threads)

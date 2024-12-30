@@ -215,12 +215,14 @@ bool GSTextureCacheSW::Texture::Update(const GSVector4i& rect)
 
 	GSVector4i r = rect;
 
-	r = r.ralign<Align_Outside>(bs);
+	r = r.ralign<Align_Outside>(bs).rintersect(GSVector4i(0, 0, tw, th));
 
 	if (r.eq(GSVector4i(0, 0, tw, th)))
 	{
 		m_complete = true; // lame, but better than nothing
 	}
+
+	//GSVector4i r2 = r.runion(GSVector4i r2 = r.runion());
 
 	if (!m_buff)
 	{

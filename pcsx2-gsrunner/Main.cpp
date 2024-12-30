@@ -46,6 +46,10 @@
 
 #include "svnrev.h"
 
+extern int s_n_debug;
+extern bool do_dump;
+extern bool use_hack;
+
 namespace GSRunner
 {
 	static void InitializeConsole();
@@ -141,6 +145,26 @@ bool GSRunner::InitializeConfig()
 		si.SetStringValue("MemoryCards", fmt::format("Slot{}_Filename", i + 1).c_str(), "");
 	}
 
+	if (do_dump)
+	{
+		si.SetBoolValue("EmuCore/GS", "dump", true);
+		si.SetIntValue("EmuCore/GS", "saven", s_n_debug-2);
+		si.SetIntValue("EmuCore/GS", "savel", 4);
+		si.SetBoolValue("EmuCore/GS", "save", true);
+		si.SetBoolValue("EmuCore/GS", "savef", true);
+		si.SetBoolValue("EmuCore/GS", "savet", true);
+		si.SetBoolValue("EmuCore/GS", "savez", true);
+		if (use_hack)
+		{
+			si.SetStringValue("EmuCore/GS", "HWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug_hack");
+			si.SetStringValue("EmuCore/GS", "SWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug_hack");
+		}
+		else
+		{
+			si.SetStringValue("EmuCore/GS", "HWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug");
+			si.SetStringValue("EmuCore/GS", "SWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug");
+		}
+	}
 	VMManager::Internal::LoadStartupSettings();
 	return true;
 }
