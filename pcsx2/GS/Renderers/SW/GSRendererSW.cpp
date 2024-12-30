@@ -8,6 +8,12 @@
 
 #include "common/StringUtil.h"
 
+#define USE_NEW_METHOD 0
+
+#pragma optimize("", off)
+
+FILE* diff_file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\diff.txt", "w");
+
 MULTI_ISA_UNSHARED_IMPL;
 
 GSRenderer* CURRENT_ISA::makeGSRendererSW(int threads)
@@ -431,10 +437,12 @@ void GSRendererSW::Draw()
 
 	sd->UsePages(fb_pages, m_context->offset.fb.psm(), zb_pages, m_context->offset.zb.psm());
 
-	//
-
-	if (GSConfig.DumpGSData)
+	if (s_n == 731)
 	{
+		m_mem.SaveBMP("C:\\Users\\tchan\\Desktop\\pic.bmp", m_context->TEX0.TBP0, m_context->TEX0.TBW, m_context->TEX0.PSM, 1 << m_context->TEX0.TW, 1 << m_context->TEX0.TH);
+	}
+
+	if (GSConfig.DumpGSData)	{
 		Sync(2);
 
 		std::string s;
@@ -1060,14 +1068,35 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 
 			GSVector4i r;
 
-			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+			if (m_vt.m_primclass == GS_TRIANGLE_CLASS && USE_NEW_METHOD)
 			{
+				if (!gd.sel.fst)
+				{
+					printf("");
+				}
 				// FIXME: This is currently for debugging.
 				// We can optimize by combining all steps into a single pass.
 
 				// Get the x, y, u, v in the proper format
 				std::vector<Point> points;
 				getPoints(points);
+
+				bool dump = s_n == 70;
+
+				if (dump)
+				{
+					FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\points.txt", "w");
+					for (int i = 0; i < points.size(); i++)
+					{
+						fprintf(file, "%f,%f,%f,%f\n", points[i].x, points[i].y, points[i].u, points[i].v);
+					}
+					fclose(file);
+				}
+
+				// FIXME: Is this early exist ok?
+				if (points.size() == 0)
+					return false;
+
 				std::vector<Point> pointsRast; 
 
 				// Rasterize the edges of each triangle.
@@ -1075,28 +1104,63 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 				// during primitive flushing to detect whether the edge is a boundary edge
 				// or an interior edge for triangles strips or fans.
 				// This could potentially drastically reduce the number of edges to check.
-				for (int i = 0; i < points.size(); i++)
+				for (int i = 0; i < points.size() / 3; i++)
 				{
-					edgeWalkTriangle(points[i], points[i + 1], points[i + 2], pointsRast);
+					if (s_n == 86)
+					{
+						std::cerr << points[3 * i].x << " " << points[3 * i].y << std::endl;
+						std::cerr << points[3 * i + 1].x << " " << points[3 * i + 1].y << std::endl;
+						std::cerr << points[3 * i + 2].x << " " << points[3 * i + 2].y << std::endl;
+						std::cerr << std::endl;
+					}
+					edgeWalkTriangle(points[3 * i], points[3 * i + 1], points[3 * i + 2], pointsRast);
 				}
+
+				if (dump)
+				{
+					FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\pointsRast.txt", "w");
+					for (int i = 0; i < pointsRast.size(); i++)
+					{
+						fprintf(file, "%f,%f,%f,%f\n", pointsRast[i].x, pointsRast[i].y, pointsRast[i].u, pointsRast[i].v);
+					}
+					fclose(file);
+				}
+
+				// FIXME: Is this early exist ok?
+				if (pointsRast.size() == 0)
+					return false;
 
 				const double sx0 = static_cast<double>(m_context->SCISSOR.SCAX0);
 				const double sy0 = static_cast<double>(m_context->SCISSOR.SCAY0);
 				const double sx1 = static_cast<double>(m_context->SCISSOR.SCAX1);
 				const double sy1 = static_cast<double>(m_context->SCISSOR.SCAY1);
 
-				// Do scissoring.
+				// Do scissoring. Should this even be done, or will this cause problems?
 				// TODO: Should be combined into the rasterization function.
 				std::vector<Point> pointsRastScissor;
 				for (int i = 0; i < pointsRast.size(); i++)
 				{
-					if (sx0 <= pointsRast[i].x && pointsRast[i] <= sx1 && sy0 <= pointsRast[i].y && pointsRast[i] <= sy1)
-						pointsRastScissor.push_back(pointsRast[i]);
+					//if ((sx0 <= pointsRast[i].x) && (pointsRast[i].x <= sx1) && (sy0 <= pointsRast[i].y) && (pointsRast[i].y <= sy1))
+					pointsRastScissor.push_back(pointsRast[i]);
 				}
 
+				if (dump)
+				{
+					FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\pointsRastScissor.txt", "w");
+					for (int i = 0; i < pointsRastScissor.size(); i++)
+					{
+						fprintf(file, "%f,%f,%f,%f\n", pointsRastScissor[i].x, pointsRastScissor[i].y, pointsRastScissor[i].u, pointsRastScissor[i].v);
+					}
+					fclose(file);
+				}
+
+				// FIXME: Is this early exist ok?
+				if (pointsRastScissor.size() == 0)
+					return false;
+
 				// TODO: Rename this to w, h since tw, th are the log2
-				const int tw = 1 << m_context->TEX0.TW;
-				const int th = 1 << m_context->TEX0.TH;
+				const int tw = 1 << TEX0.TW;
+				const int th = 1 << TEX0.TH;
 
 				const int wms = m_context->CLAMP.WMS;
 				const int wmt = m_context->CLAMP.WMT;
@@ -1109,11 +1173,22 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 				// Calculate the final UV coordiantes of the rasterized points.
 				// For bilinear filter, this could quadruple the number of UVs
 				// since each vertex uses 4 UVs for interpolation.
+				// The resulting UVs will be integer values only.
 				std::vector<Point> pointsUVCalc;
 				for (int i = 0; i < pointsRastScissor.size(); i++)
 				{
 					// FIXME: Should I be using m_vt.IiLinear() or something else to check for bilinear filtering?
-					calculateUV(pointsRastScissor[i].x, pointsRastScissor[i].y, pointsRastScissor[i].u, pointsRastScissor[i].v, tw, th, wms, wmt, minu, maxu, minv, maxv, m_vt.IsLinear(), pointsUVCalc);
+					calculateUV(pointsRastScissor[i].x, pointsRastScissor[i].y, pointsRastScissor[i].u, pointsRastScissor[i].v, tw, th, wms, wmt, minu, maxu, minv, maxv, gd.sel.ltf, pointsUVCalc);
+				}
+
+				if (dump)
+				{
+					FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\pointsUVCalc.txt", "w");
+					for (int i = 0; i < pointsUVCalc.size(); i++)
+					{
+						fprintf(file, "%f,%f,%f,%f\n", pointsUVCalc[i].x, pointsUVCalc[i].y, pointsUVCalc[i].u, pointsUVCalc[i].v);
+					}
+					fclose(file);
 				}
 
 				// Finally, find the minimum and maximum values
@@ -1130,9 +1205,102 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 				}
 
 				r = GSVector4i(
-					static_cast<int>(16.0 * calcUMin + 0.5), static_cast<int>(16.0 * calcVMin + 0.5),
-					static_cast<int>(16.0 * calcUMax + 0.5), static_cast<int>(16.0 * calcVMax + 0.5)
+					static_cast<int>(calcUMin), static_cast<int>(calcVMin),
+					static_cast<int>(calcUMax) + 1, static_cast<int>(calcVMax) + 1 // +1 for exclusive
 				);
+
+				// TODO: some of the +1s can be removed if linear == false
+				/*{
+					const int tw = m_context->TEX0.TW;
+					const int th = m_context->TEX0.TH;
+
+					const int w = 1 << tw;
+					const int h = 1 << th;
+					const int tw_mask = (1 << tw) - 1;
+					const int th_mask = (1 << th) - 1;
+
+					GSVector4i tr(0, 0, w, h);
+
+					const int wms = m_context->CLAMP.WMS;
+					const int wmt = m_context->CLAMP.WMT;
+
+					const int minu = (int)m_context->CLAMP.MINU;
+					const int minv = (int)m_context->CLAMP.MINV;
+					const int maxu = (int)m_context->CLAMP.MAXU;
+					const int maxv = (int)m_context->CLAMP.MAXV;
+
+					GSVector4i vr = tr;
+
+					switch (wms)
+					{
+						case CLAMP_REPEAT:
+							break;
+						case CLAMP_CLAMP:
+							break;
+						case CLAMP_REGION_CLAMP:
+							vr.x = minu;
+							vr.z = maxu + 1;
+							break;
+						case CLAMP_REGION_REPEAT:
+							vr.x = maxu;
+							vr.z = (maxu | minu) + 1;
+							break;
+						default:
+							ASSUME(0);
+					}
+
+					switch (wmt)
+					{
+						case CLAMP_REPEAT:
+							break;
+						case CLAMP_CLAMP:
+							break;
+						case CLAMP_REGION_CLAMP:
+							vr.y = minv;
+							vr.w = maxv + 1;
+							break;
+						case CLAMP_REGION_REPEAT:
+							vr.y = maxv;
+							vr.w = (maxv | minv) + 1;
+							break;
+						default:
+							ASSUME(0);
+					}
+					vr = vr.rintersect(tr);
+
+					if (!r.eq(r.rintersect(vr)))
+					{
+						printf("");
+					}
+					r = r.rintersect(tr);
+				}*/
+
+				GSVector4i r2 = GetTextureMinMax(TEX0, context->CLAMP, gd.sel.ltf, true).coverage;
+				if (!r.eq(r2))
+				{
+					int dx = r.x - r2.x, dy = r.y - r2.y, dz = r.z - r2.z, dw = r.w - r2.w;
+					if (abs(dx) > 1 || abs(dy) > 1 || abs(dz) > 1 || abs(dw) > 1)
+					{
+						printf("\n");
+					}
+					fprintf(diff_file, "%d: %d %d %d %d\n", s_n, r.x, r.y, r.z, r.w);
+					fprintf(diff_file, "%d: %d %d %d %d\n", s_n, r2.x, r2.y, r2.z, r2.w);
+					fprintf(diff_file, "%d: %d %d %d %d\n", s_n, r.x - r2.x, r.y - r2.y, r.z - r2.z, r.w - r2.w);
+					fprintf(diff_file, "%d: max%d\n", s_n, std::max(std::max(abs(dx), abs(dy)), std::max(abs(dz), abs(dw))));
+					fprintf(diff_file, "\n");
+				}
+				if (dump)
+				{
+					FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files\\rects.txt", "w");
+					fprintf(file, "r: %d %d %d %d\nr2: %d %d %d %d\n\n", r.x, r.y, r.z, r.w, r2.x, r2.y, r2.z, r2.w);
+					fclose(file);
+				}
+
+				//if (s_n == 731 || s_n == 801)
+				//{
+				//	printf("");
+				//	r = r2;
+				//}
 			}
 			else
 			{
@@ -1653,3 +1821,5 @@ void GSRendererSW::SharedData::UpdateSource()
 		}
 	}
 }
+
+#pragma optimize("", on)

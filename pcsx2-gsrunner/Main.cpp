@@ -141,6 +141,16 @@ bool GSRunner::InitializeConfig()
 		si.SetStringValue("MemoryCards", fmt::format("Slot{}_Filename", i + 1).c_str(), "");
 	}
 
+	//si.SetBoolValue("EmuCore/GS", "dump", true);
+	//si.SetIntValue("EmuCore/GS", "saven", 801);
+	//si.SetIntValue("EmuCore/GS", "savel", 1);
+	//si.SetBoolValue("EmuCore/GS", "save", true);
+	//si.SetBoolValue("EmuCore/GS", "savef", true);
+	//si.SetBoolValue("EmuCore/GS", "savet", true);
+	//si.SetBoolValue("EmuCore/GS", "savez", true);
+	//si.SetStringValue("EmuCore/GS", "HWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug");
+	//si.SetStringValue("EmuCore/GS", "SWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug");
+
 	VMManager::Internal::LoadStartupSettings();
 	return true;
 }

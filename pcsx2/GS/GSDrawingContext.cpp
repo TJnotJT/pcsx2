@@ -130,18 +130,18 @@ GIFRegTEX0 GSDrawingContext::GetSizeFixedTEX0(const GSVector4& st, bool linear, 
 
 	if (tw + th >= 19) // smaller sizes aren't worth, they just create multiple entries in the textue cache and the saved memory is less
 	{
-		tw = reduce(uv.x, tw);
-		th = reduce(uv.y, th);
+		tw = reduce(uv.x + 1, tw);
+		th = reduce(uv.y + 1, th);
 	}
 
 	if (wms == CLAMP_REGION_CLAMP || wms == CLAMP_REGION_REPEAT)
 	{
-		tw = extend(uv.x, tw);
+		tw = extend(uv.x + 1, tw);
 	}
 
 	if (wmt == CLAMP_REGION_CLAMP || wmt == CLAMP_REGION_REPEAT)
 	{
-		th = extend(uv.y, th);
+		th = extend(uv.y + 1, th);
 	}
 
 	GIFRegTEX0 res = TEX0;
