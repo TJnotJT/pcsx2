@@ -9,9 +9,14 @@
 #include "common/Console.h"
 
 #include <fstream>
+#include <algorithm>
+
+extern bool savePoints;
+extern std::map<int, std::tuple<int, int, int, int>> pointsHackRange;
+extern std::map<int, std::tuple<int, int, int, int>> pointsSWRange;
 
 // Comment to disable all dynamic code generation.
-#define ENABLE_JIT_RASTERIZER
+//#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -627,8 +632,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		}
 	}
 
+	int x = left - 4;
+
 	while (1)
 	{
+		x += 4;
 		do
 		{
 			int fa = 0, za = 0;
@@ -1117,6 +1125,31 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						VectorI clamp = uv1.sat_i16(tmin, tmax);
 
 						uv1 = clamp.blend8(repeat, VectorI::broadcast128(global.t.mask));
+					}
+
+					if (savePoints)
+					{
+						for (int i = 0; i < 4; i++)
+						{
+							if (test.U32[i] == 0 || sel.notest)
+							{
+								if (!pointsSWRange.contains(global.s_n))
+								{
+									pointsSWRange[global.s_n] = {10000, 10000, -10000, -10000};
+								}
+								std::get<0>(pointsSWRange[global.s_n]) = std::min(std::get<0>(pointsSWRange[global.s_n]), (int)uv0.U16[i]);
+								std::get<1>(pointsSWRange[global.s_n]) = std::min(std::get<1>(pointsSWRange[global.s_n]), (int)uv0.U16[i + 4]);
+								std::get<2>(pointsSWRange[global.s_n]) = std::max(std::get<2>(pointsSWRange[global.s_n]), (int)uv0.U16[i]);
+								std::get<3>(pointsSWRange[global.s_n]) = std::max(std::get<3>(pointsSWRange[global.s_n]), (int)uv0.U16[i + 4]);
+								if (sel.ltf)
+								{
+									std::get<0>(pointsSWRange[global.s_n]) = std::min(std::get<0>(pointsSWRange[global.s_n]), (int)uv1.U16[i]);
+									std::get<1>(pointsSWRange[global.s_n]) = std::min(std::get<1>(pointsSWRange[global.s_n]), (int)uv1.U16[i + 4]);
+									std::get<2>(pointsSWRange[global.s_n]) = std::max(std::get<2>(pointsSWRange[global.s_n]), (int)uv1.U16[i]);
+									std::get<3>(pointsSWRange[global.s_n]) = std::max(std::get<3>(pointsSWRange[global.s_n]), (int)uv1.U16[i + 4]);
+								}
+							}
+						}
 					}
 
 					VectorI y0 = uv0.uph16() << (sel.tw + 3);

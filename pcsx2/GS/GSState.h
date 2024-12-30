@@ -15,42 +15,6 @@
 
 class GSDumpBase;
 
-struct Point
-{
-	double x, y, u, v;
-	Point(double x, double y, double u, double v)
-		: x(x)
-		, y(y)
-		, u(u)
-		, v(v)
-	{
-	}
-	Point(double x, double y)
-		: Point(x, y, NAN, NAN)
-	{
-	}
-	Point()
-		: Point(0, 0)
-	{
-	}
-};
-
-struct EdgeFunction
-{
-	double a, b, c;
-};
-
-enum EdgeType
-{
-	TOP,
-	RIGHT,
-	LEFT,
-	BOTTOM
-};
-
-void calculateUV(double x, double y, double u, double v, int tw, int th, int wms, int wmt, int minu, int maxu, int minv, int maxv, bool bilinear, std::vector<Point>& output);
-void edgeWalkTriangle(Point v0, Point v1, Point v2, std::vector<Point>& output);
-
 class GSState : public GSAlignedClass<32>
 {
 public:
@@ -58,6 +22,9 @@ public:
 	virtual ~GSState();
 
 	static constexpr int GetSaveStateSize();
+	static bool UsesRegionRepeat(int fix, int msk, int min, int max, int* min_out, int* max_out);
+	static bool GetRegionRepeatMinMaxUV(int MSK, int FIX, int min, int max, int& min_out, int& max_out);
+	static bool GetClampWrapMinMaxUV(int SIZE, int WM, int MSK, int FIX, int min, int max, int& min_out, int& max_out);
 
 private:
 	// RESTRICT prevents multiple loads of the same part of the register when accessing its bitfields (the compiler is happy to know that memory writes in-between will not go there)
@@ -226,9 +193,6 @@ protected:
 	bool IsCoverageAlpha();
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
-
-	void getPoints(std::vector<Point>& output) const;
-
 public:
 	struct GSUploadQueue
 	{
@@ -398,6 +362,79 @@ public:
 		// If using screen offsets, calculate the positions here.
 		void CalculateDisplayOffset(bool scanmask);
 	} PCRTCDisplays;
+
+public:
+	struct Point
+	{
+		double x, y;
+		union
+		{
+			double U;
+			double S;
+		};
+		union
+		{
+			double T;
+			double V;
+		};
+		double Q;
+
+		Point(double x = 0, double y = 0, double US = NAN, double VT = NAN, double Q = NAN)
+			: x(x)
+			, y(y)
+			, U(U)
+			, V(V)
+			, Q(Q)
+		{
+		}
+	};
+
+	struct EdgeFunction
+	{
+		double a, b, c;
+
+		EdgeFunction(double a, double b, double c)
+			: a(a)
+			, b(b)
+			, c(c)
+		{
+		}
+	};
+
+	enum class EdgeType
+	{
+		TOP,
+		RIGHT,
+		LEFT,
+		BOTTOM
+	};
+
+public:
+	static EdgeFunction GetEdgeFunction(const Point& a, const Point& b);
+	static bool CheckEdgeFunction(double e, EdgeType edgeType);
+	static std::tuple<double, double> InterpolateEdgeFunctionsUV(
+		double e01, double e12, double e20, const Point& p0, const Point& p1, const Point& p2);
+	static std::tuple<double, double, double> InterpolateEdgeFunctionsSTQ(
+		double e01, double e12, double e20, const Point& p0, const Point& p1, const Point& p2);
+	static bool CheckXYBounds(double x, double y, int minX, int minY, int maxX, int maxY, bool dxBigger, bool dyBigger);
+	static std::tuple<Point, Point, Point> SortPoints(Point p0, Point p1, Point p2);
+	static __forceinline bool CheckScissor(int x, int y, int SCAX0, int SCAY0, int SCAX1, int SCAY1);
+	static std::tuple<Point, Point, Point, EdgeType, EdgeType, EdgeType> SortAndClassifyTriangleVerts(Point p0, Point p1, Point p2);
+	static std::tuple<int, int> CalculateUVHelper(int U, int V, int W, int H, const GIFRegCLAMP& clamp);
+	/*static void CalculateUV_Slow(double e01, double e12, double e20, EdgeType t0, EdgeType t1, EdgeType t2,
+		double U0, double V0, double U1, double V1, double U2, double V2,
+		int W, int H, bool bilinear, const GIFRegCLAMP& clamp, int& minU, int& minV, int& maxU, int& maxV);*/
+	static void CalculateUV(double e01, double e12, double e20, EdgeType t0, EdgeType t1, EdgeType t2,
+		const Point& p0, const Point& p1, const Point& p2,
+		int W, int H, bool FST, bool bilinear, const GIFRegCLAMP& clamp, int& minU, int& minV, int& maxU, int& maxV);
+	static void CheckScissorUV(Point p0, Point p1, Point p2, EdgeType t01, EdgeType t12, EdgeType t20, int W, int H, bool FST, bool bilinear,
+		const GIFRegSCISSOR& scissor, const GIFRegCLAMP& clamp, int& minU, int& minV, int& maxU, int& maxV);
+	static void EdgeWalkTriangleMinMaxUVImpl(Point p0, Point p1, Point p2, EdgeType t01, EdgeType t12, EdgeType t20, int W, int H, bool FST, bool bilinear,
+		const GIFRegSCISSOR& scissor, const GIFRegCLAMP& clamp, bool switchOrient, int& minU, int& minV, int& maxU, int& maxV);
+	static void EdgeWalkTriangleMinMaxUV(Point p0, Point p1, Point p2, int W, int H, bool FST, bool bilinear, GIFRegSCISSOR scissor, GIFRegCLAMP clamp,
+		int& minU, int& minV, int& maxU, int& maxV);
+	void GetTriangleMinMaxUV(int W, int H, bool bilinear, int& minU, int& minV, int& maxU, int& maxV) const;
+	void GetSpriteMinMaxUV(int W, int H, bool bilinear, int& minU, int& minV, int& maxU, int& maxV) const;
 
 public:
 	/// Returns the appropriate directory for draw dumping.
