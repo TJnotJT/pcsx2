@@ -10,8 +10,14 @@
 
 #include <fstream>
 
+
+#pragma optimize("", off)
+
+std::vector<Point> points;
+std::vector<Point> pointsD;
+
 // Comment to disable all dynamic code generation.
-#define ENABLE_JIT_RASTERIZER
+//#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -506,6 +512,67 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	// Init
 
+	if (!global.debug && points.size() > 0)
+	{
+		std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) {
+			if (a.y < b.y)
+				return true;
+			if (a.y > b.y)
+				return false;
+			if (a.x < b.x)
+				return true;
+			if (a.x > b.x)
+				return false;
+			if (a.u < b.u)
+				return true;
+			if (a.u > b.u)
+				return false;
+			if (a.v < b.v)
+				return true;
+			if (a.v > b.v)
+				return false;
+			return false;
+		});
+
+		FILE* file = fopen("C:\\Users\\tchan\\Desktop\\log_files_sw\\pointsSW.txt", "w");
+		for (int i = 0; i < points.size(); i++)
+		{
+			fprintf(file, "%d,%d,%d,%d\n", (int)points[i].x, (int)points[i].y, (int)points[i].u, (int)points[i].v);
+		}
+		fflush(file);
+		fclose(file);
+		points.clear();
+
+		std::sort(pointsD.begin(), pointsD.end(), [](const Point& a, const Point& b) {
+			if (a.y < b.y)
+				return true;
+			if (a.y > b.y)
+				return false;
+			if (a.x < b.x)
+				return true;
+			if (a.x > b.x)
+				return false;
+			if (a.u < b.u)
+				return true;
+			if (a.u > b.u)
+				return false;
+			if (a.v < b.v)
+				return true;
+			if (a.v > b.v)
+				return false;
+			return false;
+		});
+
+		file = fopen("C:\\Users\\tchan\\Desktop\\log_files_sw\\pointsSW_D.txt", "w");
+		for (int i = 0; i < pointsD.size(); i++)
+		{
+			fprintf(file, "%d,%d,%f,%f\n", (int)pointsD[i].x, (int)pointsD[i].y, pointsD[i].u, pointsD[i].v);
+		}
+		fflush(file);
+		fclose(file);
+		pointsD.clear();
+	}
+
 	int skip, steps;
 
 	if (!sel.notest)
@@ -627,8 +694,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		}
 	}
 
+	int x = left - 4;
+
 	while (1)
 	{
+		x += 4;
 		do
 		{
 			int fa = 0, za = 0;
@@ -1084,6 +1154,16 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					{
 						u = VectorI::cast(s);
 						v = VectorI::cast(t);
+						if (global.debug)
+						{
+							for (int i = 0; i < 4; i++)
+							{
+								if (test.U32[i] == 0)
+								{
+									pointsD.push_back(Point((double)(x + i), (double)top, (double)u.U32[i] / 256 / 256, (double)v.U32[i] / 256 / 256));
+								}
+							}
+						}
 					}
 
 					if (sel.ltf)
@@ -1117,6 +1197,26 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						VectorI clamp = uv1.sat_i16(tmin, tmax);
 
 						uv1 = clamp.blend8(repeat, VectorI::broadcast128(global.t.mask));
+					}
+
+					if (global.debug)
+					{
+						for (int i = 0; i < 4; i++)
+						{
+							if (test.U32[i] == 0)
+							{
+								points.push_back(Point((double)(x + i), (double)top, (double)uv0.U16[i], (double)uv0.U16[4 + i]));
+								points.push_back(Point((double)(x + i), (double)top, (double)uv1.U16[i], (double)uv0.U16[4 + i]));
+								points.push_back(Point((double)(x + i), (double)top, (double)uv0.U16[i], (double)uv1.U16[4 + i]));
+								points.push_back(Point((double)(x + i), (double)top, (double)uv1.U16[i], (double)uv1.U16[4 + i]));
+
+								//fprintf(log_file, "%d,%d,%d,%d\n", x + i, top, uv0.U16[i], uv0.U16[4 + i]);
+								//fprintf(log_file, "%d,%d,%d,%d\n", x + i, top, uv1.U16[i], uv0.U16[4 + i]);
+								//fprintf(log_file, "%d,%d,%d,%d\n", x + i, top, uv0.U16[i], uv1.U16[4 + i]);
+								//fprintf(log_file, "%d,%d,%d,%d\n", x + i, top, uv1.U16[i], uv1.U16[4 + i]);
+							}
+						}
+						//fflush(log_file);
 					}
 
 					VectorI y0 = uv0.uph16() << (sel.tw + 3);
@@ -1988,3 +2088,5 @@ void GSDrawScanline::DrawRect(const GSVector4i& r, const GSVertexSW& v, GSScanli
 		}
 	}
 }
+
+#pragma optimize("", on)

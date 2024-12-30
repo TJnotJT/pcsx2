@@ -58,6 +58,7 @@ public:
 	virtual ~GSState();
 
 	static constexpr int GetSaveStateSize();
+	static bool UsesRegionRepeat(int fix, int msk, int min, int max, int* min_out, int* max_out);
 
 private:
 	// RESTRICT prevents multiple loads of the same part of the register when accessing its bitfields (the compiler is happy to know that memory writes in-between will not go there)
