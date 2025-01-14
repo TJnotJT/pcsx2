@@ -1724,6 +1724,18 @@ void GSState::FlushPrim()
 		// Skip draw if Z test is enabled, but set to fail all pixels.
 		const bool skip_draw = (m_context->TEST.ZTE && m_context->TEST.ZTST == ZTST_NEVER);
 
+		//if (1)
+		//for (int i = m_index.tail - 1; i >= 0; i--)
+		//{
+		//	GSVertex* v = &m_vertex.buff[m_index.buff[i]];
+		//	v->XYZ.Z = (v->XYZ.Z & 0xFFFF) | ((v->XYZ.Z & 0xFF000000) >> 8);
+		//	if ((v->XYZ.Z & 0xFF000000) == 0x40000000)
+		//	{
+		//		v->XYZ.Z = (v->XYZ.Z & 0xFFFF) | 0x400000;
+		//		//v->XYZ.Z = v->XYZ.Z & 0xFFFF;
+		//	}
+		//}
+
 		if (!skip_draw)
 			Draw();
 

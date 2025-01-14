@@ -134,6 +134,17 @@ bool GSRunner::InitializeConfig()
 	si.SetBoolValue("EmuCore/GS", "OsdShowResolution", true);
 	si.SetBoolValue("EmuCore/GS", "OsdShowGSStats", true);
 
+	// DEBUGGING CODE
+	si.SetBoolValue("EmuCore/GS", "dump", true);
+	si.SetIntValue("EmuCore/GS", "saven", 0);
+	si.SetIntValue("EmuCore/GS", "savel", 1000);
+	si.SetBoolValue("EmuCore/GS", "save", true);
+	si.SetBoolValue("EmuCore/GS", "savef", true);
+	si.SetBoolValue("EmuCore/GS", "savet", true);
+	si.SetBoolValue("EmuCore/GS", "savez", true);
+	si.SetStringValue("EmuCore/GS", "HWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug_hw");
+	si.SetStringValue("EmuCore/GS", "SWDumpDirectory", "C:\\Users\\tchan\\Desktop\\ps2_debug_sw");
+
 	// remove memory cards, so we don't have sharing violations
 	for (u32 i = 0; i < 2; i++)
 	{
