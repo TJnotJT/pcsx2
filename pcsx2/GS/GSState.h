@@ -190,6 +190,7 @@ protected:
 	bool IsCoverageAlpha();
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
+	void TexelCoordinateRounding();
 
 public:
 	struct GSUploadQueue

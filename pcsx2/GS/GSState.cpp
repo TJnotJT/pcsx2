@@ -1677,48 +1677,9 @@ void GSState::FlushPrim()
 
 		m_vt.Update(m_vertex.buff, m_index.buff, m_vertex.tail, m_index.tail, GSUtil::GetPrimClass(PRIM->PRIM));
 
-		// Texel coordinate rounding
-		// Helps Manhunt (lights shining through objects).
-		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
-		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
 		if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
 		{
-			if (!PRIM->FST) // STQ's
-			{
-				const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
-				// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
-				for (int i = m_index.tail - 1; i >= 0; i--)
-				{
-					GSVertex* v = &m_vertex.buff[m_index.buff[i]];
-
-					// Only Q on the second vertex is valid
-					if (!(i & 1) && is_sprite)
-						v->RGBAQ.Q = m_vertex.buff[m_index.buff[i + 1]].RGBAQ.Q;
-
-					int T = std::bit_cast<int>(v->ST.T);
-					int Q = std::bit_cast<int>(v->RGBAQ.Q);
-					int S = std::bit_cast<int>(v->ST.S);
-					const int expS = (S >> 23) & 0xff;
-					const int expT = (T >> 23) & 0xff;
-					const int expQ = (Q >> 23) & 0xff;
-					int max_exp = std::max(expS, expQ);
-
-					u32 mask = CalcMask(expS, max_exp);
-					S &= ~mask;
-					v->ST.S = std::bit_cast<float>(S);
-					max_exp = std::max(expT, expQ);
-					mask = CalcMask(expT, max_exp);
-					T &= ~mask;
-					v->ST.T = std::bit_cast<float>(T);
-					Q &= ~0xff;
-
-					if (!is_sprite || (i & 1))
-						v->RGBAQ.Q = std::bit_cast<float>(Q);
-
-					m_vt.m_min.t.x = std::min(m_vt.m_min.t.x, (v->ST.S / v->RGBAQ.Q) * (1 << m_context->TEX0.TW));
-					m_vt.m_min.t.y = std::min(m_vt.m_min.t.y, (v->ST.T / v->RGBAQ.Q) * (1 << m_context->TEX0.TH));
-				}
-			}
+			TexelCoordinateRounding();
 		}
 
 		// Skip draw if Z test is enabled, but set to fail all pixels.
@@ -3831,8 +3792,8 @@ GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCL
 
 	u8 uses_border = 0;
 
-	if (m_vt.m_max.t.x >= FLT_MAX || m_vt.m_min.t.x <= -FLT_MAX ||
-		m_vt.m_max.t.y >= FLT_MAX || m_vt.m_min.t.y <= -FLT_MAX)
+	if (m_vt.m_max.t.x >= 2047.0f || m_vt.m_min.t.x <= -2047.0f ||
+		m_vt.m_max.t.y >= 2047.0f || m_vt.m_min.t.y <= -2047.0f)
 	{
 		// If any of the min/max values are +-FLT_MAX we can't rely on them
 		// so just assume full texture.
@@ -4007,6 +3968,61 @@ GSState::TextureMinMaxResult GSState::GetTextureMinMax(GIFRegTEX0 TEX0, GIFRegCL
 	}
 
 	return { vr, uses_border };
+}
+
+// Texel coordinate rounding
+// Helps Manhunt (lights shining through objects).
+// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
+// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
+void GSState::TexelCoordinateRounding()
+{
+	if (!PRIM->FST) // STQ's
+	{
+		const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
+		// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
+		for (int i = m_index.tail - 1; i >= 0; i--)
+		{
+			GSVertex* v = &m_vertex.buff[m_index.buff[i]];
+
+			// Only Q on the second vertex is valid
+			if (!(i & 1) && is_sprite)
+				v->RGBAQ.Q = m_vertex.buff[m_index.buff[i + 1]].RGBAQ.Q;
+
+			int T = std::bit_cast<int>(v->ST.T);
+			int Q = std::bit_cast<int>(v->RGBAQ.Q);
+			int S = std::bit_cast<int>(v->ST.S);
+			const int expS = (S >> 23) & 0xff;
+			const int expT = (T >> 23) & 0xff;
+			const int expQ = (Q >> 23) & 0xff;
+			int max_exp = std::max(expS, expQ);
+
+			u32 mask = CalcMask(expS, max_exp);
+			S &= ~mask;
+			v->ST.S = std::bit_cast<float>(S);
+			max_exp = std::max(expT, expQ);
+			mask = CalcMask(expT, max_exp);
+			T &= ~mask;
+			v->ST.T = std::bit_cast<float>(T);
+			Q &= ~0xff;
+
+			if (!is_sprite || (i & 1))
+				v->RGBAQ.Q = std::bit_cast<float>(Q);
+
+			float U = (v->ST.S / v->RGBAQ.Q) * (1 << m_context->TEX0.TW);
+			float V = (v->ST.T / v->RGBAQ.Q) * (1 << m_context->TEX0.TH);
+
+			m_vt.m_min.t.x = std::isnan(U) ? m_vt.m_min.t.x : std::min(m_vt.m_min.t.x, U);
+			m_vt.m_min.t.y = std::isnan(V) ? m_vt.m_min.t.y : std::min(m_vt.m_min.t.y, V);
+			m_vt.m_max.t.x = std::isnan(U) ? m_vt.m_max.t.x : std::max(m_vt.m_max.t.x, U);
+			m_vt.m_max.t.y = std::isnan(V) ? m_vt.m_max.t.y : std::max(m_vt.m_max.t.y, V);
+		}
+	}
+
+	// Clamp the min/max UV values to the min/max valid UV values.
+	// This is needed in certain cases where buggy GS input results
+	// in huge floating points values for ST.
+	m_vt.m_min.t = m_vt.m_min.t.min(GSVector4(2047.0f)).max(GSVector4(-2047.0f)).xyzw(m_vt.m_min.t);
+	m_vt.m_max.t = m_vt.m_max.t.min(GSVector4(2047.0f)).max(GSVector4(-2047.0f)).xyzw(m_vt.m_max.t);
 }
 
 void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)

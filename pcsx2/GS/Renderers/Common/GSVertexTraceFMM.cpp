@@ -138,20 +138,36 @@ void GSVertexTraceFMM::FindMinMax(GSVertexTrace& vt, const void* vertex, const u
 
 				stq0 = st.xyww(primclass == GS_SPRITE_CLASS ? stq1 : stq0);
 				stq1 = st.zwww(stq1);
+				
+				// Check for NaNs
+				GSVector4 temp_min = stq0.min(stq1);
+				GSVector4 temp_max = stq0.max(stq1);
+				temp_min.x = std::isnan(temp_min.x) ? s_minmax.x : temp_min.x;
+				temp_min.y = std::isnan(temp_min.y) ? s_minmax.x : temp_min.y;
+				temp_max.x = std::isnan(temp_max.x) ? s_minmax.y : temp_max.x;
+				temp_max.y = std::isnan(temp_max.y) ? s_minmax.y : temp_max.y;
 
-				tmin = tmin.min(stq0.min(stq1));
-				tmax = tmax.max(stq0.max(stq1));
+				tmin = tmin.min(temp_min);
+				tmax = tmax.max(temp_max);
 			}
 			else
 			{
 				GSVector4i uv0(v0.m[1]);
 				GSVector4i uv1(v1.m[1]);
 
-				GSVector4 st0 = GSVector4(uv0.uph16()).xyxy();
-				GSVector4 st1 = GSVector4(uv1.uph16()).xyxy();
+				GSVector4 st0 = GSVector4(uv0.uph16());
+				GSVector4 st1 = GSVector4(uv1.uph16());
 
-				tmin = tmin.min(st0.min(st1));
-				tmax = tmax.max(st0.max(st1));
+				// Check for NaNs
+				GSVector4 temp_min = st0.min(st1);
+				GSVector4 temp_max = st0.max(st1);
+				temp_min.x = std::isnan(temp_min.x) ? s_minmax.x : temp_min.x;
+				temp_min.y = std::isnan(temp_min.y) ? s_minmax.x : temp_min.y;
+				temp_max.x = std::isnan(temp_max.x) ? s_minmax.y : temp_max.x;
+				temp_max.y = std::isnan(temp_max.y) ? s_minmax.y : temp_max.y;
+
+				tmin = tmin.min(temp_min.xyxy());
+				tmax = tmax.max(temp_max.xyxy());
 			}
 		}
 
@@ -246,6 +262,12 @@ void GSVertexTraceFMM::FindMinMax(GSVertexTrace& vt, const void* vertex, const u
 
 		vt.m_min.t = tmin * s;
 		vt.m_max.t = tmax * s;
+
+		// Clamp the min/max UV values to the min/max valid UV values.
+		// This is needed in certain cases where buggy GS input results
+		// in huge floating points values for ST.
+		vt.m_min.t = vt.m_min.t.min(GSVector4(2047.0f)).max(GSVector4(-2047.0f)).xyzw(vt.m_min.t);
+		vt.m_max.t = vt.m_max.t.min(GSVector4(2047.0f)).max(GSVector4(-2047.0f)).xyzw(vt.m_max.t);
 	}
 	else
 	{
