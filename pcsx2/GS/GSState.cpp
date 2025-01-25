@@ -2826,6 +2826,488 @@ void GSState::GrowVertexBuffer()
 	m_index.buff = index;
 }
 
+// Returns true is the 3 vertices in verts reprsents a axis-aligned right triangles (both XY and ST/UV) and
+// outputs the indices of the corner, vertical, and horizontal point in idx_out
+static bool GetRightTriangle(const GSVertex* vertex, const u16* index, bool fst, int* i_out)
+{
+	bool same_coord_x[3] = {false, false, false};
+	bool same_coord_y[3] = {false, false, false};
+
+	// Find which vertices have the same X/Y coordinates as other vertices
+	for (int i0 = 0; i0 < 3; i0++)
+	{
+		const int i1 = (i0 + 1) % 3;
+		bool same_x = vertex[index[i0]].XYZ.X == vertex[index[i1]].XYZ.X;
+		bool same_y = vertex[index[i0]].XYZ.Y == vertex[index[i1]].XYZ.Y;
+		if (fst)
+		{
+			same_x &= vertex[index[i0]].U == vertex[index[i1]].U;
+			same_y &= vertex[index[i0]].V == vertex[index[i1]].V;
+		}
+		else
+		{
+			same_x &= vertex[index[i0]].ST.S == vertex[index[i1]].ST.S;
+			same_y &= vertex[index[i0]].ST.T == vertex[index[i1]].ST.T;
+		}
+		if (same_x)
+		{
+			same_coord_x[i0] = same_coord_x[i1] = true;
+		}
+		if (same_y)
+		{
+			same_coord_y[i0] = same_coord_y[i1] = true;
+		}
+	}
+
+	// Find the corner vertex, which should share both X/Y both other vertices
+	int i_corner = -1;
+	int i_vertical = -1;
+	int i_horizontal = -1;
+	for (int i = 0; i < 3; i++)
+	{
+		if (same_coord_x[i] && same_coord_y[i])
+		{
+			if (i_corner != -1) // There can only be one corner point
+				return false;
+			i_corner = i;
+		}
+	}
+
+	// The vertical vertex is the one that has the same x coordinate as the corner vertex
+	for (int i = 1; i < 3; i++)
+	{
+		if (same_coord_x[(i_corner + i) % 3])
+		{
+			if (i_vertical != -1)
+				return false; // There can only be one vertical point
+			i_vertical = (i_corner + i) % 3;
+		}
+	}
+	
+	// The horizontal vertex is the one that has the same y coordinate as the corner vertex
+	for (int i = 1; i < 3; i++)
+	{
+		if (same_coord_x[(i_corner + i) % 3])
+		{
+			if (i_horizontal != -1)
+				return false; // There can only be one horizontal point
+			i_horizontal = (i_corner + i) % 3;
+		}
+	}
+
+	pxAssertMsg(i_horizontal != i_vertical, "Impossible");
+
+	i_out[0] = i_corner;
+	i_out[1] = i_vertical;
+	i_out[2] = i_horizontal;
+	return true;
+}
+
+// Return true if the two triangles form an axis-aligned rectangle.
+// If true, return the min/max X,Y,U,V also
+static bool GetRectangleFromTriangles(const GSVertex* vertex, const u16* index, bool fst, GSVector4i* xy_rect, GSVector4i* uv_rect)
+{
+	// Contain the indexes of the corner, vertical, and horizontal vertex of the right triangle
+	int i0[3], i1[3];
+
+	// Both triangles must be axis-aligned right triangles
+	if (!GetRightTriangle(&vertex[0], &index[0], fst, i0) && !GetRightTriangle(&vertex[3], &index[3], fst, i1))
+	{
+		return false;
+	}
+
+	i1[0] += 3;
+	i1[1] += 3;
+	i1[2] += 3;
+
+	// To form a rectangle the vertical point of one triangle must coincide 
+	// with the horiztonal of the other and vice versa.
+	bool check = (vertex[index[i0[1]]].XYZ.X == vertex[index[i1[2]]].XYZ.X) &&
+				 (vertex[index[i0[1]]].XYZ.Y == vertex[index[i1[2]]].XYZ.Y) &&
+				 (vertex[index[i0[2]]].XYZ.X == vertex[index[i1[1]]].XYZ.X) &&
+				 (vertex[index[i0[2]]].XYZ.Y == vertex[index[i1[1]]].XYZ.Y);
+	if (fst)
+	{
+		check &= (vertex[index[i0[1]]].U == vertex[index[i1[2]]].U) &&
+				 (vertex[index[i0[1]]].V == vertex[index[i1[2]]].V) &&
+				 (vertex[index[i0[2]]].U == vertex[index[i1[1]]].U) &&
+				 (vertex[index[i0[2]]].V == vertex[index[i1[1]]].V);
+	}
+	else
+	{
+		check &= (vertex[index[i0[1]]].ST.S == vertex[index[i1[2]]].ST.S) &&
+				 (vertex[index[i0[1]]].ST.T == vertex[index[i1[2]]].ST.T) &&
+				 (vertex[index[i0[2]]].ST.S == vertex[index[i1[1]]].ST.S) &&
+				 (vertex[index[i0[2]]].ST.T == vertex[index[i1[1]]].ST.T);
+	}
+
+	if (!check)
+		return false;
+
+	// XY and UV rect will be determined by the corner points of each rectangle
+	int min_x_i;
+	int min_y_i;
+	int max_x_i;
+	int max_y_i;
+
+	if (vertex[index[i0[0]]].XYZ.X < vertex[index[i1[0]]].XYZ.X)
+	{
+		min_x_i = i0[0];
+		max_x_i = i1[0];
+	}
+	else
+	{
+		min_x_i = i1[0];
+		max_x_i = i0[0];
+	}
+	if (vertex[index[i0[0]]].XYZ.Y < vertex[index[i1[0]]].XYZ.Y)
+	{
+		min_y_i = i0[0];
+		max_y_i = i1[0];
+	}
+	else
+	{
+		min_y_i = i1[0];
+		max_y_i = i0[0];
+	}
+
+	*xy_rect = GSVector4i(
+		vertex[index[min_x_i]].XYZ.X, vertex[index[min_y_i]].XYZ.Y,
+		vertex[index[max_x_i]].XYZ.X, vertex[index[max_y_i]].XYZ.Y);
+	if (fst)
+	{
+		*uv_rect = GSVector4i(
+			vertex[index[min_x_i]].U, vertex[index[min_y_i]].V,
+			vertex[index[max_x_i]].U, vertex[index[max_y_i]].V);
+	}
+	else
+	{
+		*uv_rect = GSVector4i::cast(GSVector4(
+			vertex[index[min_x_i]].ST.S, vertex[index[min_y_i]].ST.T,
+			vertex[index[max_x_i]].ST.S, vertex[index[max_y_i]].ST.T));
+	}
+
+	return true;
+}
+
+// Check whether the two rectangles are adjacent both for XY and UV/ST.
+// Whether to check adjacent in horizontal or vertical direction is determined by adjacent_x.
+// Whether to chekc adjacent in postive or negative direction is determined by positive.
+bool CheckAdjacentRectangles(const GSVector4i prev_xy, const GSVector4i prev_uv, const GSVector4i curr_xy, const GSVector4i curr_uv, bool adjacent_x, bool positive)
+{
+	if (adjacent_x)
+	{
+		// All Y/V/T coordinates must be the same
+		if (!(prev_xy.U32[1] == curr_xy.U32[1] && prev_xy.U32[3] == curr_xy.U32[3] &&
+				prev_uv.U32[1] == curr_uv.U32[1] && prev_uv.U32[3] == curr_uv.U32[3]))
+			return false;
+		if (positive)
+		{
+			// Previous right X/U/S should be current left X/U/S
+			return (prev_xy.U32[2] == curr_xy.U32[0]) && (prev_uv.U32[2] == curr_uv.U32[0]);
+		}
+		else
+		{
+			// Previous left X/U/S should be current right X/U/S
+			return (prev_xy.U32[0] == curr_xy.U32[2]) && (prev_uv.U32[0] == curr_uv.U32[2]);
+		}
+	}
+	else
+	{
+		// All X/U/S coordinates must be the same
+		if (!(prev_xy.U32[0] == curr_xy.U32[0] && prev_xy.U32[2] == curr_xy.U32[2] &&
+				prev_uv.U32[0] == curr_uv.U32[0] && prev_uv.U32[2] == curr_uv.U32[2]))
+			return false;
+		if (positive)
+		{
+			// Previous bottom Y/V/T should be current top Y/V/T
+			return (prev_xy.U32[3] == curr_xy.U32[1]) && (prev_uv.U32[3] == curr_uv.U32[1]);
+		}
+		else
+		{
+			// Previous top Y/V/T should be current bottom Y/V/T
+			return (prev_xy.U32[1] == curr_xy.U32[3]) && (prev_uv.U32[1] == curr_uv.U32[3]);
+		}
+	}
+}
+
+bool GSState::TrianglesAreSprites(bool shuffle_check) const
+{
+	// Each rectangle takes 2 triangles with 3 vertice each
+	if (m_index.tail % 6 != 0)
+		return false;
+
+	const GSVertex* vertex = m_vertex.buff;
+	const u16* index = m_index.buff;
+	
+	// True means the sprite-like triangles are tiled
+	// first in the horizontal direction then vertical.
+	bool minor_step_x = false;
+
+	// True means we go in the positive direction for the minor/major step.
+	bool minor_positive = false;
+	bool major_positive = false;
+
+	// Means we have initialized the minor/major axis and direction
+	bool init_minor = false;
+	bool init_major = false;
+
+	bool first_rect = true;
+
+	// Size of the step in X, Y, U/S, V/T.
+	// These should be the same for all rectangles
+	GSVector4i rect_size;
+
+	GSVector4i prev_xy_rect; // The previous rectangle
+	GSVector4i prev_uv_rect; // The previous rectangle
+	GSVector4i prev_xy_rect_major; // The rectangle at the head of the current row/column
+	GSVector4i prev_uv_rect_major; // The rectangle at the head of the current row/column
+
+	// The number of rectangles in the minor/major direction
+	// The minor is determined after the first complete row/column;
+	int minor_rects = -1;
+	int major_rects = 1;
+
+	// The current number of minor rectangles to make sure we
+	// don't go over the limit of the first row/column.
+	int minor_rects_curr = 0;
+
+	// For if we succeed in merging all triangles into a sprite
+	GSVector4i first_xy_rect;
+	GSVector4i first_uv_rect;
+
+	for (int i = 0; i < m_vertex.tail; i += 6)
+	{
+		GSVector4i xy_rect; // The current rectangle
+		GSVector4i uv_rect; // The current rectangle
+		
+		if (!GetRectangleFromTriangles(&vertex[i], &index[i], PRIM->FST, &xy_rect, &uv_rect))
+			return false;
+
+		minor_rects_curr++;
+
+		// Get the size and makes sure its correct
+		GSVector4i size;
+
+		size.I32[0] = xy_rect.I32[2] - xy_rect.I32[0];
+		size.I32[1] = xy_rect.I32[3] - xy_rect.I32[1];
+
+		if (PRIM->FST)
+		{
+			size.I32[2] = uv_rect.I32[2] - uv_rect.I32[0];
+			size.I32[3] = uv_rect.I32[3] - uv_rect.I32[1];
+		}
+		else
+		{
+			size.F32[2] = uv_rect.F32[2] - uv_rect.F32[0];
+			size.F32[3] = uv_rect.F32[3] - uv_rect.F32[1];
+		}
+
+		if (first_rect)
+		{
+			rect_size = size;
+		}
+		else if (!(size == rect_size).alltrue())
+		{
+			return false;
+		}
+
+		if (first_rect)
+		{
+			first_xy_rect = prev_xy_rect_major = prev_xy_rect = xy_rect;
+			first_uv_rect = prev_uv_rect_major = prev_uv_rect = uv_rect;
+			first_rect = false;
+		}
+		else if (init_minor)
+		{
+			// We have already determined the minor/major axes and the minor direction
+			if (CheckAdjacentRectangles(prev_xy_rect, prev_uv_rect, xy_rect, uv_rect, minor_step_x, minor_positive))
+			{
+				if (init_major && minor_rects_curr > minor_rects)
+				{
+					// We went beyond the bounds of the first row/column
+					return false;
+				}
+			}
+			else
+			{
+				// If not adjacent to previous rectangle in minor direction, the only option is to start
+				// a new row/column in major direction
+				if (init_major)
+				{
+					if (!CheckAdjacentRectangles(prev_xy_rect, prev_uv_rect, xy_rect, uv_rect, !minor_step_x, major_positive))
+						return false;
+
+					if (minor_rects_curr != minor_rects)
+						return false; // Current row/columns does not hace the same number of rectangles as first row/column
+
+				}
+				else
+				{
+					// We must infer the major direction
+					for (const auto major_positive0 : {true, false})
+					{
+						if (CheckAdjacentRectangles(prev_xy_rect, prev_uv_rect, xy_rect, uv_rect, !minor_step_x, major_positive))
+						{
+							major_positive = major_positive0;
+							init_major = true;
+							break;
+						}
+					}
+					if (!init_major)
+						return false;
+
+					// This is the first row/column so set the minor rectangles
+					minor_rects = minor_rects_curr;
+				}
+
+				// Setup stuff since this is a new row/column
+				minor_rects_curr = 0;
+				major_rects++;
+				prev_xy_rect_major = xy_rect;
+				prev_uv_rect_major = uv_rect;
+			}
+		}
+		else
+		{
+			// Second rectangle so we must infer the minor axis and direction
+			for (const auto minor_step_x0 : {true, false})
+			{
+				for (const auto minor_positive0 : {true, false})
+				{
+					if (CheckAdjacentRectangles(prev_xy_rect, prev_uv_rect, xy_rect, uv_rect, minor_step_x0, minor_positive0))
+					{
+						minor_step_x = minor_step_x0;
+						minor_positive = minor_positive0;
+						init_minor = true;
+					}
+				}
+			}
+		}
+
+		prev_xy_rect = xy_rect;
+		prev_uv_rect = uv_rect;
+	}
+
+	// Make sure that the last rectangle is exactly the end of the row/column
+	if (init_major && minor_rects_curr != minor_rects)
+	{
+		return false;
+	}
+
+	// Get the merged coordinates
+	GSVector4i merged_xy_rect;
+	GSVector4i merged_uv_rect;
+
+	const GSVector4i last_xy_rect = prev_xy_rect;
+	const GSVector4i last_uv_rect = prev_uv_rect;
+
+	// Set X/U/S coordinates of merged
+	if (first_xy_rect.I32[0] < last_xy_rect.I32[0])
+	{
+		merged_xy_rect.I32[0] = first_xy_rect.I32[0];
+		merged_uv_rect.I32[0] = first_uv_rect.I32[0];
+		merged_xy_rect.I32[2] = last_xy_rect.I32[2];
+		merged_uv_rect.I32[2] = last_uv_rect.I32[2];
+	}
+	else
+	{
+		merged_xy_rect.I32[0] = last_xy_rect.I32[0];
+		merged_uv_rect.I32[0] = last_uv_rect.I32[0];
+		merged_xy_rect.I32[2] = first_xy_rect.I32[2];
+		merged_uv_rect.I32[2] = first_uv_rect.I32[2];
+	}
+
+	// Set Y/V/T coordinates of merged
+	if (first_xy_rect.I32[1] < last_xy_rect.I32[1])
+	{
+		merged_xy_rect.I32[1] = first_xy_rect.I32[1];
+		merged_uv_rect.I32[1] = first_uv_rect.I32[1];
+		merged_xy_rect.I32[3] = last_xy_rect.I32[3];
+		merged_uv_rect.I32[3] = last_uv_rect.I32[3];
+	}
+	else
+	{
+		merged_xy_rect.I32[1] = last_xy_rect.I32[1];
+		merged_uv_rect.I32[1] = last_uv_rect.I32[1];
+		merged_xy_rect.I32[3] = first_xy_rect.I32[3];
+		merged_uv_rect.I32[3] = first_uv_rect.I32[3];
+	}
+
+	return true;
+}
+
+bool GSState::GetMinMaxTrianglesUV()
+{
+	pxAssert(m_index.tail % 3 != 0);
+
+	const GSVertex* vertex = m_vertex.buff;
+	const u16* index = m_index.buff;
+	const u32 fst = PRIM->FST;
+
+	for (u32 i = 0; i < m_index.tail; i += 3)
+	{
+		int i_tri[3]; // Vertices of triangle in order: corner, vertical, horizontal
+		if (GetRightTriangle(vertex, &index[i], fst, &i_tri[0]))
+		{
+			// Order points so that we have x0 < x1, y0 < y1
+			float x0, y0, x1, y1;
+			float u0, u1, v0, v1;
+
+			int ix0, ix1, iy0, iy1;
+
+			if (vertex[i_tri[0]].XYZ.X < vertex[i_tri[2]].XYZ.X)
+			{
+				ix0 = 0;
+				ix1 = 2;
+			}
+			else
+			{
+				ix0 = 2;
+				ix1 = 0;
+			}
+
+			if (vertex[i_tri[0]].XYZ.Y < vertex[i_tri[1]].XYZ.Y)
+			{
+				iy0 = 0;
+				iy1 = 1;
+			}
+			else
+			{
+				iy0 = 1;
+				iy1 = 0;
+			}
+
+			float x0 = vertex[i_tri[ix0]].XYZ.X;
+			float y0 = vertex[i_tri[iy0]].XYZ.Y;
+			float x1 = vertex[i_tri[ix1]].XYZ.X;
+			float y1 = vertex[i_tri[iy1]].XYZ.Y;
+
+			float u0, u1, v0, v1;
+
+			if (fst)
+			{
+				u0 = vertex[i_tri[ix0]].U;
+				v0 = vertex[i_tri[iy0]].V;
+				u1 = vertex[i_tri[ix1]].U;
+				v1 = vertex[i_tri[iy1]].V;
+			}
+			else
+			{
+				u0 = vertex[i_tri[ix0]].ST.S / vertex[i_tri[ix0]].RGBAQ.Q * m_context->TEX0.TW;
+				v0 = vertex[i_tri[iy0]].ST.T / vertex[i_tri[iy0]].RGBAQ.Q * m_context->TEX0.TH;
+				u1 = vertex[i_tri[ix1]].ST.S / vertex[i_tri[ix1]].RGBAQ.Q * m_context->TEX0.TW;
+				v1 = vertex[i_tri[iy1]].ST.T / vertex[i_tri[iy1]].RGBAQ.Q * m_context->TEX0.TH;
+			}
+
+			float umin = ((x1 - std::ceilf(x0)) * u0 + (std::ceilf(x0) - x0) * u1) / (x1 - x0);
+			float vmin = ((y1 - std::ceilf(y0)) * v0 + (std::ceilf(y0) - y0) * v1) / (x1 - x0);
+			float umax = ((x1 - std::floorf(x1)) * u0 + (std::floorf(x1) - x0) * u1) / (x1 - x0);
+			float vmax = ((y1 - std::floorf(y1)) * v0 + (std::floorf(y1) - y0) * v1) / (x1 - x0); // CONTINUE HERE!! NNED TO DO CASE NOT OF RIGHT
+		}
+	}
+}
+
 bool GSState::TrianglesAreQuads(bool shuffle_check) const
 {
 	// If this is a quad, there should only be two distinct values for both X and Y, which
