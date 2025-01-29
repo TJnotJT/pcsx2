@@ -246,6 +246,7 @@
     <ClCompile Include="GS\Renderers\Vulkan\vk_mem_alloc.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="GS\RightTriangleCheck.cpp" />
     <ClCompile Include="Host\AudioStream.cpp" />
     <ClCompile Include="Host\CubebAudioStream.cpp" />
     <ClCompile Include="Host\SDLAudioStream.cpp" />

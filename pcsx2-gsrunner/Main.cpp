@@ -46,6 +46,10 @@
 
 #include "svnrev.h"
 
+#include "pcsx2/GS/Renderers/Common/GSRenderer.h"
+#include "pcsx2/GS/GSLocalMemory.h"
+#include "pcsx2/GS/GSRegs.h"
+
 namespace GSRunner
 {
 	static void InitializeConsole();
@@ -246,7 +250,7 @@ void Host::BeginPresentFrame()
 		GSJoinSnapshotThreads();
 
 		// queue dumping of this frame
-		std::string dump_path(fmt::format("{}_frame{}.png", s_output_prefix, s_dump_frame_number));
+		std::string dump_path(fmt::format("{}_frame{:05}.png", s_output_prefix, s_dump_frame_number));
 		GSQueueSnapshot(dump_path);
 	}
 
@@ -443,6 +447,14 @@ static void PrintCommandLineHelp(const char* progname)
 	std::fprintf(stderr, "  -help: Displays this information and exits.\n");
 	std::fprintf(stderr, "  -version: Displays version information and exits.\n");
 	std::fprintf(stderr, "  -dumpdir <dir>: Frame dump directory (will be dumped as filename_frameN.png).\n");
+	std::fprintf(stderr, "  -dump [rt|tex|z|f|a|i]: Enabling dunmping of render target, texture, z buffer, frame, "
+		"alphas, and info (context, vertices), respectively, per draw. Generates lots of data.\n");
+	std::fprintf(stderr, "  -dumprange N[,L,B]: Start dumping from draw N (base 0), stops after L draws, and only "
+		"those draws that are multiples of B (intersection of -dumprange and -dumrangef used)."
+		"Defaults to N=0,L=-1,B=1 (all draws). Only used if -dump used.\n");
+	std::fprintf(stderr, "  -dumprangef NF[,LF,BF]: Start dumping from frame NF (base 0), stops after LF frames, "
+		"and only those frames that are multiples of BF (intersection of -dumprange and -dumrangef used).\n"
+		"Defaults to NF=0,LF=-1,BF=1 (all frames). Only used if -dump is used.\n");
 	std::fprintf(stderr, "  -loop <count>: Loops dump playback N times. Defaults to 1. 0 will loop infinitely.\n");
 	std::fprintf(stderr, "  -renderer <renderer>: Sets the graphics renderer. Defaults to Auto.\n");
 	std::fprintf(stderr, "  -window: Forces a window to be displayed.\n");
@@ -465,6 +477,7 @@ void GSRunner::InitializeConsole()
 
 bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
 {
+	std::string dumpdir; // Save from argument -dumpdir for creating sub-directories
 	bool no_more_args = false;
 	for (int i = 1; i < argc; i++)
 	{
@@ -485,7 +498,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			}
 			else if (CHECK_ARG_PARAM("-dumpdir"))
 			{
-				s_output_prefix = StringUtil::StripWhitespace(argv[++i]);
+				dumpdir = s_output_prefix = StringUtil::StripWhitespace(argv[++i]);
 				if (s_output_prefix.empty())
 				{
 					Console.Error("Invalid dump directory specified.");
@@ -498,6 +511,86 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 					return false;
 				}
 
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-dump"))
+			{
+				std::string str(argv[++i]);
+
+				s_settings_interface.SetBoolValue("EmuCore/GS", "dump", true);
+
+				if (str.find("rt") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "save", true);
+				if (str.find("f") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "savef", true);
+				if (str.find("tex") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "savet", true);
+				if (str.find("z") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "savez", true);
+				if (str.find("a") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "savea", true);
+				if (str.find("i") != std::string::npos)
+					s_settings_interface.SetBoolValue("EmuCore/GS", "savei", true);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-dumprange"))
+			{
+				std::string str(argv[++i]);
+
+				std::vector<std::string_view> split = StringUtil::SplitString(str, ',');
+				int start = 0;
+				int num = -1;
+				int by = 1;
+				if (split.size() > 0)
+				{
+					start = StringUtil::FromChars<int>(split[0]).value_or(0);
+				}
+				if (split.size() > 1)
+				{
+					num = StringUtil::FromChars<int>(split[1]).value_or(-1);
+				}
+				if (split.size() > 2)
+				{
+					by = std::max(1, StringUtil::FromChars<int>(split[2]).value_or(1));
+				}
+				s_settings_interface.SetIntValue("EmuCore/GS", "saven", start);
+				s_settings_interface.SetIntValue("EmuCore/GS", "savel", num);
+				s_settings_interface.SetIntValue("EmuCore/GS", "saveb", by);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-dumprangef"))
+			{
+				std::string str(argv[++i]);
+
+				std::vector<std::string_view> split = StringUtil::SplitString(str, ',');
+				int start = 0;
+				int num = -1;
+				int by = 1;
+				if (split.size() > 0)
+				{
+					start = StringUtil::FromChars<int>(split[0]).value_or(0);
+				}
+				if (split.size() > 1)
+				{
+					num = StringUtil::FromChars<int>(split[1]).value_or(-1);
+				}
+				if (split.size() > 2)
+				{
+					by = std::max(1, StringUtil::FromChars<int>(split[2]).value_or(1));
+				}
+				s_settings_interface.SetIntValue("EmuCore/GS", "savenf", start);
+				s_settings_interface.SetIntValue("EmuCore/GS", "savelf", num);
+				s_settings_interface.SetIntValue("EmuCore/GS", "savebf", by);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-dumpdirhw"))
+			{
+				s_settings_interface.SetStringValue("EmuCore/GS", "HWDumpDirectory", argv[++i]);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-dumpdirsw"))
+			{
+				s_settings_interface.SetStringValue("EmuCore/GS", "SWDumpDirectory", argv[++i]);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-loop"))
@@ -643,6 +736,18 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		return false;
 	}
 
+	if (s_settings_interface.GetBoolValue("EmuCore/GS", "dump") && !dumpdir.empty())
+	{
+		if (s_settings_interface.GetStringValue("EmuCore/GS", "HWDumpDirectory").empty())
+			s_settings_interface.SetStringValue("EmuCore/GS", "HWDumpDirectory", dumpdir.c_str());
+		if (s_settings_interface.GetStringValue("EmuCore/GS", "SWDumpDirectory").empty())
+			s_settings_interface.SetStringValue("EmuCore/GS", "SWDumpDirectory", dumpdir.c_str());
+		
+		// Disable saving frames with SaveSnapshotToMemory()
+		// Instead we save more "raw" snapshots when using -dump.
+		s_output_prefix = "";
+	}
+
 	// set up the frame dump directory
 	if (!s_output_prefix.empty())
 	{
@@ -676,6 +781,24 @@ void GSRunner::DumpStats()
 #define main real_main
 #endif
 
+u32 getPsm32Address(int x, int y)
+{
+	std::vector<int> xBits = {0, 2, 3, 6, 8, 10};
+	std::vector<int> yBits = {1, 4, 5, 7, 9};
+
+	auto getAddrHelper = [](int coord, std::vector<int> bits)
+	{
+		u32 a = 0;
+		for (int i = 0; i < bits.size(); i++)
+		{
+			a |= ((coord >> i) & 1) << bits[i];
+		}
+		return a;
+	};
+	
+	return getAddrHelper(x, xBits) | getAddrHelper(y, yBits);
+}
+
 int main(int argc, char* argv[])
 {
 	CrashHandler::Install();
@@ -706,6 +829,55 @@ int main(int argc, char* argv[])
 
 	if (VMManager::Initialize(params))
 	{
+		{
+			GSOffset k = g_gs_renderer->m_mem.GetOffset(0, 1, GS_PSM::PSMCT32);
+			FILE* file = fopen("C:/Users/tchan/Desktop/log.txt", "w");
+			/*for (int x = 0; x < 64; x++)
+			{
+				for (int y = 0; y < 32; y++)
+				{
+					fprintf(file, "%08x %08x\n", k.pa(x, y), getPsm32Address(x, y));
+				}
+			}*/
+			/*fprintf(stderr, "%08x\n", k.pa(-64, 0));
+			fprintf(stderr, "%08x\n", k.pa(0, 0));
+			fprintf(stderr, "%08x\n", k.pa(128, 0));
+			fprintf(stderr, "%08x\n", k.pa(192, 0));
+			fprintf(stderr, "%08x\n", k.pa(256, 0));*/
+			fprintf(stderr, "%08x\n", k.pa(-256, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(-192, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(-128, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(-64, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(0, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(64, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(128, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(192, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(256, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(0, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(64, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(128, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(192, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(256, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 - 128, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 - 64, 32) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 + 64, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 + 96, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 + 128, 0) / 0x800);
+			fprintf(stderr, "%08x\n", k.pa(4096 + 160, 0) / 0x800);
+			//fprintf(stderr, "%08x\n", k.pa(0, 32));
+			//fprintf(stderr, "%08x\n", k.pa(0, 64));
+			//fprintf(stderr, "%08x\n", k.pa(0, 96));
+			//fprintf(stderr, "%08x\n", k.pa(0, 128));
+			fclose(file);
+
+			VMManager::Shutdown(false);
+			VMManager::Internal::CPUThreadShutdown();
+			GSRunner::DestroyPlatformWindow();
+			return EXIT_SUCCESS;
+		}
+
 		// run until end
 		GSDumpReplayer::SetLoopCount(s_loop_count);
 		VMManager::SetState(VMState::Running);

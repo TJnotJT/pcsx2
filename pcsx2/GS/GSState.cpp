@@ -443,7 +443,7 @@ void GSState::DumpVertices(const std::string& filename)
 	file << std::fixed << std::setprecision(4);
 	for (u32 i = 0; i < count; ++i)
 	{
-		file << "\t" << "v" << i << ": ";
+		file << "\t" << std::dec << "v" << i << ": ";
 		GSVertex v = buffer[m_index.buff[i]];
 
 		const float x = (v.XYZ.X - (int)m_context->XYOFFSET.OFX) / 16.0f;
@@ -461,7 +461,7 @@ void GSState::DumpVertices(const std::string& filename)
 	file << std::fixed << std::setprecision(6);
 	for (u32 i = 0; i < count; ++i)
 	{
-		file << "\t" << "v" << i << ": ";
+		file << "\t" << std::dec << "v" << i << ": ";
 		GSVertex v = buffer[m_index.buff[i]];
 
 		file << std::setfill('0') << std::setw(3) << unsigned(v.RGBAQ.R) << DEL;
@@ -479,7 +479,7 @@ void GSState::DumpVertices(const std::string& filename)
 	file << "TEXTURE COORDS (" << qualifier << ")" << std::endl;;
 	for (u32 i = 0; i < count; ++i)
 	{
-		file << "\t" << "v" << i << ": ";
+		file << "\t" << "v" << std::dec << i << ": ";
 		const GSVertex v = buffer[m_index.buff[i]];
 
 		// note
@@ -1677,6 +1677,11 @@ void GSState::FlushPrim()
 
 		m_vt.Update(m_vertex.buff, m_index.buff, m_vertex.tail, m_index.tail, GSUtil::GetPrimClass(PRIM->PRIM));
 
+		if (s_n == 82)
+		{
+			TrianglesAreSprites();
+		}
+
 		// Texel coordinate rounding
 		// Helps Manhunt (lights shining through objects).
 		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
@@ -1994,7 +1999,7 @@ void GSState::InitReadFIFO(u8* mem, int len)
 	// Read the image all in one go.
 	m_mem.ReadImageX(m_tr.x, m_tr.y, m_tr.buff, m_tr.total, m_env.BITBLTBUF, m_env.TRXPOS, m_env.TRXREG);
 
-	if (GSConfig.DumpGSData && GSConfig.SaveRT && s_n >= GSConfig.SaveN)
+	if (GSConfig.SaveRT && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
 		const std::string s(GetDrawDumpPath(
 			"%05d_read_%05x_%d_%d_%d_%d_%d_%d.bmp",
@@ -2742,7 +2747,7 @@ int GSState::Defrost(const freezeData* fd)
 	m_mem.m_clut.Reset();
 	(PRIM->CTXT == 0) ? ApplyTEX0<0>(m_context->TEX0) : ApplyTEX0<1>(m_context->TEX0);
 
-	g_perfmon.SetFrame(5000);
+	g_perfmon.SetFrame(0);
 
 	ResetPCRTC();
 
@@ -2873,21 +2878,18 @@ static bool GetRightTriangle(const GSVertex* vertex, const u16* index, bool fst,
 		}
 	}
 
-	// The vertical vertex is the one that has the same x coordinate as the corner vertex
 	for (int i = 1; i < 3; i++)
 	{
+		// The vertical vertex is the one that has the same x coordinate as the corner vertex
 		if (same_coord_x[(i_corner + i) % 3])
 		{
 			if (i_vertical != -1)
 				return false; // There can only be one vertical point
 			i_vertical = (i_corner + i) % 3;
 		}
-	}
-	
-	// The horizontal vertex is the one that has the same y coordinate as the corner vertex
-	for (int i = 1; i < 3; i++)
-	{
-		if (same_coord_x[(i_corner + i) % 3])
+		
+		// The horizontal vertex is the one that has the same y coordinate as the corner vertex
+		if (same_coord_y[(i_corner + i) % 3])
 		{
 			if (i_horizontal != -1)
 				return false; // There can only be one horizontal point
@@ -2911,7 +2913,7 @@ static bool GetRectangleFromTriangles(const GSVertex* vertex, const u16* index, 
 	int i0[3], i1[3];
 
 	// Both triangles must be axis-aligned right triangles
-	if (!GetRightTriangle(&vertex[0], &index[0], fst, i0) && !GetRightTriangle(&vertex[3], &index[3], fst, i1))
+	if (!GetRightTriangle(vertex, &index[0], fst, i0) || !GetRightTriangle(vertex, &index[3], fst, i1))
 	{
 		return false;
 	}
@@ -3076,12 +3078,12 @@ bool GSState::TrianglesAreSprites(bool shuffle_check) const
 	GSVector4i first_xy_rect;
 	GSVector4i first_uv_rect;
 
-	for (int i = 0; i < m_vertex.tail; i += 6)
+	for (u32 i = 0; i < m_vertex.tail; i += 6)
 	{
 		GSVector4i xy_rect; // The current rectangle
 		GSVector4i uv_rect; // The current rectangle
 		
-		if (!GetRectangleFromTriangles(&vertex[i], &index[i], PRIM->FST, &xy_rect, &uv_rect))
+		if (!GetRectangleFromTriangles(vertex, &index[i], PRIM->FST, &xy_rect, &uv_rect))
 			return false;
 
 		minor_rects_curr++;
