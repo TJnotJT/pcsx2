@@ -33,11 +33,12 @@ public:
 		bool valid;
 	};
 	bool m_accurate_stq = false;
+	bool invalid_stq = false;
 
 protected:
 	const GSState* m_state;
 
-	typedef void (*FindMinMaxPtr)(GSVertexTrace& vt, const void* vertex, const u16* index, int count);
+	typedef void (*FindMinMaxPtr)(GSVertexTrace& vt, const void* vertex, int v_count, const u16* index, int i_count);
 
 	FindMinMaxPtr m_fmm[2][2][2][2][4];
 

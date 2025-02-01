@@ -36,17 +36,19 @@ void GSVertexTrace::Update(const void* vertex, const u16* index, int v_count, in
 		m_accurate_stq = true;
 	}
 
+	// FIXME: This could be moved into the FMM functions
 	m_eq.value = (m_min.c == m_max.c).mask() | ((m_min.p == m_max.p).mask() << 16) | ((m_min.t == m_max.t).mask() << 20);
 
 	m_alpha.valid = false;
 
+	// FIXME: IF we just did the accurate STQ check, we could totally remove this
 	// I'm not sure of the cost. In doubt let's do it only when depth is enabled
 	if (m_state->m_context->TEST.ZTE == 1 && m_state->m_context->TEST.ZTST > ZTST_ALWAYS)
 	{
 		CorrectDepthTrace(vertex, v_count);
 	}
 
-	if (m_state->PRIM->TME)
+	if (tme)
 	{
 		const GIFRegTEX1& TEX1 = m_state->m_context->TEX1;
 
@@ -129,7 +131,6 @@ void GSVertexTrace::CorrectDepthTrace(const void* vertex, int count)
 	// Really impact Xenosaga3
 	//
 	// Hopefully function is barely called so AVX/SSE will be useless here
-
 
 	const GSVertex* RESTRICT v = (GSVertex*)vertex;
 
