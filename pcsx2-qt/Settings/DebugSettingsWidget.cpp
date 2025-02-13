@@ -49,8 +49,12 @@ DebugSettingsWidget::DebugSettingsWidget(SettingsWindow* dialog, QWidget* parent
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveFrame, "EmuCore/GS", "savef", false);
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveTexture, "EmuCore/GS", "savet", false);
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveDepth, "EmuCore/GS", "savez", false);
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveAlpha, "EmuCore/GS", "savea", false);
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveInfo, "EmuCore/GS", "savei", false);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.startDraw, "EmuCore/GS", "saven", 0);
-	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.dumpCount, "EmuCore/GS", "savel", 5000);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.drawDumpCount, "EmuCore/GS", "savel", 5000);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.startFrame, "EmuCore/GS", "savenf", 0);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.frameDumpCount, "EmuCore/GS", "savelf", 5000);
 	SettingWidgetBinder::BindWidgetToFolderSetting(
 		sif, m_ui.hwDumpDirectory, m_ui.hwDumpBrowse, m_ui.hwDumpOpen, nullptr, "EmuCore/GS", "HWDumpDirectory", std::string(), false);
 	SettingWidgetBinder::BindWidgetToFolderSetting(
@@ -152,7 +156,7 @@ void DebugSettingsWidget::onDrawDumpingChanged()
 	m_ui.saveTexture->setEnabled(enabled);
 	m_ui.saveDepth->setEnabled(enabled);
 	m_ui.startDraw->setEnabled(enabled);
-	m_ui.dumpCount->setEnabled(enabled);
+	m_ui.drawDumpCount->setEnabled(enabled);
 	m_ui.hwDumpDirectory->setEnabled(enabled);
 	m_ui.hwDumpBrowse->setEnabled(enabled);
 	m_ui.hwDumpOpen->setEnabled(enabled);
