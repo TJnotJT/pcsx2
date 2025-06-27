@@ -1650,6 +1650,7 @@ void GSState::FlushPrim()
 {
 	if (m_index.tail > 0)
 	{
+
 		GL_REG("FlushPrim ctxt %d", PRIM->CTXT);
 
 		// clear texture cache flushed flag, since we're reading from it
@@ -1770,7 +1771,7 @@ void GSState::FlushPrim()
 		const bool skip_draw = (m_context->TEST.ZTE && m_context->TEST.ZTST == ZTST_NEVER);
 		m_quad_check_valid = false;
 
-		if (!skip_draw)
+		if (!skip_draw && s_n != 92)
 			Draw();
 
 		g_perfmon.Put(GSPerfMon::Draw, 1);

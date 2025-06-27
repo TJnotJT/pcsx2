@@ -98,6 +98,7 @@
     <ClCompile Include="Debugger\SymbolTree\SymbolTreeViews.cpp" />
     <ClCompile Include="Debugger\SymbolTree\TypeString.cpp" />
     <ClCompile Include="EarlyHardwareCheck.cpp" />
+    <ClCompile Include="GSDumpEditorWindow.cpp" />
     <ClCompile Include="LogWindow.cpp" />
     <ClCompile Include="QtProgressCallback.cpp" />
     <ClCompile Include="Settings\DebugAnalysisSettingsWidget.cpp" />
@@ -209,6 +210,7 @@
     <QtMoc Include="Debugger\SymbolTree\SymbolTreeNode.h" />
     <QtMoc Include="Debugger\SymbolTree\SymbolTreeViews.h" />
     <QtMoc Include="Debugger\SymbolTree\TypeString.h" />
+    <QtMoc Include="GSDumpEditorWindow.h" />
     <ClInclude Include="Settings\ControllerSettingWidgetBinder.h" />
     <QtMoc Include="Settings\FolderSettingsWidget.h" />
     <QtMoc Include="Settings\DebugAnalysisSettingsWidget.h" />
@@ -334,6 +336,7 @@
     <ClCompile Include="$(IntDir)GameList\moc_GameListModel.cpp" />
     <ClCompile Include="$(IntDir)GameList\moc_GameListRefreshThread.cpp" />
     <ClCompile Include="$(IntDir)GameList\moc_GameListWidget.cpp" />
+    <ClCompile Include="$(IntDir)moc_GSDumpEditorWindow.cpp" />
     <ClCompile Include="$(IntDir)moc_AboutDialog.cpp" />
     <ClCompile Include="$(IntDir)moc_AutoUpdaterDialog.cpp" />
     <ClCompile Include="$(IntDir)moc_ColorPickerButton.cpp" />
@@ -371,6 +374,7 @@
     <QtUi Include="Debugger\ThreadView.ui" />
     <QtUi Include="GameList\EmptyGameListWidget.ui" />
     <QtUi Include="GameList\GameListWidget.ui" />
+    <QtUi Include="GSDumpEditorWindow.ui" />
     <QtUi Include="MainWindow.ui" />
     <QtUi Include="Settings\AchievementLoginDialog.ui" />
     <QtUi Include="Settings\AchievementSettingsWidget.ui" />

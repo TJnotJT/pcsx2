@@ -494,6 +494,7 @@
     <ClCompile Include="Debugger\ThreadView.cpp">
       <Filter>Debugger</Filter>
     </ClCompile>
+    <ClCompile Include="GSDumpEditorWindow.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="..\pcsx2\windows\PCSX2.manifest">
@@ -728,6 +729,7 @@
     <QtMoc Include="Debugger\ThreadView.h">
       <Filter>Debugger</Filter>
     </QtMoc>
+    <QtMoc Include="GSDumpEditorWindow.h" />
   </ItemGroup>
   <ItemGroup>
     <QtResource Include="resources\resources.qrc">
@@ -953,6 +955,7 @@
     <QtUi Include="Debugger\ThreadView.ui">
       <Filter>Debugger</Filter>
     </QtUi>
+    <QtUi Include="GSDumpEditorWindow.ui" />
   </ItemGroup>
   <ItemGroup>
     <QtTs Include="Translations\pcsx2-qt_en.ts">

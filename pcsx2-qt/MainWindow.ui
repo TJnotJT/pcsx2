@@ -147,6 +147,7 @@
     <addaction name="actionEnableEEConsoleLogging"/>
     <addaction name="actionEnableIOPConsoleLogging"/>
     <addaction name="actionEnableCDVDVerboseReads"/>
+	<addaction name="actionGSDumpEditor"/>
    </widget>
    <widget class="QMenu" name="menuView">
     <property name="title">
@@ -975,6 +976,11 @@
    <property name="text">
     <string>Enable &amp;CDVD Read Logging</string>
    </property>
+  </action>
+  <action name="actionGSDumpEditor">
+    <property name="text">
+      <string>GS Dump Editor</string>
+    </property>
   </action>
   <action name="actionSaveBlockDump">
    <property name="checkable">
