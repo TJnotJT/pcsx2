@@ -99,6 +99,8 @@
     <ClCompile Include="Debugger\SymbolTree\TypeString.cpp" />
     <ClCompile Include="EarlyHardwareCheck.cpp" />
     <ClCompile Include="GSDumpEditorWindow.cpp" />
+    <ClCompile Include="GSDumpFileParsed.cpp" />
+    <ClCompile Include="GSRegParseFormat.cpp" />
     <ClCompile Include="LogWindow.cpp" />
     <ClCompile Include="QtProgressCallback.cpp" />
     <ClCompile Include="Settings\DebugAnalysisSettingsWidget.cpp" />
@@ -211,6 +213,8 @@
     <QtMoc Include="Debugger\SymbolTree\SymbolTreeViews.h" />
     <QtMoc Include="Debugger\SymbolTree\TypeString.h" />
     <QtMoc Include="GSDumpEditorWindow.h" />
+    <ClInclude Include="GSDumpFileParsed.h" />
+    <ClInclude Include="GSRegParseFormat.h" />
     <ClInclude Include="Settings\ControllerSettingWidgetBinder.h" />
     <QtMoc Include="Settings\FolderSettingsWidget.h" />
     <QtMoc Include="Settings\DebugAnalysisSettingsWidget.h" />

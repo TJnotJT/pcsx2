@@ -37,6 +37,9 @@
     <Filter Include="Debugger\Memory">
       <UniqueIdentifier>{63790c94-0680-417d-926c-a8b74118f80f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="GSDumpEditor">
+      <UniqueIdentifier>{05908ad4-79c9-4bd6-b65f-30f5e0116c55}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\pcsx2\windows\PCSX2.rc" />
@@ -494,7 +497,16 @@
     <ClCompile Include="Debugger\ThreadView.cpp">
       <Filter>Debugger</Filter>
     </ClCompile>
-    <ClCompile Include="GSDumpEditorWindow.cpp" />
+    <ClCompile Include="$(IntDir)moc_GSDumpEditorWindow.cpp" />
+    <ClCompile Include="GSDumpEditorWindow.cpp">
+      <Filter>GSDumpEditor</Filter>
+    </ClCompile>
+    <ClCompile Include="GSRegParseFormat.cpp">
+      <Filter>GSDumpEditor</Filter>
+    </ClCompile>
+    <ClCompile Include="GSDumpFileParsed.cpp">
+      <Filter>GSDumpEditor</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="..\pcsx2\windows\PCSX2.manifest">
@@ -516,6 +528,12 @@
     </ClInclude>
     <ClInclude Include="Debugger\DebuggerSettingsManager.h">
       <Filter>Debugger</Filter>
+    </ClInclude>
+    <ClInclude Include="GSRegParseFormat.h">
+      <Filter>GSDumpEditor</Filter>
+    </ClInclude>
+    <ClInclude Include="GSDumpFileParsed.h">
+      <Filter>GSDumpEditor</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -729,7 +747,9 @@
     <QtMoc Include="Debugger\ThreadView.h">
       <Filter>Debugger</Filter>
     </QtMoc>
-    <QtMoc Include="GSDumpEditorWindow.h" />
+    <QtMoc Include="GSDumpEditorWindow.h">
+      <Filter>GSDumpEditor</Filter>
+    </QtMoc>
   </ItemGroup>
   <ItemGroup>
     <QtResource Include="resources\resources.qrc">
@@ -955,7 +975,9 @@
     <QtUi Include="Debugger\ThreadView.ui">
       <Filter>Debugger</Filter>
     </QtUi>
-    <QtUi Include="GSDumpEditorWindow.ui" />
+    <QtUi Include="GSDumpEditorWindow.ui">
+      <Filter>GSDumpEditor</Filter>
+    </QtUi>
   </ItemGroup>
   <ItemGroup>
     <QtTs Include="Translations\pcsx2-qt_en.ts">
