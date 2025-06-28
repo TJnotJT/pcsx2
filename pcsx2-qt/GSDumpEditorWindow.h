@@ -8,6 +8,7 @@
 #include "ui_GSDumpEditorWindow.h"
 #include "GSRegParseFormat.h"
 #include "GSDumpFileParsed.h"
+
 #include <QtWidgets/QDialog>
 
 #include <QtCore/QFile>
@@ -25,7 +26,7 @@
 #include <QStandardItemModel>
 #include <QStandardItem>
 
-
+#include "QLazyItemModel.h"
 
 
 class GSDumpEditorWindow final : public QDialog
@@ -41,6 +42,7 @@ public:
 	void ClearDumpTree();
 	QVBoxLayout* m_layout;
 	QTreeView* m_dump_tree;
+	//QStandardItemModel* m_dump_model;
 	QStandardItemModel* m_dump_model;
-	GSDumpFileParsed* m_dump_file;
+	std::unique_ptr<GSDumpFileParsed> m_dump_file;
 };

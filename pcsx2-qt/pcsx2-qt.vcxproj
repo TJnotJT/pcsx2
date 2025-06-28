@@ -102,6 +102,7 @@
     <ClCompile Include="GSDumpFileParsed.cpp" />
     <ClCompile Include="GSRegParseFormat.cpp" />
     <ClCompile Include="LogWindow.cpp" />
+    <ClCompile Include="QLazyItemModel.cpp" />
     <ClCompile Include="QtProgressCallback.cpp" />
     <ClCompile Include="Settings\DebugAnalysisSettingsWidget.cpp" />
     <ClCompile Include="Settings\DebugUserInterfaceSettingsWidget.cpp" />
@@ -215,6 +216,8 @@
     <QtMoc Include="GSDumpEditorWindow.h" />
     <ClInclude Include="GSDumpFileParsed.h" />
     <ClInclude Include="GSRegParseFormat.h" />
+    <ClInclude Include="GSDumpEditorDefs.h" />
+    <ClInclude Include="QLazyItemModel.h" />
     <ClInclude Include="Settings\ControllerSettingWidgetBinder.h" />
     <QtMoc Include="Settings\FolderSettingsWidget.h" />
     <QtMoc Include="Settings\DebugAnalysisSettingsWidget.h" />

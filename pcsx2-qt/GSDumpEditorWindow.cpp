@@ -3,7 +3,6 @@
 
 #include "GS.h"
 #include "GS/GSLzma.h"
-#include "pcsx2/SupportURLs.h"
 #include "common/StringUtil.h"
 
 #include "GSDumpEditorWindow.h"
@@ -47,20 +46,21 @@ GSDumpEditorWindow::GSDumpEditorWindow(QWidget* parent)
 	m_layout->addWidget(m_dump_tree);
 
 	// Create the model
+	//m_dump_model = new QStandardItemModel(m_dump_tree);
 	m_dump_model = new QStandardItemModel(m_dump_tree);
 	m_dump_model->setHorizontalHeaderLabels(QStringList() << "Example Tree");
 
-	// Populate the model with example data
-	QStandardItem* rootItem = m_dump_model->invisibleRootItem();
+	//// Populate the model with example data
+	//QStandardItem* rootItem = m_dump_model->invisibleRootItem();
 
-	QStandardItem* parentItem = new QStandardItem("Parent");
-	QStandardItem* childItem1 = new QStandardItem("Child 1");
-	QStandardItem* childItem2 = new QStandardItem("Child 2");
+	//QStandardItem* parentItem = new QStandardItem("Parent");
+	//QStandardItem* childItem1 = new QStandardItem("Child 1");
+	//QStandardItem* childItem2 = new QStandardItem("Child 2");
 
-	parentItem->appendRow(childItem1);
-	parentItem->appendRow(childItem2);
+	//parentItem->appendRow(childItem1);
+	//parentItem->appendRow(childItem2);
 
-	rootItem->appendRow(parentItem);
+	//rootItem->appendRow(parentItem);
 
 	// Set the model on the view
 	m_dump_tree->setModel(m_dump_model);
@@ -93,20 +93,17 @@ void GSDumpEditorWindow::ClearDumpTree()
 	m_dump_model->clear();
 }
 
-static const char* path_str[] = {
-	"Path1Old",
-	"Path1New",
-	"Path2",
-	"Path3",
-};
 
+void GSDumpEditorWindow::PopulateDumpTree(const GSDumpFile& dump_file)
+{
+	ClearDumpTree();
 
-static const char* flg_str[] = {
-	"packed",
-	"reglist",
-	"image",
-	"disable",
-};
+	m_dump_file = std::make_unique<GSDumpFileParsed>(&dump_file);
+
+	m_dump_file->AddToModel(m_dump_model);
+}
+
+GSDumpEditorWindow::~GSDumpEditorWindow() = default;
 
 
 // void GSDumpEditorWindow::PopulateDumpTree(const GSDumpFile& dump_file)
@@ -131,7 +128,7 @@ static const char* flg_str[] = {
 // 				switch (packet.path)
 // 				{
 // 					case GSDumpTypes::GSTransferPath::Path1Old:
-						
+
 // 						/*std::unique_ptr<u8[]> data(new u8[16384]);
 // 						const s32 addr = 16384 - packet.length;
 // 						std::memcpy(data.get(), packet.data + addr, packet.length);
@@ -143,13 +140,13 @@ static const char* flg_str[] = {
 // 						// 	packet.data, packet.length);
 // 						path_item = new QStandardItem(path_str[(int)packet.path]);
 // 						m_dump_model->appendRow(path_item);
-						
+
 // 						fprintf(f, "packet length: %zd\n", packet.length);
 // 						for (mem = packet.data; mem < packet.data + packet.length;)
 // 						{
 // 							GIFTag* giftag = (GIFTag*)mem;
 // 							mem += sizeof(GIFTag);
-							
+
 // 							std::string giftag_str = StringUtil::StdStringFromFormat(
 // 								"GifTag NLOOP=%d EOP=%d PRE=%d PRIM=%d FLG=%s",
 // 								giftag->NLOOP, giftag->EOP, giftag->PRE, giftag->PRIM, flg_str[giftag->FLG]);
@@ -338,100 +335,3 @@ static const char* flg_str[] = {
 // 	}
 // 	fclose(f);
 // }
-
-void GSDumpEditorWindow::PopulateDumpTree(const GSDumpFile& dump_file)
-{
-	FILE* f = fopen("E:\\debug.txt", "w");
-
-	const u8* mem = 0;
-	QStandardItem* path_item = 0;
-	QStandardItem* giftag_item = 0;
-	ClearDumpTree();
-
-
-	std::string treeName = StringUtil::StdStringFromFormat("GS Dump (%zd packets)", dump_file.GetPackets().size());
-	m_dump_tree->setObjectName(treeName.c_str());
-
-	for (const GSDumpFile::GSData& packet : dump_file.GetPackets())
-	{
-		switch (packet.id)
-		{
-			case GSDumpTypes::GSType::Transfer:
-			{
-				switch (packet.path)
-				{
-					case GSDumpTypes::GSTransferPath::Path1Old:
-						
-						/*std::unique_ptr<u8[]> data(new u8[16384]);
-						const s32 addr = 16384 - packet.length;
-						std::memcpy(data.get(), packet.data + addr, packet.length);
-						GSDumpReplayerSendPacketToMTGS(GIF_PATH_1, data.get(), packet.length);*/
-					case GSDumpTypes::GSTransferPath::Path1New:
-					case GSDumpTypes::GSTransferPath::Path2:
-					case GSDumpTypes::GSTransferPath::Path3:
-						// GSDumpReplayerSendPacketToMTGS(static_cast<GIF_PATH>(static_cast<u8>(packet.path) - 1),
-						// 	packet.data, packet.length);
-						path_item = new QStandardItem(path_str[(int)packet.path]);
-						m_dump_model->appendRow(path_item);
-						
-						fprintf(f, "packet length: %zd\n", packet.length);
-						for (mem = packet.data; mem < packet.data + packet.length;)
-						{
-							GIFTag* giftag = (GIFTag*)mem;
-							mem += sizeof(GIFTag);
-							
-							std::string giftag_str = StringUtil::StdStringFromFormat(
-								"GifTag NLOOP=%d EOP=%d PRE=%d PRIM=%d FLG=%s",
-								giftag->NLOOP, giftag->EOP, giftag->PRE, giftag->PRIM, flg_str[giftag->FLG]);
-
-							giftag_item = new QStandardItem(giftag_str.c_str());
-							path_item->appendRow(giftag_item);
-
-							std::string image_str;
-							
-						}
-						assert(mem == packet.data + packet.length);
-					default:
-						break;
-				}
-				break;
-			}
-
-			case GSDumpTypes::GSType::VSync:
-			{
-				m_dump_model->appendRow(new QStandardItem("VSync"));
-				// s_dump_frame_number++;
-				// GSDumpReplayerUpdateFrameLimit();
-				// GSDumpReplayerFrameLimit();
-				// MTGS::PostVsyncStart(false);
-				// VMManager::Internal::VSyncOnCPUThread();
-				// if (VMManager::Internal::IsExecutionInterrupted())
-				// 	GSDumpReplayerExitExecution();
-				// Host::PumpMessagesOnCPUThread();
-			}
-			break;
-
-			case GSDumpTypes::GSType::ReadFIFO2:
-			{
-				m_dump_model->appendRow(new QStandardItem("ReadFIFO2"));
-				// u32 size;
-				// std::memcpy(&size, packet.data, sizeof(size));
-
-				// // Allocate an extra quadword, some transfers write too much (e.g. Lego Racers 2 with Z24 downloads).
-				// std::unique_ptr<u8[]> arr(new u8[(size + 1) * 16]);
-				// MTGS::InitAndReadFIFO(arr.get(), size);
-			}
-			break;
-
-			case GSDumpTypes::GSType::Registers:
-			{
-				m_dump_model->appendRow(new QStandardItem("Registers"));
-				// std::memcpy(PS2MEM_GS, packet.data, std::min<s32>(packet.length, Ps2MemSize::GSregs));
-			}
-			break;
-		}
-	}
-	fclose(f);
-}
-
-GSDumpEditorWindow::~GSDumpEditorWindow() = default;

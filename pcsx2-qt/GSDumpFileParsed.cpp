@@ -1,50 +1,76 @@
-#include "common/Pcsx2Defs.h"
-#include "common/Pcsx2Types.h"
-
-#include "GS/GSState.h"
-#include "GS/GSDump.h"
-#include "GS/GSGL.h"
-#include "GS/GSPerfMon.h"
-#include "GS/GSUtil.h"
-
-#include "common/Console.h"
-#include "common/BitUtils.h"
-#include "common/Path.h"
-#include "common/StringUtil.h"
-
-#include <cstring>
-#include <string>
-#include <map>
-#include <vector>
-#include <memory>
-
+#include "GSDumpEditorDefs.h"
 #include "GSDumpFileParsed.h"
 #include "GSRegParseFormat.h"
 
-std::string GSDumpFileParsed::GSReg::getName() const
-{
-	return GSRegGetName(m_reg_id);
-}
+#include <QStandardItemModel>
 
-bool GSDumpFileParsed::GSReg::hasField(const std::string& field_name) const
+bool GSDumpFileParsed::GSAbstractReg::HasField(const std::string& field_name) const
 {
 	return m_fields.find(field_name) != m_fields.end();
 }
 
-u64 GSDumpFileParsed::GSReg::getField(const std::string& field_name) const
+u64 GSDumpFileParsed::GSAbstractReg::GetField(const std::string& field_name) const
 {
 	auto it = m_fields.find(field_name);
 	if (it != m_fields.end())
 	{
 		return it->second;
 	}
-	Console.Error("GSDumpFileParsed::GSReg: Field '{}' not found in register '{}'.", field_name, getName());
+	Console.Error("GSDumpFileParsed::GSReg: Field '{}' not found in register '{}'.", field_name, GetName());
 	return 0;
+}
+
+std::string GSDumpFileParsed::GSAbstractReg::ToString() const
+{
+	std::stringstream ss;
+	ss << GetName();
+	bool first = false;
+	for (const auto& [name, value] : m_fields)
+	{
+		if (!first)
+			ss << " ";
+		ss << name << ":" << GSRegFormatField(); 
+		first = false;
+	}
+	return ss.str();
+}
+
+void GSDumpFileParsed::GSAbstractReg::AddToModel(QStandardItem* parent) const
+{
+	QStandardItem* reg_item = new QStandardItem(QString::fromStdString(ToString()));
+	parent->appendRow(reg_item);
+}
+
+GSDumpFileParsed::GSReg::GSReg(u32 reg_id, const u8* data)
+	: GSAbstractReg(reg_id)
+{
+	GSRegDecodeFields(m_reg_id, (const u64*)data, &m_fields);
+}
+
+std::string GSDumpFileParsed::GSReg::GetName() const
+{
+	return GSRegGetName(m_reg_id);
+}
+
+GSDumpFileParsed::GSPackedReg::GSPackedReg(u32 reg_id, const u8* data)
+	: GSAbstractReg(reg_id)
+{
+	GSPackedRegDecodeFields(m_reg_id, (const u64*)data, &m_fields);
+}
+
+std::string GSDumpFileParsed::GSPackedReg::GetName() const
+{
+	return GSPackedRegGetName(m_reg_id);
 }
 
 GSDumpFileParsed::GSDumpPrivRegs::GSDumpPrivRegs(const u8* data)
 {
 	memcpy(&m_regs, data, Ps2MemSize::GSregs);
+}
+
+void GSDumpFileParsed::GSDumpPrivRegs::AddToModel(QStandardItemModel* model)
+{
+	model->appendRow(new QStandardItem("PrivRegs"));
 }
 
 u32 GSDumpFileParsed::GSDumpGIFPacket::GetDataSize(const GIFTag& tag)
@@ -55,29 +81,32 @@ u32 GSDumpFileParsed::GSDumpGIFPacket::GetDataSize(const GIFTag& tag)
 			return tag.NLOOP * tag.NREG * 16; // Each packed register is 16 bytes
 		case GIF_FLG_REGLIST:
 			return tag.NLOOP * tag.NREG * 8; // Each REGLIST register is 8 bytes
+		case GIF_FLG_IMAGE2:
 		case GIF_FLG_IMAGE:
 			return tag.NLOOP * 16;
 		default:
 			Console.Error("GSDumpGIFPacket: Unknown GIF packet type.");
+			assert(false);
 			return 0;
 	}
 }
 
 GSDumpFileParsed::GSDumpGIFPacket::GSDumpGIFPacket(const u8* data, u32 max_size)
 {
+	std::memcpy(&m_giftag, data, sizeof(GIFTag));
+
 	if (max_size < sizeof(GIFTag) + GetDataSize(m_giftag))
 	{
 		Console.Error("GSDumpGIFPacket: Packet size too small for GIFTag(got {} bytes, expected {} bytes).",
 			max_size, sizeof(GIFTag) + GetDataSize(m_giftag));
+		assert(false);
 		return;
 	}
-
-	std::memcpy(&m_giftag, data, sizeof(GIFTag));
 
 	const u8* data_orig = data;
 	data += sizeof(GIFTag);
 
-	m_regs = std::vector<GSReg>();
+	m_regs = std::vector<std::unique_ptr<GSAbstractReg>>();
 
 	switch (m_giftag.FLG)
 	{
@@ -86,9 +115,7 @@ GSDumpFileParsed::GSDumpGIFPacket::GSDumpGIFPacket(const u8* data, u32 max_size)
 			{
 				for (size_t j = 0; j < m_giftag.NREG; j++)
 				{
-					GSReg reg;
-					GSPackedRegDecodeFields(GetRegId(j), (u64*)data, &reg.m_fields);
-					m_regs.push_back(reg);
+					m_regs.push_back(std::make_unique<GSPackedReg>(GetRegId(j), data));
 					data += 16;
 				}
 			}
@@ -98,9 +125,7 @@ GSDumpFileParsed::GSDumpGIFPacket::GSDumpGIFPacket(const u8* data, u32 max_size)
 			{
 				for (size_t j = 0; j < m_giftag.NREG; j++)
 				{
-					GSReg reg;
-					GSRegDecodeFields(GetRegId(j), (u64*)data, &reg.m_fields);
-					m_regs.push_back(reg);
+					m_regs.push_back(std::make_unique<GSReg>(GetRegId(j), data));
 					data += 8;
 				}
 			}
@@ -112,11 +137,21 @@ GSDumpFileParsed::GSDumpGIFPacket::GSDumpGIFPacket(const u8* data, u32 max_size)
 			data += GetDataSize();
 			break;
 		default:
-			Console.WarningFmt("bad FLG value encountered in packet");
+			Console.Error("GSDumpGIFPacket: Bad FLG value encountered in packet ({})", m_giftag.FLG);
 			break;
 	}
 
 	assert(data - data_orig == GetSize());
+}
+
+void GSDumpFileParsed::GSDumpGIFPacket::AddToModel(QStandardItem* parent)
+{
+	QStandardItem* gif_item = new QStandardItem("GifPacket");
+	parent->appendRow(gif_item);
+	for (const std::unique_ptr<GSAbstractReg>& reg : m_regs)
+	{
+		reg->AddToModel(gif_item);
+	}
 }
 
 //bool GSDumpFileParsed::GSDumpGIFPacket::GetReg(u32 index, GSReg* reg)
@@ -153,16 +188,23 @@ GSDumpFileParsed::GSDumpTransfer::GSDumpTransfer(GSDumpTypes::GSTransferPath pat
 	u32 i = 0;
 	while (i < size)
 	{
-		std::unique_ptr<GSDumpGIFPacket> gif_packet = std::make_unique<GSDumpGIFPacket>(data + i, size - i);
-		m_packets.push_back(gif_packet);
-		i += gif_packet->GetSize();
+		m_packets.push_back(std::make_unique<GSDumpGIFPacket>(data + i, size - i));
+		i += m_packets[m_packets.size() - 1]->GetSize();
 	}
 	assert(i == size);
 }
 
-// TODO: USE Ps2MemSize::GSregs
+void GSDumpFileParsed::GSDumpTransfer::AddToModel(QStandardItemModel* model)
+{
+	QStandardItem* transfer_item = new QStandardItem("Transfer");
+	model->appendRow(transfer_item);
+	for (const std::unique_ptr<GSDumpGIFPacket>& gif_packet : m_packets)
+	{
+		gif_packet->AddToModel(transfer_item);
+	}
+}
 
-// Essentially copied from GSState::Defrost()
+// Copied from GSState::Defrost()
 void GSDumpFileParsed::ReadState(const u8* data, u32 size)
 {
 	const u8* data_orig = data;
@@ -174,7 +216,7 @@ void GSDumpFileParsed::ReadState(const u8* data, u32 size)
 
 	u32 version;
 	ReadData(&version);
-	if (version > GSState::STATE_VERSION)
+	if (version > 9) // FIXME: MOVE SAVE_STATE_VERSION FROM GSSTATE.H to GSDump.H
 	{
 		Console.Error("GS: Savestate version is incompatible.  Load aborted.");
 		assert(false);
@@ -297,24 +339,39 @@ GSDumpFileParsed::GSDumpFileParsed(const GSDumpFile* dump_file)
 
 	// Packets
 	const std::vector<GSDumpFile::GSData>* packets = &dump_file->GetPackets();
+	int i = 0;
 	for (const GSDumpFile::GSData& packet : dump_file->GetPackets())
 	{
 		switch (packet.id)
 		{
 			case GSDumpTypes::GSType::Transfer:
-				m_packets.push_back(GSDumpTransfer(packet.path, packet.data, packet.length));
+				m_packets.push_back(std::make_unique<GSDumpTransfer>(packet.path, packet.data, packet.length));
 				break;
 			case GSDumpTypes::GSType::Registers:
-				m_packets.push_back(GSDumpPrivRegs(packet.data));
+				m_packets.push_back(std::make_unique<GSDumpPrivRegs>(packet.data));
 				assert(packet.length == sizeof(GSPrivRegSet));
 				break;
 			case GSDumpTypes::GSType::VSync:
-				m_packets.push_back(GSDumpVSync(packet.data));
+				m_packets.push_back(std::make_unique<GSDumpVSync>(packet.data));
 				assert(packet.length == 1);
 				break;
 			default:
 				Console.Error("GSDumpFileParsed: Bad packet id: {}", packet.id);
 				assert(false);
 		}
+		if (i++ > 100)
+			break;
+	}
+
+	Console.WriteLnFmt("GSDumpFileParsed(): Parsed {} packets ", m_packets.size());
+}
+
+void GSDumpFileParsed::AddToModel(QStandardItemModel* model)
+{
+	for (const std::unique_ptr<GSDumpFileParsed::GSDumpPacket>& packet : m_packets)
+	{
+		packet->AddToModel(model);
 	}
 }
+
+// TODO: Make an enum with all possible register fields

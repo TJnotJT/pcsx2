@@ -1,40 +1,55 @@
 #pragma once
 
-#include "common/Pcsx2Defs.h"
-#include "common/Pcsx2Types.h"
+#include "GSDumpEditorDefs.h"
 
-#include "GS/GSState.h"
-#include "GS/GSDump.h"
-#include "GS/GSGL.h"
-#include "GS/GSPerfMon.h"
-#include "GS/GSUtil.h"
-
-#include "common/Console.h"
-#include "common/BitUtils.h"
-#include "common/Path.h"
-#include "common/StringUtil.h"
-
-#include <cstring>
-#include <string>
-#include <map>
-#include <vector>
-#include <memory>
+#include <QStandardItemModel>
 
 struct GSDumpFileParsed
 {
-	struct GSReg // GS register high-level structure
+	struct GSAbstractReg
 	{
 		u32 m_reg_id;
 		std::map<std::string, u64> m_fields;
 
-		std::string getName() const;
-		bool hasField(const std::string& field_name) const;
-		u64 getField(const std::string& field_name) const;
+		virtual std::string GetName() const = 0;
+		virtual u32 GetSize() const = 0;
+
+		std::string ToString() const;
+		bool HasField(const std::string& field_name) const;
+		u64 GetField(const std::string& field_name) const;
+		void AddToModel(QStandardItem* parent) const;
+
+		GSAbstractReg(u32 reg_id)
+			: m_reg_id(reg_id)
+			, m_fields()
+		{
+		}
+	};
+
+	struct GSReg : GSAbstractReg
+	{
+		std::string GetName() const;
+		u32 GetSize() const
+		{
+			return 8;
+		};
+		GSReg(u32 reg_id, const u8* data);
+	};
+
+	struct GSPackedReg : GSAbstractReg
+	{
+		std::string GetName() const;
+		u32 GetSize() const
+		{
+			return 16;
+		}
+		GSPackedReg(u32 reg_id, const u8* data);
 	};
 
 	struct GSDumpPacket
 	{
-		virtual GSDumpTypes::GSType getType();
+		virtual GSDumpTypes::GSType getType() = 0;
+		virtual void AddToModel(QStandardItemModel* model) = 0;
 	};
 
 	struct GSDumpPrivRegs : GSDumpPacket
@@ -46,8 +61,8 @@ struct GSDumpFileParsed
 			memset(this, 0, sizeof(*this));
 		}
 		GSDumpPrivRegs(const u8* data);
-
-		virtual GSDumpTypes::GSType getType()
+		void AddToModel(QStandardItemModel* model);
+		GSDumpTypes::GSType getType()
 		{
 			return GSDumpTypes::GSType::Registers;
 		}
@@ -56,8 +71,8 @@ struct GSDumpFileParsed
 	struct GSDumpGIFPacket
 	{
 		GIFTag m_giftag;
-		std::vector<GSReg> m_regs; // For PACKED and REGLIST
-		std::vector<u8> m_image;   // For IMAGE
+		std::vector<std::unique_ptr<GSAbstractReg>> m_regs; // For PACKED and REGLIST
+		std::vector<u8> m_image;  // For IMAGE
 
 		static u32 GetDataSize(const GIFTag& tag);
 
@@ -82,6 +97,7 @@ struct GSDumpFileParsed
 			assert(i < m_giftag.NREG);
 			return (m_giftag.REGS >> (4 * i)) & 0xF;
 		}
+		void AddToModel(QStandardItem* item);
 	};
 
 	struct GSDumpTransfer : GSDumpPacket
@@ -93,6 +109,8 @@ struct GSDumpFileParsed
 		{
 			return GSDumpTypes::GSType::Transfer;
 		}
+
+		void AddToModel(QStandardItemModel* model);
 
 		GSDumpTransfer(GSDumpTypes::GSTransferPath path, const u8* data, u32 size);
 	};
@@ -107,6 +125,10 @@ struct GSDumpFileParsed
 		GSDumpVSync(const u8* data)
 		{
 			field = *data;
+		}
+		void AddToModel(QStandardItemModel* model)
+		{
+			model->appendRow(new QStandardItem("VSync"));
 		}
 	};
 	
@@ -128,10 +150,13 @@ struct GSDumpFileParsed
 	std::vector<u8> m_mem;
 	GIFPath m_path[4] = {};
 	float m_q = 1.0f;
-	std::vector<GSDumpPacket> m_packets;
+	std::vector<std::unique_ptr<GSDumpPacket>> m_packets;
 	GSDumpPrivRegs m_priv_regs;
 
 	void ReadState(const u8* data, u32 size);
 
 	GSDumpFileParsed(const GSDumpFile* dump_file);
+
+	// FIXME: Capitalize
+	void AddToModel(QStandardItemModel* model);
 };

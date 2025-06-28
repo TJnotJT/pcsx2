@@ -497,14 +497,19 @@
     <ClCompile Include="Debugger\ThreadView.cpp">
       <Filter>Debugger</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)moc_GSDumpEditorWindow.cpp" />
     <ClCompile Include="GSDumpEditorWindow.cpp">
+      <Filter>GSDumpEditor</Filter>
+    </ClCompile>
+    <ClCompile Include="GSDumpFileParsed.cpp">
       <Filter>GSDumpEditor</Filter>
     </ClCompile>
     <ClCompile Include="GSRegParseFormat.cpp">
       <Filter>GSDumpEditor</Filter>
     </ClCompile>
-    <ClCompile Include="GSDumpFileParsed.cpp">
+    <ClCompile Include="$(IntDir)moc_GSDumpEditorWindow.cpp">
+      <Filter>moc</Filter>
+    </ClCompile>
+    <ClCompile Include="QLazyItemModel.cpp">
       <Filter>GSDumpEditor</Filter>
     </ClCompile>
   </ItemGroup>
@@ -529,10 +534,16 @@
     <ClInclude Include="Debugger\DebuggerSettingsManager.h">
       <Filter>Debugger</Filter>
     </ClInclude>
+    <ClInclude Include="GSDumpFileParsed.h">
+      <Filter>GSDumpEditor</Filter>
+    </ClInclude>
     <ClInclude Include="GSRegParseFormat.h">
       <Filter>GSDumpEditor</Filter>
     </ClInclude>
-    <ClInclude Include="GSDumpFileParsed.h">
+    <ClInclude Include="GSDumpEditorDefs.h">
+      <Filter>GSDumpEditor</Filter>
+    </ClInclude>
+    <ClInclude Include="QLazyItemModel.h">
       <Filter>GSDumpEditor</Filter>
     </ClInclude>
   </ItemGroup>
