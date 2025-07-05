@@ -29,7 +29,8 @@ static __fi bool IsAutoFlushEnabled()
 
 static __fi bool IsFirstProvokingVertex()
 {
-	return (GSIsHardwareRenderer() && !g_gs_device->Features().provoking_vertex_last);
+	return false;
+	//return (GSIsHardwareRenderer() && !g_gs_device->Features().provoking_vertex_last);
 }
 
 constexpr int GSState::GetSaveStateSize(int version)
