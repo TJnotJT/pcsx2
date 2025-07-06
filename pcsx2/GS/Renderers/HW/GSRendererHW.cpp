@@ -182,9 +182,7 @@ GSTexture* GSRendererHW::GetOutput(int i, float& scale, int& y_offset)
 		}
 
 		if (GSConfig.SaveFrame && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
-		{
 			t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), i, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)));
-		}
 	}
 
 	return t;
@@ -208,12 +206,13 @@ GSTexture* GSRendererHW::GetFeedbackOutput(float& scale)
 	GSTexture* t = rt->m_texture;
 	scale = rt->m_scale;
 
-	if (GSConfig.SaveFrame && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+	if (g_perfmon.GetFrame() == 2)
 		t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), 3, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)));
 
 	return t;
 }
 
+// FIXME: Shouldn't this be called Sprites 2 Triangles?
 void GSRendererHW::Lines2Sprites()
 {
 	pxAssert(m_vt.m_primclass == GS_SPRITE_CLASS);
@@ -7866,6 +7865,52 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.drawarea = m_channel_shuffle ? scissor : scissor.rintersect(ComputeBoundingBox(rtsize, rtscale));
 	m_conf.scissor = (DATE && !DATE_BARRIER) ? m_conf.drawarea : scissor;
 
+	// Note: Needs to be put before the SetupIA
+	// Handle ordering of vertices in case the API supports only provoking first vertex
+	// TODO: PUT THIS IN THE VERTEX TRACE!
+	bool first_eq_last = true;
+	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	if (n > 1)
+	{
+		for (int i = 0; i < m_index.tail; i += n)
+		{
+			if (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + n - 1]].RGBAQ.U32[0])
+			{
+				first_eq_last = false;
+				break;
+			}
+		}
+	}
+	if (!g_gs_device->Features().provoking_vertex_last && !m_conf.vs.iip && !first_eq_last && m_vt.m_primclass != GS_POINT_CLASS) // Only care about flat shading and non-constant color
+	{
+		// Indices share vertices. We must copy the vertices in this case.
+		if (PRIM->PRIM == GS_LINESTRIP || PRIM->PRIM == GS_TRIANGLESTRIP || PRIM->PRIM == GS_TRIANGLEFAN)
+		{
+			// TODO: Fix up vertex kick so that there are no gaps in indexed vertices
+			// Then we could probably do this in place.
+			m_vertex.maxcount = std::max(m_vertex.maxcount, m_index.tail);
+			GSVertex* temp_vertex = static_cast<GSVertex*>(_aligned_malloc(sizeof(GSVertex) * m_vertex.maxcount, 32));
+
+			for (int i = m_index.tail - 1; i >= 0; i--)
+			{
+				temp_vertex[i] = m_vertex.buff[m_index.buff[i]];
+				m_index.buff[i] = static_cast<u16>(i);
+			}
+			std::swap(temp_vertex, m_vertex.buff);
+			_aligned_free(temp_vertex);
+			m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail;
+		}
+		// Copy color from last to first vertex
+		const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+		for (int i = 0; i < m_index.tail; i += n)
+		{
+			m_vertex.buff[i].RGBAQ.U32[0] = m_vertex.buff[i + n - 1].RGBAQ.U32[0];
+			m_vertex.buff[i + n - 1].RGBAQ.U32[0] = 0;
+		}
+		provokingFirstVertexFixes++;
+	}
+	provokingTotal++;
+
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
 
 	if (ate_second_pass)
@@ -7953,46 +7998,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	m_conf.drawlist = (m_conf.require_full_barrier && m_vt.m_primclass == GS_SPRITE_CLASS) ? &m_drawlist : nullptr;
-
-	// Handle ordering of vertices in case the API supports only provoking first vertex
-	// TODO: PUT THIS IN THE VERTEX TRACE!
-	bool first_eq_last = true;
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
-	if (n > 1)
-	{
-		for (int i = 0; i < m_index.tail; i += n)
-		{
-			if (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + n - 1]].RGBAQ.U32[0])
-			{
-				first_eq_last = false;
-				break;
-			}
-		}
-	}
-	if (!g_gs_device->Features().provoking_vertex_last && !m_conf.vs.iip && !first_eq_last && m_vt.m_primclass != GS_POINT_CLASS) // Only care about flat shading and non-constant color
-	{
-		// Indices share vertices. We must copy the vertices in this case.
-		if (PRIM->PRIM == GS_LINESTRIP || PRIM->PRIM == GS_TRIANGLESTRIP || PRIM->PRIM == GS_TRIANGLEFAN)
-		{
-			while (m_index.tail > m_vertex.maxcount)
-			{
-				GrowVertexBuffer();
-			}
-			for (int i = std::max(m_index.tail - 1, m_vertex.tail - 1); i >= 0; i--)
-			{
-				m_vertex.buff[i] = m_vertex.buff[m_index.buff[i]];
-				m_index.buff[i] = static_cast<u16>(i);
-			}
-		}
-		// Copy color from last to first vertex
-		const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
-		for (int i = 0; i < m_index.tail; i += n)
-		{
-			m_vertex.buff[i].RGBAQ.U32[0] = m_vertex.buff[i + n - 1].RGBAQ.U32[0];
-		}
-		provokingFirstVertexFixes++;
-	}
-	provokingTotal++;
 
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
