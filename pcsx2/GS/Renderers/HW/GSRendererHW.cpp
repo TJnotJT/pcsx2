@@ -7868,23 +7868,30 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Note: Needs to be put before the SetupIA
 	// Handle ordering of vertices in case the API supports only provoking first vertex
 	// TODO: PUT THIS IN THE VERTEX TRACE!
+
 	bool first_eq_last = true;
 	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
-	if (n > 1)
+
+	if (m_vt.m_primclass != GS_POINT_CLASS && m_vt.m_primclass != GS_SPRITE_CLASS)
 	{
-		for (int i = 0; i < m_index.tail; i += n)
+		if (n > 1)
 		{
-			if (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + n - 1]].RGBAQ.U32[0])
+			for (int i = 0; i < m_index.tail; i += n)
 			{
-				first_eq_last = false;
-				break;
+				// FIXME: Need to check all flattened quantities (Z, etc.)
+				if (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + n - 1]].RGBAQ.U32[0])
+				{
+					first_eq_last = false;
+					break;
+				}
 			}
 		}
 	}
-	if (!g_gs_device->Features().provoking_vertex_last && !m_conf.vs.iip && !first_eq_last && m_vt.m_primclass != GS_POINT_CLASS) // Only care about flat shading and non-constant color
+	if (!g_gs_device->Features().provoking_vertex_last && !m_conf.vs.iip  &&
+		!first_eq_last && m_vt.m_primclass != GS_POINT_CLASS && m_vt.m_primclass != GS_SPRITE_CLASS) // Only care about flat shading and non-constant color
 	{
 		// Indices share vertices. We must copy the vertices in this case.
-		if (PRIM->PRIM == GS_LINESTRIP || PRIM->PRIM == GS_TRIANGLESTRIP || PRIM->PRIM == GS_TRIANGLEFAN)
+		if (m_vt.m_primclass != GS_SPRITE_CLASS)
 		{
 			// TODO: Fix up vertex kick so that there are no gaps in indexed vertices
 			// Then we could probably do this in place.
@@ -7902,10 +7909,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		}
 		// Copy color from last to first vertex
 		const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+		// Now all indces are just flat increasing (see VerifyIndices())
 		for (int i = 0; i < m_index.tail; i += n)
 		{
 			m_vertex.buff[i].RGBAQ.U32[0] = m_vertex.buff[i + n - 1].RGBAQ.U32[0];
-			m_vertex.buff[i + n - 1].RGBAQ.U32[0] = 0;
+			m_vertex.buff[i + n - 1].RGBAQ.U32[0] = 0xff; // Make red so get garbage if used improperly
 		}
 		provokingFirstVertexFixes++;
 	}
