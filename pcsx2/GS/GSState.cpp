@@ -1586,6 +1586,7 @@ inline bool GSState::TestDrawChanged()
 	{
 		u32 prim_mask = 0x7ff;
 
+		// TODO: Could simplify this a bit
 		if (GSUtil::GetPrimClass(m_prev_env.PRIM.PRIM) == GSUtil::GetPrimClass(m_env.PRIM.PRIM))
 			prim_mask &= ~0x7;
 		else
@@ -3641,6 +3642,8 @@ __forceinline void GSState::HandleAutoFlush()
 	}
 }
 
+
+// TODO: Could simplify a bit and remove use of m_vertex.head!
 template <u32 prim, bool auto_flush, bool index_swap>
 __forceinline void GSState::VertexKick(u32 skip)
 {
@@ -3864,6 +3867,18 @@ __forceinline void GSState::VertexKick(u32 skip)
 			m_index.tail += 3;
 			break;
 		case GS_TRIANGLEFAN:
+			if (next == head && head < tail - 3)
+			{
+				m_vertex.buff[head + 1] = m_vertex.buff[tail - 2];
+				m_vertex.buff[head + 2] = m_vertex.buff[tail - 1];
+				tail = m_vertex.tail = head + 3;
+			}
+			else if (head < next && next < tail - 2)
+			{
+				m_vertex.buff[next + 0] = m_vertex.buff[tail - 2];
+				m_vertex.buff[next + 1] = m_vertex.buff[tail - 1];
+				tail = m_vertex.tail = next + 2;
+			}
 			// TODO: remove gaps, next == head && head < tail - 3 || next > head && next < tail - 2 (very rare)
 			buff[0] = static_cast<u16>(index_swap ? (tail - 1) : (head + 0));
 			buff[1] = static_cast<u16>(tail - 2);
