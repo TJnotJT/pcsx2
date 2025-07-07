@@ -1582,6 +1582,7 @@ inline bool GSState::TestDrawChanged()
 	{
 		u32 prim_mask = 0x7ff;
 
+		// TODO: Could simplify this a bit
 		if (GSUtil::GetPrimClass(m_prev_env.PRIM.PRIM) == GSUtil::GetPrimClass(m_env.PRIM.PRIM))
 			prim_mask &= ~0x7;
 		else
@@ -3915,7 +3916,21 @@ __forceinline void GSState::VertexKick(u32 skip)
 			m_index.tail += 3;
 			break;
 		case GS_TRIANGLEFAN:
-			// TODO: remove gaps, next == head && head < tail - 3 || next > head && next < tail - 2 (very rare)
+			if (next == head && head < tail - 3)
+			{
+				// In this case the fan has not generated any indices yet, only skipped vertices.
+				m_vertex.buff[head + 1] = m_vertex.buff[tail - 2];
+				m_vertex.buff[head + 2] = m_vertex.buff[tail - 1];
+				tail = m_vertex.tail = head + 3;
+			}
+			else if (head < next && next < tail - 2)
+			{
+				// In this case the fan has generated some indices, but there
+				// are skipped vertices in the middle.
+				m_vertex.buff[next + 0] = m_vertex.buff[tail - 2];
+				m_vertex.buff[next + 1] = m_vertex.buff[tail - 1];
+				tail = m_vertex.tail = next + 2;
+			}
 			buff[0] = static_cast<u16>(head + 0);
 			buff[1] = static_cast<u16>(tail - 2);
 			buff[2] = static_cast<u16>(tail - 1);
@@ -3927,6 +3942,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 			buff[1] = static_cast<u16>(head + 1);
 
 			// Update the first vert's Q for ease of doing Autoflush
+			// FIXME: Could this be moved somewhere else?
 			if (!m_env.PRIM.FST)
 				m_vertex.buff[buff[0]].RGBAQ.Q = m_vertex.buff[buff[1]].RGBAQ.Q;
 
