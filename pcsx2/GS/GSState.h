@@ -446,6 +446,7 @@ public:
 	void DumpVertices(const std::string& filename);
 
 	bool TrianglesAreQuads(bool shuffle_check = false);
+	bool TrianglesAreQuads2(bool shuffle_check = false);
 	PRIM_OVERLAP PrimitiveOverlap();
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();

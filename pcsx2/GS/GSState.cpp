@@ -2917,6 +2917,15 @@ void GSState::GrowVertexBuffer()
 	m_index.buff = index;
 }
 
+bool GSState::TrianglesAreQuads2(bool shuffle_check)
+{
+	if (!shuffle_check && m_quad_check_valid)
+		return m_are_quads;
+
+	// First check that all pairs of triangles form a quad
+	// and find the 
+}
+
 bool GSState::TrianglesAreQuads(bool shuffle_check)
 {
 	// If this is a quad, there should only be two distinct values for both X and Y, which
