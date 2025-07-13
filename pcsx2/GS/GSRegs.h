@@ -211,17 +211,30 @@ enum class GS_MIN_FILTER : uint8_t
 	Linear_Mipmap_Linear   = 5,
 };
 
-#define REG32(name) \
-	union name      \
-	{               \
-		u32 U32; \
-		struct {    \
+#define REG32(name)  \
+	union name       \
+	{                \
+		u32 U32;     \
+		u16 U16[2];  \
+		u8  U8[4];   \
+		s32 S32;     \
+		s16 S16[2];  \
+		s8  S8[4];   \
+		float F32;   \
+		struct {     \
 
 #define REG64(name)    \
 	union name         \
 	{                  \
-		u64 U64;    \
-		u32 U32[2]; \
+		u64 U64;       \
+		u32 U32[2];    \
+		u16 U16[4];    \
+		u8  U8[8];     \
+		s64 S64[1];    \
+		s32 S32[2];    \
+		s16 S16[4];    \
+		s8  S8[8];     \
+		float F32[2];  \
 		void operator = (const GSVector4i& v) {GSVector4i::storel(this, v);} \
 		bool operator == (const union name& r) const {return ((GSVector4i)r).eq(*this);} \
 		bool operator != (const union name& r) const {return !((GSVector4i)r).eq(*this);} \
@@ -231,8 +244,14 @@ enum class GS_MIN_FILTER : uint8_t
 #define REG128(name)   \
 	union name         \
 	{                  \
-		u64 U64[2]; \
-		u32 U32[4]; \
+		u64 U64[2];    \
+		u32 U32[4];    \
+		u16 U16[8];    \
+		u8  U8[16];    \
+		s64 S64[2];    \
+		s32 S32[4];    \
+		s16 S16[8];    \
+		s8  S8[16];    \
 		struct {
 
 #define REG32_(prefix, name) REG32(prefix##name)
@@ -243,14 +262,14 @@ enum class GS_MIN_FILTER : uint8_t
 #define REG_END2 };
 
 #define REG32_SET(name) \
-union name          \
-{                   \
+union name              \
+{                       \
 	u32 u32;
 
 #define REG64_SET(name) \
 	union name          \
 	{                   \
-		u64 U64;     \
+		u64 U64;        \
 		u32 U32[2];
 
 #define REG128_SET(name) \

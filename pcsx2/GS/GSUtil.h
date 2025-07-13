@@ -45,12 +45,13 @@ public:
 	template <u32 tme, u32 fst>
 	static bool AreTrianglesRight(const GSVertex* RESTRICT vin, const u16* index0, const u16* index1,
 		TriangleOrdering* out_triangle0, TriangleOrdering* out_triangle1);
-	template <u32 tme, u32 fst>
-	static bool AreTrianglesQuad(const GSVertex* RESTRICT vin, const u16* index0, const u16* index1,
-		TriangleOrdering* out_triangle0, TriangleOrdering* out_triangle1);
 	// Determines ordering of a single triangle
 	template <u32 tme, u32 fst>
 	static bool IsTriangleRight(const GSVertex* RESTRICT vin, const u16* index, TriangleOrdering* out_triangle);
+	// Determines whether the triangle are right and form a quad
+	template <u32 tme, u32 fst>
+	static bool AreTrianglesQuad(const GSVertex* RESTRICT vin, const u16* index0, const u16* index1,
+		TriangleOrdering* out_triangle0, TriangleOrdering* out_triangle1);
 
 	static bool AnalyzeGrid(std::vector<std::pair<u32, GSVector4i>>& rects,
 		GSVector2i& grid_size, GSVector2i& rect_size, GSVector2i& stride_size);

@@ -360,25 +360,25 @@ bool GSUtil::AreTrianglesQuad(const GSVertex* RESTRICT vin, const u16* index0, c
 	// b   c | c  b | a     |     a
 	// a     |    a | b   c | c   b
 	// To form a quad we must have a0 == c1 and a1 == c0
-	bool are_quad = vin[index0[out_triangle0.a]].XY.U32 == vin[index1[out_triangle1.c]].XY.U32 &&
-					vin[index0[out_triangle0.c]].XY.U32 == vin[index1[out_triangle1.a]].XY.U32;
+	bool are_quad = vin[index0[out_triangle0->a]].XYZ.U32 == vin[index1[out_triangle1->c]].XYZ.U32 &&
+					vin[index0[out_triangle0->c]].XYZ.U32 == vin[index1[out_triangle1->a]].XYZ.U32;
 
 	if (tme)
 	{
 		if (fst)
 		{
-			const u32 uv_a0 = vin[index0[out_triangle0.a]].UV;
-			const u32 uv_c0 = vin[index0[out_triangle0.c]].UV;
-			const u32 uv_a1 = vin[index1[out_triangle1.a]].UV;
-			const u32 uv_c1 = vin[index1[out_triangle1.c]].UV;
+			const u32 uv_a0 = vin[index0[out_triangle0->a]].UV;
+			const u32 uv_c0 = vin[index0[out_triangle0->c]].UV;
+			const u32 uv_a1 = vin[index1[out_triangle1->a]].UV;
+			const u32 uv_c1 = vin[index1[out_triangle1->c]].UV;
 			are_quad = are_quad && uv_a0 == uv_c1 && uv_c0 == uv_a1;
 		}
 		else
 		{
-			const u64 st_a0 = vin[index0[out_triangle0.a]].ST.U64;
-			const u64 st_c0 = vin[index0[out_triangle0.c]].ST.U64;
-			const u64 st_a1 = vin[index1[out_triangle1.a]].ST.U64;
-			const u64 st_c1 = vin[index1[out_triangle1.c]].ST.U64;
+			const u64 st_a0 = vin[index0[out_triangle0->a]].ST.U64;
+			const u64 st_c0 = vin[index0[out_triangle0->c]].ST.U64;
+			const u64 st_a1 = vin[index1[out_triangle1->a]].ST.U64;
+			const u64 st_c1 = vin[index1[out_triangle1->c]].ST.U64;
 			are_quad = are_quad && st_a0 == st_c1 && st_c0 == st_a1;
 		}
 	}
@@ -435,15 +435,16 @@ bool GSUtil::IsTriangleRight(const GSVertex* RESTRICT vin, const u16* index, Tri
 	return true;
 }
 
-// Instantiate the template functions for Is/AreTrianglesRight
-template bool GSUtil::AreTrianglesRight<0, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesRight<1, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesRight<0, 1>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesRight<1, 1>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<0, 0>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<1, 0>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<0, 1>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<1, 1>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
+// Instantiate the template functions for Is/AreTrianglesRight/Quad
+template bool GSUtil::AreTrianglesRight<0, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesRight<1, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesRight<1, 1>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<0, 0>(const GSVertex*, const u16*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<1, 0>(const GSVertex*, const u16*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<1, 1>(const GSVertex*, const u16*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<0, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<1, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<0, 1>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
 
 const char* GSUtil::GetPSMName(int psm)
 {

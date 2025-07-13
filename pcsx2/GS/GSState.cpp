@@ -2917,13 +2917,460 @@ void GSState::GrowVertexBuffer()
 	m_index.buff = index;
 }
 
+struct GSGridInfo
+{
+	GSVector2i size_xy;
+	GSVector2i size_uv;
+	GSVector2 size_st;
+	GSVector2i stride_xy;
+	GSVector2i stride_uv;
+	GSVector2 stride_st;
+	enum
+	{
+		FIRST_X,
+		FIRST_Y
+	} grid_dir;
+	GSVector2i grid_size;
+};
+
+
+template<u32 TME, u32 FST>
+bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridInfo* info)
+{
+	pxAssert(n % 2 == 0);
+
+	GSVertex grid_v0; // Top-left corner of the first quad
+
+	constexpr u32 X = 0;
+	constexpr u32 Y = 1;
+	// Sets the stride member of info. xy = 0 for X and xy = 1 for Y.
+	auto SetStride = [](const GSVertex& v0, const GSVertex& grid_v0, GSGridInfo* info, int XY) {
+		info->stride_xy.v[XY] = static_cast<int>(v0.XYZ.U16[XY]) - static_cast<int>(grid_v0.XYZ.U16[XY]);
+		if (TME && FST)
+			info->stride_uv.v[XY] = static_cast<int>(v0.UV.U16[XY]) - static_cast<int>(grid_v0.XYZ.U16[XY]);
+		if (TME && !FST)
+			info->stride_st.v[XY] = v0.ST.F32[XY] - grid_v0.ST.F32[XY];
+	};
+
+	bool first_row_or_col = true;
+
+	int i;
+	for (i = 0; i < n; i += 2)
+	{
+		const u16* idx = index + i;
+
+		// Indices to order top/bottom left/right
+		const u16 ix0 = vin[idx[0]].XYZ.X < vin[idx[1]].XYZ.X ? 0 : 1; // left attributes
+		const u16 iy0 = vin[idx[0]].XYZ.Y < vin[idx[1]].XYZ.Y ? 0 : 1; // top attributes
+
+		GSVertex v[2]; // top-left and bottom-right vertices
+
+		// Load the top-left and bottom-right vertices
+		for (int j = 0; j < 2; j++)
+		{
+			v[j].XYZ.X = vin[idx[(ix0 + j) & 1]].XYZ.X;
+			v[j].XYZ.Y = vin[idx[(iy0 + j) & 1]].XYZ.Y;
+			if (TME && FST)
+			{
+				v[j].U = vin[idx[(ix0 + j) & 1]].U;
+				v[j].V = vin[idx[(iy0 + j) & 1]].V;
+			}
+			if (TME && !FST)
+			{
+				v[j].ST.S = vin[idx[(ix0 + j) & 1]].ST.S;
+				v[j].ST.T = vin[idx[(iy0 + j) & 1]].ST.T;
+			}
+		}
+
+		GSVector2i size_xy;
+		GSVector2i size_uv;
+		GSVector2 size_st;
+
+		GSVector2i size_xy = {
+			static_cast<int>(v[1].XYZ.X) - static_cast<int>(v[0].XYZ.X),
+			static_cast<int>(v[1].XYZ.Y) - static_cast<int>(v[0].XYZ.Y),
+		};
+
+		GSVector2i size_uv;
+		GSVector2 size_st;
+
+		if (TME && FST)
+		{
+			size_uv = {
+				static_cast<int>(v[1].U) - static_cast<int>(v[0].U),
+				static_cast<int>(v[1].V) - static_cast<int>(v[0].V),
+			};
+		}
+		if (TME && !FST)
+			size_st = {v[1].ST.S - v[0].ST.S, v[1].ST.S - v[0].ST.S};
+
+		// Infer grid origin and rect sizes from the first quad
+		if (i == 0)
+		{
+			info->size_xy = size_xy;
+			info->size_uv = size_uv;
+			info->size_st = size_st;
+			grid_v0 = v[0];
+		}
+
+		if (i > 0)
+		{
+			// All quads must have same dimensions of first quad
+			if (info->size_xy != size_xy)
+				return false;
+			if (TME && FST)
+			{
+				if (info->size_uv != size_uv)
+					return false;
+			}
+			if (TME && !FST)
+			{
+				if (info->size_st != size_st)
+					return false;
+			}
+		}
+
+		// On the second quad, infer the grid direction and stride
+		if (i == 1)
+		{
+			int dir;
+			for (dir = X; dir <= Y; dir++)
+			{
+				// If step direction is X then Y values must align and vice versa.
+				if (v[0].XYZ.U16[dir ^ 1] == grid_v0.XYZ.U16[dir ^ 1])
+					break;
+			}
+			if (dir > Y)
+				return false; // Not aligned vertically or horizontally
+			info->grid_dir = dir;
+			SetStride(v[0], grid_v0, info, dir);
+		}
+
+		if (i >= 2)
+		{
+			// Check if we have ended the first row or column.
+			// Then we can infer the stride of the second grid dimensions.
+			if (first_row_or_col)
+			{
+				if (v[0].XYZ.U16[info->grid_dir ^ 1] != grid_v0.XYZ.U16[info->grid_dir ^ 1])
+				{
+					info->grid_size.v[info->grid_dir] = i;
+					first_row_or_col = false;
+					SetStride(v[0], grid_v0, info, info->grid_dir ^ 1);
+				}
+			}
+
+			// We can infer the correct position on the grid
+			GSVector2i grid_pos;
+
+			grid_pos.v[info->grid_dir] = first_row_or_col ? i : i % info->grid_size.v[info->grid_dir];
+			grid_pos.v[info->grid_dir ^ 1] = first_row_or_col ? 0 : i / info->grid_size.v[info->grid_dir];
+
+			// Make sure we are actually on the correct grid position
+			for (int dir = X; dir <= Y; dir++)
+			{
+				if (v[0].XYZ.U16[dir] !=
+					grid_v0.XYZ.U16[dir] + static_cast<u16>(info->stride_xy.v[dir] * grid_pos.v[dir]))
+					return false;
+				if (TME && FST &&
+					v[0].UV.U16[dir] != grid_v0.UV.U16[dir] + static_cast<u16>(info->stride_uv.v[dir] * grid_pos.v[dir]))
+					return false;
+				if (TME && !FST &&
+					v[0].ST.F32[dir] != grid_v0.ST.F32[dir] + info->stride_st.v[dir] * grid_pos.v[dir])
+					return false;
+			}
+		}
+	}
+
+	// All points lie on the grid so far.
+	// Make sure all points in the list have been used.
+	if (i != n)
+		return false;
+
+	// Can infer the second dimension of the grid now
+	info->grid_size.v[info->grid_dir ^ 1] = n / info->grid_size.v[info->grid_dir];
+
+	// Everything should fit evenly
+	pxAssert(n == info->grid_size.x * info->grid_size.y);
+
+	return true;
+}
+
+//// TODO: We could generalize this to allow arbitrary grid detection
+//// Just take the list of indices that form the corners
+//bool GSState::TrianglesAreQuads2(bool shuffle_check)
+//{
+//	if (!shuffle_check && m_quad_check_valid)
+//		return m_are_quads;
+//
+//	enum StrideDir
+//	{
+//		FIRST_X,
+//		FIRST_Y
+//	} stride_dir;
+//
+//	// The stride between row/columns of the grid
+//	GSVector2i stride_size_xy;
+//	GSVector2i stride_size_uv;
+//	GSVector2 stride_size_st;
+//
+//	// The size of each rect in the grid (could be different than size if the grid is not tighty packed)
+//	GSVector2i rect_size_xy;
+//	GSVector2i rect_size_uv;
+//	GSVector2 rect_size_st;
+//
+//	u32 grid_minor_size; // Number of rects in the minor dimension
+//	
+//	GSVertex grid_ref_pt; // Top-left corner of the first quad
+//
+//	// TODO: Make this template function
+//	const u32 FST = PRIM->FST;
+//	const u32 TME = PRIM->TME;
+//
+//	// Set correct template instantiation of quad-checking function
+//	bool (*AreTrianglesQuad)(const GSVertex*, const u16*, const u16*, GSUtil::TriangleOrdering*, GSUtil::TriangleOrdering*);
+//	if (PRIM->TME)
+//	{
+//		if (PRIM->FST)
+//			AreTrianglesQuad = GSUtil::AreTrianglesQuad<1, 1>;
+//		else
+//			AreTrianglesQuad = GSUtil::AreTrianglesQuad<1, 0>;
+//	}
+//	else
+//		AreTrianglesQuad = GSUtil::AreTrianglesQuad<0, 0>;
+//
+//	bool first_row_or_col = true;
+//
+//	for (int i = 0; i < m_index.tail; i += 6)
+//	{
+//		GSUtil::TriangleOrdering tri0;
+//		GSUtil::TriangleOrdering tri1;
+//
+//		if (!AreTrianglesQuad(m_vertex.buff, &m_index.buff[i], &m_index.buff[i + 3], &tri0, &tri1))
+//			return false;
+//
+//		// Two opposite corners to infer rect attributes.
+//		const GSVertex* const v[2] = {
+//			&m_vertex.buff[m_index.buff[tri0.b]],
+//			&m_vertex.buff[m_index.buff[tri1.b]]};
+//		// Indices to order top/bottom left/right
+//		const GSVertex& vx0 = v[0]->XYZ.X < v[1]->XYZ.X ? *v[0] : *v[1]; // left attributes
+//		const GSVertex& vx1 = v[0]->XYZ.X < v[1]->XYZ.X ? *v[1] : *v[0]; // right attributes
+//		const GSVertex& vy0 = v[0]->XYZ.Y < v[1]->XYZ.Y ? *v[0] : *v[1]; // top attributes
+//		const GSVertex& vy1 = v[0]->XYZ.Y < v[1]->XYZ.Y ? *v[1] : *v[0]; // bottom attributes
+//
+//		GSVector2i size_xy = {
+//			static_cast<int>(vx1.XYZ.X) - static_cast<int>(vx0.XYZ.X),
+//			static_cast<int>(vy1.XYZ.Y) - static_cast<int>(vy0.XYZ.Y)
+//		};
+//
+//		GSVector2i size_uv;
+//		GSVector2 size_st;
+//
+//		GSVertex ref_pt; // top-left point of the quad
+//
+//		if (TME)
+//		{
+//			if (FST)
+//			{
+//				size_uv = {
+//					static_cast<int>(vx1.U) - static_cast<int>(vx0.U),
+//					static_cast<int>(vy1.V) - static_cast<int>(vy1.V),
+//				};
+//				ref_pt.U = vx0.U;
+//				ref_pt.V = vy0.V;
+//			}
+//			else
+//			{
+//				rect_size_st = {vx1.ST.S - vx0.ST.S, vy1.ST.S - vy0.ST.S};
+//				ref_pt.ST.S = vx0.ST.S;
+//				ref_pt.ST.T = vy0.ST.T;
+//			}
+//		}
+//
+//		// Infer grid origin and rect sizes from the first quad
+//		if (i == 0)
+//		{
+//			rect_size_xy = size_xy;
+//			rect_size_uv = size_uv;
+//			rect_size_st = size_st;
+//		}
+//
+//		if (i > 0)
+//		{
+//			// Not the first quad so must have same dimensions of first quad
+//			if (rect_size_xy != size_xy)
+//				return false;
+//			if (TME)
+//			{
+//				if (FST)
+//				{
+//					if (rect_size_uv != size_uv)
+//						return false;
+//				}
+//				else
+//				{
+//					if (rect_size_st != size_st)
+//						return false;
+//				}
+//			}
+//		}
+//
+//		// On the second quad, infer the minor stride
+//		if (i == 1)
+//		{
+//			if (ref_pt.XYZ.Y == grid_ref_pt.XYZ.Y) // Aligned vertically so striding X first
+//			{
+//				stride_dir = StrideDir::FIRST_X;
+//				stride_size_xy.x = static_cast<int>(ref_pt.XYZ.X) - static_cast<int>(grid_ref_pt.XYZ.X);
+//				if (TME)
+//				{
+//					if (FST)
+//						stride_size_uv.x = static_cast<int>(ref_pt.U) - static_cast<int>(grid_ref_pt.U);
+//					else
+//						stride_size_st.x = ref_pt.ST.S - grid_ref_pt.ST.S;
+//				}
+//			}
+//			else if (ref_pt.XYZ.X == grid_ref_pt.XYZ.X) // Aligned horizontally so striding Y first
+//			{
+//				stride_dir = StrideDir::FIRST_Y;
+//				stride_size_xy.y = static_cast<int>(ref_pt.XYZ.Y) - static_cast<int>(grid_ref_pt.XYZ.Y);
+//				if (TME)
+//				{
+//					if (FST)
+//						stride_size_uv.y = static_cast<int>(ref_pt.V) - static_cast<int>(grid_ref_pt.V);
+//					else
+//						stride_size_st.y = ref_pt.ST.T - grid_ref_pt.ST.T;
+//				}
+//			}
+//			else // No horizontal/vertical alignment so not a grid
+//				return false;
+//		}
+//
+//		if (i >= 2)
+//		{
+//			// Check if we have ended the first row or column
+//			if (first_row_or_col)
+//			{
+//				if (stride_dir == StrideDir::FIRST_X)
+//				{
+//					if (ref_pt.XYZ.Y != grid_ref_pt.XYZ.Y)
+//					{
+//						grid_minor_size = i;
+//						first_row_or_col = false;
+//					}
+//				}
+//				else
+//				{
+//					if (ref_pt.XYZ.X != grid_ref_pt.XYZ.X)
+//					{
+//						grid_minor_size = i;
+//						first_row_or_col = false;
+//					}
+//				}
+//			}
+//
+//			// We can infer the current position on the grid
+//			u32 grid_pos_x;
+//			u32 grid_pos_y;
+//
+//			if (stride_dir == StrideDir::FIRST_X)
+//			{
+//				grid_pos_x = first_row_or_col ? i : i % grid_minor_size;
+//				grid_pos_y = first_row_or_col ? 0 : i / grid_minor_size;
+//			}
+//			else
+//			{
+//				grid_pos_x = first_row_or_col ? 0 : i / grid_minor_size;
+//				grid_pos_y = first_row_or_col ? i : i % grid_minor_size;
+//			}
+//
+//			// Make sure we are on the current position on the grid
+//			if (ref_pt.XYZ.X != grid_ref_pt.XYZ.X + static_cast<u16>(stride_size_xy.x * grid_pos_x))
+//				return false;
+//			if (ref_pt.XYZ.Y != grid_ref_pt.XYZ.Y + static_cast<u16>(stride_size_xy.y * grid_pos_y))
+//				return false;
+//			if (TME)
+//			{
+//				if (FST)
+//				{
+//					if (ref_pt.U != grid_ref_pt.U + static_cast<u16>(stride_size_uv.x * grid_pos_x))
+//						return false;
+//					if (ref_pt.V != grid_ref_pt.V + static_cast<u16>(stride_size_uv.y * grid_pos_y))
+//						return false;
+//				}
+//				else
+//				{
+//					if (ref_pt.ST.S != grid_ref_pt.ST.S + static_cast<u16>(stride_size_st.x * grid_pos_x))
+//						return false;
+//					if (ref_pt.ST.T != grid_ref_pt.ST.T + static_cast<u16>(stride_size_st.y * grid_pos_y))
+//						return false;
+//				}
+//			}
+//		}
+//	}
+//}
+
+// TODO: We could generalize this to allow arbitrary grid detection
+// Just take the list of indices that form the corners
 bool GSState::TrianglesAreQuads2(bool shuffle_check)
 {
 	if (!shuffle_check && m_quad_check_valid)
 		return m_are_quads;
 
-	// First check that all pairs of triangles form a quad
-	// and find the 
+	if (m_index.tail % 6 != 0)
+		return false;
+	
+	// Set correct template instantiation of quad-checking function
+	bool (*AreTrianglesQuad)(const GSVertex*, const u16*, const u16*, GSUtil::TriangleOrdering*, GSUtil::TriangleOrdering*);
+	if (PRIM->TME)
+	{
+		if (PRIM->FST)
+			AreTrianglesQuad = GSUtil::AreTrianglesQuad<1, 1>;
+		else
+			AreTrianglesQuad = GSUtil::AreTrianglesQuad<1, 0>;
+	}
+	else
+		AreTrianglesQuad = GSUtil::AreTrianglesQuad<0, 0>;
+
+	bool first_row_or_col = true;
+	std::vector<u16> corner_index;
+
+	// Make sure all pairs of triangles form quads and gather their corner points
+	for (int i = 0; i < m_index.tail; i += 6)
+	{
+		GSUtil::TriangleOrdering tri0;
+		GSUtil::TriangleOrdering tri1;
+
+		if (!AreTrianglesQuad(m_vertex.buff, &m_index.buff[i], &m_index.buff[i + 3], &tri0, &tri1))
+			return false;
+
+		// The 'b' points are the corner indices
+		corner_index.push_back(m_index.buff[tri0.b]);
+		corner_index.push_back(m_index.buff[tri1.b]);
+	}
+
+	GSGridInfo grid_info;
+	bool is_grid;
+	if (PRIM->TME)
+	{
+		if (PRIM->FST)
+			is_grid = AnalyzeGrid<1, 1>(m_vertex.buff, corner_index.data(), corner_index.size(), &grid_info);
+		else
+			is_grid = AnalyzeGrid<1, 0>(m_vertex.buff, corner_index.data(), corner_index.size(), &grid_info);
+	}
+	else
+		is_grid = AnalyzeGrid<0, 0>(m_vertex.buff, corner_index.data(), corner_index.size(), &grid_info);
+	
+	if (!is_grid)
+		return false;
+
+	if (shuffle_check)
+	{
+		// ???
+	}
+	else
+		return grid_info.size_xy == grid_info.stride_xy;
 }
 
 bool GSState::TrianglesAreQuads(bool shuffle_check)

@@ -17,8 +17,16 @@ struct alignas(32) GSVertex
 			GIFRegST ST;       // S:0, T:4
 			GIFRegRGBAQ RGBAQ; // RGBA:8, Q:12
 			GIFRegXYZ XYZ;     // XY:16, Z:20
-			union { u32 UV; struct { u16 U, V; }; }; // UV:24
-			u32 FOG;        // FOG:28
+			union {            // UV:24
+				u32 UV;
+				struct
+				{
+					u16 U;
+					u16 V;
+				};
+				u16 U16[2];
+			}; 
+			u32 FOG;           // FOG:28
 		};
 
 #if defined(_M_X86)
