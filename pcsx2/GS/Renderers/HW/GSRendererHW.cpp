@@ -12,6 +12,9 @@
 #include "common/StringUtil.h"
 #include <bit>
 
+extern FILE* extraLog;
+int extraLogEntries = 0;
+
 GSRendererHW::GSRendererHW()
 	: GSRenderer()
 {
@@ -560,14 +563,15 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		}
 	}
 
+	Console.WriteLn("[%d] Texture Shuffle Vertices Before/After", s_n);
 	if (PRIM->FST)
 	{
-		GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
+		//GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
 		const int reversed_pos = (v[0].XYZ.X > v[1].XYZ.X) ? 1 : 0;
 		const int reversed_U = (v[0].U > v[1].U) ? 1 : 0;
 		for (u32 i = 0; i < count; i += 2)
 		{
-
+			GSVertex vorig[2] = {v[i], v[i+1]};
 			if (!full_width)
 			{
 				if (process_ba & SHUFFLE_WRITE)
@@ -586,6 +590,8 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 				{
 					v[i + reversed_pos].XYZ.X -= 128u;
 					v[i + 1 - reversed_pos].XYZ.X -= 128u;
+					//v[i + reversed_pos].XYZ.X -= 128u;
+					//v[i + 1 - reversed_U].U += 128u;
 				}
 				// Needed for when there's no barriers.
 				if (v[i + reversed_U].U & 128)
@@ -631,12 +637,41 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 					v[i + 1].U = static_cast<u16>(tmp.w);
 				}
 			}
+			bool changed = false;
+			for (int k = 0; k < 2; k++)
+			{
+				if (vorig[k].XYZ.X != v[i + k].XYZ.X || vorig[k].U != v[i + k].U)
+				{
+					changed = true;
+					break;
+				}
+			}
+			//fprintf(extraLog, "[%04d] Texture shuffle\n", s_n);
+			if (changed && extraLogEntries < 100)
+			{
+				for (int k = 0; k < 2; k++)
+				{
+					fprintf(extraLog, "[%04d][%03d] (X,Y,U,V): %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f\n",
+						s_n, i + k,
+						(vorig[k].XYZ.X - o.OFX) / 16.0f, (v[i + k].XYZ.X - o.OFX) / 16.0f,
+						vorig[k].U / 16.0f, v[i + k].U / 16.0f,
+						(vorig[k].XYZ.Y - o.OFY) / 16.0f, (v[i + k].XYZ.Y - o.OFY) / 16.0f,
+						vorig[k].U / 16.0f, v[i + k].U / 16.0f);
+					//fflush(extraLog);
+				}
+				extraLogEntries++;
+				if (extraLogEntries >= 100)
+				{
+					fflush(extraLog);
+					fclose(extraLog);
+				}
+			}
 		}
 	}
 	else
 	{
 		const float offset_8pix = 8.0f / tw;
-		GL_INS("HW: First vertex is  P: %d => %d    T: %f => %f (offset %f)", v[0].XYZ.X, v[1].XYZ.X, v[0].ST.S, v[1].ST.S, offset_8pix);
+		//GL_INS("HW: First vertex is  P: %d => %d    T: %f => %f (offset %f)", v[0].XYZ.X, v[1].XYZ.X, v[0].ST.S, v[1].ST.S, offset_8pix);
 		const int reversed_pos = (v[0].XYZ.X > v[1].XYZ.X) ? 1 : 0;
 		const int reversed_S = (v[0].ST.S > v[1].ST.S) ? 1 : 0;
 

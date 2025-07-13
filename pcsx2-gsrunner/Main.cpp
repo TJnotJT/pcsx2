@@ -47,6 +47,9 @@
 
 #include "svnrev.h"
 
+std::string dumpName;
+FILE* extraLog;
+
 namespace GSRunner
 {
 	static void InitializeConsole();
@@ -762,6 +765,12 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		if (!params.filename.empty())
 			params.filename += ' ';
 		params.filename += argv[i];
+
+		dumpName = params.filename;
+		auto x = StringUtil::SplitString(dumpName, '\\');
+		dumpName = x[x.size() - 1];
+		dumpName = "E:\\extra_logs\\" + dumpName + ".txt";
+		extraLog = fopen(dumpName.c_str(), "w");
 	}
 
 	if (params.filename.empty())

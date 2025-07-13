@@ -8,8 +8,8 @@
 
 #if defined(_DEBUG) || defined(PCSX2_DEVBUILD)
 #define ENABLE_OGL_DEBUG // enable GS debug logging
-//#define ENABLE_TRACE_REG // print GS reg write
-//#define ENABLE_EXTRA_LOG // print extra log
+#define ENABLE_TRACE_REG // print GS reg write
+#define ENABLE_EXTRA_LOG // print extra log
 #endif
 
 // Note: GL messages are present in common code, so in all renderers.
