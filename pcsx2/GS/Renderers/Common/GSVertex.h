@@ -24,7 +24,7 @@ struct alignas(32) GSVertex
 					u16 U;
 					u16 V;
 				};
-				u16 U16[2];
+				u16 UV_U16[2];
 			}; 
 			u32 FOG;           // FOG:28
 		};

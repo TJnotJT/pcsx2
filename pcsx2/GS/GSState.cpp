@@ -2917,47 +2917,40 @@ void GSState::GrowVertexBuffer()
 	m_index.buff = index;
 }
 
-struct GSGridInfo
-{
-	GSVector2i size_xy;
-	GSVector2i size_uv;
-	GSVector2 size_st;
-	GSVector2i stride_xy;
-	GSVector2i stride_uv;
-	GSVector2 stride_st;
-	enum
-	{
-		FIRST_X,
-		FIRST_Y
-	} grid_dir;
-	GSVector2i grid_size;
-};
-
 
 template<u32 TME, u32 FST>
 bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridInfo* info)
 {
-	pxAssert(n % 2 == 0);
+	if (n == 0)
+		return false; // Invalid input
 
-	GSVertex grid_v0; // Top-left corner of the first quad
+	// Will give correct default values for fields that are not explicitly set
+	// like the strides when the grid is a single row/column.
+	memset(info, 0, sizeof(GSGridInfo));
 
+	// Top-left corner of the first quad.
+	// For computing offsets to make sure points are on grid.
+	GSVertex grid_v0;
+
+	// For readability
 	constexpr u32 X = 0;
 	constexpr u32 Y = 1;
-	// Sets the stride member of info. xy = 0 for X and xy = 1 for Y.
+
+	bool first_row_or_col = true; // Whether we are still in the first grid row/column.
+
+	// Sets the stride member of info. XY = 0 for X and XY = 1 for Y.
 	auto SetStride = [](const GSVertex& v0, const GSVertex& grid_v0, GSGridInfo* info, int XY) {
 		info->stride_xy.v[XY] = static_cast<int>(v0.XYZ.U16[XY]) - static_cast<int>(grid_v0.XYZ.U16[XY]);
 		if (TME && FST)
-			info->stride_uv.v[XY] = static_cast<int>(v0.UV.U16[XY]) - static_cast<int>(grid_v0.XYZ.U16[XY]);
+			info->stride_uv.v[XY] = static_cast<int>(v0.UV_U16[XY]) - static_cast<int>(grid_v0.UV_U16[XY]);
 		if (TME && !FST)
 			info->stride_st.v[XY] = v0.ST.F32[XY] - grid_v0.ST.F32[XY];
 	};
 
-	bool first_row_or_col = true;
-
 	int i;
-	for (i = 0; i < n; i += 2)
+	for (i = 0; i < n; i++)
 	{
-		const u16* idx = index + i;
+		const u16* idx = index + 2 * i;
 
 		// Indices to order top/bottom left/right
 		const u16 ix0 = vin[idx[0]].XYZ.X < vin[idx[1]].XYZ.X ? 0 : 1; // left attributes
@@ -2982,18 +2975,14 @@ bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridIn
 			}
 		}
 
-		GSVector2i size_xy;
-		GSVector2i size_uv;
-		GSVector2 size_st;
+		GSVector2i size_xy = {0, 0};
+		GSVector2i size_uv = {0, 0};
+		GSVector2 size_st = {0.0f, 0.0f};
 
-		GSVector2i size_xy = {
+		size_xy = {
 			static_cast<int>(v[1].XYZ.X) - static_cast<int>(v[0].XYZ.X),
 			static_cast<int>(v[1].XYZ.Y) - static_cast<int>(v[0].XYZ.Y),
 		};
-
-		GSVector2i size_uv;
-		GSVector2 size_st;
-
 		if (TME && FST)
 		{
 			size_uv = {
@@ -3073,7 +3062,7 @@ bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridIn
 					grid_v0.XYZ.U16[dir] + static_cast<u16>(info->stride_xy.v[dir] * grid_pos.v[dir]))
 					return false;
 				if (TME && FST &&
-					v[0].UV.U16[dir] != grid_v0.UV.U16[dir] + static_cast<u16>(info->stride_uv.v[dir] * grid_pos.v[dir]))
+					v[0].UV_U16[dir] != grid_v0.UV_U16[dir] + static_cast<u16>(info->stride_uv.v[dir] * grid_pos.v[dir]))
 					return false;
 				if (TME && !FST &&
 					v[0].ST.F32[dir] != grid_v0.ST.F32[dir] + info->stride_st.v[dir] * grid_pos.v[dir])
@@ -3087,6 +3076,10 @@ bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridIn
 	if (i != n)
 		return false;
 
+	// Check if the whole grid is a single row/column
+	if (first_row_or_col)
+		info->grid_size.v[info->grid_dir] = n;
+
 	// Can infer the second dimension of the grid now
 	info->grid_size.v[info->grid_dir ^ 1] = n / info->grid_size.v[info->grid_dir];
 
@@ -3095,6 +3088,10 @@ bool AnalyzeGrid(const GSVertex* RESTRICT vin, const u16* index, u32 n, GSGridIn
 
 	return true;
 }
+
+template bool AnalyzeGrid<0, 0>(const GSVertex* RESTRICT, const u16*, u32, GSGridInfo*);
+template bool AnalyzeGrid<1, 0>(const GSVertex* RESTRICT, const u16*, u32, GSGridInfo*);
+template bool AnalyzeGrid<1, 1>(const GSVertex* RESTRICT, const u16*, u32, GSGridInfo*);
 
 //// TODO: We could generalize this to allow arbitrary grid detection
 //// Just take the list of indices that form the corners
@@ -3367,10 +3364,22 @@ bool GSState::TrianglesAreQuads2(bool shuffle_check)
 
 	if (shuffle_check)
 	{
-		// ???
+		// FIXME FIXME FIXME
+		u32 gap_x = std::abs(grid_info.stride_xy.x) - std::abs(grid_info.size_xy.x);
+		return gap_x == 0 || gap_x == 0x80;
+
+		/*if (PRIM->TME && PRIM->FST)
+		{
+			u32 gap_u = std::abs(grid_info.stride_uv.x) - std::abs(grid_info.size_uv.x);
+			if (gap_u != 0 && gap_u != 0x80)
+				return false;
+		}*/
 	}
 	else
+	{
+		// We want a tightly packed grid packing
 		return grid_info.size_xy == grid_info.stride_xy;
+	}
 }
 
 bool GSState::TrianglesAreQuads(bool shuffle_check)

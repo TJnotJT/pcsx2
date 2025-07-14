@@ -465,3 +465,15 @@ inline void GSState::ExpandDIMX(GSVector4i* dimx, const GIFRegDIMX DIMX)
 	dimx[7] = GSVector4i(DIMX.DM30, 0, DIMX.DM31, 0, DIMX.DM32, 0, DIMX.DM33, 0);
 	dimx[6] = dimx[7].xxzzlh();
 }
+
+struct GSGridInfo
+{
+	GSVector2i size_xy;
+	GSVector2i size_uv;
+	GSVector2 size_st;
+	GSVector2i stride_xy;
+	GSVector2i stride_uv;
+	GSVector2 stride_st;
+	u32 grid_dir; // 0 for step X first, 1 for step Y first
+	GSVector2i grid_size;
+};

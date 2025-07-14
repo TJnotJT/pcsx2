@@ -360,8 +360,8 @@ bool GSUtil::AreTrianglesQuad(const GSVertex* RESTRICT vin, const u16* index0, c
 	// b   c | c  b | a     |     a
 	// a     |    a | b   c | c   b
 	// To form a quad we must have a0 == c1 and a1 == c0
-	bool are_quad = vin[index0[out_triangle0->a]].XYZ.U32 == vin[index1[out_triangle1->c]].XYZ.U32 &&
-					vin[index0[out_triangle0->c]].XYZ.U32 == vin[index1[out_triangle1->a]].XYZ.U32;
+	bool are_quad = vin[index0[out_triangle0->a]].XYZ.U32[0] == vin[index1[out_triangle1->c]].XYZ.U32[0] &&
+					vin[index0[out_triangle0->c]].XYZ.U32[0] == vin[index1[out_triangle1->a]].XYZ.U32[0];
 
 	if (tme)
 	{
@@ -436,15 +436,15 @@ bool GSUtil::IsTriangleRight(const GSVertex* RESTRICT vin, const u16* index, Tri
 }
 
 // Instantiate the template functions for Is/AreTrianglesRight/Quad
-template bool GSUtil::AreTrianglesRight<0, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesRight<1, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesRight<1, 1>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<0, 0>(const GSVertex*, const u16*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<1, 0>(const GSVertex*, const u16*, TriangleOrdering*);
-template bool GSUtil::IsTriangleRight<1, 1>(const GSVertex*, const u16*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesQuad<0, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesQuad<1, 0>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
-template bool GSUtil::AreTrianglesQuad<0, 1>(const GSVertex*, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesRight<0, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesRight<1, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesRight<1, 1>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<0, 0>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<1, 0>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
+template bool GSUtil::IsTriangleRight<1, 1>(const GSVertex* RESTRICT, const u16*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<0, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<1, 0>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
+template bool GSUtil::AreTrianglesQuad<1, 1>(const GSVertex* RESTRICT, const u16*, const u16*, TriangleOrdering*, TriangleOrdering*);
 
 const char* GSUtil::GetPSMName(int psm)
 {
@@ -485,82 +485,82 @@ const char* GSUtil::GetPSMName(int psm)
 // (number of rows and columns), rect size (equal size of each rectangle),
 // and stride size (shift between each row and column). Return the rectangles
 // in scanline order also.
-bool GSUtil::AnalyzeGrid(std::vector<std::pair<u32, GSVector4i>>& rects,
-	GSVector2i& grid_size, GSVector2i& rect_size, GSVector2i& stride_size)
-{
-	// Invalid input
-	if (rects.size() == 0)
-		return false;
-
-	// Sort lexicographically with Y-major and X-minor (i.e., scanline order)
-	// using the top-left corner of each rectangle.
-	std::sort(
-		rects.begin(),
-		rects.end(),
-		[](const std::pair<u32, GSVector4i>& r1, const std::pair<u32, GSVector4i>& r2) {
-			if (r1.second.top < r2.second.top)
-				return true;
-			if (r1.second.top > r2.second.top)
-				return false;
-			// Now r1.second.top == r2.second.top
-			return r1.second.left < r2.second.left;
-		});
-
-	// Size can always be inferred from first rectangle
-	rect_size = {rects[0].second.width(), rects[0].second.height()};
-
-	// Iterator variables
-	u32 i;
-	u32 j;
-	u32 r;
-
-	// Infer the grid size x. Ths is the first position that is not horizontally with
-	// the first rectangle.
-	for (i = 1; i < rects.size(); i++)
-	{
-		if (rects[i].second.top != rects[0].second.top)
-			break;
-	}
-	grid_size.x = i;
-
-	// Grid size y can be inferred now
-	grid_size.y = rects.size() / grid_size.x;
-
-	// Dimensions must evenly divide the number of rectangles
-	if (grid_size.x * grid_size.y != rects.size())
-		return false;
-
-	// Now the stride size X and Y can be inferred
-	if (grid_size.x > 1)
-		stride_size.x = rects[1].second.left - rects[0].second.left;
-	else
-		stride_size.x = 0;
-	if (grid_size.y > 1)
-		stride_size.y = rects[grid_size.x].second.top - rects[0].second.top;
-	else
-		stride_size.y = 0;
-
-	// We cannot have overlaps so rects must fit within the stride
-	if (rect_size.x > stride_size.x || rect_size.y > stride_size.y)
-		return false;
-
-	// Now make sure that all rects lie on this inferred grid
-	for (i = 0, r = 0; i < grid_size.x; i++)
-	{
-		for (j = 0; j < grid_size.y; j++, r++)
-		{
-			// Must match the rect size
-			if (GSVector2i(rects[r].second.width(), rects[r].second.height()) != rect_size)
-			return false;
-
-			// Must have top-left point lying on the grid
-			if (rects[r].second.top - rects[0].second.top != i * stride_size.x)
-			return false;
-			if (rects[r].second.left - rects[0].second.left != j * stride_size.y)
-			return false;
-		}
-	}
-
-	// All checks passed
-	return true;
-}
+//bool GSUtil::AnalyzeGrid(std::vector<std::pair<u32, GSVector4i>>& rects,
+//	GSVector2i& grid_size, GSVector2i& rect_size, GSVector2i& stride_size)
+//{
+//	// Invalid input
+//	if (rects.size() == 0)
+//		return false;
+//
+//	// Sort lexicographically with Y-major and X-minor (i.e., scanline order)
+//	// using the top-left corner of each rectangle.
+//	std::sort(
+//		rects.begin(),
+//		rects.end(),
+//		[](const std::pair<u32, GSVector4i>& r1, const std::pair<u32, GSVector4i>& r2) {
+//			if (r1.second.top < r2.second.top)
+//				return true;
+//			if (r1.second.top > r2.second.top)
+//				return false;
+//			// Now r1.second.top == r2.second.top
+//			return r1.second.left < r2.second.left;
+//		});
+//
+//	// Size can always be inferred from first rectangle
+//	rect_size = {rects[0].second.width(), rects[0].second.height()};
+//
+//	// Iterator variables
+//	u32 i;
+//	u32 j;
+//	u32 r;
+//
+//	// Infer the grid size x. Ths is the first position that is not horizontally with
+//	// the first rectangle.
+//	for (i = 1; i < rects.size(); i++)
+//	{
+//		if (rects[i].second.top != rects[0].second.top)
+//			break;
+//	}
+//	grid_size.x = i;
+//
+//	// Grid size y can be inferred now
+//	grid_size.y = rects.size() / grid_size.x;
+//
+//	// Dimensions must evenly divide the number of rectangles
+//	if (grid_size.x * grid_size.y != rects.size())
+//		return false;
+//
+//	// Now the stride size X and Y can be inferred
+//	if (grid_size.x > 1)
+//		stride_size.x = rects[1].second.left - rects[0].second.left;
+//	else
+//		stride_size.x = 0;
+//	if (grid_size.y > 1)
+//		stride_size.y = rects[grid_size.x].second.top - rects[0].second.top;
+//	else
+//		stride_size.y = 0;
+//
+//	// We cannot have overlaps so rects must fit within the stride
+//	if (rect_size.x > stride_size.x || rect_size.y > stride_size.y)
+//		return false;
+//
+//	// Now make sure that all rects lie on this inferred grid
+//	for (i = 0, r = 0; i < grid_size.x; i++)
+//	{
+//		for (j = 0; j < grid_size.y; j++, r++)
+//		{
+//			// Must match the rect size
+//			if (GSVector2i(rects[r].second.width(), rects[r].second.height()) != rect_size)
+//			return false;
+//
+//			// Must have top-left point lying on the grid
+//			if (rects[r].second.top - rects[0].second.top != i * stride_size.x)
+//			return false;
+//			if (rects[r].second.left - rects[0].second.left != j * stride_size.y)
+//			return false;
+//		}
+//	}
+//
+//	// All checks passed
+//	return true;
+//}
