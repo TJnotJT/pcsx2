@@ -12,8 +12,14 @@
 #include "common/StringUtil.h"
 #include <bit>
 
+
 extern FILE* extraLog;
 int extraLogEntries = 0;
+
+//#define GL_INS(...) \
+//	do { \
+//		Console.WriteLn(StringUtil::StdStringFromFormat(__VA_ARGS__)); \
+//	} while (0)
 
 GSRendererHW::GSRendererHW()
 	: GSRenderer()
@@ -323,16 +329,268 @@ void GSRendererHW::ExpandLineIndices()
 	}
 }
 
+bool AnalyzeSprites(
+	const GSVertex* RESTRICT vert,
+	const u16* RESTRICT idx,
+	const int nidx,
+	const GSVector2i xy_off,
+	bool rt_is_tex)
+{
+	enum Flag
+	{
+		R = 0,
+		G = 1,
+		B = 2,
+		A = 3,
+		UNKNOWN = 4
+	};
+	struct Column
+	{
+		u8 channel[4]; // R, G, B, A
+		int y0;
+		int y1;
+
+		Column(int y0, int y1)
+			: y0(y0)
+			, y1(y1)
+		{
+			channel[0] = 0;
+			channel[1] = 1;
+			channel[2] = 2;
+			channel[3] = 3;
+		};
+
+		Column()
+			: Column(0, 0){};
+
+		bool Compatible(const Column& other)
+		{
+			for (int i = 0; i < 4; i++)
+			{
+				if (channel[i] != other.channel[i])
+				{
+					// If the channels are different, we only consider them
+					// compatible if one is UNKNOWN.
+					if (channel[i] != UNKNOWN || other.channel[i] != UNKNOWN)
+						return false;
+				}
+			}
+			return true;
+		}
+
+		// For merging with another compatible columns
+		void Merge(const Column& other)
+		{
+			for (int i = 0; i < 4; i++)
+			{
+				if (channel[i] != other.channel[i])
+					channel[i] = UNKNOWN;
+			}
+		}
+	};
+
+	std::map<int, std::map<int, Column>> column_map;
+
+	for (int i = 0; i < nidx; i += 2)
+	{
+		const GSVertex* v[2] = { &vert[idx[i]], &vert[idx[i + 1]] };
+
+		if (v[0]->XYZ.X > v[1]->XYZ.X)
+			std::swap(v[0], v[1]);
+		
+		// TODO: me need to check this math
+		const GSVector2i snap_x = {
+			((static_cast<int>(v[0]->XYZ.X) - xy_off.x) + 0x8) >> 4,
+			((static_cast<int>(v[1]->XYZ.X) - xy_off.x) >> 4) + 1
+		};
+		const GSVector2i snap_u = {
+			static_cast<int>(v[0]->U) >> 4,
+			(static_cast<int>(v[1]->U - 0x8) >> 4) + 1
+		};
+		
+		const int width_x = snap_x.v[1] - snap_x.v[0];
+		const int width_u = std::abs(snap_u.v[1] - snap_u.v[0]);
+		const int height_y = (static_cast<int>(v[1]->XYZ.Y) - static_cast<int>(v[0]->XYZ.Y) + 0x8) >> 4;
+		const int height_v = (static_cast<int>(v[1]->V) - static_cast<int>(v[0]->V) + 0x8) >> 4;
+		const int y0 = static_cast<int>(v[0]->XYZ.Y);
+		const int y1 = static_cast<int>(v[1]->XYZ.Y);
+
+		// In these cases these sprites are likely not a texture shuffle.
+		if (width_x != width_u)
+			return false;
+		if (width_x != 8 && width_x != 16)
+			return false;
+		if (width_u != 8 && width_u != 16)
+			return false;
+		if (height_y != height_v)
+			return false;
+
+		constexpr int dx = 8;
+		const int du = snap_u.v[0] < snap_u.v[1] ? 8 : -8;
+
+		for (int j = 0; j < (width_x / 2); j++)
+		{
+			const int x = snap_x.v[0] + j * dx;
+			const int u = snap_u.v[0] + j * du;
+
+			const int column16_x = x / 16;
+			const int column16_u = u / 16;
+			const int group8_x = (x & 8) >> 3;
+			const int group8_u = (u & 8) >> 3;
+
+			// TODO: Make a proper struct for keys
+			// TODO: Must check that all Y-values are the same?
+			u32 key = (group8_x & 0xFFFF) | (static_cast<int>(v[0]->XYZ.Y) << 16);
+
+			// TODO: Make more efficent use of std::map lookup
+			if (column_map.find(y0) == column_map.end())
+				column_map[y0] = std::map<int, Column>();
+			if (column_map[y0].find(column16_x) == column_map[y0].end())
+				column_map[y0][column16_x] = Column(y0, y1);
+
+			Column& col_ref = column_map[y0][column16_x];
+
+			// Make sure all sprites with the same y0 have the same y1
+			if (y1 != col_ref.y1)
+				return false;
+
+			// TODO: Need to consider the clamp/wrap mode
+			const int write_chan[2] = {group8_x, group8_x + 2};
+			const int read_chan[2] = {group8_u, group8_u + 2};
+
+			if (column16_x != column16_u)
+			{
+				// We are moving data between words with different addresses.
+				// We don't know how to handle this yet so ignore such writes.
+				col_ref.channel[write_chan[0]] = UNKNOWN;
+				col_ref.channel[write_chan[1]] = UNKNOWN;
+				continue;
+			}
+
+			// TODO: Need to put in the Y-values!
+
+			if (group8_x == group8_u)
+			{
+				// Moving data from one channel to itself.
+				// We process this as a NOP even though in reality
+				// the pixels should may be reversed (if X and U go in opposite directions).
+				// However, we assume games will correct this reversal later on
+				// if the channel is used. Thus, we can ignore such reversals.
+			}
+			else
+			{
+				if (!rt_is_tex)
+				{
+					// Source texture is different from the RT so
+					// just overwrite what was already there.
+					col_ref.channel[write_chan[0]] = read_chan[0];
+					col_ref.channel[write_chan[1]] = read_chan[1];
+				}
+				else
+				{
+					// Source texture is the same as the RT so
+					// compose with the previous mappings.
+					const int new_chan0 = col_ref.channel[read_chan[0]];
+					const int new_chan1 = col_ref.channel[read_chan[1]];
+					col_ref.channel[write_chan[0]] = new_chan0;
+					col_ref.channel[write_chan[1]] = new_chan1;
+				}
+			}
+		}
+	}
+
+	// Analyze the list of blocks.
+	Column overall;
+	GSVector2i column_range;
+	GSVector2i y_range;
+	bool overall_init = false;
+	bool column_range_init = false;
+	bool y_range_init = false;
+
+	for (const auto& [y0, column_map2] : column_map)
+	{
+		GSVector2i column_range0(INT_MAX, INT_MIN);
+		int y1 = INT_MIN;
+		for (const auto& [column16_x, column] : column_map2)
+		{
+			if (!overall_init)
+			{
+				overall = column;
+				overall_init = true;
+			}
+
+			if (!overall.Compatible(column))
+				return false;
+			overall.Merge(column);
+
+			column_range0.v[0] = std::min(column16_x, column_range0.v[0]);
+			column_range0.v[1] = std::max(column16_x, column_range0.v[1]);
+
+			// We already checked that all y1 values are the same.
+			pxAssert(y1 == INT_MIN || y1 == column.y1);
+			y1 = column.y1;
+		}
+
+		// Check if there are gaps in the columns
+		if (column_range0.v[1] - column_range0.v[0] + 1 !=
+			static_cast<int>(column_map2.size()))
+			return false;
+
+		if (!column_range_init)
+		{
+			column_range = column_range0;
+			column_range_init = true;
+		}
+
+		// Check if the column range is the same for all rows.
+		if (column_range0 != column_range)
+			return false;
+		
+		const GSVector2i y_range0 = {
+			std::min(y0, y1),
+			std::max(y0, y1),
+		};
+		// Check if the y-values line up
+		if (y_range_init)
+		{
+			// TODO: Make sure direction of y-values is the same always?
+			if (y_range0.v[0] != y_range.v[1] && y_range0.v[1] != y_range.v[0])
+				return false;
+			y_range = {
+				std::min(y_range.v[0], y_range0.v[0]),
+				std::max(y_range.v[1], y_range0.v[1]),
+			};
+		}
+		else
+		{
+			y_range = y_range0;
+			y_range_init = true;
+		}
+	}
+
+	printf("column_range = %d, %d", column_range.v[0], column_range.v[1]);
+	printf("y_range = %f, %f", y_range.v[0] / 16.0f, y_range.v[1] / 16.0f);
+	printf("mapping = 0<-%d, 1<-%d, 2<-%d, 3<-%d",
+		overall.channel[0], overall.channel[1], overall.channel[2], overall.channel[3]);
+	return true;
+}
+
 // Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
 void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
+	AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
+		GSVector2i(m_context->XYOFFSET.OFX, m_context->XYOFFSET.OFY),
+		tex && tex->m_from_target && rt == tex->m_from_target);
 	const u32 count = m_vertex.next;
 	GSVertex* v = &m_vertex.buff[0];
+	const u16* idx = &m_index.buff[0];
 	const GIFRegXYOFFSET& o = m_context->XYOFFSET;
-	// Could be drawing upside down or just back to front on the actual verts.
-	const GSVertex* start_verts = (v[0].XYZ.X <= v[m_vertex.tail - 2].XYZ.X) ? &v[0] : &v[m_vertex.tail - 2];
-	const GSVertex first_vert = (start_verts[0].XYZ.X <= start_verts[1].XYZ.X) ? start_verts[0] : start_verts[1];
-	const GSVertex second_vert = (start_verts[0].XYZ.X <= start_verts[1].XYZ.X) ? start_verts[1] : start_verts[0];
+	
+	u32 first_idx = v[idx[0]].XYZ.X <= v[idx[m_index.tail - 2]].XYZ.X ? 0 : m_index.tail;
+	first_idx = v[idx[first_idx]].XYZ.X <= v[idx[first_idx] + 1].XYZ.X ? first_idx : first_idx + 1;
+	const GSVertex first_vert = v[idx[first_idx]];
+	const GSVertex second_vert = v[idx[first_idx ^ 1]];
+
 	// vertex position is 8 to 16 pixels, therefore it is the 16-31 bits of the colors
 	const int pos = (first_vert.XYZ.X - o.OFX) & 0xFF;
 	
@@ -563,7 +821,7 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		}
 	}
 
-	Console.WriteLn("[%d] Texture Shuffle Vertices Before/After", s_n);
+	//Console.WriteLn("[%d] Texture Shuffle Vertices Before/After", s_n);
 	if (PRIM->FST)
 	{
 		//GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
@@ -646,26 +904,25 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 					break;
 				}
 			}
-			//fprintf(extraLog, "[%04d] Texture shuffle\n", s_n);
-			if (changed && extraLogEntries < 100)
-			{
-				for (int k = 0; k < 2; k++)
-				{
-					fprintf(extraLog, "[%04d][%03d] (X,Y,U,V): %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f\n",
-						s_n, i + k,
-						(vorig[k].XYZ.X - o.OFX) / 16.0f, (v[i + k].XYZ.X - o.OFX) / 16.0f,
-						vorig[k].U / 16.0f, v[i + k].U / 16.0f,
-						(vorig[k].XYZ.Y - o.OFY) / 16.0f, (v[i + k].XYZ.Y - o.OFY) / 16.0f,
-						vorig[k].U / 16.0f, v[i + k].U / 16.0f);
-					//fflush(extraLog);
-				}
-				extraLogEntries++;
-				if (extraLogEntries >= 100)
-				{
-					fflush(extraLog);
-					fclose(extraLog);
-				}
-			}
+
+			// if (changed && extraLogEntries < 100)
+			// {
+			// 	for (int k = 0; k < 2; k++)
+			// 	{
+			// 		fprintf(extraLog, "[%04d][%03d] (X,Y,U,V): %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f\n",
+			// 			s_n, i + k,
+			// 			(vorig[k].XYZ.X - o.OFX) / 16.0f, (v[i + k].XYZ.X - o.OFX) / 16.0f,
+			// 			vorig[k].U / 16.0f, v[i + k].U / 16.0f,
+			// 			(vorig[k].XYZ.Y - o.OFY) / 16.0f, (v[i + k].XYZ.Y - o.OFY) / 16.0f,
+			// 			vorig[k].U / 16.0f, v[i + k].U / 16.0f);
+			// 	}
+			// 	extraLogEntries++;
+			// 	if (extraLogEntries >= 100)
+			// 	{
+			// 		fflush(extraLog);
+			// 		fclose(extraLog);
+			// 	}
+			// }
 		}
 	}
 	else
@@ -1404,7 +1661,7 @@ u32 GSRendererHW::GetEffectiveTextureShuffleFbmsk() const
 	const u32 fbmask = ((m >> 3) & 0x1F) | ((m >> 6) & 0x3E0) | ((m >> 9) & 0x7C00) | ((m >> 16) & 0x8000);
 	const u32 rb_mask = fbmask & 0xFF;
 	const u32 ga_mask = (fbmask >> 8) & 0xFF;
-	const u32 eff_mask =
+	const u32 eff_mask = // This doesn't make any sense at all. If both rb and ga as masked then nothing should be written.
 		((rb_mask == 0xFF && ga_mask == 0xFF) ? 0x00FFFFFFu : 0) | ((ga_mask == 0xFF) ? 0xFF000000u : 0);
 	return eff_mask;
 }
@@ -2617,10 +2874,8 @@ void GSRendererHW::Draw()
 		}
 	}
 
-	m_texture_shuffle = false;
-	m_copy_16bit_to_target_shuffle = false;
-	m_same_group_texture_shuffle = false;
-	m_using_temp_z = false;
+	
+	m_using_temp_z = false; //
 
 	const bool is_split_texture_shuffle = (m_split_texture_shuffle_pages > 0);
 	if (is_split_texture_shuffle)
@@ -2946,8 +3201,15 @@ void GSRendererHW::Draw()
 		{
 			// Tail check is to make sure we have enough strips to go all the way across the page, or if it's using a region clamp could be used to draw strips.
 			if (GSLocalMemory::m_psm[m_cached_ctx.TEX0.PSM].bpp == 16 && 
-				(m_index.tail >= (m_cached_ctx.TEX0.TBW * 2) || m_cached_ctx.TEX0.TBP0 == m_cached_ctx.FRAME.Block() || m_cached_ctx.CLAMP.WMS > CLAMP_CLAMP || m_cached_ctx.CLAMP.WMT > CLAMP_CLAMP))
+				(
+					m_index.tail >= (m_cached_ctx.TEX0.TBW * 2) ||             // So at least 1 sprite for each horizontal page
+					m_cached_ctx.TEX0.TBP0 == m_cached_ctx.FRAME.Block() ||    // Texture is frame itself
+					m_cached_ctx.CLAMP.WMS > CLAMP_CLAMP ||                    // Using a region mode
+					m_cached_ctx.CLAMP.WMT > CLAMP_CLAMP)                      // Using a region mode
+				)
 			{
+				// NOTE: This is where we find texture shuffle
+
 				const GSVertex* v = &m_vertex.buff[0];
 
 				const int first_x = std::clamp((static_cast<int>(((v[0].XYZ.X - m_context->XYOFFSET.OFX) + 8))) >> 4, 0, 2048);
@@ -2959,7 +3221,8 @@ void GSRendererHW::Draw()
 				const u32 minu = m_cached_ctx.CLAMP.MINU;
 				// Make sure minu or minv are actually a mask on some bits, false positives of games setting 512 (0x1ff) are not masks used for shuffles.
 				const bool rgba_shuffle = ((m_cached_ctx.CLAMP.WMS == m_cached_ctx.CLAMP.WMT && m_cached_ctx.CLAMP.WMS == CLAMP_REGION_REPEAT) && (minu && minv && ((minu + 1 & minu) || (minv + 1 & minv))));
-				const bool shuffle_coords = ((first_x ^ first_u) & 0xF) == 8 || rgba_shuffle;
+				
+				const bool shuffle_coords = ((first_x ^ first_u) & 0xF) == 8 || rgba_shuffle; // This appears to be checking the offset by 8
 
 				// Round up half of second coord, it can sometimes be slightly under.
 				const int draw_width = std::abs(v[1].XYZ.X + 9 - v[0].XYZ.X) >> 4;
@@ -2976,6 +3239,7 @@ void GSRendererHW::Draw()
 				const u32 increment = (m_vt.m_primclass == GS_TRIANGLE_CLASS) ? 3 : 2;
 				const GSVertex* v = &m_vertex.buff[0];
 
+				// What is this doing?
 				if (shuffle_channel_reads)
 				{
 					for (u32 i = 0; i < m_index.tail; i += increment)
@@ -2985,6 +3249,8 @@ void GSRendererHW::Draw()
 						const int vector_width = std::abs(v[i + 1].XYZ.X - v[i].XYZ.X) / 16;
 						const int tex_width = std::abs(second_u - first_u);
 						// & 7 just a quicker way of doing % 8
+
+						// Land on multiples of 8 always
 						if ((vector_width & 7) != 0 || (tex_width & 7) != 0 || tex_width != vector_width)
 						{
 							shuffle_channel_reads = false;
@@ -2992,6 +3258,8 @@ void GSRendererHW::Draw()
 						}
 					}
 				}
+				
+				// Consider cases with a FBMSK
 				if (m_cached_ctx.FRAME.FBMSK || shuffle_channel_reads)
 				{
 					// FBW is going to be wrong for channel shuffling into a new target, so take it from the source.
@@ -3000,8 +3268,12 @@ void GSRendererHW::Draw()
 					FRAME_TEX0.TBW = m_cached_ctx.FRAME.FBW;
 					FRAME_TEX0.PSM = m_cached_ctx.FRAME.PSM;
 
-					GSTextureCache::Target* tgt = g_texture_cache->FindOverlappingTarget(FRAME_TEX0.TBP0, GSLocalMemory::GetEndBlockAddress(FRAME_TEX0.TBP0, FRAME_TEX0.TBW, FRAME_TEX0.PSM, m_r));
+					// We want to find a 32 bit target that used to be in exactly the same spot
+					// because we might be reinterpreting the old 32 bit target as 16 bits
+					GSTextureCache::Target* tgt = g_texture_cache->FindOverlappingTarget(
+						FRAME_TEX0.TBP0, GSLocalMemory::GetEndBlockAddress(FRAME_TEX0.TBP0, FRAME_TEX0.TBW, FRAME_TEX0.PSM, m_r));
 
+					// If it was indeed an old 32 target then we have evidence for shuffling
 					if (tgt)
 						shuffle_target = tgt->m_32_bits_fmt;
 					else
@@ -3012,7 +3284,9 @@ void GSRendererHW::Draw()
 			}
 		}
 
-		possible_shuffle = !no_rt && (((shuffle_target /*&& GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].bpp == 16*/) /*|| (m_cached_ctx.FRAME.Block() == m_cached_ctx.TEX0.TBP0 && ((m_cached_ctx.TEX0.PSM & 0x6) || m_cached_ctx.FRAME.PSM != m_cached_ctx.TEX0.PSM))*/) || IsPossibleChannelShuffle());
+		// Possibly a shuffle if have RT and shuffle target or is PossibleShuffle().
+		// Why do we ahve so many steps?
+		possible_shuffle = !no_rt && (shuffle_target || IsPossibleChannelShuffle());
 		const bool need_aem_color = GSLocalMemory::m_psm[m_cached_ctx.TEX0.PSM].trbpp <= 24 && GSLocalMemory::m_psm[m_cached_ctx.TEX0.PSM].pal == 0 && ((NeedsBlending() && m_context->ALPHA.C == 0) || IsDiscardingDstAlpha()) && m_cached_ctx.TEXA.AEM;
 		const u32 color_mask = (m_vt.m_max.c > GSVector4i::zero()).mask();
 		const bool texture_function_color = m_cached_ctx.TEX0.TFX == TFX_DECAL || (color_mask & 0xFFF) || (m_cached_ctx.TEX0.TFX > TFX_DECAL && (color_mask & 0xF000));
@@ -3870,6 +4144,11 @@ void GSRendererHW::Draw()
 		}
 	}
 
+	// Do processing for texture shuffle
+	m_texture_shuffle = false;
+	m_copy_16bit_to_target_shuffle = false;
+	m_same_group_texture_shuffle = false;
+
 	if (m_process_texture)
 	{
 		GIFRegCLAMP MIP_CLAMP = m_cached_ctx.CLAMP;
@@ -3879,11 +4158,18 @@ void GSRendererHW::Draw()
 		{
 			// Hypothesis: texture shuffle is used as a postprocessing effect so texture will be an old target.
 			// Initially code also tested the RT but it gives too much false-positive
-			const int horizontal_offset = ((static_cast<int>((m_cached_ctx.FRAME.Block() - rt->m_TEX0.TBP0)) / 32) % static_cast<int>(std::max(rt->m_TEX0.TBW, 1U))) * frame_psm.pgs.x;
-			const int first_x = (((v[0].XYZ.X - m_context->XYOFFSET.OFX) + 8) >> 4) - horizontal_offset;
-			const int first_u = PRIM->FST ? ((v[0].U + 8) >> 4) : static_cast<int>(((1 << m_cached_ctx.TEX0.TW) * (v[0].ST.S / v[1].RGBAQ.Q)) + 0.5f);
-			const bool shuffle_coords = (first_x ^ first_u) & 8;
+			// Offset of framebuffer from the texture buffer
 
+			// If drawing sprites can we just convert the UV coordinates?
+			// Could triangles to quads conversion be done early in the pipeline?
+			
+			// Removed the offset because its always a multiple of 8
+			const int first_x = ((v[0].XYZ.X - m_context->XYOFFSET.OFX) + 8) >> 4;
+			const int first_u = PRIM->FST ? ((v[0].U + 8) >> 4) : static_cast<int>(((1 << m_cached_ctx.TEX0.TW) * (v[0].ST.S / v[1].RGBAQ.Q)) + 0.5f);
+			const bool shuffle_coords = (first_x ^ first_u) & 8; // same as first_x & 8 != first_u & 8
+
+			// We are moving bits of a 16bit texture to this 32bit color frame buffer?
+			// 
 			// copy of a 16bit source in to this target, make sure it's opaque and not bilinear to reduce false positives.
 			m_copy_16bit_to_target_shuffle = m_cached_ctx.TEX0.TBP0 != m_cached_ctx.FRAME.Block() && rt->m_32_bits_fmt == true && IsOpaque()
 											&& !(context->TEX1.MMIN & 1) && !src->m_32_bits_fmt && m_cached_ctx.FRAME.FBMSK;
@@ -3893,7 +4179,8 @@ void GSRendererHW::Draw()
 			m_same_group_texture_shuffle = draw_uses_target && (m_cached_ctx.TEX0.PSM & 0xE) == PSMCT32 && (m_cached_ctx.FRAME.PSM & 0x7) == PSMCT16 && (m_vt.m_min.p.x == 8.0f);
 
 			// Both input and output are 16 bits and texture was initially 32 bits! Same for the target, Sonic Unleash makes a new target which really is 16bit.
-			m_texture_shuffle = ((m_same_group_texture_shuffle || (tex_psm.bpp == 16)) && (GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].bpp == 16) &&
+			m_texture_shuffle = ((m_same_group_texture_shuffle || (tex_psm.bpp == 16)) &&
+				(GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].bpp == 16) &&
 				(shuffle_coords || rt->m_32_bits_fmt)) &&
 				(src->m_32_bits_fmt || m_copy_16bit_to_target_shuffle) && 
 				(draw_sprite_tex || (m_vt.m_primclass == GS_TRIANGLE_CLASS && (m_index.tail % 6) == 0 && TrianglesAreQuads(true)));
@@ -5049,6 +5336,57 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 		u32 process_ba = 0;
 		bool shuffle_across = true;
 
+		if (extraLogEntries < 100)
+		{
+			fprintf(extraLog, "[%d] Texture Shuffle\n", s_n);
+			// Print the vertices and necessary context
+			fprintf(extraLog, "[%d] TEX0: TBP0=%x TBW=%x PSM=%x TW=%d TH=%d TCC=%d TFX=%d CBP=%x CPSM=%x CSM=%d CSA=%d CLD=%d\n",
+				s_n,
+				(int)m_cached_ctx.TEX0.TBP0, (int)m_cached_ctx.TEX0.TBW, (int)m_cached_ctx.TEX0.PSM,
+				(int)m_cached_ctx.TEX0.TW, (int)m_cached_ctx.TEX0.TH, (int)m_cached_ctx.TEX0.TCC, (int)m_cached_ctx.TEX0.TFX,
+				(int)m_cached_ctx.TEX0.CBP, (int)m_cached_ctx.TEX0.CPSM, (int)m_cached_ctx.TEX0.CSM,
+				(int)m_cached_ctx.TEX0.CSA, (int)m_cached_ctx.TEX0.CLD);
+			// Printf the frame
+			fprintf(extraLog, "[%d] FRAME: FBP=%x FBW=%x PSM=%x FBMSK=%x\n",
+				s_n,
+				(int)m_cached_ctx.FRAME.Block(), (int)m_cached_ctx.FRAME.FBW, (int)m_cached_ctx.FRAME.PSM, (int)m_cached_ctx.FRAME.FBMSK);
+			// Printf the calmp/wrap mode
+			fprintf(extraLog, "[%d] CLAMP: WMS=%d WMT=%d MINU=%d MAXU=%d MINV=%d MAXV=%d\n",
+				s_n,
+				(int)m_cached_ctx.CLAMP.WMS, (int)m_cached_ctx.CLAMP.WMT,
+				(int)m_cached_ctx.CLAMP.MINU, (int)m_cached_ctx.CLAMP.MAXU,
+				(int)m_cached_ctx.CLAMP.MINV, (int)m_cached_ctx.CLAMP.MAXV);
+			// printf the alpha
+			const char* col[3] = {"Cs", "Cd", "0"};
+			const char* alpha[3] = {"As", "Ad", "Af"};
+			fprintf(extraLog, "[%d] ALPHA: FIX=%d (%s - %s) * %s + %s\n\n",
+				s_n, m_context[PRIM->CTXT].ALPHA.FIX, col[m_context[PRIM->CTXT].ALPHA.A], col[m_context[PRIM->CTXT].ALPHA.B],
+				alpha[m_context[PRIM->CTXT].ALPHA.C], col[m_context[PRIM->CTXT].ALPHA.D]);
+			// printf the PRIM
+			fprintf(extraLog, "[%d] PRIM: PRIM=%d IIP=%d TME=%d FGE=%d ABE=%d AA1=%d FST=%d CTXT=%d FIX=%d\n", s_n,
+				PRIM->PRIM,
+				PRIM->IIP,
+				PRIM->TME,
+				PRIM->FGE,
+				PRIM->ABE,
+				PRIM->AA1,
+				PRIM->FST,
+				PRIM->CTXT,
+				PRIM->FIX);
+			fprintf(extraLog, "\n");
+			// Printf the vertices
+			const GSVector2i offset = GSVector2i(m_context[PRIM->CTXT].XYOFFSET.OFX, m_context[PRIM->CTXT].XYOFFSET.OFY);
+			for (int i = 0; i < m_index.tail; i++)
+			{
+				const GSVertex& v = m_vertex.buff[m_index.buff[i]];
+				float x = (v.XYZ.X - offset.x) / 16.0f;
+				float y = (v.XYZ.Y - offset.y) / 16.0f;
+				float u = v.U / 16.0f;
+				float v_coord = v.V / 16.0f;
+				fprintf(extraLog, "[%d][%d] (X,U,Y,V)=(%8.04f,%8.04f,%8.04f,%8.04f)\n", s_n, i, x, u, y, v_coord);
+			}
+		}
+
 		ConvertSpriteTextureShuffle(process_rg, process_ba, shuffle_across, rt, tex);
 
 		// If date is enabled you need to test the green channel instead of the alpha channel.
@@ -5123,6 +5461,18 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 		else
 		{
 			m_conf.ps.fbmask = 0;
+		}
+
+		if (extraLogEntries < 100)
+		{
+			// printf the config
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.process_rg=%d m_conf.ps.process_ba=%d\n", s_n, m_conf.ps.process_rg, m_conf.ps.process_ba);
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.shuffle_across=%d\n", s_n, m_conf.ps.shuffle_across);
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.colormask.wrgba=%x\n", s_n, m_conf.colormask.wrgba);
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.colormask.fbmask=%x\n", s_n, m_conf.ps.fbmask);
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.FbMask=%x %x %x %x\n", s_n, m_conf.cb_ps.FbMask.r, m_conf.cb_ps.FbMask.g, m_conf.cb_ps.FbMask.b, m_conf.cb_ps.FbMask.a);
+			fprintf(extraLog, "\n\n");
+			extraLogEntries++;
 		}
 
 		// Set dirty alpha on target, but only if we're actually writing to it.
