@@ -48,7 +48,6 @@
 #include "svnrev.h"
 
 std::string dumpName;
-FILE* extraLog;
 
 namespace GSRunner
 {
@@ -769,8 +768,6 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		dumpName = params.filename;
 		auto x = StringUtil::SplitString(dumpName, '\\');
 		dumpName = x[x.size() - 1];
-		dumpName = "E:\\texture_shuffle_logs\\" + dumpName + ".txt";
-		extraLog = fopen(dumpName.c_str(), "w");
 	}
 
 	if (params.filename.empty())

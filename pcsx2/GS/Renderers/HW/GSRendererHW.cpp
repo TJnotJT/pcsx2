@@ -13,8 +13,10 @@
 #include <bit>
 
 
-extern FILE* extraLog;
+FILE* extraLog;
 int extraLogEntries = 0;
+constexpr int maxExtraLogEntries = 10;
+extern std::string dumpName;
 
 //#define GL_INS(...) \
 //	do { \
@@ -329,11 +331,28 @@ void GSRendererHW::ExpandLineIndices()
 	}
 }
 
+void ensureExtraLog()
+{
+	if (!extraLog && extraLogEntries < maxExtraLogEntries)
+	{
+		std::string file = "E:\\texture_shuffle_logs\\" + dumpName + ".txt";
+		extraLog = fopen(file.c_str(), "w");
+	}
+	if (extraLog && extraLogEntries >= maxExtraLogEntries)
+	{
+		fclose(extraLog);
+	}
+}
+
+#define FLOOR4(x) ((x) & ~0xF)
+#define CEIL4(x) (-(-(x) & ~0xF))
+
 bool AnalyzeSprites(
 	const GSVertex* RESTRICT vert,
 	const u16* RESTRICT idx,
 	const int nidx,
-	const GSVector2i xy_off,
+	const GIFRegXYOFFSET& offset,
+	const GIFRegSCISSOR& scissor, 
 	bool rt_is_tex)
 {
 	enum Flag
@@ -371,7 +390,7 @@ bool AnalyzeSprites(
 				{
 					// If the channels are different, we only consider them
 					// compatible if one is UNKNOWN.
-					if (channel[i] != UNKNOWN || other.channel[i] != UNKNOWN)
+					if (!(channel[i] == UNKNOWN || other.channel[i] == UNKNOWN))
 						return false;
 				}
 			}
@@ -397,46 +416,78 @@ bool AnalyzeSprites(
 
 		if (v[0]->XYZ.X > v[1]->XYZ.X)
 			std::swap(v[0], v[1]);
+
+		const int x0 = static_cast<int>(v[0]->XYZ.X) - static_cast<int>(offset.OFX);
+		const int x1 = static_cast<int>(v[1]->XYZ.X) - static_cast<int>(offset.OFX);
+		const int y0 = static_cast<int>(v[0]->XYZ.Y) - static_cast<int>(offset.OFY);
+		const int y1 = static_cast<int>(v[1]->XYZ.Y) - static_cast<int>(offset.OFY);
+
+		// Cull degenerate sprites.
+		if (y0 == y1)
+			continue;
+
+		// Subtract half texels for U so that integers are texel centers.
+		const int u0 = static_cast<int>(v[0]->U) - 0x8; 
+		const int u1 = static_cast<int>(v[1]->U) - 0x8;
+		const int v0 = static_cast<int>(v[0]->V) - 0x8;
+		const int v1 = static_cast<int>(v[1]->V) - 0x8;
+
+		constexpr int dx = 1;
+		const int du = u0 < u1 ? 1 : -1;
+
+		// Round X to the correct pixel center
+		int x0i = CEIL4(x0);
+		int x1i = FLOOR4(x1);
+		// Omit the right edge of a sprite
+		if (x1 == x1i)
+			x1i -= 0x10;
+		// Interpolate U and round to texel center
+		int u0i = ((x1 - x0i) * u0 + (x0i - x0) * u1) / (x1 - x0);
+		int u1i = ((x1 - x1i) * u0 + (x1i - x0) * u1) / (x1 - x0);
+
+		if (du < 0)
+		{
+			u0i = FLOOR4(u0i);
+			u1i = FLOOR4(u1i);
+		}
+		else
+		{
+			u0i = CEIL4(u0i);
+			u1i = CEIL4(u1i);
+		}
 		
-		// TODO: me need to check this math
-		const GSVector2i snap_x = {
-			((static_cast<int>(v[0]->XYZ.X) - xy_off.x) + 0x8) >> 4,
-			((static_cast<int>(v[1]->XYZ.X) - xy_off.x) >> 4) + 1
-		};
-		const GSVector2i snap_u = {
-			static_cast<int>(v[0]->U) >> 4,
-			(static_cast<int>(v[1]->U - 0x8) >> 4) + 1
-		};
-		
-		const int width_x = snap_x.v[1] - snap_x.v[0];
-		const int width_u = std::abs(snap_u.v[1] - snap_u.v[0]);
-		const int height_y = (static_cast<int>(v[1]->XYZ.Y) - static_cast<int>(v[0]->XYZ.Y) + 0x8) >> 4;
-		const int height_v = (static_cast<int>(v[1]->V) - static_cast<int>(v[0]->V) + 0x8) >> 4;
-		const int y0 = static_cast<int>(v[0]->XYZ.Y);
-		const int y1 = static_cast<int>(v[1]->XYZ.Y);
+		const int width_x = x1i - x0i + 0x10;
+		const int width_u = std::abs(u1i - u0i) + 0x10;
+		const int height_y = y1 - y0;
+		const int height_v = v1 - v0;
 
 		// In these cases these sprites are likely not a texture shuffle.
 		if (width_x != width_u)
 			return false;
-		if (width_x != 8 && width_x != 16)
-			return false;
-		if (width_u != 8 && width_u != 16)
-			return false;
+		if ((width_x & 0x7F) || (width_u & 0x7F))
+			return false; // Not 8 pixel/texel aligned
 		if (height_y != height_v)
 			return false;
 
-		constexpr int dx = 8;
-		const int du = snap_u.v[0] < snap_u.v[1] ? 8 : -8;
-
-		for (int j = 0; j < (width_x / 2); j++)
+		for (int j = 0; j < (width_x / 0x80); j++)
 		{
-			const int x = snap_x.v[0] + j * dx;
-			const int u = snap_u.v[0] + j * du;
+			const int x = x0i + j * 0x80 * dx;
+			const int u = u0i + j * 0x80 * du;
 
-			const int column16_x = x / 16;
-			const int column16_u = u / 16;
-			const int group8_x = (x & 8) >> 3;
-			const int group8_u = (u & 8) >> 3;
+			if (x + 0x80 <= scissor.SCAX0 << 4)
+				continue;
+			if (x >= scissor.SCAX1 << 4)
+				continue;
+
+			const int column16_x = x >> 8;
+			const int column16_u = u >> 8;
+			const int group8_x = (x & 0x80) >> 7;
+			const int group8_u = (u & 0x80) >> 7;
+
+			// TODO: Need to consider the clamp/wrap mode
+			// First group is RG (channel 0, 1). Second group is BA (channel 2, 3).
+			const int write_chan[2] = {2 * group8_x, 2 * group8_x + 1};
+			const int read_chan[2] = {2 * group8_u, 2 * group8_u + 1};
 
 			// TODO: Make a proper struct for keys
 			// TODO: Must check that all Y-values are the same?
@@ -453,10 +504,6 @@ bool AnalyzeSprites(
 			// Make sure all sprites with the same y0 have the same y1
 			if (y1 != col_ref.y1)
 				return false;
-
-			// TODO: Need to consider the clamp/wrap mode
-			const int write_chan[2] = {group8_x, group8_x + 2};
-			const int read_chan[2] = {group8_u, group8_u + 2};
 
 			if (column16_x != column16_u)
 			{
@@ -568,19 +615,39 @@ bool AnalyzeSprites(
 		}
 	}
 
-	printf("column_range = %d, %d", column_range.v[0], column_range.v[1]);
-	printf("y_range = %f, %f", y_range.v[0] / 16.0f, y_range.v[1] / 16.0f);
-	printf("mapping = 0<-%d, 1<-%d, 2<-%d, 3<-%d",
-		overall.channel[0], overall.channel[1], overall.channel[2], overall.channel[3]);
+	if (extraLogEntries < maxExtraLogEntries)
+	{
+		fprintf(extraLog, "[%d] column_range = %d, %d\n", GSState::s_n, column_range.v[0], column_range.v[1]);
+		fprintf(extraLog, "[%d] y_range = %f, %f\n", GSState::s_n, y_range.v[0] / 16.0f,
+			y_range.v[1] / 16.0f);
+		const char* chan_str[] = {"R", "G", "B", "A", "U"};
+		fprintf(extraLog, "[%d] mapping = R=%s, G=%s, B=%s, A=%s\n", GSState::s_n,
+			chan_str[overall.channel[0]], chan_str[overall.channel[1]],
+			chan_str[overall.channel[2]], chan_str[overall.channel[3]]);
+	}
 	return true;
 }
 
 // Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
 void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
-	AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
-		GSVector2i(m_context->XYOFFSET.OFX, m_context->XYOFFSET.OFY),
-		tex && tex->m_from_target && rt == tex->m_from_target);
+	if (AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
+		m_context->XYOFFSET,
+		m_context->SCISSOR,
+		tex && tex->m_from_target && rt == tex->m_from_target))
+	{
+		if (extraLogEntries < maxExtraLogEntries)
+		{
+			fprintf(extraLog, "[%d] AnalyzeSprites successful\n", s_n);
+		}
+	}
+	else
+	{
+		if (extraLogEntries < maxExtraLogEntries)
+		{
+			fprintf(extraLog, "[%d] AnalyzeSprites failed\n", s_n);
+		}
+	}
 	const u32 count = m_vertex.next;
 	GSVertex* v = &m_vertex.buff[0];
 	const u16* idx = &m_index.buff[0];
@@ -904,25 +971,6 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 					break;
 				}
 			}
-
-			// if (changed && extraLogEntries < 100)
-			// {
-			// 	for (int k = 0; k < 2; k++)
-			// 	{
-			// 		fprintf(extraLog, "[%04d][%03d] (X,Y,U,V): %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f, %.4f=>%.4f\n",
-			// 			s_n, i + k,
-			// 			(vorig[k].XYZ.X - o.OFX) / 16.0f, (v[i + k].XYZ.X - o.OFX) / 16.0f,
-			// 			vorig[k].U / 16.0f, v[i + k].U / 16.0f,
-			// 			(vorig[k].XYZ.Y - o.OFY) / 16.0f, (v[i + k].XYZ.Y - o.OFY) / 16.0f,
-			// 			vorig[k].U / 16.0f, v[i + k].U / 16.0f);
-			// 	}
-			// 	extraLogEntries++;
-			// 	if (extraLogEntries >= 100)
-			// 	{
-			// 		fflush(extraLog);
-			// 		fclose(extraLog);
-			// 	}
-			// }
 		}
 	}
 	else
@@ -5336,7 +5384,8 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 		u32 process_ba = 0;
 		bool shuffle_across = true;
 
-		if (extraLogEntries < 100)
+		ensureExtraLog();
+		if (extraLogEntries < maxExtraLogEntries)
 		{
 			fprintf(extraLog, "[%d] Texture Shuffle\n", s_n);
 			// Print the vertices and necessary context
@@ -5359,9 +5408,9 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 			// printf the alpha
 			const char* col[3] = {"Cs", "Cd", "0"};
 			const char* alpha[3] = {"As", "Ad", "Af"};
-			fprintf(extraLog, "[%d] ALPHA: FIX=%d (%s - %s) * %s + %s\n\n",
-				s_n, m_context[PRIM->CTXT].ALPHA.FIX, col[m_context[PRIM->CTXT].ALPHA.A], col[m_context[PRIM->CTXT].ALPHA.B],
-				alpha[m_context[PRIM->CTXT].ALPHA.C], col[m_context[PRIM->CTXT].ALPHA.D]);
+			fprintf(extraLog, "[%d] ALPHA: FIX=%d (%s - %s) * %s + %s\n",
+				s_n, m_context->ALPHA.FIX, col[m_context->ALPHA.A], col[m_context->ALPHA.B],
+				alpha[m_context->ALPHA.C], col[m_context->ALPHA.D]);
 			// printf the PRIM
 			fprintf(extraLog, "[%d] PRIM: PRIM=%d IIP=%d TME=%d FGE=%d ABE=%d AA1=%d FST=%d CTXT=%d FIX=%d\n", s_n,
 				PRIM->PRIM,
@@ -5373,9 +5422,11 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 				PRIM->FST,
 				PRIM->CTXT,
 				PRIM->FIX);
-			fprintf(extraLog, "\n");
+			fprintf(extraLog, "[%d] SCISSOR: X0=%d X1=%d Y0=%d Y1=%d\n", s_n,
+				m_context->SCISSOR.SCAX0, m_context->SCISSOR.SCAX1,
+				m_context->SCISSOR.SCAY0, m_context->SCISSOR.SCAY1);
 			// Printf the vertices
-			const GSVector2i offset = GSVector2i(m_context[PRIM->CTXT].XYOFFSET.OFX, m_context[PRIM->CTXT].XYOFFSET.OFY);
+			const GSVector2i offset = GSVector2i(m_context->XYOFFSET.OFX, m_context->XYOFFSET.OFY);
 			for (int i = 0; i < m_index.tail; i++)
 			{
 				const GSVertex& v = m_vertex.buff[m_index.buff[i]];
@@ -5463,7 +5514,7 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 			m_conf.ps.fbmask = 0;
 		}
 
-		if (extraLogEntries < 100)
+		if (extraLogEntries < maxExtraLogEntries)
 		{
 			// printf the config
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.process_rg=%d m_conf.ps.process_ba=%d\n", s_n, m_conf.ps.process_rg, m_conf.ps.process_ba);
@@ -5474,6 +5525,7 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 			fprintf(extraLog, "\n\n");
 			extraLogEntries++;
 		}
+		ensureExtraLog();
 
 		// Set dirty alpha on target, but only if we're actually writing to it.
 		rt->m_valid_alpha_low |= m_conf.colormask.wa;
