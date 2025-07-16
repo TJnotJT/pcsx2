@@ -15,7 +15,7 @@
 #if PCSX2_DEBUG
 FILE* extraLog;
 int extraLogEntries = 0;
-constexpr int maxExtraLogEntries = 0;
+constexpr int maxExtraLogEntries = 10;
 extern std::string dumpName;
 #elif PCSX2_DEVEL
 FILE* extraLog;
@@ -355,66 +355,71 @@ void ensureExtraLog()
 
 #define TEXTURE_SHUFFLE_LOG(x) (void)(0)
 
+enum Flag
+{
+	R = 0,
+	G = 1,
+	B = 2,
+	A = 3,
+	UNKNOWN = 4
+};
+
+struct Column
+{
+	u8 channel[4]; // R, G, B, A
+	int y0;
+	int y1;
+
+	Column(int y0, int y1)
+		: y0(y0)
+		, y1(y1)
+	{
+		channel[0] = 0;
+		channel[1] = 1;
+		channel[2] = 2;
+		channel[3] = 3;
+	};
+
+	Column()
+		: Column(0, 0){};
+
+	bool Compatible(const Column& other)
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			if (channel[i] != other.channel[i])
+			{
+				// If the channels are different, we only consider them
+				// compatible if one is UNKNOWN.
+				if (!(channel[i] == UNKNOWN || other.channel[i] == UNKNOWN))
+					return false;
+			}
+		}
+		return true;
+	}
+
+	// For merging with another compatible columns
+	void Merge(const Column& other)
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			if (channel[i] != other.channel[i])
+				channel[i] = UNKNOWN;
+		}
+	}
+};
+
 bool AnalyzeSprites(
 	const GSVertex* RESTRICT vert,
 	const u16* RESTRICT idx,
 	const int nidx,
 	const GIFRegXYOFFSET& offset,
 	const GIFRegSCISSOR& scissor, 
-	bool rt_is_tex)
+	const GIFRegCLAMP& clamp,
+	bool rt_is_tex,
+	Column& result
+)
 {
-	enum Flag
-	{
-		R = 0,
-		G = 1,
-		B = 2,
-		A = 3,
-		UNKNOWN = 4
-	};
-	struct Column
-	{
-		u8 channel[4]; // R, G, B, A
-		int y0;
-		int y1;
-
-		Column(int y0, int y1)
-			: y0(y0)
-			, y1(y1)
-		{
-			channel[0] = 0;
-			channel[1] = 1;
-			channel[2] = 2;
-			channel[3] = 3;
-		};
-
-		Column()
-			: Column(0, 0){};
-
-		bool Compatible(const Column& other)
-		{
-			for (int i = 0; i < 4; i++)
-			{
-				if (channel[i] != other.channel[i])
-				{
-					// If the channels are different, we only consider them
-					// compatible if one is UNKNOWN.
-					if (!(channel[i] == UNKNOWN || other.channel[i] == UNKNOWN))
-						return false;
-				}
-			}
-			return true;
-		}
-
-		// For merging with another compatible columns
-		void Merge(const Column& other)
-		{
-			for (int i = 0; i < 4; i++)
-			{
-				if (channel[i] != other.channel[i])
-					channel[i] = UNKNOWN;
-			}
-		}
-	};
 
 	std::map<int, std::map<int, Column>> column_map;
 
@@ -527,6 +532,8 @@ bool AnalyzeSprites(
 			}
 
 			// TODO: Need to consider the clamp/wrap mode
+			pxAssertMsg(clamp.WMS != 3, "Using AnalyzeSprites with WMS==3!");
+			
 			// First group is RG (channel 0, 1). Second group is BA (channel 2, 3).
 			const int write_chan[2] = {2 * group8_x, 2 * group8_x + 1};
 			const int read_chan[2] = {2 * group8_u, 2 * group8_u + 1};
@@ -587,10 +594,9 @@ bool AnalyzeSprites(
 	}
 
 	// Analyze the list of blocks.
-	Column overall;
 	GSVector2i column_range;
 	GSVector2i y_range;
-	bool overall_init = false;
+	bool result_init = false;
 	bool column_range_init = false;
 	bool y_range_init = false;
 
@@ -600,15 +606,15 @@ bool AnalyzeSprites(
 		int y1 = INT_MIN;
 		for (const auto& [column16_x, column] : column_map2)
 		{
-			if (!overall_init)
+			if (!result_init)
 			{
-				overall = column;
-				overall_init = true;
+				result = column;
+				result_init = true;
 			}
 
-			if (!overall.Compatible(column))
+			if (!result.Compatible(column))
 				return false;
-			overall.Merge(column);
+			result.Merge(column);
 
 			column_range0.v[0] = std::min(column16_x, column_range0.v[0]);
 			column_range0.v[1] = std::max(column16_x, column_range0.v[1]);
@@ -662,8 +668,8 @@ bool AnalyzeSprites(
 			y_range.v[1] / 16.0f);
 		const char* chan_str[] = {"R", "G", "B", "A", "U"};
 		fprintf(extraLog, "[%d] mapping = R=%s, G=%s, B=%s, A=%s\n", GSState::s_n,
-			chan_str[overall.channel[0]], chan_str[overall.channel[1]],
-			chan_str[overall.channel[2]], chan_str[overall.channel[3]]);
+			chan_str[result.channel[0]], chan_str[result.channel[1]],
+			chan_str[result.channel[2]], chan_str[result.channel[3]]);
 	}
 	return true;
 }
@@ -671,10 +677,14 @@ bool AnalyzeSprites(
 // Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
 void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
+	Column result;
 	if (AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
 		m_context->XYOFFSET,
 		m_context->SCISSOR,
-		tex && tex->m_from_target && rt == tex->m_from_target))
+		m_context->CLAMP,
+		tex && tex->m_from_target && rt == tex->m_from_target,
+		result)
+	)
 	{
 		if (extraLogEntries < maxExtraLogEntries)
 		{

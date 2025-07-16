@@ -324,6 +324,29 @@ void GSRendererSW::Draw()
 		DumpVertices(s);
 	}
 
+	Sync(2);
+	//if (s_n == 4750 || s_n == 4751)
+	//{
+	//	std::string file = StringUtil::StdStringFromFormat("E:\\temp_swbf\\%d_", s_n);
+	//	m_mem.SaveBMP(file+ "tex_32.bmp", 0x1000, 8, PSMCT32, 512, 512);
+	//	m_mem.SaveBMP(file+ "tex_16.bmp", 0x1000, 8, PSMCT16, 512, 1024);
+	//	m_mem.SaveBMP(file+ "frame_32.bmp", 0, 8, PSMCT32, 512, 512);
+	//	m_mem.SaveBMP(file+ "frame_16.bmp", 0, 8, PSMCT16, 512, 1024);
+	//}
+
+	// Scarface
+	// if (s_n == 430 || s_n == 431)
+	// {
+	// 	std::string file = StringUtil::StdStringFromFormat("E:\\temp_scarface_2\\%d_", s_n);
+	// 	m_mem.SaveBMP(file + "tex_16z_10.bmp", 0x1a40, 10, PSMZ16, 640, 896);
+	// 	m_mem.SaveBMP(file + "tex_16z_5.bmp", 0x1a40, 5, PSMZ16, 320, 1792);
+	// 	m_mem.SaveBMP(file + "tex_24z_10.bmp", 0x1a40, 10, PSMZ24, 640, 448);
+	// 	m_mem.SaveBMP(file + "frame_16c_10.bmp", 0x2ce0, 10, PSMCT16, 640, 896);
+	// 	m_mem.SaveBMP(file + "frame_16c_5.bmp", 0x2ce0, 5, PSMCT16, 320, 1792);
+	// 	m_mem.SaveBMP(file + "frame_16z_10.bmp", 0x2ce0, 10, PSMZ16, 640, 896);
+	// 	m_mem.SaveBMP(file + "frame_16z_5.bmp", 0x2ce0, 5, PSMZ16, 320, 1792);
+	// 	m_mem.SaveBMP(file + "frame_24z_10.bmp", 0x2ce0, 10, PSMZ16, 640, 448);
+	// }
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
 
