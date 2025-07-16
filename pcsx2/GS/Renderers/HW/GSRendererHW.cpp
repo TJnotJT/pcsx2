@@ -12,12 +12,17 @@
 #include "common/StringUtil.h"
 #include <bit>
 
-
+#if PCSX2_DEBUG
+FILE* extraLog;
+int extraLogEntries = 0;
+constexpr int maxExtraLogEntries = 0;
+extern std::string dumpName;
+#elif PCSX2_DEVEL
 FILE* extraLog;
 int extraLogEntries = 0;
 constexpr int maxExtraLogEntries = 10;
 extern std::string dumpName;
-
+#endif
 //#define GL_INS(...) \
 //	do { \
 //		Console.WriteLn(StringUtil::StdStringFromFormat(__VA_ARGS__)); \
@@ -346,6 +351,9 @@ void ensureExtraLog()
 
 #define FLOOR4(x) ((x) & ~0xF)
 #define CEIL4(x) (-(-(x) & ~0xF))
+#define ISALIGNED(x, sz)  (((x) % (sz)) == 0)
+
+#define TEXTURE_SHUFFLE_LOG(x) (void)(0)
 
 bool AnalyzeSprites(
 	const GSVertex* RESTRICT vert,
@@ -427,13 +435,23 @@ bool AnalyzeSprites(
 			continue;
 
 		// Subtract half texels for U so that integers are texel centers.
+		// This makes some math for U and X look the same.
 		const int u0 = static_cast<int>(v[0]->U) - 0x8; 
 		const int u1 = static_cast<int>(v[1]->U) - 0x8;
-		const int v0 = static_cast<int>(v[0]->V) - 0x8;
-		const int v1 = static_cast<int>(v[1]->V) - 0x8;
+		int v0 = static_cast<int>(v[0]->V);
+		int v1 = static_cast<int>(v[1]->V);
 
 		constexpr int dx = 1;
+		const int dy = y0 < y1 ? 1 : -1;
 		const int du = u0 < u1 ? 1 : -1;
+		const int dv = v0 < v1 ? 1 : -1;
+
+		// Y and V coordinates should be somewhat the same and in the same direction.
+		// There are cases where the V range is bigger by 1 texel so we allow some tolerance.
+		if (std::abs(y0 - v0) + std::abs(y1 - v1) > 0x10)
+			return false;
+		if (dy != dv)
+			return false;
 
 		// Round X to the correct pixel center
 		int x0i = CEIL4(x0);
@@ -457,32 +475,56 @@ bool AnalyzeSprites(
 		}
 		
 		const int width_x = x1i - x0i + 0x10;
-		const int width_u = std::abs(u1i - u0i) + 0x10;
 		const int height_y = y1 - y0;
-		const int height_v = v1 - v0;
+
+		int width_u = std::abs(u1i - u0i) + 0x10;
+		int height_v = v1 - v0;
+
+		// HACK: It seems that some games have U/V one pixel too large
+		// (the last pixel drawn will overlap with the next sprite).
+		// It appears that they are intending to do a texture shuffle so
+		// so we will just correct the width/height.
+		if (width_x == 0x80 && width_u == 0x90)
+		{
+			if ((u0i & 0x7F) == 0)
+				u1i = u0i + 0x80 * du; // First coordinate is 8 pixel aligned so fix the second.
+			else if ((u1i & 0x7F) == 0)
+				u0i = u1i - 0x80 * du; // Second coordinate is 8 pixel aligned so fix the first.
+			else
+				return false; // Neither coordinate is 8 pixel aligned so assume not a texture shuffle.
+			width_u = 0x80;
+		}
 
 		// In these cases these sprites are likely not a texture shuffle.
 		if (width_x != width_u)
 			return false;
 		if ((width_x & 0x7F) || (width_u & 0x7F))
 			return false; // Not 8 pixel/texel aligned
-		if (height_y != height_v)
-			return false;
 
 		for (int j = 0; j < (width_x / 0x80); j++)
 		{
 			const int x = x0i + j * 0x80 * dx;
 			const int u = u0i + j * 0x80 * du;
 
-			if (x + 0x80 <= scissor.SCAX0 << 4)
+			// Cull any columns that fail the scissor test
+			if (x + 0x80 <= (scissor.SCAX0 << 4))
 				continue;
-			if (x >= scissor.SCAX1 << 4)
+			if (x >= (scissor.SCAX1 << 4))
 				continue;
 
 			const int column16_x = x >> 8;
 			const int column16_u = u >> 8;
 			const int group8_x = (x & 0x80) >> 7;
 			const int group8_u = (u & 0x80) >> 7;
+
+			if (group8_x == group8_u)
+			{
+				// The channels are being written to themselves.
+				// In reality this might be flipping the pixel horizontally
+				// but we treat it as a NOP assuming that the game
+				// would reverse the pixels again later on.
+				continue;
+			}
 
 			// TODO: Need to consider the clamp/wrap mode
 			// First group is RG (channel 0, 1). Second group is BA (channel 2, 3).
@@ -513,8 +555,6 @@ bool AnalyzeSprites(
 				col_ref.channel[write_chan[1]] = UNKNOWN;
 				continue;
 			}
-
-			// TODO: Need to put in the Y-values!
 
 			if (group8_x == group8_u)
 			{
