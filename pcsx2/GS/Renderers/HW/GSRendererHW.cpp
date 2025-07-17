@@ -15,13 +15,13 @@
 #if PCSX2_DEBUG
 FILE* extraLog;
 int extraLogEntries = 0;
-constexpr int maxExtraLogEntries = 10;
-extern std::string dumpName;
+constexpr int maxExtraLogEntries = 0;
+std::string dumpName;
 #elif PCSX2_DEVEL
 FILE* extraLog;
 int extraLogEntries = 0;
 constexpr int maxExtraLogEntries = 10;
-extern std::string dumpName;
+std::string dumpName;
 #endif
 //#define GL_INS(...) \
 //	do { \
@@ -417,11 +417,23 @@ bool AnalyzeSprites(
 	const GIFRegSCISSOR& scissor, 
 	const GIFRegCLAMP& clamp,
 	bool rt_is_tex,
-	Column& result
+	Column& result,
+	GSVector2i& column_range,
+	GSVector2i& y_range
 )
 {
 
 	std::map<int, std::map<int, Column>> column_map;
+
+	// Convert the scissor region to 4 bit fixed-point.
+	const int scissor_x0 = static_cast<int>(scissor.SCAX0) << 4;
+	const int scissor_x1 = static_cast<int>(scissor.SCAX1) << 4;
+	const int scissor_y0 = static_cast<int>(scissor.SCAY0) << 4;
+	const int scissor_y1 = static_cast<int>(scissor.SCAY1) << 4;
+
+	const int offset_x = static_cast<int>(offset.OFX);
+	const int offset_y = static_cast<int>(offset.OFY);
+
 
 	for (int i = 0; i < nidx; i += 2)
 	{
@@ -430,10 +442,14 @@ bool AnalyzeSprites(
 		if (v[0]->XYZ.X > v[1]->XYZ.X)
 			std::swap(v[0], v[1]);
 
-		const int x0 = static_cast<int>(v[0]->XYZ.X) - static_cast<int>(offset.OFX);
-		const int x1 = static_cast<int>(v[1]->XYZ.X) - static_cast<int>(offset.OFX);
-		const int y0 = static_cast<int>(v[0]->XYZ.Y) - static_cast<int>(offset.OFY);
-		const int y1 = static_cast<int>(v[1]->XYZ.Y) - static_cast<int>(offset.OFY);
+		const int x0 = static_cast<int>(v[0]->XYZ.X) - offset_x;
+		const int x1 = static_cast<int>(v[1]->XYZ.X) - offset_x;
+		int y0 = static_cast<int>(v[0]->XYZ.Y) - offset_y;
+		int y1 = static_cast<int>(v[1]->XYZ.Y) - offset_y;
+
+		// Scissor y-region.
+		y0 = std::max(y0, scissor_y0);
+		y1 = std::min(y1, scissor_y1);
 
 		// Cull degenerate sprites.
 		if (y0 == y1)
@@ -511,10 +527,10 @@ bool AnalyzeSprites(
 			const int x = x0i + j * 0x80 * dx;
 			const int u = u0i + j * 0x80 * du;
 
-			// Cull any columns that fail the scissor test
-			if (x + 0x80 <= (scissor.SCAX0 << 4))
+			// Cull any columns that fail the scissor test.
+			if (x + 0x80 <= scissor_x0)
 				continue;
-			if (x >= (scissor.SCAX1 << 4))
+			if (x >= scissor_x1)
 				continue;
 
 			const int column16_x = x >> 8;
@@ -573,7 +589,9 @@ bool AnalyzeSprites(
 			}
 			else
 			{
-				if (!rt_is_tex)
+				// FIXME: Is this check needed or can we just get away with
+				// assuming that no sprites will overlap in the draw?
+				if (!rt_is_tex || true) 
 				{
 					// Source texture is different from the RT so
 					// just overwrite what was already there.
@@ -594,8 +612,6 @@ bool AnalyzeSprites(
 	}
 
 	// Analyze the list of blocks.
-	GSVector2i column_range;
-	GSVector2i y_range;
 	bool result_init = false;
 	bool column_range_init = false;
 	bool y_range_init = false;
@@ -649,10 +665,8 @@ bool AnalyzeSprites(
 			// TODO: Make sure direction of y-values is the same always?
 			if (y_range0.v[0] != y_range.v[1] && y_range0.v[1] != y_range.v[0])
 				return false;
-			y_range = {
-				std::min(y_range.v[0], y_range0.v[0]),
-				std::max(y_range.v[1], y_range0.v[1]),
-			};
+			y_range.v[0] = std::min(y_range.v[0], y_range0.v[0]);
+			y_range.v[1] = std::max(y_range.v[1], y_range0.v[1]);
 		}
 		else
 		{
@@ -674,21 +688,109 @@ bool AnalyzeSprites(
 	return true;
 }
 
+u32 my_process_ba;
+u32 my_process_rg;
+
 // Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
 void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
 	Column result;
+	GSVector2i column_range;
+	GSVector2i y_range;
+	my_process_ba = process_ba;
+	my_process_rg = process_rg;
+	if (0)
 	if (AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
-		m_context->XYOFFSET,
-		m_context->SCISSOR,
-		m_context->CLAMP,
-		tex && tex->m_from_target && rt == tex->m_from_target,
-		result)
-	)
+			m_context->XYOFFSET,
+			m_context->SCISSOR,
+			m_context->CLAMP,
+			tex && tex->m_from_target && rt == tex->m_from_target,
+			result,
+			column_range,
+			y_range
+	))
 	{
 		if (extraLogEntries < maxExtraLogEntries)
 		{
 			fprintf(extraLog, "[%d] AnalyzeSprites successful\n", s_n);
+		}
+		// TODO: What does shuffle_across do?
+		// Replace the sprites with a single big sprite based on the analysis
+		// Problems:
+		// 1. There might be color info different for each sprite
+		// 2. There might be alpha
+		// 3. 
+		if (m_vt.m_eq.rgba == 0xffff && m_vt.m_eq.z)
+		{
+			if (extraLogEntries < maxExtraLogEntries)
+			{
+				fprintf(extraLog, "[%d] Converting vertices\n", s_n);
+			}
+			const int window_x0 = column_range.v[0] << 8;
+			const int window_x1 = (column_range.v[1] + 1) << 8;
+			const int window_y0 = y_range.v[0];
+			const int window_y1 = y_range.v[1] - (512 << 4); // FIXME!!!
+#if 1
+			// FIXME: What if there is a translation between XY and UV?
+			m_vertex.buff[0].XYZ.X = m_context->XYOFFSET.OFX + window_x0;
+			m_vertex.buff[0].U = window_x0 + 0x8;
+			m_vertex.buff[1].XYZ.X = m_context->XYOFFSET.OFX + window_x1;
+			m_vertex.buff[1].U = window_x1 + 0x8;
+
+			m_vertex.buff[0].XYZ.Y = m_context->XYOFFSET.OFY + window_y0;
+			m_vertex.buff[0].V = window_y0 + 0x8;
+			m_vertex.buff[1].XYZ.Y = m_context->XYOFFSET.OFY + window_y1;
+			m_vertex.buff[1].V = window_y1 + 0x8;
+
+			m_index.buff[0] = 0;
+			m_index.buff[1] = 1;
+			m_index.tail = m_vertex.head = m_vertex.tail = m_vertex.next = 2;
+
+			// Convert columns to X
+			m_vt.m_min.p.x = window_x0 / 16.0f;
+			m_vt.m_max.p.x = window_x1 / 16.0f;
+			pxAssert(window_x0 <= window_x1);
+
+			// Y is in 4 bits fixed-point format
+			m_vt.m_min.p.y = y_range.v[0] / 16.0f;
+			m_vt.m_max.p.y = y_range.v[1] / 16.0f;
+			pxAssert(y_range.v[0] <= y_range.v[1]);
+
+			for (int i = 0; i < 4; i++)
+				m_r.F32[i] = m_vt.m_min.p.F32[i];
+#endif
+			// Compute which channels are processed and how
+			my_process_rg = 0;
+			my_process_ba = 0;
+			for (u8 chan_write = 0; chan_write < 4; chan_write++)
+			{
+				u8 chan_read = result.channel[chan_write];
+				if (chan_write == Flag::UNKNOWN)
+					continue;
+				if (chan_write == chan_read)
+					continue;
+				const u8 chan[2] = {chan_read, chan_write};
+				const u32 process_flag[2] = {SHUFFLE_READ, SHUFFLE_WRITE};
+				for (int j = 0; j < 2; j++)
+				{
+					switch (chan[j])
+					{
+						case Flag::R:
+						case Flag::G:
+							my_process_rg |= process_flag[j];
+							break;
+						case Flag::B:
+						case Flag::A:
+							my_process_ba |= process_flag[j];
+							break;
+						default:
+							pxAssert("Bad channel");
+					}
+				}
+			}
+			process_rg = my_process_rg;
+			process_ba = my_process_ba;
+			return;
 		}
 	}
 	else
@@ -5475,8 +5577,10 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 			fprintf(extraLog, "[%d] SCISSOR: X0=%d X1=%d Y0=%d Y1=%d\n", s_n,
 				m_context->SCISSOR.SCAX0, m_context->SCISSOR.SCAX1,
 				m_context->SCISSOR.SCAY0, m_context->SCISSOR.SCAY1);
+			fprintf(extraLog, "[%d] m_vt.m_eq.rgba=%x m_vt.m_eq.z=%d\n", s_n, m_vt.m_eq.rgba, m_vt.m_eq.z);
 			// Printf the vertices
 			const GSVector2i offset = GSVector2i(m_context->XYOFFSET.OFX, m_context->XYOFFSET.OFY);
+			fprintf(extraLog, "[%d] Old verts:\n", s_n);
 			for (int i = 0; i < m_index.tail; i++)
 			{
 				const GSVertex& v = m_vertex.buff[m_index.buff[i]];
@@ -5566,7 +5670,19 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 
 		if (extraLogEntries < maxExtraLogEntries)
 		{
+			const GSVector2i offset = GSVector2i(m_context->XYOFFSET.OFX, m_context->XYOFFSET.OFY);
+			fprintf(extraLog, "[%d] New verts:\n", s_n);
+			for (int i = 0; i < m_index.tail; i++)
+			{
+				const GSVertex& v = m_vertex.buff[m_index.buff[i]];
+				float x = (v.XYZ.X - offset.x) / 16.0f;
+				float y = (v.XYZ.Y - offset.y) / 16.0f;
+				float u = v.U / 16.0f;
+				float v_coord = v.V / 16.0f;
+				fprintf(extraLog, "[%d][%d] (X,U,Y,V)=(%8.04f,%8.04f,%8.04f,%8.04f)\n", s_n, i, x, u, y, v_coord);
+			}
 			// printf the config
+			fprintf(extraLog, "[%d] HW: Texture Shuffle: my_process_rg=%d my_process_ba=%d\n", s_n, my_process_rg, my_process_ba);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.process_rg=%d m_conf.ps.process_ba=%d\n", s_n, m_conf.ps.process_rg, m_conf.ps.process_ba);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.shuffle_across=%d\n", s_n, m_conf.ps.shuffle_across);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.colormask.wrgba=%x\n", s_n, m_conf.colormask.wrgba);

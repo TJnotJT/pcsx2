@@ -47,7 +47,7 @@
 
 #include "svnrev.h"
 
-std::string dumpName;
+extern std::string dumpName;
 
 namespace GSRunner
 {
