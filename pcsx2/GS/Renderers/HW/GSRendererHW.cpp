@@ -15,7 +15,7 @@
 #if PCSX2_DEBUG
 FILE* extraLog;
 int extraLogEntries = 0;
-constexpr int maxExtraLogEntries = 0;
+constexpr int maxExtraLogEntries = 10;
 std::string dumpName;
 #elif PCSX2_DEVEL
 FILE* extraLog;
@@ -409,6 +409,15 @@ struct Column
 	}
 };
 
+
+// Checks if the bits in x mask the all bits from 0:n for some integer n.
+// In other words, check whether x + 1 is a power of 2.
+template<typename T>
+static __forceinline bool IsLowerMask(T x)
+{
+	return (x & (x + 1)) == 0;
+}
+
 bool AnalyzeSprites(
 	const GSVertex* RESTRICT vert,
 	const u16* RESTRICT idx,
@@ -422,6 +431,25 @@ bool AnalyzeSprites(
 	GSVector2i& y_range
 )
 {
+	// Check region repeat mode to make sure it follows the pattern
+	// used for texture shuffles.
+	// FIME: This should be checked before!
+	int UMSK = -1;
+	int UFIX = -1;
+	if (clamp.WMS == CLAMP_REGION_REPEAT)
+	{
+		// Check if the UMSK (aka MINU) is either a power of 2 (does nothing)
+		// or a power of 2 with bit 3 missing (masks off bit 3 in U).
+		if (!IsLowerMask(clamp.MINU | 0x8))
+			return false;
+		// Check if UFIX (aka MINU) is either 0 (does nothing)
+		// or just has bit 3 set (sets bit 3 in U).
+		if (!(clamp.MAXU == 8 || clamp.MAXU == 0))
+			return false;
+		// Convert UMSK and UFIX to 4 bit fixed point
+		UMSK = static_cast<int>(clamp.MINU) << 4;
+		UFIX = static_cast<int>(clamp.MAXU) << 4;
+	}
 
 	std::map<int, std::map<int, Column>> column_map;
 
@@ -447,9 +475,10 @@ bool AnalyzeSprites(
 		int y0 = static_cast<int>(v[0]->XYZ.Y) - offset_y;
 		int y1 = static_cast<int>(v[1]->XYZ.Y) - offset_y;
 
+		// FIXME: Remove if not needed. Scissoring is probably handles elsewhere.
 		// Scissor y-region.
-		y0 = std::max(y0, scissor_y0);
-		y1 = std::min(y1, scissor_y1);
+		//y0 = std::max(y0, scissor_y0);
+		//y1 = std::min(y1, scissor_y1);
 
 		// Cull degenerate sprites.
 		if (y0 == y1)
@@ -459,8 +488,8 @@ bool AnalyzeSprites(
 		// This makes some math for U and X look the same.
 		const int u0 = static_cast<int>(v[0]->U) - 0x8; 
 		const int u1 = static_cast<int>(v[1]->U) - 0x8;
-		int v0 = static_cast<int>(v[0]->V);
-		int v1 = static_cast<int>(v[1]->V);
+		int v0 = static_cast<int>(v[0]->V) - 0x8;
+		int v1 = static_cast<int>(v[1]->V) - 0x8;
 
 		constexpr int dx = 1;
 		const int dy = y0 < y1 ? 1 : -1;
@@ -495,10 +524,11 @@ bool AnalyzeSprites(
 			u1i = CEIL4(u1i);
 		}
 		
+		// X and U are in inclusive coordinates so add +1 to width
 		const int width_x = x1i - x0i + 0x10;
-		const int height_y = y1 - y0;
-
 		int width_u = std::abs(u1i - u0i) + 0x10;
+
+		const int height_y = y1 - y0;
 		int height_v = v1 - v0;
 
 		// HACK: It seems that some games have U/V one pixel too large
@@ -525,13 +555,33 @@ bool AnalyzeSprites(
 		for (int j = 0; j < (width_x / 0x80); j++)
 		{
 			const int x = x0i + j * 0x80 * dx;
-			const int u = u0i + j * 0x80 * du;
+			int u = u0i + j * 0x80 * du;
 
 			// Cull any columns that fail the scissor test.
 			if (x + 0x80 <= scissor_x0)
 				continue;
 			if (x >= scissor_x1)
 				continue;
+
+			// Apply region repeat to U
+			// TODO: Use a general purpose function for mapping
+			// texture ranges as in exists in GSState.cpp;
+			if (clamp.WMS == CLAMP_REGION_REPEAT)
+			{
+				// Apply the region clamping to both endpoints of
+				// the group of 8 pixels and make sure they map to
+				// a new range of 8 pixels.
+				const int u0_new = (u & UMSK) | UFIX;
+				const int u1_new = ((u + 0x70 * du) & UMSK) | UFIX;
+				const int du_new = u0_new < u1_new ? 1 : -1;
+				if (std::abs(u1_new - u0_new) + 0x10 != 0x80)
+						return false; // The range is not exactly 8
+				if (u0_new & 0x7F)
+					return false; // First coord is not a multiple of 8
+				if ((u1_new + 0x10 * du) & 0x7F)
+					return false; // Second coord is not one away from a multiple of 8
+				u = u0_new;
+			}
 
 			const int column16_x = x >> 8;
 			const int column16_u = u >> 8;
@@ -546,9 +596,6 @@ bool AnalyzeSprites(
 				// would reverse the pixels again later on.
 				continue;
 			}
-
-			// TODO: Need to consider the clamp/wrap mode
-			pxAssertMsg(clamp.WMS != 3, "Using AnalyzeSprites with WMS==3!");
 			
 			// First group is RG (channel 0, 1). Second group is BA (channel 2, 3).
 			const int write_chan[2] = {2 * group8_x, 2 * group8_x + 1};
@@ -610,6 +657,9 @@ bool AnalyzeSprites(
 			}
 		}
 	}
+
+	if (column_map.empty())
+		return false;
 
 	// Analyze the list of blocks.
 	bool result_init = false;
@@ -688,6 +738,7 @@ bool AnalyzeSprites(
 	return true;
 }
 
+// FIXME: Remove this debugging code
 u32 my_process_ba;
 u32 my_process_rg;
 
@@ -699,7 +750,8 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 	GSVector2i y_range;
 	my_process_ba = process_ba;
 	my_process_rg = process_rg;
-	if (0)
+	pxAssertMsg(PRIM->FST, "Texture Shuffle with ST coordinates!");
+
 	if (AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
 			m_context->XYOFFSET,
 			m_context->SCISSOR,
@@ -719,7 +771,9 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		// Problems:
 		// 1. There might be color info different for each sprite
 		// 2. There might be alpha
-		// 3. 
+		// 3. Can we do this if using a decaling texture function (color not relevant)
+		//    although vertex trace might do this already.
+		// TODO: Add use color field to vertex trace?
 		if (m_vt.m_eq.rgba == 0xffff && m_vt.m_eq.z)
 		{
 			if (extraLogEntries < maxExtraLogEntries)
@@ -729,8 +783,9 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 			const int window_x0 = column_range.v[0] << 8;
 			const int window_x1 = (column_range.v[1] + 1) << 8;
 			const int window_y0 = y_range.v[0];
-			const int window_y1 = y_range.v[1] - (512 << 4); // FIXME!!!
-#if 1
+			// FIXME: NEED TO CHECK WHEN TO DOUBLE/HALVE ETC.!!
+			const int window_y1 = CEIL4(y_range.v[1]) / 2;
+
 			// FIXME: What if there is a translation between XY and UV?
 			m_vertex.buff[0].XYZ.X = m_context->XYOFFSET.OFX + window_x0;
 			m_vertex.buff[0].U = window_x0 + 0x8;
@@ -758,7 +813,7 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 
 			for (int i = 0; i < 4; i++)
 				m_r.F32[i] = m_vt.m_min.p.F32[i];
-#endif
+
 			// Compute which channels are processed and how
 			my_process_rg = 0;
 			my_process_ba = 0;
