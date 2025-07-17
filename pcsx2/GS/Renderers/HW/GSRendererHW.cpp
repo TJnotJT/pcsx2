@@ -355,60 +355,6 @@ void ensureExtraLog()
 
 #define TEXTURE_SHUFFLE_LOG(x) (void)(0)
 
-enum Flag
-{
-	R = 0,
-	G = 1,
-	B = 2,
-	A = 3,
-	UNKNOWN = 4
-};
-
-struct Column
-{
-	u8 channel[4]; // R, G, B, A
-	int y0;
-	int y1;
-
-	Column(int y0, int y1)
-		: y0(y0)
-		, y1(y1)
-	{
-		channel[0] = 0;
-		channel[1] = 1;
-		channel[2] = 2;
-		channel[3] = 3;
-	};
-
-	Column()
-		: Column(0, 0){};
-
-	bool Compatible(const Column& other)
-	{
-		for (int i = 0; i < 4; i++)
-		{
-			if (channel[i] != other.channel[i])
-			{
-				// If the channels are different, we only consider them
-				// compatible if one is UNKNOWN.
-				if (!(channel[i] == UNKNOWN || other.channel[i] == UNKNOWN))
-					return false;
-			}
-		}
-		return true;
-	}
-
-	// For merging with another compatible columns
-	void Merge(const Column& other)
-	{
-		for (int i = 0; i < 4; i++)
-		{
-			if (channel[i] != other.channel[i])
-				channel[i] = UNKNOWN;
-		}
-	}
-};
-
 
 // Checks if the bits in x mask the all bits from 0:n for some integer n.
 // In other words, check whether x + 1 is a power of 2.
@@ -418,24 +364,89 @@ static __forceinline bool IsLowerMask(T x)
 	return (x & (x + 1)) == 0;
 }
 
-bool AnalyzeSprites(
-	const GSVertex* RESTRICT vert,
-	const u16* RESTRICT idx,
-	const int nidx,
-	const GIFRegXYOFFSET& offset,
-	const GIFRegSCISSOR& scissor, 
-	const GIFRegCLAMP& clamp,
+bool GSRendererHW::AnalyzeSpritesShuffle(
+	// FIXME: Document
 	bool rt_is_tex,
-	Column& result,
-	GSVector2i& column_range,
+	
+	// Channel that are written to R, G, B, A.
+	// 0, 1, 2, 3 indicate R, G, B, A. Values > 3 indicate 'unknown'.
+	u8 channels[4],
+	
+	// X and Y range that are shuffled.
+	// These are in window coordinate in 4 bit fixed point.
+	GSVector2i& x_range,
 	GSVector2i& y_range
 )
 {
+	// Represents a rectangular region 8 pixels wide that has channels permuted.
+	struct ShuffleColumn
+	{
+		// Order R, G, B, A. Each entry represents the new channel that is written.
+		u8 channels[4];
+
+		// The range of y-values that the 8 pixel wide region spans.
+		int y0;
+		int y1;
+
+		ShuffleColumn(int y0, int y1)
+			: y0(y0)
+			, y1(y1)
+		{
+			channels[0] = 0;
+			channels[1] = 1;
+			channels[2] = 2;
+			channels[3] = 3;
+		};
+
+		ShuffleColumn()
+			: ShuffleColumn(0, 0){};
+
+		bool Compatible(const ShuffleColumn& other)
+		{
+			for (int i = 0; i < 4; i++)
+			{
+				if (channels[i] != other.channels[i])
+				{
+					// If the channels are different, we only consider them
+					// compatible if one is UNKNOWN.
+					if (!(channels[i] == UNKNOWN || other.channels[i] == UNKNOWN))
+						return false;
+				}
+			}
+			return true;
+		}
+
+		// For merging with another compatible range
+		void Merge(const ShuffleColumn& other)
+		{
+			for (int i = 0; i < 4; i++)
+			{
+				if (channels[i] != other.channels[i])
+					channels[i] = UNKNOWN;
+			}
+		}
+	};
+
+	// Get some of the context variables that are used
+	const GIFRegXYOFFSET& offset = m_context->XYOFFSET;
+	const GIFRegSCISSOR& scissor = m_context->SCISSOR;
+	const GIFRegCLAMP& clamp = m_context->CLAMP;
+
+	// Convert the scissor region to 4 bit fixed-point.
+	const int scissor_x0 = static_cast<int>(scissor.SCAX0) << 4;
+	const int scissor_x1 = static_cast<int>(scissor.SCAX1) << 4;
+	const int scissor_y0 = static_cast<int>(scissor.SCAY0) << 4;
+	const int scissor_y1 = static_cast<int>(scissor.SCAY1) << 4;
+
+	const int offset_x = static_cast<int>(offset.OFX);
+	const int offset_y = static_cast<int>(offset.OFY);
+
 	// Check region repeat mode to make sure it follows the pattern
 	// used for texture shuffles.
-	// FIME: This should be checked before!
-	int UMSK = -1;
-	int UFIX = -1;
+	// FIME: This should be checked before?
+	// TODO: What about the Y clamp/wrap?
+	int umsk = -1;
+	int ufix = -1;
 	if (clamp.WMS == CLAMP_REGION_REPEAT)
 	{
 		// Check if the UMSK (aka MINU) is either a power of 2 (does nothing)
@@ -447,25 +458,22 @@ bool AnalyzeSprites(
 		if (!(clamp.MAXU == 8 || clamp.MAXU == 0))
 			return false;
 		// Convert UMSK and UFIX to 4 bit fixed point
-		UMSK = static_cast<int>(clamp.MINU) << 4;
-		UFIX = static_cast<int>(clamp.MAXU) << 4;
+		umsk = static_cast<int>(clamp.MINU) << 4;
+		ufix = static_cast<int>(clamp.MAXU) << 4;
 	}
 
-	std::map<int, std::map<int, Column>> column_map;
+	// Note: most values used below are in 4 bit fixed point format.
 
-	// Convert the scissor region to 4 bit fixed-point.
-	const int scissor_x0 = static_cast<int>(scissor.SCAX0) << 4;
-	const int scissor_x1 = static_cast<int>(scissor.SCAX1) << 4;
-	const int scissor_y0 = static_cast<int>(scissor.SCAY0) << 4;
-	const int scissor_y1 = static_cast<int>(scissor.SCAY1) << 4;
+	// Maps (y0, x0 / 8) to the shuffle information where
+	// (y0, x0) is one of the coordinates of the corners.
+	std::map<int, std::map<int, ShuffleColumn>> column_map;
 
-	const int offset_x = static_cast<int>(offset.OFX);
-	const int offset_y = static_cast<int>(offset.OFY);
-
-
-	for (int i = 0; i < nidx; i += 2)
+	for (int i = 0; i < m_index.tail; i += 2)
 	{
-		const GSVertex* v[2] = { &vert[idx[i]], &vert[idx[i + 1]] };
+		const GSVertex* v[2] = {
+			&m_vertex.buff[m_index.buff[i]],
+			&m_vertex.buff[m_index.buff[i + 1]],
+		};
 
 		if (v[0]->XYZ.X > v[1]->XYZ.X)
 			std::swap(v[0], v[1]);
@@ -571,8 +579,8 @@ bool AnalyzeSprites(
 				// Apply the region clamping to both endpoints of
 				// the group of 8 pixels and make sure they map to
 				// a new range of 8 pixels.
-				const int u0_new = (u & UMSK) | UFIX;
-				const int u1_new = ((u + 0x70 * du) & UMSK) | UFIX;
+				const int u0_new = (u & umsk) | ufix;
+				const int u1_new = ((u + 0x70 * du) & umsk) | ufix;
 				const int du_new = u0_new < u1_new ? 1 : -1;
 				if (std::abs(u1_new - u0_new) + 0x10 != 0x80)
 						return false; // The range is not exactly 8
@@ -605,13 +613,10 @@ bool AnalyzeSprites(
 			// TODO: Must check that all Y-values are the same?
 			u32 key = (group8_x & 0xFFFF) | (static_cast<int>(v[0]->XYZ.Y) << 16);
 
-			// TODO: Make more efficent use of std::map lookup
-			if (column_map.find(y0) == column_map.end())
-				column_map[y0] = std::map<int, Column>();
-			if (column_map[y0].find(column16_x) == column_map[y0].end())
-				column_map[y0][column16_x] = Column(y0, y1);
-
-			Column& col_ref = column_map[y0][column16_x];
+			// Lookup or create the entry in the map
+			std::map<int, ShuffleColumn>& map  = column_map[y0];
+			auto it = map.try_emplace(column16_x, y0, y1).first;
+			ShuffleColumn& col_ref = (*it).second;
 
 			// Make sure all sprites with the same y0 have the same y1
 			if (y1 != col_ref.y1)
@@ -621,8 +626,8 @@ bool AnalyzeSprites(
 			{
 				// We are moving data between words with different addresses.
 				// We don't know how to handle this yet so ignore such writes.
-				col_ref.channel[write_chan[0]] = UNKNOWN;
-				col_ref.channel[write_chan[1]] = UNKNOWN;
+				col_ref.channels[write_chan[0]] = UNKNOWN;
+				col_ref.channels[write_chan[1]] = UNKNOWN;
 				continue;
 			}
 
@@ -642,48 +647,50 @@ bool AnalyzeSprites(
 				{
 					// Source texture is different from the RT so
 					// just overwrite what was already there.
-					col_ref.channel[write_chan[0]] = read_chan[0];
-					col_ref.channel[write_chan[1]] = read_chan[1];
+					col_ref.channels[write_chan[0]] = read_chan[0];
+					col_ref.channels[write_chan[1]] = read_chan[1];
 				}
 				else
 				{
 					// Source texture is the same as the RT so
 					// compose with the previous mappings.
-					const int new_chan0 = col_ref.channel[read_chan[0]];
-					const int new_chan1 = col_ref.channel[read_chan[1]];
-					col_ref.channel[write_chan[0]] = new_chan0;
-					col_ref.channel[write_chan[1]] = new_chan1;
+					const int new_chan0 = col_ref.channels[read_chan[0]];
+					const int new_chan1 = col_ref.channels[read_chan[1]];
+					col_ref.channels[write_chan[0]] = new_chan0;
+					col_ref.channels[write_chan[1]] = new_chan1;
 				}
 			}
 		}
 	}
 
 	if (column_map.empty())
-		return false;
+		return false; // Nothing got shuffled
 
 	// Analyze the list of blocks.
-	bool result_init = false;
-	bool column_range_init = false;
+	ShuffleColumn merged;
+	bool merged_init = false;
+	bool x_range_init = false;
 	bool y_range_init = false;
 
 	for (const auto& [y0, column_map2] : column_map)
 	{
-		GSVector2i column_range0(INT_MAX, INT_MIN);
+		int group_min = INT_MAX;
+		int group_max = INT_MIN;
 		int y1 = INT_MIN;
-		for (const auto& [column16_x, column] : column_map2)
+		for (const auto& [group8_x, column] : column_map2)
 		{
-			if (!result_init)
+			if (!merged_init)
 			{
-				result = column;
-				result_init = true;
+				merged = column;
+				merged_init = true;
 			}
 
-			if (!result.Compatible(column))
+			if (!merged.Compatible(column))
 				return false;
-			result.Merge(column);
+			merged.Merge(column);
 
-			column_range0.v[0] = std::min(column16_x, column_range0.v[0]);
-			column_range0.v[1] = std::max(column16_x, column_range0.v[1]);
+			group_min = std::min(group8_x, group_min);
+			group_max = std::max(group8_x, group_max);
 
 			// We already checked that all y1 values are the same.
 			pxAssert(y1 == INT_MIN || y1 == column.y1);
@@ -691,170 +698,182 @@ bool AnalyzeSprites(
 		}
 
 		// Check if there are gaps in the columns
-		if (column_range0.v[1] - column_range0.v[0] + 1 !=
-			static_cast<int>(column_map2.size()))
+		if (group_max - group_min + 1 != static_cast<int>(column_map2.size()))
 			return false;
 
-		if (!column_range_init)
-		{
-			column_range = column_range0;
-			column_range_init = true;
-		}
+		GSVector2i x_range_tmp = { group_min << 8, (group_max + 1) << 8 };
 
-		// Check if the column range is the same for all rows.
-		if (column_range0 != column_range)
-			return false;
-		
-		const GSVector2i y_range0 = {
-			std::min(y0, y1),
-			std::max(y0, y1),
-		};
-		// Check if the y-values line up
-		if (y_range_init)
+		if (x_range_init)
 		{
-			// TODO: Make sure direction of y-values is the same always?
-			if (y_range0.v[0] != y_range.v[1] && y_range0.v[1] != y_range.v[0])
+			// Check if the X range is the same for all rows
+			if (x_range_tmp != x_range)
 				return false;
-			y_range.v[0] = std::min(y_range.v[0], y_range0.v[0]);
-			y_range.v[1] = std::max(y_range.v[1], y_range0.v[1]);
 		}
 		else
 		{
-			y_range = y_range0;
+			x_range = x_range_tmp;
+			x_range_init = true;
+		}
+		
+		const GSVector2i y_range_tmp = {
+			std::min(y0, y1),
+			std::max(y0, y1)
+		};
+
+		if (y_range_init)
+		{
+			// Check that the Y ranges can be concatenated without gaps
+			// TODO: Make sure direction of y-values is the same always?
+			if (y_range_tmp.v[0] != y_range.v[1] && y_range_tmp.v[1] != y_range.v[0])
+				return false;
+			y_range.v[0] = std::min(y_range.v[0], y_range_tmp.v[0]);
+			y_range.v[1] = std::max(y_range.v[1], y_range_tmp.v[1]);
+		}
+		else
+		{
+			y_range = y_range_tmp;
 			y_range_init = true;
 		}
 	}
 
+	// Write out the permuted channels
+	for (int i = 0; i < 4; i++)
+		channels[i] = merged.channels[i];
+
 	if (extraLogEntries < maxExtraLogEntries)
 	{
-		fprintf(extraLog, "[%d] column_range = %d, %d\n", GSState::s_n, column_range.v[0], column_range.v[1]);
-		fprintf(extraLog, "[%d] y_range = %f, %f\n", GSState::s_n, y_range.v[0] / 16.0f,
-			y_range.v[1] / 16.0f);
+		fprintf(extraLog, "[%d] x_range = %f, %f\n", GSState::s_n, x_range.v[0] / 16.0f, x_range.v[1] / 16.0f);
+		fprintf(extraLog, "[%d] y_range = %f, %f\n", GSState::s_n, y_range.v[0] / 16.0f, y_range.v[1] / 16.0f);
 		const char* chan_str[] = {"R", "G", "B", "A", "U"};
 		fprintf(extraLog, "[%d] mapping = R=%s, G=%s, B=%s, A=%s\n", GSState::s_n,
-			chan_str[result.channel[0]], chan_str[result.channel[1]],
-			chan_str[result.channel[2]], chan_str[result.channel[3]]);
+			chan_str[merged.channels[0]], chan_str[merged.channels[1]],
+			chan_str[merged.channels[2]], chan_str[merged.channels[3]]);
 	}
 	return true;
 }
 
-// FIXME: Remove this debugging code
-u32 my_process_ba;
-u32 my_process_rg;
-
-// Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
-void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
+// FIXME: We might have to split up the functionality of AnalyzeSprites and Convert
+bool GSRendererHW::ConvertSpriteTextureShuffle2(
+	u32& process_rg, u32& process_ba, bool& shuffle_across,
+	GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
-	Column result;
-	GSVector2i column_range;
+	GSVector2i x_range;
 	GSVector2i y_range;
-	my_process_ba = process_ba;
-	my_process_rg = process_rg;
+	u8 channels[4];
 	pxAssertMsg(PRIM->FST, "Texture Shuffle with ST coordinates!");
 
-	if (AnalyzeSprites(m_vertex.buff, m_index.buff, m_index.tail,
-			m_context->XYOFFSET,
-			m_context->SCISSOR,
-			m_context->CLAMP,
+	if (!AnalyzeSpritesShuffle(
 			tex && tex->m_from_target && rt == tex->m_from_target,
-			result,
-			column_range,
-			y_range
-	))
-	{
-		if (extraLogEntries < maxExtraLogEntries)
-		{
-			fprintf(extraLog, "[%d] AnalyzeSprites successful\n", s_n);
-		}
-		// TODO: What does shuffle_across do?
-		// Replace the sprites with a single big sprite based on the analysis
-		// Problems:
-		// 1. There might be color info different for each sprite
-		// 2. There might be alpha
-		// 3. Can we do this if using a decaling texture function (color not relevant)
-		//    although vertex trace might do this already.
-		// TODO: Add use color field to vertex trace?
-		if (m_vt.m_eq.rgba == 0xffff && m_vt.m_eq.z)
-		{
-			if (extraLogEntries < maxExtraLogEntries)
-			{
-				fprintf(extraLog, "[%d] Converting vertices\n", s_n);
-			}
-			const int window_x0 = column_range.v[0] << 8;
-			const int window_x1 = (column_range.v[1] + 1) << 8;
-			const int window_y0 = y_range.v[0];
-			// FIXME: NEED TO CHECK WHEN TO DOUBLE/HALVE ETC.!!
-			const int window_y1 = CEIL4(y_range.v[1]) / 2;
-
-			// FIXME: What if there is a translation between XY and UV?
-			m_vertex.buff[0].XYZ.X = m_context->XYOFFSET.OFX + window_x0;
-			m_vertex.buff[0].U = window_x0 + 0x8;
-			m_vertex.buff[1].XYZ.X = m_context->XYOFFSET.OFX + window_x1;
-			m_vertex.buff[1].U = window_x1 + 0x8;
-
-			m_vertex.buff[0].XYZ.Y = m_context->XYOFFSET.OFY + window_y0;
-			m_vertex.buff[0].V = window_y0 + 0x8;
-			m_vertex.buff[1].XYZ.Y = m_context->XYOFFSET.OFY + window_y1;
-			m_vertex.buff[1].V = window_y1 + 0x8;
-
-			m_index.buff[0] = 0;
-			m_index.buff[1] = 1;
-			m_index.tail = m_vertex.head = m_vertex.tail = m_vertex.next = 2;
-
-			// Convert columns to X
-			m_vt.m_min.p.x = window_x0 / 16.0f;
-			m_vt.m_max.p.x = window_x1 / 16.0f;
-			pxAssert(window_x0 <= window_x1);
-
-			// Y is in 4 bits fixed-point format
-			m_vt.m_min.p.y = y_range.v[0] / 16.0f;
-			m_vt.m_max.p.y = y_range.v[1] / 16.0f;
-			pxAssert(y_range.v[0] <= y_range.v[1]);
-
-			for (int i = 0; i < 4; i++)
-				m_r.F32[i] = m_vt.m_min.p.F32[i];
-
-			// Compute which channels are processed and how
-			my_process_rg = 0;
-			my_process_ba = 0;
-			for (u8 chan_write = 0; chan_write < 4; chan_write++)
-			{
-				u8 chan_read = result.channel[chan_write];
-				if (chan_write == Flag::UNKNOWN)
-					continue;
-				if (chan_write == chan_read)
-					continue;
-				const u8 chan[2] = {chan_read, chan_write};
-				const u32 process_flag[2] = {SHUFFLE_READ, SHUFFLE_WRITE};
-				for (int j = 0; j < 2; j++)
-				{
-					switch (chan[j])
-					{
-						case Flag::R:
-						case Flag::G:
-							my_process_rg |= process_flag[j];
-							break;
-						case Flag::B:
-						case Flag::A:
-							my_process_ba |= process_flag[j];
-							break;
-						default:
-							pxAssert("Bad channel");
-					}
-				}
-			}
-			process_rg = my_process_rg;
-			process_ba = my_process_ba;
-			return;
-		}
-	}
-	else
+			channels,
+			x_range,
+			y_range))
 	{
 		if (extraLogEntries < maxExtraLogEntries)
 		{
 			fprintf(extraLog, "[%d] AnalyzeSprites failed\n", s_n);
 		}
+		return false;
 	}
+
+	if (extraLogEntries < maxExtraLogEntries)
+	{
+		fprintf(extraLog, "[%d] AnalyzeSprites successful\n", GSState::s_n);
+	}
+	// TODO: What does shuffle_across do?
+	// TODO: Make this a separate function!
+	// Replace the sprites with a single big sprite based on the analysis
+	// Problems:
+	// 1. There might be color info different for each sprite
+	// 2. There might be alpha
+	// 3. Can we do this if using a decaling texture function (color not relevant)
+	//    although vertex trace might do this already.
+	// TODO: Add use color field to vertex trace? Might already be handled.
+	// TODO: Possibly allow not making the sprites an single large sprite
+	// but instead just snap the coordiantes and modify them appropriately.
+	if (!(m_vt.m_eq.rgba == 0xffff && m_vt.m_eq.z))
+	{
+		if (extraLogEntries < maxExtraLogEntries)
+		{
+			fprintf(extraLog, "[%d] AnalyzeSprites failed (vertex trace)\n", s_n);
+		}
+		return false;
+	}
+
+	if (extraLogEntries < maxExtraLogEntries)
+	{
+		fprintf(extraLog, "[%d] Converting vertices\n", s_n);
+	}
+	const int window_x0 = x_range.v[0];
+	const int window_x1 = x_range.v[1];
+	const int window_y0 = y_range.v[0];
+	// FIXME: NEED TO CHECK WHEN TO DOUBLE/HALVE ETC.!!
+	const int window_y1 = CEIL4(y_range.v[1]) / 2;
+
+	// FIXME: What if there is a translation between XY and UV?
+	m_vertex.buff[0].XYZ.X = m_context->XYOFFSET.OFX + window_x0;
+	m_vertex.buff[0].U = window_x0 + 0x8;
+	m_vertex.buff[1].XYZ.X = m_context->XYOFFSET.OFX + window_x1;
+	m_vertex.buff[1].U = window_x1 + 0x8;
+
+	m_vertex.buff[0].XYZ.Y = m_context->XYOFFSET.OFY + window_y0;
+	m_vertex.buff[0].V = window_y0 + 0x8;
+	m_vertex.buff[1].XYZ.Y = m_context->XYOFFSET.OFY + window_y1;
+	m_vertex.buff[1].V = window_y1 + 0x8;
+
+	m_index.buff[0] = 0;
+	m_index.buff[1] = 1;
+	m_index.tail = m_vertex.head = m_vertex.tail = m_vertex.next = 2;
+
+	// Convert columns to X
+	m_vt.m_min.p.x = window_x0 / 16.0f;
+	m_vt.m_max.p.x = window_x1 / 16.0f;
+	pxAssert(window_x0 <= window_x1);
+
+	// Y is in 4 bits fixed-point format
+	m_vt.m_min.p.y = y_range.v[0] / 16.0f;
+	m_vt.m_max.p.y = y_range.v[1] / 16.0f;
+	pxAssert(y_range.v[0] <= y_range.v[1]);
+
+	for (int i = 0; i < 4; i++)
+		m_r.F32[i] = m_vt.m_min.p.F32[i];
+
+	// Compute which channels are processed and how
+	for (u8 chan_write = 0; chan_write < 4; chan_write++)
+	{
+		u8 chan_read = channels[chan_write];
+		if (chan_write == Flag::UNKNOWN)
+			continue;
+		if (chan_write == chan_read)
+			continue;
+		const u8 chan[2] = {chan_read, chan_write};
+		const u32 process_flag[2] = {SHUFFLE_READ, SHUFFLE_WRITE};
+		for (int j = 0; j < 2; j++)
+		{
+			switch (chan[j])
+			{
+				case Flag::R:
+				case Flag::G:
+					process_rg |= process_flag[j];
+					break;
+				case Flag::B:
+				case Flag::A:
+					process_ba |= process_flag[j];
+					break;
+				default:
+					pxAssert("Bad channel");
+			}
+		}
+	}
+	return true;
+}
+
+// Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
+void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across,
+	GSTextureCache::Target* rt, GSTextureCache::Source* tex)
+{
+	if (ConvertSpriteTextureShuffle2(process_rg, process_ba, shuffle_across, rt, tex))
+		return;
+
 	const u32 count = m_vertex.next;
 	GSVertex* v = &m_vertex.buff[0];
 	const u16* idx = &m_index.buff[0];
@@ -932,6 +951,7 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 				m_vt.m_max.p.z = m_r.z;
 			}
 
+			// NOTE: Check for whether to half or double is here
 			if (m_cached_ctx.FRAME.FBW != rt->m_TEX0.TBW && m_cached_ctx.FRAME.FBW == rt->m_TEX0.TBW * 2)
 			{
 				half_bottom_vert = false;
@@ -1095,10 +1115,9 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		}
 	}
 
-	//Console.WriteLn("[%d] Texture Shuffle Vertices Before/After", s_n);
 	if (PRIM->FST)
 	{
-		//GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
+		GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
 		const int reversed_pos = (v[0].XYZ.X > v[1].XYZ.X) ? 1 : 0;
 		const int reversed_U = (v[0].U > v[1].U) ? 1 : 0;
 		for (u32 i = 0; i < count; i += 2)
@@ -5737,7 +5756,6 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 				fprintf(extraLog, "[%d][%d] (X,U,Y,V)=(%8.04f,%8.04f,%8.04f,%8.04f)\n", s_n, i, x, u, y, v_coord);
 			}
 			// printf the config
-			fprintf(extraLog, "[%d] HW: Texture Shuffle: my_process_rg=%d my_process_ba=%d\n", s_n, my_process_rg, my_process_ba);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.process_rg=%d m_conf.ps.process_ba=%d\n", s_n, m_conf.ps.process_rg, m_conf.ps.process_ba);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.ps.shuffle_across=%d\n", s_n, m_conf.ps.shuffle_across);
 			fprintf(extraLog, "[%d] HW: Texture Shuffle: m_conf.colormask.wrgba=%x\n", s_n, m_conf.colormask.wrgba);

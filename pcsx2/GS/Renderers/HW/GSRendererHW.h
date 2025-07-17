@@ -214,12 +214,23 @@ public:
 
 	void UpdateRenderFixes() override;
 
+	enum Flag
+	{
+		R = 0,
+		G = 1,
+		B = 2,
+		A = 3,
+		UNKNOWN = 4
+	};
+
 	bool CanUpscale() override;
 	float GetUpscaleMultiplier() override;
 	void Lines2Sprites();
 	bool VerifyIndices();
 	void ExpandLineIndices();
 	void ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
+	bool ConvertSpriteTextureShuffle2(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
+	bool AnalyzeSpritesShuffle(bool rt_is_tex, u8 channels[4], GSVector2i& x_range, GSVector2i& y_range);
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);
 	void MergeSprite(GSTextureCache::Source* tex);
