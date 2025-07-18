@@ -4358,6 +4358,14 @@ void GSState::CorrectATEAlphaMinMax(const u32 atst, const int aref)
 	m_vt.m_alpha.max = amax;
 }
 
+// Returns true if the result of the alpha test is
+// always redundant because the pixels that would be
+// written are the same whether it fails or not (or
+// because it always fails or always passes).
+// This means that there is not point in emulating the
+// alpha test. The masks fm and zm are updated to indicate
+// which bits can be masked to emulate the alpha test
+// without actually doing an alpha test.
 bool GSState::TryAlphaTest(u32& fm, u32& zm)
 {
 	// Shortcut for the easy case
@@ -4373,16 +4381,16 @@ bool GSState::TryAlphaTest(u32& fm, u32& zm)
 	{
 		case AFAIL_KEEP:
 			break;
-		case AFAIL_FB_ONLY:
+		case AFAIL_FB_ONLY: // Framebuffer always updated
 			if (zm == 0xFFFFFFFF)
 				return true;
 			break;
 		case AFAIL_ZB_ONLY:
-			if ((fm & framemask) == framemask)
+			if ((fm & framemask) == framemask) // We are already controlling writing to the frame so the alpha test is unneeded
 				return true;
 			break;
 		case AFAIL_RGB_ONLY:
-			if (zm == 0xFFFFFFFF && (fm & framemaskalpha) == framemaskalpha)
+			if (zm == 0xFFFFFFFF && (fm & framemaskalpha) == framemaskalpha) // The masks already take care of the alpha test
 				return true;
 			break;
 		default:
@@ -4403,6 +4411,8 @@ bool GSState::TryAlphaTest(u32& fm, u32& zm)
 
 		const int aref = m_context->TEST.AREF;
 
+		// Block determined if we can always determine result of alpha test
+		// otherwise return false
 		switch (m_context->TEST.ATST)
 		{
 			case ATST_NEVER:
@@ -4486,6 +4496,7 @@ bool GSState::TryAlphaTest(u32& fm, u32& zm)
 		}
 	}
 
+	// We were able to successfully determine th result of the alpha test and the mask
 	return true;
 }
 

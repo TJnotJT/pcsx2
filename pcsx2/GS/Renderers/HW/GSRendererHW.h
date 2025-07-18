@@ -231,6 +231,7 @@ public:
 	void ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	bool ConvertSpriteTextureShuffle2(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	bool AnalyzeSpritesShuffle(bool rt_is_tex, u8 channels[4], GSVector2i& x_range, GSVector2i& y_range);
+	bool AnalyzeSpritesShuffle();
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);
 	void MergeSprite(GSTextureCache::Source* tex);
@@ -279,4 +280,37 @@ public:
 
 	/// Submits a previously set up HLE hardware draw, copying any textures as needed if there's hazards.
 	void EndHLEHardwareDraw(bool force_copy_on_hazard = false);
+
+	enum SplitState
+	{
+		SPLIT_NONE,
+		SPLIT_TEXTURE_SHUFFLE
+	};
+
+	struct ShuffleState
+	{
+		enum
+		{
+			CHANNEL_R = 0,
+			CHANNEL_G = 1,
+			CHANNEL_B = 2,
+			CHANNEL_A = 3,
+			CHANNEL_INVALID = 4
+		};
+		u8 channels[4];      // Maps output channel to input channel.
+		u32 real_FBP = 0;   // Save this state in case the shuffle is split over multiple draws
+		u32 real_FBW = 0;
+		u32 real_TBP = 0;
+		u32 real_TBW = 0;
+		u32 page_start = 0;      // First page modified by the shuffle
+		u32 page_end = 0;        // Last page modified by the shuffle
+		GSVector4 rect;
+	};
+
+	SplitState m_split_state = SPLIT_NONE;
+	ShuffleState m_shuffle_state;
+
+	void PrintTSContext(); // FIXME: For debugging. Remove later.
+	void PrintTSVerts(); // FIXME: For debugging. Remove later.
+	void PrintTSConfig(); // FIXME: For debugging. Remove later.
 };

@@ -806,6 +806,8 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		Console.WriteLn(fmt::format("Saving dumps as {}_frameN.png", s_output_prefix));
 	}
 
+	s_settings_interface.SetIntValue("EmuCore/GS", "accurate_blending_unit", 2);
+
 	return true;
 }
 
