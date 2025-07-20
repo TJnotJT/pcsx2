@@ -13,7 +13,7 @@
 #include <bit>
 #include <cstdarg>
 
-#define ENABLE_NEW_TS 0
+#define ENABLE_NEW_TS 1
 
 #if PCSX2_DEBUG
 FILE* tsLog;
@@ -385,6 +385,8 @@ static __forceinline bool IsLowerMask(T x)
 	return (x & (x + 1)) == 0;
 }
 
+
+// TODO: Lets' make this infer the offset between X and U.
 bool GSRendererHW::AnalyzeSpritesShuffle(
 	// FIXME: Document
 	bool rt_is_tex,
@@ -397,7 +399,12 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 	// X and Y range that are shuffled.
 	// These are in window coordinate in 4 bit fixed point.
 	GSVector2i& x_range,
-	GSVector2i& y_range
+	GSVector2i& y_range,
+
+	int& page_offset_x,
+	int& page_offset_y,
+	int& page_offset_u,
+	int& page_offset_v
 )
 {
 	// Represents a rectangular region 8 pixels wide that has channels permuted.
@@ -431,7 +438,10 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 				{
 					// If the channels are different, we only consider them
 					// compatible if one is UNKNOWN.
-					if (!(channels[i] == UNKNOWN || other.channels[i] == UNKNOWN))
+					if (!(
+						channels[i] == ShuffleState::CHANNEL_INVALID ||
+						other.channels[i] == ShuffleState::CHANNEL_INVALID
+					))
 						return false;
 				}
 			}
@@ -444,7 +454,7 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 			for (int i = 0; i < 4; i++)
 			{
 				if (channels[i] != other.channels[i])
-					channels[i] = UNKNOWN;
+					channels[i] = ShuffleState::CHANNEL_INVALID;
 			}
 		}
 	};
@@ -460,8 +470,20 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 	const int scissor_y0 = static_cast<int>(scissor.SCAY0) << 4;
 	const int scissor_y1 = static_cast<int>(scissor.SCAY1) << 4;
 
+
+	// FIXME: Rename offset arguments
 	const int offset_x = static_cast<int>(offset.OFX);
 	const int offset_y = static_cast<int>(offset.OFY);
+	
+	// Inferred offsets incase there is some shifting
+	// of the frame or texture base pointer. We always
+	// assume that these offsets are multiple of 64
+	// (the width and height of a PSMCT16 page).
+	bool page_offset_init = false;
+	page_offset_x = 0;
+	page_offset_y = 0;
+	page_offset_u = 0;
+	page_offset_v = 0;
 
 	// Check region repeat mode to make sure it follows the pattern
 	// used for texture shuffles.
@@ -484,8 +506,6 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 		ufix = static_cast<int>(clamp.MAXU) << 4;
 	}
 
-	// Note: most values used below are in 4 bit fixed point format.
-
 	// Maps (y0, x0 / 8) to the shuffle information where
 	// (y0, x0) is one of the coordinates of the corners.
 	std::map<int, std::map<int, ShuffleColumn>> column_map;
@@ -500,15 +520,10 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 		if (v[0]->XYZ.X > v[1]->XYZ.X)
 			std::swap(v[0], v[1]);
 
-		const int x0 = static_cast<int>(v[0]->XYZ.X) - offset_x;
-		const int x1 = static_cast<int>(v[1]->XYZ.X) - offset_x;
+		int x0 = static_cast<int>(v[0]->XYZ.X) - offset_x;
+		int x1 = static_cast<int>(v[1]->XYZ.X) - offset_x;
 		int y0 = static_cast<int>(v[0]->XYZ.Y) - offset_y;
 		int y1 = static_cast<int>(v[1]->XYZ.Y) - offset_y;
-
-		// FIXME: Remove if not needed. Scissoring is probably handles elsewhere.
-		// Scissor y-region.
-		//y0 = std::max(y0, scissor_y0);
-		//y1 = std::min(y1, scissor_y1);
 
 		// Cull degenerate sprites.
 		if (y0 == y1)
@@ -516,15 +531,33 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 
 		// Subtract half texels for U so that integers are texel centers.
 		// This makes some math for U and X look the same.
-		const int u0 = static_cast<int>(v[0]->U) - 0x8; 
-		const int u1 = static_cast<int>(v[1]->U) - 0x8;
+		int u0 = static_cast<int>(v[0]->U) - 0x8; 
+		int u1 = static_cast<int>(v[1]->U) - 0x8;
 		int v0 = static_cast<int>(v[0]->V) - 0x8;
 		int v1 = static_cast<int>(v[1]->V) - 0x8;
+
+		if (!page_offset_init)
+		{
+			// Round coordinate to nearest multiple of 64 pixels/texels
+			const int page_offset_x = (x0 + 0x200) & ~0x3FF;
+			const int page_offset_y = (y0 + 0x200) & ~0x3FF;
+			const int page_offset_u = (u0 + 0x200) & ~0x3FF;
+			const int page_offset_v = (v0 + 0x200) & ~0x3FF;
+
+			page_offset_init = true;
+		}
+
+		// Remove the page offset
+		x0 -= page_offset_x;
+		y0 -= page_offset_y;
+		u0 -= page_offset_u;
+		v0 -= page_offset_v;
 
 		constexpr int dx = 1;
 		const int dy = y0 < y1 ? 1 : -1;
 		const int du = u0 < u1 ? 1 : -1;
 		const int dv = v0 < v1 ? 1 : -1;
+
 
 		// Y and V coordinates should be somewhat the same and in the same direction.
 		// There are cases where the V range is bigger by 1 texel so we allow some tolerance.
@@ -776,26 +809,121 @@ bool GSRendererHW::AnalyzeSpritesShuffle(
 	return true;
 }
 
-bool GSRendererHW::AnalyzeSpritesShuffle()
+bool GetContiguousPages(int buffer_pages_x, GSVector2i page_size, GSVector4i rect,
+	int& page_start, int& page_end)
 {
+	// All coordinates should be pages aligned
+	if (rect.left % page_size.x != 0 ||
+		rect.right % page_size.x != 0 ||
+		rect.top % page_size.y != 0 ||
+		rect.bottom % page_size.y != 0)
+		return false;
+
+	GSVector4i page_rect = {
+		rect.left / page_size.x,
+		rect.top / page_size.y,
+		rect.right / page_size.x,
+		rect.bottom / page_size.y,
+	};
+
+	page_start = page_rect.top * buffer_pages_x + page_rect.left;
+	page_end = (page_rect.bottom - 1) * buffer_pages_x + (page_rect.left - 1);
+
+	// Check if rectangle is on single row of pages
+	if (page_rect.height() == 1)
+		return true;
+	
+	// FIXME: Make sure that this is true!
+	// Check if the rectangles spans all pages horizontally 
+	if (page_rect.width() >= buffer_pages_x)
+		return true;
+}
+
+void GSRendererHW::AnalyzeSpritesShuffle()
+{
+	// Compute the offset
+	int offset_x;
+	int offset_y;
+	int offset_u;
+	int offset_v;
+
+	m_shuffle_state.found_shuffle = true;
+
+	// FIXME: MAKE A FUNCTION TO COMPUTE THE OFFSET MORE EASILY?
+#if 0
+	if (m_split_state == SPLIT_TEXTURE_SHUFFLE)
+	{
+		// TODO: Need to be able to infer the true FBW and TBW?
+		int FBP_page_diff = m_context->FRAME.FBP - m_shuffle_state.real_FBP; // FIXME; Rename to orig FBP
+
+		const int page_offset_x = FBP_page_diff % m_context->FRAME.FBW; // FIXME: Rename to frame width
+		const int page_offset_y = FBP_page_diff / m_context->FRAME.FBW;
+
+		offset_x = page_offset_x * GSLocalMemory::m_psm[PSMCT32].pgs.x;
+		offset_y = page_offset_y * GSLocalMemory::m_psm[PSMCT32].pgs.y;
+
+		const int TBP_block_diff = m_context->TEX0.TBP0 - m_shuffle_state.real_TBP;
+		if ((TBP_block_diff % BLOCKS_PER_PAGE) != 0)
+		{
+			TSDebug("Split Texture Shuffle: Error: TBP difference is not page aligned.\n");
+			return false;
+		}
+		const int TBP_page_diff = TBP_block_diff / BLOCKS_PER_PAGE;
+
+		const int page_offset_u = TBP_block_diff % m_context->TEX0.TBW;
+		const int page_offset_v = TBP_block_diff / m_context->TEX0.TBW;
+
+		offset_u = page_offset_u * GSLocalMemory::m_psm[PSMCT32].pgs.x;
+		offset_v = page_offset_v * GSLocalMemory::m_psm[PSMCT32].pgs.y;
+	}
+#endif
+
 	u8 channels[4];
 	GSVector2i x_range;
 	GSVector2i y_range;
 
-	if (!AnalyzeSpritesShuffle(false, channels, x_range, y_range))
-		return false;
+	m_shuffle_state.found_shuffle = AnalyzeSpritesShuffle(
+		false, channels, x_range, y_range, offset_x, offset_y, offset_u, offset_v);
+	m_shuffle_state.analyzed_draw = true;
+
+	if (!m_shuffle_state.found_shuffle)
+	{
+		TSDebug("AnalyzeSprites failed\n");
+		return;
+	}
+
+	TSDebug("AnalyzeSprites succeeded\n");
 
 	for (int i = 0; i < 4; i++)
 		m_shuffle_state.channels[i] = channels[i];
 
-	m_shuffle_state.rect = GSVector4(
-		x_range.v[0] / 16.0f,
-		y_range.v[0] / 16.0f,
-		x_range.v[1] / 16.0f,
-		y_range.v[1] / 16.0f
+	m_shuffle_state.xy_rect = GSVector4i(
+		(offset_x + x_range.v[0]) >> 4,
+		(offset_y + y_range.v[0]) >> 4,
+		(offset_x + x_range.v[1]) >> 4,
+		(offset_y + y_range.v[1]) >> 4
 	);
 
-	return true;
+	// FIXME: Need to worry about half pixel offset
+	m_shuffle_state.uv_rect = GSVector4i(
+		(offset_u + x_range.v[0]) >> 4,
+		(offset_v + y_range.v[0]) >> 4,
+		(offset_u + x_range.v[1]) >> 4,
+		(offset_v + y_range.v[1]) >> 4
+	);
+	
+	int pages_start_xy = -1;
+	int pages_end_xy = -1;
+	int pages_start_uv = -1;
+	int pages_end_uv = -1;
+
+	const GSVector2i page_size = GSVector2i(64, 64); // FIXME: Use the PSM to find this
+	m_shuffle_state.contiguous_xy_pages = 
+		GetContiguousPages(m_context->FRAME.FBW, page_size, m_shuffle_state.xy_rect,
+			m_shuffle_state.page_start_frame, m_shuffle_state.page_end_frame);
+	m_shuffle_state.contiguous_uv_pages =
+		GetContiguousPages(m_context->FRAME.FBW, page_size, m_shuffle_state.uv_rect,
+			m_shuffle_state.page_start_tex, m_shuffle_state.page_end_tex);
 }
 
 // FIXME: We might have to split up the functionality of AnalyzeSprites and Convert
@@ -803,21 +931,21 @@ bool GSRendererHW::ConvertSpriteTextureShuffle2(
 	u32& process_rg, u32& process_ba, bool& shuffle_across,
 	GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
-	GSVector2i x_range;
+	/*GSVector2i x_range;
 	GSVector2i y_range;
-	u8 channels[4];
+	u8 channels[4];*/
 	// FIXME: We should be able to work with ST coordinates!
 	pxAssertMsg(PRIM->FST, "Texture Shuffle with ST coordinates!");
 
-	if (!AnalyzeSpritesShuffle(
-			tex && tex->m_from_target && rt == tex->m_from_target,
-			channels,
-			x_range,
-			y_range))
-	{
-		TSDebug("AnalyzeSprites failed\n");
-		return false;
-	}
+	//if (!AnalyzeSpritesShuffle(
+	//		tex && tex->m_from_target && rt == tex->m_from_target,
+	//		channels,
+	//		x_range,
+	//		y_range))
+	//{
+	//	TSDebug("AnalyzeSprites failed\n");
+	//	return false;
+	//}
 
 	TSDebug("AnalyzeSprites successful\n");
 	// TODO: What does shuffle_across do?
@@ -838,7 +966,7 @@ bool GSRendererHW::ConvertSpriteTextureShuffle2(
 	}
 
 	TSDebug("Converting vertices\n");
-	const int window_x0 = x_range.v[0];
+	const int window_x0 = m_shuffle_state.draw_rect;
 	const int window_x1 = x_range.v[1];
 	const int window_y0 = y_range.v[0];
 	// FIXME: NEED TO CHECK WHEN TO DOUBLE/HALVE ETC.!!
@@ -1923,6 +2051,106 @@ bool GSRendererHW::IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_
 
 	if (m_split_texture_shuffle_pages == 0)
 	{
+		m_shuffle_state.real_FBP = m_cached_ctx.FRAME.Block();
+		m_shuffle_state.real_TBP = m_cached_ctx.TEX0.TBP0;
+
+		m_split_texture_shuffle_start_FBP = m_cached_ctx.FRAME.FBP;
+		m_split_texture_shuffle_start_TBP = m_cached_ctx.TEX0.TBP0;
+
+		// If the game has changed the texture width to 1 we need to retanslate it to whatever the rt has so the final rect is correct.
+		if (m_cached_ctx.FRAME.FBW == 1)
+		{
+			m_split_texture_shuffle_fbw = rt_TEX0.TBW;
+			m_shuffle_state.real_TBP = rt_TEX0.TBW;
+		}
+		else
+		{
+			m_split_texture_shuffle_fbw = m_cached_ctx.FRAME.FBW;
+			m_shuffle_state.real_FBW = m_cached_ctx.FRAME.FBW;
+		}
+	}
+
+	u32 vertical_pages = pages_high;
+	u32 total_pages = num_pages;
+
+	// If the current draw is further than the half way point and the next draw is the half way point, then we can assume it's just overdrawing.
+	if (next_ctx.FRAME.FBP == rt_half && num_pages > (rt_half - (rt_TEX0.TBP0 >> 5)))
+	{
+		vertical_pages = (valid_area.height() / GSLocalMemory::m_psm[rt_TEX0.PSM].pgs.y) / 2;
+		total_pages = vertical_pages * rt_TEX0.TBW;
+	}
+
+	if ((m_split_texture_shuffle_pages % m_split_texture_shuffle_fbw) == 0)
+		m_split_texture_shuffle_pages_high += vertical_pages;
+
+	m_split_texture_shuffle_pages += total_pages;
+	return true;
+}
+
+// TODO: Might just need to go 
+bool GSRendererHW::IsSplitTextureShuffle2(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area)
+{
+	// For this to work, we're peeking into the next draw, therefore we need dirty registers.
+	// FIXME; Should we check for FRAME and TEX0?
+	if (m_dirty_gs_regs == 0)
+		return false;
+
+	if (!NextDrawMatchesShuffle())
+		return false;
+
+	// Make sure this draw has a shuffle pattern
+	if (!m_shuffle_state.found_shuffle)
+		return false;
+
+	// Make sure the same channel are being shuffled
+	if (!ShuffleState::ChannelsCompatible(m_shuffle_state.channels, m_shuffle_state.channels_split))
+		return false;
+
+	// Check that X, Y are page aligned
+	GSVector4i xy_rect = m_shuffle_state.xy_rect;
+	for (int i = 0; i < 4; i++)
+		if (xy_rect.U32[i] & 0x3FF)
+			return false;
+
+	const GSLocalMemory::psm_t& frame_psm = GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM];
+	const GSDrawingContext& next_ctx = m_env.CTXT[m_backed_up_ctx];
+
+	int block_diff_frame = next_ctx.FRAME.Block() - m_shuffle_state.real_FBP;
+	int block_diff_tex = next_ctx.TEX0.TBP0 - m_shuffle_state.real_TBP;
+
+	// Only consider cases where the next frame/texture buffer offsets
+	// into the real frame/texture buffer.
+	// TODO: Do the case of both frame and texture being the same.
+	if (block_diff_frame == 0 || block_diff_tex == 0)
+		return false;
+
+	// Only consider cases where the next texture buffer is at a page aligned
+	// offset from the real texture buffer.
+	if (block_diff_tex % BLOCKS_PER_PAGE)
+		return false;
+
+	const int width = xy_rect.width();
+	const int height = xy_rect.height();
+
+	// Should go across the whole buffer
+	if (width != m_shuffle_state.real_FBW * 64)
+		return false;
+
+	// FIXME: Are width and height in fixed point format?
+	// FIXME: We should always compute the xy_rect scissored
+	const int blocks_shuffled = BLOCKS_PER_PAGE * (width / 64) * (height / 64); // FIXME: Use PSMCT16 units
+
+	// Either that have a difference must be the same as the number of pages shuffled
+	if (block_diff_frame != 0 && block_diff_frame != blocks_shuffled)
+		return false;
+
+	if (block_diff_tex != 0 && block_diff_tex != blocks_shuffled)
+		return false;
+
+	TSDebug("Split texture shuffle detected\n");
+
+	if (m_split_texture_shuffle_pages == 0)
+	{
 		m_split_texture_shuffle_start_FBP = m_cached_ctx.FRAME.FBP;
 		m_split_texture_shuffle_start_TBP = m_cached_ctx.TEX0.TBP0;
 
@@ -1949,6 +2177,7 @@ bool GSRendererHW::IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_
 	m_split_texture_shuffle_pages += total_pages;
 	return true;
 }
+
 
 GSVector4i GSRendererHW::GetSplitTextureShuffleDrawRect() const
 {
@@ -2816,6 +3045,144 @@ void GSRendererHW::RoundSpriteOffset()
 	}
 }
 
+void GSRendererHW::HandleSplitShuffle()
+{
+	pxAssert(m_shuffle_state.analyzed_draw);
+
+	// We are in a split shuffle.
+	// Make sure that the new FBP is at an appropriate offset
+	// FIXME: This is duplicated from the IsSplitTextureShuffle() code
+	// Try to reduce duplication by making functions.
+
+	if (!m_shuffle_state.found_shuffle)
+	{
+		TSDebug("Warning: did not find shuffle in split shuffle\n");
+		return;
+	}
+
+	const GSVector4i xy_rect = m_shuffle_state.xy_rect;
+
+	TSDebug("Split shuffle: rect = (%d, %d, %d, %d)\n",
+		xy_rect.x, xy_rect.y, xy_rect.z, xy_rect.w);
+
+	// FIXME: Check the page offset again?
+
+
+	if (!m_shuffle_state.contiguous_xy_pages)
+	{
+		TSDebug("Warning: not contiguous XY pages in split shuffle\n");
+		return;
+	}
+
+	if (!m_shuffle_state.contiguous_uv_pages)
+	{
+		TSDebug("Warning: not contiguous UV pages in split shuffle\n");
+		return;
+	}
+
+	const int start_frame_block = m_split_shuffle_state.start_frame_block;
+	const int start_tex_block = m_split_shuffle_state.start_tex_block;
+
+	const int block_offset_frame =
+		static_cast<int>(m_context->FRAME.Block()) - m_split_shuffle_state.start_frame_block;
+	const int block_offset_tex =
+		static_cast<int>(m_context->TEX0.TBP0) - m_split_shuffle_state.start_tex_block;
+
+	// We should have checked page alignment of the offset already when determining whether to
+	// continue the split shuffle.
+	if (block_offset_tex % BLOCKS_PER_PAGE)
+	{
+		TSDebug("Warning: block_offset_tex not page aligned\n");
+		return;
+	}
+
+	const int page_offset_frame = block_offset_frame / BLOCKS_PER_PAGE;
+	const int page_offset_tex = block_offset_tex / BLOCKS_PER_PAGE;
+
+	int page_start_frame = page_offset_frame + m_shuffle_state.page_start_frame; // FIXME: Rename this to page_start_frame/texture
+	int page_end_frame = page_offset_frame + m_shuffle_state.page_end_frame; // FIXME: Rename this to page_start_frame/texture
+	int page_start_tex = page_offset_tex + m_shuffle_state.page_start_tex;
+	int page_end_tex = page_offset_tex + m_shuffle_state.page_end_tex;
+
+	if (page_start_frame != page_start_tex)
+	{
+		TSDebug("Warning:page_start_frame != page_start_tex\n");
+		return;
+	}
+
+	if (page_end_frame != page_end_tex)
+	{
+		TSDebug("Warning:page_end_frame != page_end_tex\n");
+		return;
+	}
+
+	// Check that the pages shuffled by the current draw line up exactly
+	// with the pages previously shuffled.
+	if (page_start_frame != m_split_shuffle_state.pages)
+	{
+		TSDebug("Warning:page_start_frame != m_split_shuffle_state.pages\n");
+		return;
+	}
+
+	int& pages = m_split_shuffle_state.pages;
+	pages = page_end_frame + 1;
+
+	const int frame_width = m_split_shuffle_state.start_frame_width;
+	const int frame_width_pages = frame_width / 64; // FIXME: Use the PSM
+
+	const int width_pages = std::min(pages, frame_width_pages); // FIXME: Use the PSM
+	const int height_pages = (pages + frame_width_pages - 1) / frame_width_pages;
+	const int width = width_pages * 64; // FIXME: USE PSM
+	const int height = std::min(height_pages * 64, 1024); // FIXME: USE PSM
+	
+	// Adjust the draw retangle
+	m_r = GSVector4i(0, 0, width, height);
+
+	// Adjust the scissor rectangle of the draw
+	m_context->scissor.in = m_r;
+
+	// Set FRAME and TEX0 to point to the start of the shuffle.
+	m_cached_ctx.TEX0.TBP0 = m_split_shuffle_state.start_tex_block;
+
+
+	SetNewFRAME(
+		m_split_shuffle_state.start_frame_block,
+		m_split_shuffle_state.start_frame_width / 64,
+		m_cached_ctx.FRAME.PSM
+	);
+
+	// Check is this is potentially the last draw of the shuffle.
+	// FIXME: Can we guarantee that it is always the last draw of the shuffle?
+	// FIXME: Is there a better way to detect this?
+	if (pages > 1 && !NextDrawMatchesShuffle())
+	{
+		// FIXME: Was the check for page_offset_frame > 0 necessary?
+		// It is common for games to shuffle 1 column of pages at a time byt
+		// setting the buffer width to 1 (64 pixels).
+		if (m_cached_ctx.TEX0.TBW == 1)
+		{
+			const GSLocalMemory::psm_t& frame_psm = GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM];
+			
+			// FIXME: Is it necessary to use the tex_psm here?
+			// FIXME: Is it guaranteed that tex and frame have the same 32 of 16 bit PSM?
+			m_cached_ctx.TEX0.TW = std::ceil(std::log2(std::min(1024, width)));
+			m_cached_ctx.TEX0.TH = std::ceil(std::log2(std::min(1024, height)));
+			m_cached_ctx.TEX0.TBW = m_split_shuffle_state.start_frame_width / 64;
+		}
+
+
+		// Update the bounding box of the vertex trace
+		m_vt.m_min.p.x = static_cast<float>(m_r.x);
+		m_vt.m_min.p.y = static_cast<float>(m_r.y);
+		m_vt.m_min.t.x = static_cast<float>(m_r.x);
+		m_vt.m_min.t.y = static_cast<float>(m_r.y);
+		m_vt.m_max.p.x = static_cast<float>(m_r.z);
+		m_vt.m_max.p.y = static_cast<float>(m_r.w);
+		m_vt.m_max.t.x = static_cast<float>(m_r.z);
+		m_vt.m_max.t.y = static_cast<float>(m_r.w);
+	}
+}
+
 void GSRendererHW::Draw()
 {
 	// ---------------
@@ -3243,12 +3610,22 @@ void GSRendererHW::Draw()
 	// 10. m_cached_ctx.TEX0.TBW 
 	// Gotchas: TBW of FBW being 1. They might not correctly reflect the buffer size
 
+	// Should probably anlyze the textre shuffle here
+
+#if ENABLE_NEW_TS
+	AnalyzeSpritesShuffle();
+
+	if (m_split_shuffle_state.pages > 0)
+	{
+		HandleSplitShuffle();
+	}
+#else
 	if (m_split_texture_shuffle_pages > 0)
 	{
 		// Call this when we are actually in a split texture shuffle
 
 		// Adjust the draw rectangle to the new page range, so we get the correct fb height.
-		const GSVector4i new_r = GetSplitTextureShuffleDrawRect(); // FIXME: Why would we need to determine halving if we could just use this?
+		const GSVector4i new_r = GetSplitTextureShuffleDrawRect(); // This probably computes the height in C16
 		GL_CACHE(
 			"Split texture shuffle: FBP %x -> %x, TBP0 %x -> %x, draw %d,%d => %d,%d -> %d,%d => %d,%d",
 			m_cached_ctx.FRAME.Block(), m_split_texture_shuffle_start_FBP * BLOCKS_PER_PAGE,
@@ -3312,6 +3689,7 @@ void GSRendererHW::Draw()
 			m_vt.m_max.t.y = m_r.w;
 		}
 	}
+#endif
 
 	// Mem clearing
 	if (!GSConfig.UserHacks_DisableSafeFeatures && is_possible_mem_clear)
@@ -3603,10 +3981,10 @@ void GSRendererHW::Draw()
 					m_cached_ctx.CLAMP.WMT > CLAMP_CLAMP)                      // Using a region mode
 				)
 			{
-
+				
 				// HERE: We replace with a new analysis
 #if ENABLE_NEW_TS
-				shuffle_target = AnalyzeSpritesShuffle();
+				shuffle_target = m_shuffle_state.found_shuffle;
 #else
 				const GSVertex* v = &m_vertex.buff[0];
 
@@ -3631,8 +4009,11 @@ void GSRendererHW::Draw()
 #endif
 			}
 
-			// FIXME: Could replace all this with the new analysis code
+			// FIXME: What parts of the below code are necessary once we have done the thorough anaysis?
 
+#if ENABLE_NEW_TS
+
+#else
 			// The first pass did not determine the shuffle target so we give it a second chance
 			// The output of this is shuffle_target. The inputs are some context variables and the verts.
 			// It's possible it's writing to an old 32bit target, but is actually just a 16bit copy, so let's make sure it's actually using a mask.
@@ -3691,8 +4072,8 @@ void GSRendererHW::Draw()
 					tgt = nullptr;
 				}
 			}
+#endif
 		}
-
 		// So we use the above checks and the IsPossibleShuffle(). Where is the m_texture_shuffle detected?
 		// Possibly a shuffle if have RT and shuffle_target or is IsPossibleChannelShuffle().
 		// Why do we ahve so many steps?
@@ -4678,7 +5059,7 @@ void GSRendererHW::Draw()
 			// If drawing sprites can we just convert the UV coordinates?
 			// Could triangles to quads conversion be done early in the pipeline?
 #if ENABLE_NEW_TS
-
+			shuffle_coords = m_shuffle_state.found_shuffle;
 #else
 			// Removed the offset because its always a multiple of 8
 			const int first_x = ((v[0].XYZ.X - m_context->XYOFFSET.OFX) + 8) >> 4;
@@ -4695,14 +5076,18 @@ void GSRendererHW::Draw()
 
 			// It's not actually possible to do a C16->C16 texture shuffle of B to A as they are the same group
 			// However you can do it by using C32 and offsetting the target verticies to point to B A, then mask as appropriate.
-			m_same_group_texture_shuffle = draw_uses_target && (m_cached_ctx.TEX0.PSM & 0xE) == PSMCT32 && (m_cached_ctx.FRAME.PSM & 0x7) == PSMCT16 && (m_vt.m_min.p.x == 8.0f);
+			m_same_group_texture_shuffle = draw_uses_target &&
+				(m_cached_ctx.TEX0.PSM & 0xE) == PSMCT32 &&
+				(m_cached_ctx.FRAME.PSM & 0x7) == PSMCT16 &&
+				(m_vt.m_min.p.x == 8.0f);
 
-			// Both input and output are 16 bits and texture was initially 32 bits! Same for the target, Sonic Unleash makes a new target which really is 16bit.
+			// Both input and output are 16 bits and texture was initially 32 bits! Same for the target,
+			// Sonic Unleash makes a new target which really is 16bit.
 			m_texture_shuffle = ((m_same_group_texture_shuffle || (tex_psm.bpp == 16)) &&
 				(GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].bpp == 16) &&
 				(shuffle_coords || rt->m_32_bits_fmt)) &&
 				(src->m_32_bits_fmt || m_copy_16bit_to_target_shuffle) && 
-				// Need to overhaul the TraianglesAreQuads detection
+				// Need to overhaul the TrianglesAreQuads detection
 				(draw_sprite_tex || (m_vt.m_primclass == GS_TRIANGLE_CLASS && (m_index.tail % 6) == 0 && TrianglesAreQuads(true)));
 
 
@@ -4720,7 +5105,7 @@ void GSRendererHW::Draw()
 				TSDebug("Attention: m_same_group_texture_shuffle == true\n");
 			}
 
-			// We detect an run of draws that form a texture shuffle.
+			// We detect a run of draws that form a texture shuffle.
 			if (m_texture_shuffle && IsSplitTextureShuffle(rt->m_TEX0, rt->m_valid))
 			{
 				// If TEX0 == FBP, we're going to have a source left in the TC.
@@ -8091,6 +8476,8 @@ void GSRendererHW::CleanupDraw(bool invalidate_temp_src)
 		m_context->offset.fb = m_mem.GetOffset(m_context->FRAME.Block(), m_context->FRAME.FBW, m_context->FRAME.PSM);
 	if ((m_context->ZBUF.U32[0] ^ m_cached_ctx.ZBUF.U32[0]) & 0x3f0001ff)
 		m_context->offset.zb = m_mem.GetOffset(m_context->ZBUF.Block(), m_context->FRAME.FBW, m_context->ZBUF.PSM);
+
+	m_shuffle_state.analyzed_draw = false;
 }
 
 void GSRendererHW::ResetStates()

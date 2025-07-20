@@ -116,6 +116,7 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	bool IsSplitTextureShuffle2(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
 	GSVector4i GetSplitTextureShuffleDrawRect() const;
 	u32 GetEffectiveTextureShuffleFbmsk() const;
 
@@ -230,8 +231,11 @@ public:
 	void ExpandLineIndices();
 	void ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	bool ConvertSpriteTextureShuffle2(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
-	bool AnalyzeSpritesShuffle(bool rt_is_tex, u8 channels[4], GSVector2i& x_range, GSVector2i& y_range);
-	bool AnalyzeSpritesShuffle();
+	bool AnalyzeSpritesShuffle(
+		bool rt_is_tex, u8 channels[4], GSVector2i& x_range, GSVector2i& y_range,
+		int& page_offset_x, int& page_offset_y, int& page_offset_u, int& page_offset_v
+	);
+	void AnalyzeSpritesShuffle();
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);
 	void MergeSprite(GSTextureCache::Source* tex);
@@ -287,30 +291,75 @@ public:
 		SPLIT_TEXTURE_SHUFFLE
 	};
 
-	struct ShuffleState
+	struct SplitShuffleState
 	{
-		enum
-		{
-			CHANNEL_R = 0,
-			CHANNEL_G = 1,
-			CHANNEL_B = 2,
-			CHANNEL_A = 3,
-			CHANNEL_INVALID = 4
-		};
-		u8 channels[4];      // Maps output channel to input channel.
-		u32 real_FBP = 0;   // Save this state in case the shuffle is split over multiple draws
-		u32 real_FBW = 0;
-		u32 real_TBP = 0;
-		u32 real_TBW = 0;
-		u32 page_start = 0;      // First page modified by the shuffle
-		u32 page_end = 0;        // Last page modified by the shuffle
-		GSVector4 rect;
+		int start_frame_block = 0;
+		int start_frame_width = 0;
+		int start_frame_psm = 0;
+		int start_tex_block = 0;
+		int start_tex_width = 0;
+		int pages;
+		GSLocalMemory::psm_t* frame_psm = nullptr;
+		u8 channels_split[4] = {0, 0, 0, 0};
 	};
 
+	enum
+	{
+		CHANNEL_R = 0,
+		CHANNEL_G = 1,
+		CHANNEL_B = 2,
+		CHANNEL_A = 3,
+		CHANNEL_INVALID = 4
+	};
+
+	static bool ChannelsCompatible(u8 c0[4], u8 c1[4])
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			if (c0[i] == CHANNEL_INVALID || c1[i] == CHANNEL_INVALID)
+				continue; // Invalid channels are always compatible.
+			if (c0[i] != c1[i])
+				return false;
+		}
+	}
+
+	// For merging with another set of compatible channels
+	static void MergeChannels(u8 dst[4], u8 src[4])
+	{
+		for (int i = 0; i < 4; i++)
+		{
+			if (dst[i] != src[i])
+				dst[i] = CHANNEL_INVALID;
+		}
+	}
+
+	// FIXME: Maybe make a separate struct for SplitShuffleState
+	struct ShuffleState
+	{
+		u8 channels[4] = {0, 0, 0, 0}; // Maps output channel to input channel.
+		int page_offset_x;
+		int page_offset_y;
+		int page_offset_u;
+		int page_offset_v;
+		bool analyzed_draw = false;
+		bool found_shuffle = false;
+		bool contiguous_xy_pages = false;
+		bool contiguous_uv_pages = false;
+		int page_start_xy = -1;
+		int page_end_xy = -1;
+		int page_start_uv = -1;
+		int page_end_uv = -1;
+		GSVector4i xy_rect = {0, 0, 0, 0};
+		GSVector4i uv_rect = {0, 0, 0, 0};
+	};
+
+
 	SplitState m_split_state = SPLIT_NONE;
+	SplitShuffleState m_split_shuffle_state;
 	ShuffleState m_shuffle_state;
 
 	void PrintTSContext(); // FIXME: For debugging. Remove later.
 	void PrintTSVerts(); // FIXME: For debugging. Remove later.
 	void PrintTSConfig(); // FIXME: For debugging. Remove later.
+	void GSRendererHW::HandleSplitShuffle();
 };
