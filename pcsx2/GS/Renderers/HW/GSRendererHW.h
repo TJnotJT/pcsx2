@@ -116,7 +116,7 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
-	bool IsSplitTextureShuffle2(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	bool NextDrawContinuesTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
 	GSVector4i GetSplitTextureShuffleDrawRect() const;
 	u32 GetEffectiveTextureShuffleFbmsk() const;
 
@@ -215,15 +215,6 @@ public:
 
 	void UpdateRenderFixes() override;
 
-	enum Flag
-	{
-		R = 0,
-		G = 1,
-		B = 2,
-		A = 3,
-		UNKNOWN = 4
-	};
-
 	bool CanUpscale() override;
 	float GetUpscaleMultiplier() override;
 	void Lines2Sprites();
@@ -293,14 +284,32 @@ public:
 
 	struct SplitShuffleState
 	{
-		int start_frame_block = 0;
-		int start_frame_width = 0;
-		int start_frame_psm = 0;
-		int start_tex_block = 0;
-		int start_tex_width = 0;
+		int frame_block;
+		int frame_width;
+		int start_frame_psm;
+		int tex_block;
+		int start_tex_width;
 		int pages;
-		GSLocalMemory::psm_t* frame_psm = nullptr;
-		u8 channels_split[4] = {0, 0, 0, 0};
+		GSLocalMemory::psm_t* frame_psm;
+		u8 channels[4] = {0, 0, 0, 0};
+
+		SplitShuffleState()
+		{
+			Reset();
+		}
+
+		void Reset()
+		{
+			frame_block = 0;
+			frame_width = 0;
+			start_frame_psm = 0;
+			tex_block = 0;
+			start_tex_width = 0;
+			pages = 0;
+			frame_psm = nullptr;
+			for (int i = 0; i < 4; i++)
+				channels[i] = 0xFF;
+		}
 	};
 
 	enum
@@ -312,7 +321,7 @@ public:
 		CHANNEL_INVALID = 4
 	};
 
-	static bool ChannelsCompatible(u8 c0[4], u8 c1[4])
+	static bool ChannelsCompatible(const u8 c0[4], const u8 c1[4])
 	{
 		for (int i = 0; i < 4; i++)
 		{
@@ -321,15 +330,19 @@ public:
 			if (c0[i] != c1[i])
 				return false;
 		}
+		return true;
 	}
 
 	// For merging with another set of compatible channels
-	static void MergeChannels(u8 dst[4], u8 src[4])
+	static void MergeChannels(u8 dst[4], const u8 src[4])
 	{
 		for (int i = 0; i < 4; i++)
 		{
 			if (dst[i] != src[i])
+			{
+				pxAssert(dst[i] == CHANNEL_INVALID || src[i] == CHANNEL_INVALID);
 				dst[i] = CHANNEL_INVALID;
+			}
 		}
 	}
 
@@ -337,20 +350,28 @@ public:
 	struct ShuffleState
 	{
 		u8 channels[4] = {0, 0, 0, 0}; // Maps output channel to input channel.
-		int page_offset_x;
-		int page_offset_y;
-		int page_offset_u;
-		int page_offset_v;
-		bool analyzed_draw = false;
+		bool analyzed = false;
 		bool found_shuffle = false;
-		bool contiguous_xy_pages = false;
-		bool contiguous_uv_pages = false;
-		int page_start_xy = -1;
-		int page_end_xy = -1;
-		int page_start_uv = -1;
-		int page_end_uv = -1;
-		GSVector4i xy_rect = {0, 0, 0, 0};
-		GSVector4i uv_rect = {0, 0, 0, 0};
+		bool contiguous = false;
+		int page_start_frame = -1;
+		int page_start_tex = -1;
+		int contiguous_pages = -1;
+		GSVector4i frame_rect = {0, 0, 0, 0};
+		GSVector4i tex_rect = {0, 0, 0, 0};
+
+		void Reset()
+		{
+			analyzed = false;
+			found_shuffle = false;
+			contiguous = false;
+			page_start_frame = -1;
+			page_start_tex = -1;
+			contiguous_pages = -1;
+			frame_rect = GSVector4i(0);
+			tex_rect = GSVector4i(0);
+			for (int i = 0; i < 4; i++)
+				channels[i] = 0xFF;
+		}
 	};
 
 
@@ -361,5 +382,8 @@ public:
 	void PrintTSContext(); // FIXME: For debugging. Remove later.
 	void PrintTSVerts(); // FIXME: For debugging. Remove later.
 	void PrintTSConfig(); // FIXME: For debugging. Remove later.
-	void GSRendererHW::HandleSplitShuffle();
+	
+	void HandleSplitTextureShuffle();
+	void GetTextureShuffleRects(GSVector4i& dst_rect, GSVector4i& src_rect);
+	bool InSplitTextureShuffle();
 };

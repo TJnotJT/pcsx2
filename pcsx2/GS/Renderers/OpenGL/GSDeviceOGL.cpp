@@ -2838,7 +2838,7 @@ void GSDeviceOGL::DebugMessageCallback(GLenum gl_source, GLenum gl_type, GLuint 
 	}
 
 	// Don't spam noisy information on the terminal
-	if (gl_severity != GL_DEBUG_SEVERITY_NOTIFICATION && gl_source != GL_DEBUG_SOURCE_APPLICATION)
+	//if (gl_severity != GL_DEBUG_SEVERITY_NOTIFICATION && gl_source != GL_DEBUG_SOURCE_APPLICATION)
 	{
 		Console.Error("T:%s\tID:%d\tS:%s\t=> %s", type.c_str(), GSState::s_n, severity.c_str(), message.c_str());
 	}
