@@ -116,7 +116,10 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
-	bool NextDrawContinuesTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	void PredictSplitTextureShuffle_HandlePagesOverdraw(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	void PredictSplitTextureShuffle_HandlePages(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	void PredictSplitTextureShuffle_HandleRect(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
+	bool PredictSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
 	GSVector4i GetSplitTextureShuffleDrawRect() const;
 	u32 GetEffectiveTextureShuffleFbmsk() const;
 
@@ -227,6 +230,7 @@ public:
 		int& page_offset_x, int& page_offset_y, int& page_offset_u, int& page_offset_v
 	);
 	void AnalyzeSpritesShuffle();
+	void AnalyzeSpriteShuffle_HandleHalfOverdraw();
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);
 	void MergeSprite(GSTextureCache::Source* tex);
@@ -282,34 +286,10 @@ public:
 		SPLIT_TEXTURE_SHUFFLE
 	};
 
-	struct SplitShuffleState
+	enum SIDE
 	{
-		int frame_block;
-		int frame_width;
-		int start_frame_psm;
-		int tex_block;
-		int start_tex_width;
-		int pages;
-		GSLocalMemory::psm_t* frame_psm;
-		u8 channels[4] = {0, 0, 0, 0};
-
-		SplitShuffleState()
-		{
-			Reset();
-		}
-
-		void Reset()
-		{
-			frame_block = 0;
-			frame_width = 0;
-			start_frame_psm = 0;
-			tex_block = 0;
-			start_tex_width = 0;
-			pages = 0;
-			frame_psm = nullptr;
-			for (int i = 0; i < 4; i++)
-				channels[i] = 0xFF;
-		}
+		RIGHT = 0,
+		BOTTOM = 1
 	};
 
 	enum
@@ -346,18 +326,65 @@ public:
 		}
 	}
 
-	// FIXME: Maybe make a separate struct for SplitShuffleState
+	struct SplitShuffleState
+	{
+		GIFRegTEX0 rt_TEX0;
+		GSVector4i rt_valid_area;
+		// FIXME: Make everyhting a STD array and use FRAME=0, TEX=1
+		int frame_bp;
+		int frame_bw; // FIXME: This should be the true BW
+		int frame_psm;
+		int tex_bp;
+		int tex_bw;
+		int tex_psm;
+		int pages;
+		bool pages_valid;
+		GSVector4i frame_rect;
+		GSVector4i tex_rect;
+		bool rect_valid;
+		int expected_side;
+		u8 channels[4]; // FIXME; Change to std::array
+
+		SplitShuffleState()
+		{
+			Reset();
+		}
+
+		void Reset()
+		{
+			rt_TEX0.U64 = 0;
+			rt_valid_area = GSVector4i(0);
+			frame_bp = 0;
+			frame_bw = 0;
+			frame_psm = 0;
+			tex_bp = 0;
+			tex_bw = 0;
+			pages = 0;
+			pages_valid = false;
+			frame_rect = GSVector4i(0);
+			tex_rect = GSVector4i(0);
+			rect_valid = false;
+			for (int i = 0; i < 4; i++)
+				channels[i] = 0xFF;
+		}
+	};
+
 	struct ShuffleState
 	{
-		u8 channels[4] = {0, 0, 0, 0}; // Maps output channel to input channel.
-		bool analyzed = false;
-		bool found_shuffle = false;
-		bool contiguous = false;
-		int page_start_frame = -1;
-		int page_start_tex = -1;
-		int contiguous_pages = -1;
-		GSVector4i frame_rect = {0, 0, 0, 0};
-		GSVector4i tex_rect = {0, 0, 0, 0};
+		u8 channels[4]; // Maps output channel to input channel.
+		bool analyzed;
+		bool found_shuffle;
+		bool contiguous;
+		int page_start_frame;
+		int page_start_tex;
+		int contiguous_pages;
+		GSVector4i frame_rect;
+		GSVector4i tex_rect;
+
+		ShuffleState()
+		{
+			Reset();
+		}
 
 		void Reset()
 		{
@@ -383,7 +410,8 @@ public:
 	void PrintTSVerts(); // FIXME: For debugging. Remove later.
 	void PrintTSConfig(); // FIXME: For debugging. Remove later.
 	
-	void HandleSplitTextureShuffle();
+	void ContinueSplitTextureShuffle();
 	void GetTextureShuffleRects(GSVector4i& dst_rect, GSVector4i& src_rect);
-	bool InSplitTextureShuffle();
+	bool IsSplitTextureShuffleActive();
+	bool FixTextureShuffleHalfOverdraw(const GIFRegTEX0& rt_TEX0, const GSVector4i& valid_area);
 };
