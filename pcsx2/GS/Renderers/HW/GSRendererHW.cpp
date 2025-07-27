@@ -1242,7 +1242,7 @@ bool GSRendererHW::NextDrawMatchesShuffle() const
 bool GSRendererHW::IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area)
 {
 	// For this to work, we're peeking into the next draw, therefore we need dirty registers.
-	if (m_dirty_gs_regs == 0)
+	if (!m_dirty_gs_regs.AnyDirty())
 		return false;
 
 	if (!NextDrawMatchesShuffle())
@@ -1548,7 +1548,7 @@ bool GSRendererHW::CheckNextDrawForSplitClear(const GSVector4i& r, u32* pages_co
 	}
 
 	// must be changing FRAME
-	if (m_backed_up_ctx < 0 || (m_dirty_gs_regs & (1u << DIRTY_REG_FRAME)) == 0)
+	if (m_backed_up_ctx < 0 || !m_dirty_gs_regs.FRAME)
 		return false;
 
 	// rect width should match the FBW (page aligned)
@@ -2338,7 +2338,7 @@ void GSRendererHW::Draw()
 
 	GL_PUSH("HW: Draw %d (Context %u)", s_n, PRIM->CTXT);
 	GL_INS("HW: FLUSH REASON: %s%s", GetFlushReasonString(m_state_flush_reason),
-		(m_state_flush_reason != GSFlushReason::CONTEXTCHANGE && m_dirty_gs_regs) ? " AND POSSIBLE CONTEXT CHANGE" :
+		(m_state_flush_reason != GSFlushReason::CONTEXTCHANGE && m_dirty_gs_regs.AnyDirty()) ? " AND POSSIBLE CONTEXT CHANGE" :
 																					"");
 
 	// When the format is 24bit (Z or C), DATE ceases to function.

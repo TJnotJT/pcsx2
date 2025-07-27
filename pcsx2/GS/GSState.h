@@ -248,9 +248,40 @@ public:
 	bool m_in_target_draw = false;
 	bool m_channel_shuffle_abort = false;
 
+	union GSDirtyRegList
+	{
+		struct
+		{
+			u32 ALPHA : 1;
+			u32 CLAMP : 1;
+			u32 COLCLAMP : 1;
+			u32 DIMX : 1;
+			u32 DTHE : 1;
+			u32 FBA : 1;
+			u32 FOGCOL : 1;
+			u32 FRAME : 1;
+			u32 MIPTBP1 : 1;
+			u32 MIPTBP2 : 1;
+			u32 PABE : 1;
+			u32 PRIM : 1;
+			u32 SCANMSK : 1;
+			u32 SCISSOR : 1;
+			u32 TEST : 1;
+			u32 TEX0 : 1;
+			u32 TEX1 : 1;
+			u32 TEXA : 1;
+			u32 XYOFFSET : 1;
+			u32 ZBUF : 1;
+		};
+		u32 U32;
+
+		bool AnyDirty() const { return U32 != 0; }
+		void ClearAllDirty() { U32 = 0; }
+	};
+
 	u32 m_target_offset = 0;
 	u8 m_scanmask_used = 0;
-	u32 m_dirty_gs_regs = 0;
+	GSDirtyRegList m_dirty_gs_regs{0};
 	int m_backed_up_ctx = 0;
 	std::vector<GSUploadQueue> m_draw_transfers;
 	NoGapsType m_primitive_covers_without_gaps;
@@ -262,30 +293,6 @@ public:
 	static int s_transfer_n;
 
 	static constexpr u32 STATE_VERSION = 9;
-
-	enum REG_DIRTY
-	{
-		DIRTY_REG_ALPHA,
-		DIRTY_REG_CLAMP,
-		DIRTY_REG_COLCLAMP,
-		DIRTY_REG_DIMX,
-		DIRTY_REG_DTHE,
-		DIRTY_REG_FBA,
-		DIRTY_REG_FOGCOL,
-		DIRTY_REG_FRAME,
-		DIRTY_REG_MIPTBP1,
-		DIRTY_REG_MIPTBP2,
-		DIRTY_REG_PABE,
-		DIRTY_REG_PRIM,
-		DIRTY_REG_SCANMSK,
-		DIRTY_REG_SCISSOR,
-		DIRTY_REG_TEST,
-		DIRTY_REG_TEX0,
-		DIRTY_REG_TEX1,
-		DIRTY_REG_TEXA,
-		DIRTY_REG_XYOFFSET,
-		DIRTY_REG_ZBUF
-	};
 
 	enum GSFlushReason
 	{
