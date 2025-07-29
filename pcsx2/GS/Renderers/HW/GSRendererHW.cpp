@@ -2579,9 +2579,8 @@ bool GSRendererHW::DetectMemClearSkipDraw(const bool no_rt, const bool no_ds,
 // Do the first pass of processing texture mapping and looking up texture cache
 // source for the draw. Return true if we determine the draw should be aborted early.
 bool GSRendererHW::ProcessTextureMappingAndLookupSource(
-	bool& no_rt, bool& no_ds, u32& fm, u32& zm,
-	const u32 fm_mask, const bool all_depth_tests_pass,
-	GIFRegTEX0& TEX0, GSTextureCache::Source*& src, TextureMinMaxResult& tmm,
+	bool& no_rt, bool& no_ds, u32& fm, const u32 fm_mask, u32& zm, const bool all_depth_tests_pass,
+	GSTextureCache::Source*& src, GIFRegTEX0& TEX0, TextureMinMaxResult& tmm,
 	bool& possible_shuffle, bool& draw_uses_target)
 {
 	if (!m_process_texture)
@@ -3546,7 +3545,7 @@ bool GSRendererHW::ProcessColorAndLookupRenderTarget(
 
 // Second attempt at looking up the depth target after the RT has been looked up.
 void GSRendererHW::ProcessDepthAndLookupDepthTargetAfterColor(
-	bool& no_ds, const u32 zm, GSTextureCache::Source* src, GSTextureCache::Target*& ds,
+	bool& no_ds, const u32 zm, GSTextureCache::Source* const src, GSTextureCache::Target*& ds,
 	GIFRegTEX0& ZBUF_TEX0, const GSVector2i t_size, const float target_scale, const bool force_preload,
 	const bool preserve_depth, const GSVector4i& unclamped_draw_rect, const bool possible_shuffle)
 {
@@ -4235,8 +4234,36 @@ void GSRendererHW::UpdateTargetSizes(GSTextureCache::Source* const src, GSTextur
 	}
 }
 
+// If necessary update GPU textures with GS memory data
+void GSRendererHW::UpdateTargetsFromMemPreDraw(
+	GSTextureCache::Target* const rt, GSTextureCache::Target* const ds)
+{
+	if (rt)
+	{
+		// Always update the preloaded data (marks s_n to last draw or newer)
+		if (rt->m_last_draw >= s_n || m_texture_shuffle || m_channel_shuffle || (!rt->m_dirty.empty() && !rt->m_dirty.GetTotalRect(rt->m_TEX0, rt->m_unscaled_size).rintersect(m_r).rempty()))
+		{
+			const u32 alpha = m_cached_ctx.FRAME.FBMSK >> 24;
+			const u32 alpha_mask = GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].fmsk >> 24;
+			rt->Update(m_texture_shuffle || (alpha != 0 && (alpha & alpha_mask) != alpha_mask) || (!alpha && (GetAlphaMinMax().max | (m_context->FBA.FBA << 7)) > 128));
+		}
+		else
+			rt->m_age = 0;
+	}
+
+	if (ds)
+	{
+		if (ds->m_last_draw >= s_n || m_texture_shuffle || m_channel_shuffle || (!ds->m_dirty.empty() && !ds->m_dirty.GetTotalRect(ds->m_TEX0, ds->m_unscaled_size).rintersect(m_r).rempty()))
+			ds->Update();
+		else
+			ds->m_age = 0;
+	}
+}
+
 void GSRendererHW::InvalidateTextureCachePostDraw(
-	GSTextureCache::Target* const old_rt, GSTextureCache::Target* const old_ds)
+	const bool no_rt, const bool no_ds, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds,
+	GSTextureCache::Target* const old_rt, GSTextureCache::Target* const old_ds, const u32 fm, const u32 fm_mask,
+	const u32 zm, const GSVector4i& real_rect)
 {
 	// Temporary source *must* be invalidated before normal, because otherwise it'll be double freed.
 	g_texture_cache->InvalidateTemporarySource();
@@ -4246,9 +4273,40 @@ void GSRendererHW::InvalidateTextureCachePostDraw(
 		g_texture_cache->InvalidateVideoMemType(GSTextureCache::RenderTarget, old_rt->m_TEX0.TBP0);
 	if (old_ds)
 		g_texture_cache->InvalidateVideoMemType(GSTextureCache::DepthStencil, old_ds->m_TEX0.TBP0);
+
+	if ((fm & fm_mask) != fm_mask && !no_rt)
+	{
+		g_texture_cache->InvalidateVideoMem(m_context->offset.fb, real_rect, false);
+
+		// Remove overwritten Zs at the FBP.
+		g_texture_cache->InvalidateVideoMemType(GSTextureCache::DepthStencil, m_cached_ctx.FRAME.Block(),
+			m_cached_ctx.FRAME.PSM, m_texture_shuffle ? GetEffectiveTextureShuffleFbmsk() : fm);
+
+		if (rt && !m_using_temp_z && g_texture_cache->GetTemporaryZ() != nullptr)
+		{
+			GSTextureCache::TempZAddress temp_z_info = g_texture_cache->GetTemporaryZInfo();
+			if (GSLocalMemory::GetStartBlockAddress(rt->m_TEX0.TBP0, rt->m_TEX0.TBW, rt->m_TEX0.PSM, real_rect) <= temp_z_info.ZBP && GSLocalMemory::GetEndBlockAddress(rt->m_TEX0.TBP0, rt->m_TEX0.TBW, rt->m_TEX0.PSM, real_rect) > temp_z_info.ZBP)
+				g_texture_cache->InvalidateTemporaryZ();
+		}
+	}
+
+	if (zm != 0xffffffff && !no_ds)
+	{
+		g_texture_cache->InvalidateVideoMem(m_context->offset.zb, real_rect, false);
+
+		// Remove overwritten RTs at the ZBP.
+		g_texture_cache->InvalidateVideoMemType(
+			GSTextureCache::RenderTarget, m_cached_ctx.ZBUF.Block(), m_cached_ctx.ZBUF.PSM, zm);
+	}
+
+#ifdef DISABLE_HW_TEXTURE_CACHE
+	if (rt)
+		g_texture_cache->Read(rt, real_rect);
+#endif
 }
 
-void GSRendererHW::UpdateTargetValidityPostDraw(
+// Update the texture cache color/depth target after performing the draw
+void GSRendererHW::UpdateTargetAttributesPostDraw(
 	GSTextureCache::Target* const rt, GSTextureCache::Target* const ds, const u32 fm, const u32 fm_mask,
 	const u32 zm, const bool can_update_size, const GSVector2i resolution, const GSVector4i real_rect)
 {
@@ -4332,9 +4390,15 @@ void GSRendererHW::UpdateTargetValidityPostDraw(
 			}
 		}
 	}
+
+	if (rt)
+		rt->m_last_draw = s_n;
+
+	if (ds)
+		ds->m_last_draw = s_n;
 }
 
-void GSRendererHW::Draw()
+void GSRendererHW::DumpInfo()
 {
 	if (GSConfig.SaveInfo && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
@@ -4350,6 +4414,150 @@ void GSRendererHW::Draw()
 		s = GetDrawDumpPath("%05d_vertex.txt", s_n);
 		DumpVertices(s);
 	}
+}
+
+void GSRendererHW::DumpImagesPreDraw(
+	GSTextureCache::Source* const src, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds)
+{
+	if (!GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+		return;
+
+	const u64 frame = g_perfmon.GetFrame();
+
+	std::string s;
+
+	if (GSConfig.SaveTexture && src)
+	{
+		s = GetDrawDumpPath("%05d_f%05lld_itex_%s_%05x(%05x)_%s_%d%d_%02x_%02x_%02x_%02x.dds",
+			s_n, frame, (src->m_from_target ? "tgt" : "gs"), static_cast<int>(m_cached_ctx.TEX0.TBP0), (src->m_from_target ? src->m_from_target->m_TEX0.TBP0 : src->m_TEX0.TBP0), GSUtil::GetPSMName(m_cached_ctx.TEX0.PSM),
+			static_cast<int>(m_cached_ctx.CLAMP.WMS), static_cast<int>(m_cached_ctx.CLAMP.WMT),
+			static_cast<int>(m_cached_ctx.CLAMP.MINU), static_cast<int>(m_cached_ctx.CLAMP.MAXU),
+			static_cast<int>(m_cached_ctx.CLAMP.MINV), static_cast<int>(m_cached_ctx.CLAMP.MAXV));
+
+		src->m_texture->Save(s);
+
+		if (src->m_palette)
+		{
+			s = GetDrawDumpPath("%05d_f%05lld_itpx_%05x_%s.dds", s_n, frame, m_cached_ctx.TEX0.CBP, GSUtil::GetPSMName(m_cached_ctx.TEX0.CPSM));
+
+			src->m_palette->Save(s);
+		}
+	}
+
+	if (rt && GSConfig.SaveRT)
+	{
+		s = GetDrawDumpPath("%05d_f%05lld_rt0_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
+
+		if (rt->m_texture)
+			rt->m_texture->Save(s);
+	}
+
+	if (ds && GSConfig.SaveDepth)
+	{
+		s = GetDrawDumpPath("%05d_f%05lld_rz0_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.ZBUF.Block(), ds->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.ZBUF.PSM));
+
+		if (m_using_temp_z)
+			g_texture_cache->GetTemporaryZ()->Save(s);
+		else if (ds->m_texture)
+			ds->m_texture->Save(s);
+	}
+}
+
+void GSRendererHW::DoUpscalingSpriteHacks(GSTextureCache::Target* const rt, const bool draw_sprite_tex)
+{
+	// A couple of hack to avoid upscaling issue. So far it seems to impacts mostly sprite
+	// Note: first hack corrects both position and texture coordinate
+	// Note: second hack corrects only the texture coordinate
+	// Be careful to not correct downscaled targets, this can get messy and break post processing
+	// but it still needs to adjust native stuff from memory as it's not been compensated for upscaling (Dragon Quest 8 font for example).
+	if (CanUpscale() && (m_vt.m_primclass == GS_SPRITE_CLASS) && rt && rt->GetScale() > 1.0f)
+	{
+		const u32 count = m_vertex.next;
+		GSVertex* v = &m_vertex.buff[0];
+
+		// Hack to avoid vertical black line in various games (ace combat/tekken)
+		if (GSConfig.UserHacks_AlignSpriteX)
+		{
+			// Note for performance reason I do the check only once on the first
+			// primitive
+			const int win_position = v[1].XYZ.X - m_context->XYOFFSET.OFX;
+			const bool unaligned_position = ((win_position & 0xF) == 8);
+			const bool unaligned_texture = ((v[1].U & 0xF) == 0) && PRIM->FST; // I'm not sure this check is useful
+			const bool hole_in_vertex = (count < 4) || (v[1].XYZ.X != v[2].XYZ.X);
+			if (hole_in_vertex && unaligned_position && (unaligned_texture || !PRIM->FST))
+			{
+				// Normally vertex are aligned on full pixels and texture in half
+				// pixels. Let's extend the coverage of an half-pixel to avoid
+				// hole after upscaling
+				for (u32 i = 0; i < count; i += 2)
+				{
+					v[i + 1].XYZ.X += 8;
+					// I really don't know if it is a good idea. Neither what to do for !PRIM->FST
+					if (unaligned_texture)
+						v[i + 1].U += 8;
+				}
+			}
+		}
+
+		// Noting to do if no texture is sampled
+		if (PRIM->FST && draw_sprite_tex && m_process_texture)
+		{
+			if ((GSConfig.UserHacks_RoundSprite > 1) || (GSConfig.UserHacks_RoundSprite == 1 && !m_vt.IsLinear()))
+			{
+				if (m_vt.IsLinear())
+					RoundSpriteOffset<true>();
+				else
+					RoundSpriteOffset<false>();
+			}
+		}
+		else
+		{
+			// vertical line in Yakuza (note check m_userhacks_align_sprite_X behavior)
+		}
+	}
+}
+
+void GSRendererHW::DumpImagesPostDraw(
+	GSTextureCache::Source* const src, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds)
+{
+	if (!GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
+		return;
+
+	const bool writeback_colclip_texture = g_gs_device->GetColorClipTexture() != nullptr;
+	if (writeback_colclip_texture)
+	{
+		GSTexture* colclip_texture = g_gs_device->GetColorClipTexture();
+		g_gs_device->StretchRect(
+			colclip_texture, GSVector4(m_conf.colclip_update_area) / GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy()),
+			rt->m_texture, GSVector4(m_conf.colclip_update_area), ShaderConvert::COLCLIP_RESOLVE, false);
+	}
+
+	const u64 frame = g_perfmon.GetFrame();
+
+	std::string s;
+
+	if (rt && GSConfig.SaveRT && !m_last_rt)
+	{
+		s = GetDrawDumpPath("%05d_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
+
+		rt->m_texture->Save(s);
+	}
+
+	if (ds && GSConfig.SaveDepth)
+	{
+		s = GetDrawDumpPath("%05d_f%05lld_rz1_%05x_%s.bmp", s_n, frame, m_cached_ctx.ZBUF.Block(), GSUtil::GetPSMName(m_cached_ctx.ZBUF.PSM));
+
+		if (m_using_temp_z)
+			g_texture_cache->GetTemporaryZ()->Save(s);
+		else
+			ds->m_texture->Save(s);
+	}
+}
+
+void GSRendererHW::Draw()
+{
+	// Debugging
+	DumpInfo();
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
 	const GSDrawingContext* context = m_context;
@@ -4370,6 +4578,8 @@ void GSRendererHW::Draw()
 		return;
 
 	m_last_rt = nullptr;
+	
+	// Channel shuffle state
 	m_channel_shuffle_width = 0;
 	m_full_screen_shuffle = false;
 	m_channel_shuffle_abort = false;
@@ -4589,8 +4799,8 @@ void GSRendererHW::Draw()
 	bool possible_shuffle = false;
 	bool draw_uses_target = false;
 
-	if (ProcessTextureMappingAndLookupSource(no_rt, no_ds, fm, zm, all_depth_tests_pass, fm_mask,
-		TEX0, src, tmm, possible_shuffle, draw_uses_target))
+	if (ProcessTextureMappingAndLookupSource(no_rt, no_ds, fm, fm_mask, zm, all_depth_tests_pass,
+		src, TEX0, tmm, possible_shuffle, draw_uses_target))
 		return;
 
 	// Urban Reign trolls by scissoring a draw to a target at 0x0-0x117F to 378x449 which ends up the size being rounded up to 640x480
@@ -4688,6 +4898,7 @@ void GSRendererHW::Draw()
 		no_ds, zm, src, ds, ZBUF_TEX0, t_size, target_scale,
 		force_preload, preserve_depth, unclamped_draw_rect, possible_shuffle);
 
+	// Texture shuffle state
 	m_texture_shuffle = false;
 	m_copy_16bit_to_target_shuffle = false;
 	m_same_group_texture_shuffle = false;
@@ -4712,25 +4923,7 @@ void GSRendererHW::Draw()
 	if (!GSConfig.UserHacks_DisableSafeFeatures && m_is_possible_mem_clear)
 		skip_draw = TryTargetClear(rt, ds, preserve_rt_color, preserve_depth);
 
-	if (rt)
-	{
-		// Always update the preloaded data (marks s_n to last draw or newer)
-		if (rt->m_last_draw >= s_n || m_texture_shuffle || m_channel_shuffle || (!rt->m_dirty.empty() && !rt->m_dirty.GetTotalRect(rt->m_TEX0, rt->m_unscaled_size).rintersect(m_r).rempty()))
-		{
-			const u32 alpha = m_cached_ctx.FRAME.FBMSK >> 24;
-			const u32 alpha_mask = GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].fmsk >> 24;
-			rt->Update(m_texture_shuffle || (alpha != 0 && (alpha & alpha_mask) != alpha_mask) || (!alpha && (GetAlphaMinMax().max | (m_context->FBA.FBA << 7)) > 128));
-		}
-		else
-			rt->m_age = 0;
-	}
-	if (ds)
-	{
-		if (ds->m_last_draw >= s_n || m_texture_shuffle || m_channel_shuffle || (!ds->m_dirty.empty() && !ds->m_dirty.GetTotalRect(ds->m_TEX0, ds->m_unscaled_size).rintersect(m_r).rempty()))
-			ds->Update();
-		else
-			ds->m_age = 0;
-	}
+	UpdateTargetsFromMemPreDraw(rt, ds);
 
 	if (src && src->m_shared_texture && src->m_texture != src->m_from_target->m_texture)
 	{
@@ -4738,48 +4931,7 @@ void GSRendererHW::Draw()
 		src->m_texture = src->m_from_target->m_texture;
 	}
 
-	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
-	{
-		const u64 frame = g_perfmon.GetFrame();
-
-		std::string s;
-
-		if (GSConfig.SaveTexture && src)
-		{
-			s = GetDrawDumpPath("%05d_f%05lld_itex_%s_%05x(%05x)_%s_%d%d_%02x_%02x_%02x_%02x.dds",
-				s_n, frame, (src->m_from_target ? "tgt" : "gs"), static_cast<int>(m_cached_ctx.TEX0.TBP0), (src->m_from_target ? src->m_from_target->m_TEX0.TBP0 : src->m_TEX0.TBP0), GSUtil::GetPSMName(m_cached_ctx.TEX0.PSM),
-				static_cast<int>(m_cached_ctx.CLAMP.WMS), static_cast<int>(m_cached_ctx.CLAMP.WMT),
-				static_cast<int>(m_cached_ctx.CLAMP.MINU), static_cast<int>(m_cached_ctx.CLAMP.MAXU),
-				static_cast<int>(m_cached_ctx.CLAMP.MINV), static_cast<int>(m_cached_ctx.CLAMP.MAXV));
-
-			src->m_texture->Save(s);
-
-			if (src->m_palette)
-			{
-				s = GetDrawDumpPath("%05d_f%05lld_itpx_%05x_%s.dds", s_n, frame, m_cached_ctx.TEX0.CBP, GSUtil::GetPSMName(m_cached_ctx.TEX0.CPSM));
-
-				src->m_palette->Save(s);
-			}
-		}
-
-		if (rt && GSConfig.SaveRT)
-		{
-			s = GetDrawDumpPath("%05d_f%05lld_rt0_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
-
-			if (rt->m_texture)
-				rt->m_texture->Save(s);
-		}
-
-		if (ds && GSConfig.SaveDepth)
-		{
-			s = GetDrawDumpPath("%05d_f%05lld_rz0_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.ZBUF.Block(), ds->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.ZBUF.PSM));
-
-			if (m_using_temp_z)
-				g_texture_cache->GetTemporaryZ()->Save(s);
-			else if (ds->m_texture)
-				ds->m_texture->Save(s);
-		}
-	}
+	DumpImagesPreDraw(src, rt, ds); // Debugging
 
 	if (m_oi && !m_oi(*this, rt ? rt->m_texture : nullptr, ds ? ds->m_texture : nullptr, src))
 	{
@@ -4795,134 +4947,18 @@ void GSRendererHW::Draw()
 		return;
 	}
 
-	// A couple of hack to avoid upscaling issue. So far it seems to impacts mostly sprite
-	// Note: first hack corrects both position and texture coordinate
-	// Note: second hack corrects only the texture coordinate
-	// Be careful to not correct downscaled targets, this can get messy and break post processing
-	// but it still needs to adjust native stuff from memory as it's not been compensated for upscaling (Dragon Quest 8 font for example).
-	if (CanUpscale() && (m_vt.m_primclass == GS_SPRITE_CLASS) && rt && rt->GetScale() > 1.0f)
-	{
-		const u32 count = m_vertex.next;
-		GSVertex* v = &m_vertex.buff[0];
-
-		// Hack to avoid vertical black line in various games (ace combat/tekken)
-		if (GSConfig.UserHacks_AlignSpriteX)
-		{
-			// Note for performance reason I do the check only once on the first
-			// primitive
-			const int win_position = v[1].XYZ.X - context->XYOFFSET.OFX;
-			const bool unaligned_position = ((win_position & 0xF) == 8);
-			const bool unaligned_texture = ((v[1].U & 0xF) == 0) && PRIM->FST; // I'm not sure this check is useful
-			const bool hole_in_vertex = (count < 4) || (v[1].XYZ.X != v[2].XYZ.X);
-			if (hole_in_vertex && unaligned_position && (unaligned_texture || !PRIM->FST))
-			{
-				// Normaly vertex are aligned on full pixels and texture in half
-				// pixels. Let's extend the coverage of an half-pixel to avoid
-				// hole after upscaling
-				for (u32 i = 0; i < count; i += 2)
-				{
-					v[i + 1].XYZ.X += 8;
-					// I really don't know if it is a good idea. Neither what to do for !PRIM->FST
-					if (unaligned_texture)
-						v[i + 1].U += 8;
-				}
-			}
-		}
-
-		// Noting to do if no texture is sampled
-		if (PRIM->FST && draw_sprite_tex && m_process_texture)
-		{
-			if ((GSConfig.UserHacks_RoundSprite > 1) || (GSConfig.UserHacks_RoundSprite == 1 && !m_vt.IsLinear()))
-			{
-				if (m_vt.IsLinear())
-					RoundSpriteOffset<true>();
-				else
-					RoundSpriteOffset<false>();
-			}
-		}
-		else
-		{
-			// vertical line in Yakuza (note check m_userhacks_align_sprite_X behavior)
-		}
-	}
+	DoUpscalingSpriteHacks(rt, draw_sprite_tex);
 
 	const GSVector4i real_rect = m_r;
 
 	if (!skip_draw)
 		DrawPrims(rt, ds, src, tmm);
 
-	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
-	{
-		const bool writeback_colclip_texture = g_gs_device->GetColorClipTexture() != nullptr;
-		if (writeback_colclip_texture)
-		{
-			GSTexture* colclip_texture = g_gs_device->GetColorClipTexture();
-			g_gs_device->StretchRect(colclip_texture, GSVector4(m_conf.colclip_update_area) / GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy()), rt->m_texture, GSVector4(m_conf.colclip_update_area),
-				ShaderConvert::COLCLIP_RESOLVE, false);
-		}
+	DumpImagesPostDraw(src, rt, ds); // Debugging
 
-		const u64 frame = g_perfmon.GetFrame();
-
-		std::string s;
-
-		if (rt && GSConfig.SaveRT && !m_last_rt)
-		{
-			s = GetDrawDumpPath("%05d_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
-
-			rt->m_texture->Save(s);
-		}
-
-		if (ds && GSConfig.SaveDepth)
-		{
-			s = GetDrawDumpPath("%05d_f%05lld_rz1_%05x_%s.bmp", s_n, frame, m_cached_ctx.ZBUF.Block(), GSUtil::GetPSMName(m_cached_ctx.ZBUF.PSM));
-
-			if (m_using_temp_z)
-				g_texture_cache->GetTemporaryZ()->Save(s);
-			else
-				ds->m_texture->Save(s);
-		}
-	}
-
-	InvalidateTextureCachePostDraw(old_rt, old_ds);
-
-	UpdateTargetValidityPostDraw(rt, ds, fm, fm_mask, zm, can_update_size, resolution, real_rect);
-
-	// DUMPING WAS HERE!!
-
-	if (rt)
-		rt->m_last_draw = s_n;
-
-	if (ds)
-		ds->m_last_draw = s_n;
-
-	if ((fm & fm_mask) != fm_mask && !no_rt)
-	{
-		g_texture_cache->InvalidateVideoMem(context->offset.fb, real_rect, false);
-
-		// Remove overwritten Zs at the FBP.
-		g_texture_cache->InvalidateVideoMemType(GSTextureCache::DepthStencil, m_cached_ctx.FRAME.Block(),
-			m_cached_ctx.FRAME.PSM, m_texture_shuffle ? GetEffectiveTextureShuffleFbmsk() : fm);
-
-		if (rt && !m_using_temp_z && g_texture_cache->GetTemporaryZ() != nullptr)
-		{
-			GSTextureCache::TempZAddress temp_z_info = g_texture_cache->GetTemporaryZInfo();
-			if (GSLocalMemory::GetStartBlockAddress(rt->m_TEX0.TBP0, rt->m_TEX0.TBW, rt->m_TEX0.PSM, real_rect) <= temp_z_info.ZBP && GSLocalMemory::GetEndBlockAddress(rt->m_TEX0.TBP0, rt->m_TEX0.TBW, rt->m_TEX0.PSM, real_rect) > temp_z_info.ZBP)
-				g_texture_cache->InvalidateTemporaryZ();
-		}
-	}
-
-	if (zm != 0xffffffff && !no_ds)
-	{
-		g_texture_cache->InvalidateVideoMem(context->offset.zb, real_rect, false);
-
-		// Remove overwritten RTs at the ZBP.
-		g_texture_cache->InvalidateVideoMemType(
-			GSTextureCache::RenderTarget, m_cached_ctx.ZBUF.Block(), m_cached_ctx.ZBUF.PSM, zm);
-	}
-#ifdef DISABLE_HW_TEXTURE_CACHE
-	if (rt)
-		g_texture_cache->Read(rt, real_rect);
-#endif
+	UpdateTargetAttributesPostDraw(rt, ds, fm, fm_mask, zm, can_update_size, resolution, real_rect);
+	
+	InvalidateTextureCachePostDraw(no_rt, no_ds, rt, ds, old_rt, old_ds, fm, fm_mask, zm, real_rect);
 
 	CleanupDraw(false);
 }

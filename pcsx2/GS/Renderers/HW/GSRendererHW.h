@@ -53,9 +53,8 @@ private:
 	void ContinueSplitTextureShuffle();
 	bool DetectMemClearSkipDraw(const bool no_rt, const bool no_ds, const bool preserve_rt_color, const bool preserve_depth);
 	bool ProcessTextureMappingAndLookupSource(
-		bool& no_rt, bool& no_ds, u32& fm, u32& zm,
-		const u32 fm_mask, const bool all_depth_tests_pass,
-		GIFRegTEX0& TEX0, GSTextureCache::Source*& src, TextureMinMaxResult& tmm,
+		bool& no_rt, bool& no_ds, u32& fm, const u32 fm_mask, u32& zm, const bool all_depth_tests_pass,
+		GSTextureCache::Source*& src, GIFRegTEX0& TEX0, TextureMinMaxResult& tmm,
 		bool& possible_shuffle, bool& draw_uses_target);
 	bool ProcessDepthAndLookupDepthTarget(
 		const bool no_rt, bool& no_ds, const u32 zm, GSTextureCache::Source* const src, GSTextureCache::Target*& ds,
@@ -69,7 +68,7 @@ private:
 		const bool preserve_depth, const GSVector4i& unclamped_draw_rect, bool& possible_shuffle, const bool draw_sprite_tex,
 		const int scale_draw, const bool draw_uses_target);
 	void ProcessDepthAndLookupDepthTargetAfterColor(
-		bool& no_ds, const u32 zm, GSTextureCache::Source* src, GSTextureCache::Target*& ds,
+		bool& no_ds, const u32 zm, GSTextureCache::Source* const src, GSTextureCache::Target*& ds,
 		GIFRegTEX0& ZBUF_TEX0, const GSVector2i t_size, const float target_scale, const bool force_preload,
 		const bool preserve_depth, const GSVector4i& unclamped_draw_rect, const bool possible_shuffle);
 	void ProcessTextureMappingAfterTargetLookup(
@@ -83,12 +82,22 @@ private:
 		const GSVector2i t_size, const float target_scale, const bool can_update_size,
 		bool& preserve_rt_color, const bool preserve_rt_rgb, const bool preserve_rt_alpha, bool& preserve_depth,
 		const GSVector2i resolution);
-	void InvalidateTextureCachePostDraw(
-		GSTextureCache::Target* const old_rt, GSTextureCache::Target* const old_ds);
-	void UpdateTargetValidityPostDraw(
+	void UpdateTargetsFromMemPreDraw(
+		GSTextureCache::Target* const rt, GSTextureCache::Target* const ds);
+	void UpdateTargetAttributesPostDraw(
 		GSTextureCache::Target* const rt, GSTextureCache::Target* const ds, const u32 fm, const u32 fm_mask,
 		const u32 zm, const bool can_update_size, const GSVector2i resolution, const GSVector4i real_rect);
+	void InvalidateTextureCachePostDraw(
+		const bool no_rt, const bool no_ds, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds,
+		GSTextureCache::Target* const old_rt, GSTextureCache::Target* const old_ds, const u32 fm, const u32 fm_mask,
+		const u32 zm, const GSVector4i& real_rect);
+	void DoUpscalingSpriteHacks(GSTextureCache::Target* const rt, const bool draw_sprite_tex);
 
+	void DumpInfo();
+	void DumpImagesPreDraw(
+		GSTextureCache::Source* const src, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds);
+	void DumpImagesPostDraw(
+		GSTextureCache::Source* const src, GSTextureCache::Target* const rt, GSTextureCache::Target* const ds);
 
 	u16 Interpolate_UV(float alpha, int t0, int t1);
 	float alpha0(int L, int X0, int X1);
