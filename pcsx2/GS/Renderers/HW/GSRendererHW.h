@@ -49,6 +49,46 @@ private:
 	bool TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Target* ds, bool preserve_rt_color, bool preserve_depth);
 	void SetNewFRAME(u32 bp, u32 bw, u32 psm);
 	void SetNewZBUF(u32 bp, u32 psm);
+	bool DetectSplitChannelShuffleSkipDraw();
+	void ContinueSplitTextureShuffle();
+	bool DetectMemClearSkipDraw(const bool no_rt, const bool no_ds, const bool preserve_rt_color, const bool preserve_depth);
+	bool ProcessTextureMappingAndLookupSource(
+		bool& no_rt, bool& no_ds, u32& fm, u32& zm,
+		const u32 fm_mask, const bool all_depth_tests_pass,
+		GIFRegTEX0& TEX0, GSTextureCache::Source*& src, TextureMinMaxResult& tmm,
+		bool& possible_shuffle, bool& draw_uses_target);
+	bool ProcessDepthAndLookupDepthTarget(
+		const bool no_rt, bool& no_ds, const u32 zm, GSTextureCache::Source* const src, GSTextureCache::Target*& ds,
+		GIFRegTEX0& ZBUF_TEX0, GSVector2i& t_size, const float target_scale,
+		const bool force_preload, const bool preserve_depth, const GSVector4i unclamped_draw_rect,
+		const bool possible_shuffle);
+	bool ProcessColorAndLookupRenderTarget(
+		const bool no_rt, const bool no_ds, const u32 fm, GSTextureCache::Source* const src, GSTextureCache::Target*& rt,
+		GSTextureCache::Target*& ds, GIFRegTEX0& FRAME_TEX0, GSVector2i& t_size, float& target_scale,
+		const bool force_preload, bool& preserve_rt_color, bool& preserve_rt_rgb, bool& preserve_rt_alpha,
+		const bool preserve_depth, const GSVector4i& unclamped_draw_rect, bool& possible_shuffle, const bool draw_sprite_tex,
+		const int scale_draw, const bool draw_uses_target);
+	void ProcessDepthAndLookupDepthTargetAfterColor(
+		bool& no_ds, const u32 zm, GSTextureCache::Source* src, GSTextureCache::Target*& ds,
+		GIFRegTEX0& ZBUF_TEX0, const GSVector2i t_size, const float target_scale, const bool force_preload,
+		const bool preserve_depth, const GSVector4i& unclamped_draw_rect, const bool possible_shuffle);
+	void ProcessTextureMappingAfterTargetLookup(
+		GSTextureCache::Source* const src, GSTextureCache::Target* const rt, GIFRegTEX0& TEX0,
+		TextureMinMaxResult& tmm, const bool draw_sprite_tex, const bool draw_uses_target);
+	void UpdateTargetAttributes(const u32 fm, const u32 zm, GSTextureCache::Source* src, GSTextureCache::Target* rt,
+		GSTextureCache::Target* ds, GIFRegTEX0& FRAME_TEX0, GIFRegTEX0& ZBUF_TEX0,
+		const int scale_draw, const bool scaled_copy);
+	void UpdateTargetSizes(GSTextureCache::Source* const src, GSTextureCache::Target* const rt,
+		GSTextureCache::Target* const ds, GSTextureCache::Target*& old_rt, GSTextureCache::Target*& old_ds,
+		const GSVector2i t_size, const float target_scale, const bool can_update_size,
+		bool& preserve_rt_color, const bool preserve_rt_rgb, const bool preserve_rt_alpha, bool& preserve_depth,
+		const GSVector2i resolution);
+	void InvalidateTextureCachePostDraw(
+		GSTextureCache::Target* const old_rt, GSTextureCache::Target* const old_ds);
+	void UpdateTargetValidityPostDraw(
+		GSTextureCache::Target* const rt, GSTextureCache::Target* const ds, const u32 fm, const u32 fm_mask,
+		const u32 zm, const bool can_update_size, const GSVector2i resolution, const GSVector4i real_rect);
+
 
 	u16 Interpolate_UV(float alpha, int t0, int t1);
 	float alpha0(int L, int X0, int X1);
@@ -136,6 +176,8 @@ private:
 	bool IsUsingCsInBlend();
 	bool IsUsingAsInBlend();
 
+	void TryOptimizeAlphaTestAsNOP(u32& fm, u32& zm);
+
 	// We modify some of the context registers to optimize away unnecessary operations.
 	// Instead of messing with the real context, we copy them and use those instead.
 	struct HWCachedCtx
@@ -175,6 +217,7 @@ private:
 	u32 m_split_texture_shuffle_start_TBP = 0;
 	u32 m_split_texture_shuffle_fbw = 0;
 
+	u32 m_num_skipped_channel_shuffle_draws = 0;
 	u32 m_last_channel_shuffle_fbmsk = 0;
 	u32 m_last_channel_shuffle_fbp = 0;
 	u32 m_last_channel_shuffle_tbp = 0;
@@ -185,6 +228,7 @@ private:
 
 	GSTextureCache::Target* m_last_rt;
 
+	ClearType m_is_possible_mem_clear;
 	GIFRegFRAME m_split_clear_start = {};
 	GIFRegZBUF m_split_clear_start_Z = {};
 	u32 m_split_clear_pages = 0; // if zero, inactive
