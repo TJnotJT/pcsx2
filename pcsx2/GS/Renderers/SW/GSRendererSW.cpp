@@ -307,6 +307,11 @@ MULTI_ISA_UNSHARED_END
 
 void GSRendererSW::Draw()
 {
+	//if (true)
+	//{
+	//	m_mem.SaveBMP("E:\\temp.png", 0x3500, 4, 0, 256, 256);
+	//	printf("\n");
+	//}
 	const GSDrawingContext* context = m_context;
 
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();

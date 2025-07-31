@@ -7115,9 +7115,10 @@ void GSTextureCache::Source::Update(const GSVector4i& rect, int level)
 	if (m_from_target)
 		m_from_target->m_age = 0;
 
+	if(GSState::s_n!=263)
 	if (m_target || m_from_hash_cache || (m_complete_layers & (1u << level)))
 		return;
-
+	if (GSState::s_n != 263)
 	if (CanPreload())
 	{
 		PreloadLevel(level);

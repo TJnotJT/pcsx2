@@ -115,6 +115,8 @@ bool GSRenderer::Merge(int field)
 			tex[2] = GetFeedbackOutput(tex_scale[2]);
 	}
 
+	s_n++; // FIXME: Make a separate PR!
+
 	if (!tex[0] && !tex[1])
 	{
 		m_real_size = GSVector2i(0, 0);
@@ -132,8 +134,6 @@ bool GSRenderer::Merge(int field)
 		}
 		return false;
 	}
-
-	s_n++;
 
 	GSVector4 src_gs_read[2];
 	GSVector4 dst[3];
