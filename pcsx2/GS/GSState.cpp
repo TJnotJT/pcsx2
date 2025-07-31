@@ -774,6 +774,10 @@ void GSState::DumpTransfers(const std::string& filename)
 
 		// Dump zero_clear
 		(*file) << INDENT << "zero_clear: " << (transfer.zero_clear ? "true" : "false") << std::endl;
+
+		std::string filename = GetDrawDumpPath("%05d_transfer_%04x_%s.png", s_n, transfer.blit.DBP,
+			GSUtil::GetPSMName(transfer.blit.DPSM));
+		m_mem.SaveBMP(filename, transfer.blit.DBP, transfer.blit.DBW, transfer.blit.DPSM, transfer.rect.z, transfer.rect.w);
 	}
 }
 
