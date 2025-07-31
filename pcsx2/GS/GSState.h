@@ -170,7 +170,7 @@ protected:
 	void UpdateVertexKick();
 
 	void GrowVertexBuffer();
-	bool IsAutoFlushDraw(u32 prim);
+	bool IsAutoFlushDraw(u32 prim, int& LOD_hit);
 	template<u32 prim> void HandleAutoFlush();
 	void CheckCLUTValidity(u32 prim);
 
@@ -451,6 +451,12 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
+
+	GSVector2i GetWindowCoords(const GSVertex& v);
+	GSVector2i GetTexelCoords(const GSVertex& v);
+	void GetSpriteBBox(const GSVertex* const* v, GSVector4i* xy_rect, GSVector4i* uv_rect);
+	template <u32 prim>
+	void GetPrimBBox(const GSVertex* const* v, GSVector4i* xy_rect, GSVector4i* uv_rect);
 };
 
 // We put this in the header because of Multi-ISA.

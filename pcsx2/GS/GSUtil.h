@@ -31,8 +31,4 @@ public:
 	static GSRendererType GetPreferredRenderer();
 
 	static bool FrameNotWritten(const GIFRegFRAME& frame);
-	static void RoundSpriteToPixel(
-		const GSVertex& v0, const GSVertex& v1, const GSVector2i& offset,
-		const GSVector4i& scissor, bool tme, bool fst, int tw, int th,
-		GSVector4i& xy_rect, GSVector4i& uv_rect);
 };
