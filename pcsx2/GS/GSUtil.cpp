@@ -264,3 +264,77 @@ const char* GSUtil::GetPSMName(int psm)
 	}
 	return "BAD_PSM";
 }
+
+bool GSUtil::FrameNotWritten(const GIFRegFRAME& frame)
+{
+	return (GSLocalMemory::m_psm[frame.PSM].fmsk & ~frame.FBMSK) == 0;
+}
+
+void GSUtil::RoundSpriteToPixel(
+	const GSVertex& v0, const GSVertex& v1, const GSVector2i& offset,
+	const GSVector4i& scissor, bool tme, bool fst, int tw, int th,
+	GSVector4i& xy_rect, GSVector4i& uv_rect)
+{
+	const GSVertex* v[2] = {&v0, &v1};
+
+	const int xidx[2] = {
+		v0.XYZ.X > v1.XYZ.X ? 0 : 1,
+		v0.XYZ.X > v1.XYZ.X ? 1 : 0};
+	const int yidx[2] = {
+		v0.XYZ.Y > v1.XYZ.Y ? 0 : 1,
+		v0.XYZ.Y > v1.XYZ.Y ? 1 : 0};
+
+	// Raw XY values
+	int x0 = static_cast<int>(v[xidx[0]]->XYZ.X) - offset.x;
+	int y0 = static_cast<int>(v[yidx[0]]->XYZ.Y) - offset.y;
+	int x1 = static_cast<int>(v[xidx[1]]->XYZ.X) - offset.x;
+	int y1 = static_cast<int>(v[yidx[1]]->XYZ.Y) - offset.y;
+
+	// Rounded XY values to pixel centers
+	int ix0 = (x0 + 0xF) & ~0xF;
+	int iy0 = (y0 + 0xF) & ~0xF;
+	int ix1 = x1 & ~0xF;
+	int iy1 = y1 & ~0xF;
+
+	// Omit right and bottom edges
+	if (ix1 == x1)
+		ix1 = std::max(ix0, ix1 - 0x10);
+	if (iy1 == y1)
+		ix1 = std::max(iy0, iy1 - 0x10);
+
+	// Scissor
+	ix0 = std::clamp(ix0, scissor.x << 4, scissor.z << 4);
+	iy0 = std::clamp(iy0, scissor.y << 4, scissor.w << 4);
+	ix1 = std::clamp(ix1, scissor.x << 4, scissor.z << 4);
+	iy1 = std::clamp(iy1, scissor.y << 4, scissor.w << 4);
+
+	// Get UV coords
+	int iu0, iv0, iu1, iv1;
+	if (tme)
+	{
+		// Interpolate UV
+		float u0, v0, u1, v1;
+		if (fst)
+		{
+			u0 = v[xidx[0]]->U;
+			v0 = v[yidx[0]]->V;
+			u1 = v[xidx[1]]->U;
+			v1 = v[yidx[1]]->V;
+		}
+		else
+		{
+			u0 = 16.0f * (1 << tw) * (v[xidx[0]]->ST.S / v[xidx[0]]->RGBAQ.Q);
+			v0 = 16.0f * (1 << th) * (v[yidx[0]]->ST.T / v[yidx[0]]->RGBAQ.Q);
+			u1 = 16.0f * (1 << tw) * (v[xidx[1]]->ST.S / v[xidx[1]]->RGBAQ.Q);
+			v1 = 16.0f * (1 << th) * (v[yidx[1]]->ST.T / v[yidx[1]]->RGBAQ.Q);
+		}
+		iu0 = static_cast<int>(((x1 - ix0) * u0 + (ix0 - x0) * u1) / (x1 - x0));
+		iv0 = static_cast<int>(((y1 - iy0) * v0 + (iy0 - y0) * v1) / (y1 - y0));
+		iu1 = static_cast<int>(((x1 - ix1) * u0 + (ix1 - x0) * u1) / (x1 - x0));
+		iv1 = static_cast<int>(((y1 - iy1) * v0 + (iy1 - y0) * v1) / (y1 - y0));
+	}
+
+	xy_rect = GSVector4i(ix0, iy0, ix1, iy1).sra32<4>();
+	if (tme)
+		uv_rect = GSVector4i(iu0, iv0, iu1, iv1).sra32<4>();
+}
