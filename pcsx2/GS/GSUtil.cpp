@@ -5,6 +5,7 @@
 #include "GS/GSExtra.h"
 #include "GS/GSUtil.h"
 #include "GS/GSLocalMemory.h"
+#include "GS/GSVector.h"
 #include "MultiISA.h"
 #include "common/StringUtil.h"
 
@@ -140,6 +141,69 @@ u32 GSUtil::GetChannelMask(u32 spsm, u32 fbmsk)
 		((mask & 0xFF00)     ? 2 : 0) |
 		((mask & 0xFF0000)   ? 4 : 0) |
 		((mask & 0xFF000000) ? 8 : 0);
+}
+
+template <Align_Mode mode>
+GSVector4i GSUtil::GetAlignedUnits(GSVector4i rect, const GSVector2i align)
+{
+	rect = rect.ralign<mode>(align);
+	rect.x /= align.x;
+	rect.y /= align.y;
+	rect.z /= align.x;
+	rect.w /= align.y;
+	return rect;
+}
+
+template GSVector4i GSUtil::GetAlignedUnits<Align_Outside>(GSVector4i rect, const GSVector2i align);
+template GSVector4i GSUtil::GetAlignedUnits<Align_Inside>(GSVector4i rect, const GSVector2i align);
+template GSVector4i GSUtil::GetAlignedUnits<Align_NegInf>(GSVector4i rect, const GSVector2i align);
+template GSVector4i GSUtil::GetAlignedUnits<Align_PosInf>(GSVector4i rect, const GSVector2i align);
+
+GSVector2i GSUtil::ConvertRangeDepthFormat(const GSVector2i range, const int pg_size)
+{
+	const int start = range.x;
+	const int end = range.y;
+	const int half_pg_size = pg_size / 2;
+	const int start_pg = start & ~(pg_size - 1);
+	const int start_mid_pg = start_pg + half_pg_size;
+	const int end_pg = (end + pg_size - 1) & ~(pg_size - 1);
+	const int end_mid_pg = end_pg - half_pg_size;
+
+	if (start_pg == end_pg)
+	{
+		// Empty interval exactly on a page; ambiguous.
+		return GSVector2i(start_pg, end_pg);
+	}
+
+	int new_start;
+	int new_end;
+
+	if (start > start_mid_pg)
+		new_start = start - half_pg_size; // Only upper half of start page covered.
+	else if (end > start_mid_pg)
+		new_start = start_pg; // Interval crosses start half-page.
+	else if (start < start_mid_pg)
+		new_start = start + half_pg_size; // Interval fully inside lower half page.
+	else
+		new_start = start; // Empty interval exactly on a half page; ambiguous.
+
+	if (end < end_mid_pg)
+		new_end = end + half_pg_size; // Only lower half of end page covered.
+	else if (start < end_mid_pg)
+		new_end = end_pg; // Interval crosses end half-page.
+	else if (end > end_mid_pg)
+		new_end = end - half_pg_size; // Interval fully inside upper half page.
+	else
+		new_end = end; // Empty interval exactly on a half page; ambiguous.
+
+	return GSVector2i(new_start, new_end);
+};
+
+GSVector4i GSUtil::ConvertBBoxDepthFormat(const GSVector4i bbox, const GSVector2i pg_size)
+{
+	const GSVector2i pt0 = ConvertRangeDepthFormat(GSVector2i(bbox.x, bbox.z), pg_size.x);
+	const GSVector2i pt1 = ConvertRangeDepthFormat(GSVector2i(bbox.y, bbox.w), pg_size.y);
+	return GSVector4i(pt0.x, pt1.x, pt0.y, pt1.y);
 }
 
 GSRendererType GSUtil::GetPreferredRenderer()
