@@ -320,26 +320,84 @@ void GSRendererHW::ExpandLineIndices()
 	}
 }
 
+// Return true if the sprite reverses the same 8 pixels between the src and dst.
+// Used by games to corrected reversed pixels in a texture shuffle.
+__fi bool GSRendererHW::Is8PixelReverseSprite(const GSVertex& v0, const GSVertex& v1)
+{
+	pxAssert(m_vt.m_primclass == GS_SPRITE_CLASS);
+
+	const GIFRegXYOFFSET& o = m_context->XYOFFSET;
+	const float tw = static_cast<float>(1u << m_cached_ctx.TEX0.TW);
+
+	int pos0 = std::max(static_cast<int>(v0.XYZ.X) - static_cast<int>(o.OFX), 0);
+	int pos1 = std::max(static_cast<int>(v1.XYZ.X) - static_cast<int>(o.OFX), 0);
+
+	const bool rev_pos = pos0 > pos1;
+	if (rev_pos)
+		std::swap(pos0, pos1);
+
+	int tex0 = (PRIM->FST) ? v0.U : static_cast<int>(tw * v0.ST.S * 16.0f);
+	int tex1 = (PRIM->FST) ? v1.U : static_cast<int>(tw * v1.ST.S * 16.0f);
+
+	const bool rev_tex = tex0 > tex1;
+	if (rev_tex)
+		std::swap(tex0, tex1);
+
+	// Sprites flips a single column and does nothing else.
+	return std::abs(pos1 - pos0) < 136 &&
+	       std::abs(pos0 - tex0) <= 8 && std::abs(pos1 - tex1) <= 8 &&
+	       rev_pos != rev_tex;
+}
+
 // Fix the vertex position/tex_coordinate from 16 bits color to 32 bits color
 void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
-	const u32 count = m_vertex.next;
+	const u32 count = m_index.tail;
 	GSVertex* v = &m_vertex.buff[0];
+	
+	const bool recursive_draw = m_cached_ctx.FRAME.Block() == m_cached_ctx.TEX0.TBP0;
+
 	const GIFRegXYOFFSET& o = m_context->XYOFFSET;
+	const float tw = static_cast<float>(1u << m_cached_ctx.TEX0.TW);
+
 	// Could be drawing upside down or just back to front on the actual verts.
-	const GSVertex* start_verts = (v[0].XYZ.X <= v[m_vertex.tail - 2].XYZ.X) ? &v[0] : &v[m_vertex.tail - 2];
-	const GSVertex first_vert = (start_verts[0].XYZ.X <= start_verts[1].XYZ.X) ? start_verts[0] : start_verts[1];
-	const GSVertex second_vert = (start_verts[0].XYZ.X <= start_verts[1].XYZ.X) ? start_verts[1] : start_verts[0];
-	// vertex position is 8 to 16 pixels, therefore it is the 16-31 bits of the colors
-	const int pos = (first_vert.XYZ.X - o.OFX) & 0xFF;
+	// Iterate through the sprites in order and find one to infer which channels are being shuffled.
+	const int sprite_order = v[0].XYZ.X <= v[count - 2].XYZ.X ? 1 : -1;
+	const int sprite_start = sprite_order > 0 ? 0 : count - 2;
+	const int sprite_end = sprite_order > 0 ? count - 2 : 0;
+	int tries = 0;
+	int sprite;
+	for (sprite = sprite_start;; sprite += 2 * sprite_order, tries++)
+	{
+		if (!(recursive_draw && Is8PixelReverseSprite(v[sprite], v[sprite + 1])))
+			break; // Found the right sprite.
+
+		// Two tries at most, by the second sprite we should be able to infer the channels.
+		if (sprite == sprite_end || tries >= 2) 
+		{
+			sprite = sprite_start; // Use the first sprite in order by default.
+			GL_INS("Warning: ConvertSpriteTextureShuffle: Could not find correct sprite for shuffle.");
+			break;
+		}
+	}
+
+	// Get first and second vertex for the sprite we will use to infer shuffled channels.
+	const bool rev_pos = v[sprite].XYZ.X > v[sprite + 1].XYZ.X;
+	const GSVertex& first_vert = rev_pos ? v[sprite + 1] : v[sprite];
+	const GSVertex& second_vert = rev_pos ? v[sprite] : v[sprite + 1];
+	const int pos = std::max(static_cast<int>(first_vert.XYZ.X) - static_cast<int>(o.OFX), 0) & 0xFF;
 
 	// Read texture is 8 to 16 pixels (same as above)
-	const float tw = static_cast<float>(1u << m_cached_ctx.TEX0.TW);
-	int tex_pos = (PRIM->FST) ? first_vert.U : static_cast<int>(tw * first_vert.ST.S * 16.0f);
+	const bool rev_tex = v[sprite].U > v[sprite + 1].U;
+	int tex_pos = PRIM->FST ?
+		(rev_tex ? v[sprite + 1].U : v[sprite].U) :
+	    static_cast<int>(tw * (rev_tex ? v[sprite + 1].ST.T : v[sprite].ST.S) * 16.0f);
 	tex_pos &= 0xFF;
-	shuffle_across = (((tex_pos + 8) >> 4) ^ ((pos + 8) >> 4)) & 0x8;
+	shuffle_across = ((((tex_pos + 8) >> 4) ^ ((pos + 8) >> 4)) & 0x8);
 
 	const bool full_width = ((second_vert.XYZ.X - first_vert.XYZ.X) >> 4) >= 16 && m_r.width() > 8 && tex && tex->m_from_target && rt == tex->m_from_target;
+	const bool rev_pixels = rev_pos != rev_tex; // Whether pixels are reversed between src and dst.
+	shuffle_across |= full_width && rev_pixels;
 	process_ba = ((pos > 112 && pos < 136) || full_width) ? SHUFFLE_WRITE : 0;
 	process_rg = (!process_ba || full_width) ? SHUFFLE_WRITE : 0;
 	// "same group" means it can read blue and write alpha using C32 tricks
@@ -565,73 +623,86 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		GL_INS("HW: First vertex is  P: %d => %d    T: %d => %d", v[0].XYZ.X, v[1].XYZ.X, v[0].U, v[1].U);
 		const int reversed_pos = (v[0].XYZ.X > v[1].XYZ.X) ? 1 : 0;
 		const int reversed_U = (v[0].U > v[1].U) ? 1 : 0;
+		// We might cull some sprites so set up write index to copy them down.
+		int wi = 0;
 		for (u32 i = 0; i < count; i += 2)
 		{
-
+			if (recursive_draw && rev_pixels && Is8PixelReverseSprite(v[i], v[i + 1]))
+				continue;
+			if (wi != i)
+			{
+				v[wi] = v[i];
+				v[wi + 1] = v[i + 1];
+			}
 			if (!full_width)
 			{
 				if (process_ba & SHUFFLE_WRITE)
-					v[i + reversed_pos].XYZ.X -= 128u;
+					v[wi + reversed_pos].XYZ.X -= 128u;
 				else
-					v[i + 1 - reversed_pos].XYZ.X += 128u;
+					v[wi + 1 - reversed_pos].XYZ.X += 128u;
 
 				if (process_ba & SHUFFLE_READ)
-					v[i + reversed_U].U -= 128u;
+					v[wi + reversed_U].U -= 128u;
 				else
-					v[i + 1 - reversed_U].U += 128u;
+					v[wi + 1 - reversed_U].U += 128u;
 			}
 			else
 			{
 				if (((pos + 8) >> 4) & 0x8)
 				{
-					v[i + reversed_pos].XYZ.X -= 128u;
-					v[i + 1 - reversed_pos].XYZ.X -= 128u;
+					v[wi + reversed_pos].XYZ.X -= 128u;
+					v[wi + 1 - reversed_pos].XYZ.X -= 128u;
 				}
 				// Needed for when there's no barriers.
 				if (v[i + reversed_U].U & 128)
 				{
-					v[i + reversed_U].U -= 128u;
-					v[i + 1 - reversed_U].U -= 128u;
+					v[wi + reversed_U].U -= 128u;
+					v[wi + 1 - reversed_U].U -= 128u;
 				}
 			}
 
 			if (half_bottom_vert)
 			{
 				// Height is too big (2x).
-				const int tex_offset = v[i].V & 0xF;
+				const int tex_offset = v[wi].V & 0xF;
 				const GSVector4i offset(o.OFY, tex_offset, o.OFY, tex_offset);
 
-				GSVector4i tmp(v[i].XYZ.Y, v[i].V, v[i + 1].XYZ.Y, v[i + 1].V);
+				GSVector4i tmp(v[wi].XYZ.Y, v[wi].V, v[wi + 1].XYZ.Y, v[wi + 1].V);
 				tmp = GSVector4i(tmp - offset).srl32<1>() + offset;
 
-				v[i].XYZ.Y = static_cast<u16>(tmp.x);
-				v[i + 1].XYZ.Y = static_cast<u16>(tmp.z);
+				v[wi].XYZ.Y = static_cast<u16>(tmp.x);
+				v[wi + 1].XYZ.Y = static_cast<u16>(tmp.z);
 
 				if (half_bottom_uv)
 				{
-					v[i].V = static_cast<u16>(tmp.y);
-					v[i + 1].V = static_cast<u16>(tmp.w);
+					v[wi].V = static_cast<u16>(tmp.y);
+					v[wi + 1].V = static_cast<u16>(tmp.w);
 				}
 			}
 			else if (half_right_vert)
 			{
 				// Width is too big (2x).
-				const int tex_offset = v[i].U & 0xF;
+				const int tex_offset = v[wi].U & 0xF;
 				const GSVector4i offset(o.OFX, tex_offset, o.OFX, tex_offset);
 
-				GSVector4i tmp(v[i].XYZ.X, v[i].U, v[i + 1].XYZ.X, v[i + 1].U);
+				GSVector4i tmp(v[wi].XYZ.X, v[wi].U, v[wi + 1].XYZ.X, v[wi + 1].U);
 				tmp = GSVector4i(tmp - offset).srl32<1>() + offset;
 
-				v[i].XYZ.X = static_cast<u16>(tmp.x);
-				v[i + 1].XYZ.X = static_cast<u16>(tmp.z);
+				v[wi].XYZ.X = static_cast<u16>(tmp.x);
+				v[wi + 1].XYZ.X = static_cast<u16>(tmp.z);
 
 				if (half_right_uv)
 				{
-					v[i].U = static_cast<u16>(tmp.y);
-					v[i + 1].U = static_cast<u16>(tmp.w);
+					v[wi].U = static_cast<u16>(tmp.y);
+					v[wi + 1].U = static_cast<u16>(tmp.w);
 				}
 			}
+
+			wi += 2;
 		}
+
+		m_vertex.head = m_vertex.tail = m_vertex.next = wi;
+		m_index.tail = wi;
 	}
 	else
 	{
@@ -639,28 +710,35 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 		GL_INS("HW: First vertex is  P: %d => %d    T: %f => %f (offset %f)", v[0].XYZ.X, v[1].XYZ.X, v[0].ST.S, v[1].ST.S, offset_8pix);
 		const int reversed_pos = (v[0].XYZ.X > v[1].XYZ.X) ? 1 : 0;
 		const int reversed_S = (v[0].ST.S > v[1].ST.S) ? 1 : 0;
-
+		// We might cull some sprites so set up write index to copy them down.
+		int wi = 0;
 		for (u32 i = 0; i < count; i += 2)
 		{
-
+			if (recursive_draw && rev_pixels && Is8PixelReverseSprite(v[i], v[i + 1]))
+				continue;
+			if (wi != i)
+			{
+				v[wi] = v[i];
+				v[wi + 1] = v[i + 1];
+			}
 			if (!full_width)
 			{
 				if (process_ba & SHUFFLE_WRITE)
-					v[i + reversed_pos].XYZ.X -= 128u;
+					v[wi + reversed_pos].XYZ.X -= 128u;
 				else
-					v[i + 1 - reversed_pos].XYZ.X += 128u;
+					v[wi + 1 - reversed_pos].XYZ.X += 128u;
 
 				if (process_ba & SHUFFLE_READ)
-					v[i + reversed_S].ST.S -= offset_8pix;
+					v[wi + reversed_S].ST.S -= offset_8pix;
 				else
-					v[i + 1 - reversed_S].ST.S += offset_8pix;
+					v[wi + 1 - reversed_S].ST.S += offset_8pix;
 			}
 			else
 			{
-				if (static_cast<int>(v[i + reversed_S].ST.S * tw) & 8)
+				if (static_cast<int>(v[wi + reversed_S].ST.S * tw) & 8)
 				{
-					v[i + reversed_S].ST.S -= offset_8pix;
-					v[i + 1 - reversed_S].ST.S -= offset_8pix;
+					v[wi + reversed_S].ST.S -= offset_8pix;
+					v[wi + 1 - reversed_S].ST.S -= offset_8pix;
 				}
 			}
 
@@ -669,17 +747,17 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 				// Height is too big (2x).
 				const GSVector4i offset(o.OFY, o.OFY);
 
-				GSVector4i tmp(v[i].XYZ.Y, v[i + 1].XYZ.Y);
+				GSVector4i tmp(v[wi].XYZ.Y, v[wi + 1].XYZ.Y);
 				tmp = GSVector4i(tmp - offset).srl32<1>() + offset;
 
 				//fprintf(stderr, "HW: Before %d, After %d\n", v[i + 1].XYZ.Y, tmp.y);
-				v[i].XYZ.Y = static_cast<u16>(tmp.x);
-				v[i + 1].XYZ.Y = static_cast<u16>(tmp.y);
+				v[wi].XYZ.Y = static_cast<u16>(tmp.x);
+				v[wi + 1].XYZ.Y = static_cast<u16>(tmp.y);
 
 				if (half_bottom_uv)
 				{
-					v[i].ST.T /= 2.0f;
-					v[i + 1].ST.T /= 2.0f;
+					v[wi].ST.T /= 2.0f;
+					v[wi + 1].ST.T /= 2.0f;
 				}
 			}
 			else if (half_right_vert)
@@ -687,20 +765,38 @@ void GSRendererHW::ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba,
 				// Width is too big (2x).
 				const GSVector4i offset(o.OFX, o.OFX);
 
-				GSVector4i tmp(v[i].XYZ.X, v[i + 1].XYZ.X);
+				GSVector4i tmp(v[wi].XYZ.X, v[wi + 1].XYZ.X);
 				tmp = GSVector4i(tmp - offset).srl32<1>() + offset;
 
 				//fprintf(stderr, "HW: Before %d, After %d\n", v[i + 1].XYZ.Y, tmp.y);
-				v[i].XYZ.X = static_cast<u16>(tmp.x);
-				v[i + 1].XYZ.X = static_cast<u16>(tmp.y);
+				v[wi].XYZ.X = static_cast<u16>(tmp.x);
+				v[wi + 1].XYZ.X = static_cast<u16>(tmp.y);
 
 				if (half_right_uv)
 				{
-					v[i].ST.S /= 2.0f;
-					v[i + 1].ST.S /= 2.0f;
+					v[wi].ST.S /= 2.0f;
+					v[wi + 1].ST.S /= 2.0f;
 				}
 			}
+
+			wi += 2;
 		}
+
+		m_vertex.head = m_vertex.tail = m_vertex.next = wi;
+		m_index.tail = wi;
+	}
+
+	if (m_index.tail == 0)
+	{
+		// In case we culled all the sprites just exit, but if we get here then there is a bug.
+		// The draw should have been exited earlier.
+		m_vt.m_max.c = m_vt.m_min.c = m_r = GSVector4i(0);
+		m_vt.m_max.p = m_vt.m_max.t = m_vt.m_min.p = m_vt.m_min.t = GSVector4(0.0f);
+		m_vt.m_eq.rgba = 0xFFFF;
+		m_vt.m_eq.xyzf = 0xF;
+		m_vt.m_eq.stq = 0xF;
+		GL_INS("Warning: ConvertSpriteTextureShuffle: All sprites were culled.");
+		return;
 	}
 
 	if (!full_width)
@@ -3901,6 +3997,18 @@ void GSRendererHW::Draw()
 				if (m_cached_ctx.FRAME.Block() == m_cached_ctx.TEX0.TBP0)
 					g_texture_cache->InvalidateVideoMem(context->offset.fb, m_r, false);
 
+				CleanupDraw(true);
+				return;
+			}
+
+			// Colin MacRae Rally texture shuffles while reversing pixels horizontally
+			// in each column and then corrects the reversals. We ignore all such reversals
+			// so that they cancel out. If the draw contains only a single sprite that only
+			// reverses pixels without shuffling, we can just skip the draw.
+			if (m_texture_shuffle && m_vt.m_primclass == GS_SPRITE_CLASS && m_index.tail == 2 &&
+				m_cached_ctx.FRAME.Block() == m_cached_ctx.TEX0.TBP0 &&
+				Is8PixelReverseSprite(m_vertex.buff[0], m_vertex.buff[1]))
+			{
 				CleanupDraw(true);
 				return;
 			}
