@@ -11,7 +11,7 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-#define ENABLE_JIT_RASTERIZER
+//#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -1251,6 +1251,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 				continue;
 
 			// ColorTFX
+
+			if (GSState::s_n == 420)
+			{
+				printf("");
+			}
 
 			if (sel.fwrite)
 			{

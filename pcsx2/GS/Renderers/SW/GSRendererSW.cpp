@@ -27,7 +27,7 @@ GSRendererSW::GSRendererSW(int threads)
 	m_nativeres = true; // ignore ini, sw is always native
 
 	m_tc = std::make_unique<GSTextureCacheSW>();
-	m_rl = GSRasterizerList::Create(threads);
+	m_rl = GSRasterizerList::Create(0);
 
 	m_output = (u8*)_aligned_malloc(1024 * 1024 * sizeof(u32), VECTOR_ALIGNMENT);
 
@@ -305,6 +305,8 @@ void GSVertexSWInitStatic()
 
 MULTI_ISA_UNSHARED_END
 
+
+
 void GSRendererSW::Draw()
 {
 	const GSDrawingContext* context = m_context;
@@ -322,6 +324,67 @@ void GSRendererSW::Draw()
 		// Dump vertices
 		s = GetDrawDumpPath("%05d_vertex.txt", s_n);
 		DumpVertices(s);
+	}
+
+	if (PRIM->TME && !PRIM->FST)
+	{
+		const GSVector4 scale = GSVector4(
+			static_cast<float>(1 << m_context->TEX0.TW),
+			static_cast<float>(1 << m_context->TEX0.TH),
+			0.0f,
+			0.0f);
+		constexpr GSVector4 BIG_VAL = GSVector4::cxpr(32.0f);
+
+		u32 rewrite_verts = 0;
+		rewrite_verts |= (m_vt.m_min.t <= (-BIG_VAL * scale)).mask() & 3;
+		rewrite_verts |= (m_vt.m_max.t >= (BIG_VAL * scale)).mask() & 3;
+		rewrite_verts |= m_vt.nan.value;
+
+
+		if (rewrite_verts)
+		{
+			//const GSVector4 all_small = m_vt.m_max.t <= GSVector4::cxpr(-1e10f);
+			//const GSVector4 all_big = m_vt.m_min.t >= GSVector4::cxpr(1e10f);
+			//const GSVector4 all_nan = GSVector4(m_vt.nan_all.s, m_vt.nan_all.t, m_vt.nan_all.q, 0) != GSVector4::zero();
+			//GSVector4 const_val = GSVector4::cxpr(-1e10f);
+			//const_val = const_val.blend32(GSVector4::cxpr(1e10f), all_big);
+			//const_val = const_val.blend32(GSVector4::zero(), all_nan);
+			//GSVector4i use_const = GSVector4i::cast(all_small) | GSVector4i::cast(all_big) | GSVector4i::cast(all_nan);
+
+			const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+
+			for (int i = 0; i < m_index.tail; i += n)
+			{
+				GSVector4& stcq0 = *reinterpret_cast<GSVector4*>(&m_vertex.buff[m_index.buff[i + 0]]);
+				GSVector4& stcq1 = *reinterpret_cast<GSVector4*>(&m_vertex.buff[m_index.buff[i + 1]]);
+				GSVector4& stcq2 = *reinterpret_cast<GSVector4*>(&m_vertex.buff[m_index.buff[i + 2]]);
+
+				GSVector4 uv0 = (stcq0 / stcq0.w).xyzw(GSVector4::zero());
+				GSVector4 uv1 = (stcq1 / stcq1.w).xyzw(GSVector4::zero());
+				GSVector4 uv2 = (stcq2 / stcq2.w).xyzw(GSVector4::zero());
+
+				const GSVector4i small = GSVector4i::cast(uv0.min(uv1).min(uv2) <= -BIG_VAL);
+				const GSVector4i big = GSVector4i::cast(uv1.max(uv1).max(uv2) >= BIG_VAL);
+				const GSVector4i nan = GSVector4i::cast((uv0 != uv0) | (uv1 != uv1) | (uv2 != uv2));
+
+				GSVector4 uv_new = GSVector4::zero();
+				uv_new = uv_new.blend32(-BIG_VAL, GSVector4::cast(small));
+				uv_new = uv_new.blend32(BIG_VAL, GSVector4::cast(big));
+				uv_new = uv_new.blend32(GSVector4::zero(), GSVector4::cast((small & big) | nan));
+
+				GSVector4i rewrite = (small | big | nan).upl64(GSVector4i::zero());
+				if (rewrite.x & rewrite.y)
+					stcq0.w = stcq1.w = stcq2.w = 1.0f;
+
+				const GSVector4 stcq0_new = (uv_new * stcq0.w).xyzw(stcq0);
+				const GSVector4 stcq1_new = (uv_new * stcq1.w).xyzw(stcq1);
+				const GSVector4 stcq2_new = (uv_new * stcq2.w).xyzw(stcq2);
+
+				stcq0 = stcq0.blend32(stcq0_new, GSVector4::cast(rewrite));
+				stcq1 = stcq0.blend32(stcq1_new, GSVector4::cast(rewrite));
+				stcq2 = stcq0.blend32(stcq2_new, GSVector4::cast(rewrite));
+			}
+		}
 	}
 
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
@@ -1248,7 +1311,9 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 			gd.t.invmask = ~gd.t.mask;
 		}
 
-		if (PRIM->FGE)
+		FLT_MIN;
+
+		if (PRIM->FGE && !(m_vt.m_min.p.w == 255.0f && m_vt.m_max.p.w == 255.0f))
 		{
 			gd.sel.fge = 1;
 
