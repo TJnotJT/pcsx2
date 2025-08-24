@@ -66,6 +66,7 @@ DebugSettingsWidget::DebugSettingsWidget(SettingsWindow* dialog, QWidget* parent
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveDepth, "EmuCore/GS", "SaveDepth", false);
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveAlpha, "EmuCore/GS", "SaveAlpha", false);
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveInfo, "EmuCore/GS", "SaveInfo", false);
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.saveTransfers, "EmuCore/GS", "SaveTransfers", false);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.saveDrawStart, "EmuCore/GS", "SaveDrawStart", 0);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.saveDrawCount, "EmuCore/GS", "SaveDrawCount", 5000);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.saveFrameStart, "EmuCore/GS", "SaveFrameStart", 0);
@@ -172,6 +173,7 @@ void DebugSettingsWidget::onDrawDumpingChanged()
 	m_ui.saveDepth->setEnabled(enabled);
 	m_ui.saveAlpha->setEnabled(enabled);
 	m_ui.saveInfo->setEnabled(enabled);
+	m_ui.saveTransfers->setEnabled(enabled);
 	m_ui.saveDrawStart->setEnabled(enabled);
 	m_ui.saveDrawCount->setEnabled(enabled);
 	m_ui.saveFrameStart->setEnabled(enabled);
