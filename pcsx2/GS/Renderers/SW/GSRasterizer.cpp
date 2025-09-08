@@ -323,23 +323,32 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	if (dpi.y == 0)
 	{
+		// shortcut for horizontal lines
 		if (dpi.x > 0)
 		{
-			// shortcut for horizontal lines
-
-			GSVector4 mask = (v0.p > v1.p).xxxx();
+			const bool left_to_right = v0.p.x <= v1.p.x;
 
 			GSVertexSW scan;
-
-			scan.p = v0.p.blend32(v1.p, mask);
-			scan.t = v0.t.blend32(v1.t, mask);
-			scan.c = v0.c.blend32(v1.c, mask);
+			if (left_to_right)
+			{
+				scan.p = v0.p;
+				scan.t = v0.t;
+				scan.c = v0.c;
+			}
+			else
+			{
+				scan.p = v1.p;
+				scan.t = v1.t;
+				scan.c = v1.c;
+			}
 
 			GSVector4i p(scan.p);
 
 			if (m_scissor.top <= p.y && p.y < m_scissor.bottom && IsOneOfMyScanlines(p.y))
 			{
-				GSVector4 lrf = scan.p.upl(v1.p.blend32(v0.p, mask)).ceil();
+				GSVector4 lrf = left_to_right ?
+					v0.p.upl(v1.p).ceil() :                                     // Left pixel is included and right pixel is omitted.
+					v1.p.upl(v0.p).floor() + GSVector4(1.0f, 1.0f, 0.0f, 0.0f); // Add bias so that right pixel is included and left pixel is omitted.
 				GSVector4 l = lrf.max(m_fscissor_x);
 				GSVector4 r = lrf.min(m_fscissor_x);
 				GSVector4i lr = GSVector4i(l.xxyy(r));
