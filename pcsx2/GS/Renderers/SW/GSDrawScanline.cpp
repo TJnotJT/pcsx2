@@ -464,28 +464,9 @@ __ri static bool TestAlpha(T& test, T& fm, T& zm, const T& ga, const GSScanlineG
 static const int s_offsets[] = {0, 2, 8, 10, 16, 18, 24, 26}; // columnTable16[0]
 
 template <class T>
-__ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScanlineGlobalData& global)
+__ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScanlineGlobalData& global, int write_offset = 0)
 {
-	u8* dst = (u8*)global.vm + addr * 2 + s_offsets[i] * 2;
-
-	switch (psm)
-	{
-		case 0:
-			*(u32*)dst = src.U32[i];
-			break;
-		case 1:
-			*(u32*)dst = (src.U32[i] & 0xffffff) | (*(u32*)dst & 0xff000000);
-			break;
-		case 2:
-			*(u16*)dst = src.U16[i * 2];
-			break;
-	}
-}
-
-template <class T>
-__ri static void WritePixelSlow(const T& src, int addr, int i, u32 psm, const GSScanlineGlobalData& global, int addr_offset = 0)
-{
-	u8* dst = (u8*)global.vm + addr * 2 + s_offsets[i + addr_offset] * 2;
+	u8* dst = (u8*)global.vm + addr * 2 + s_offsets[i + write_offset] * 2;
 
 	switch (psm)
 	{
@@ -541,8 +522,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #else
 		//test = const_test[skip] | const_test[7 + (steps & (steps >> 31))];
 		test = const_test[skip] | const_test[7 - 2 + (steps & (steps >> 31))];
-		test.v[2] = -1; // Should be unnecessary now cause of const_test
-		test.v[3] = -1;
 #endif
 	}
 	else
@@ -1483,8 +1462,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000300) WritePixelSlow(zs, za, 0, sel.zpsm, global, 2 * step2_offset);
-						if (fzm & 0x00000c00) WritePixelSlow(zs, za, 1, sel.zpsm, global, 2 * step2_offset);
+						if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global, 2 * step2_offset);
+						if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global, 2 * step2_offset);
 						if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global);
 						if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global);
 #if _M_SSE >= 0x501
@@ -1707,8 +1686,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000003) WritePixelSlow(fs, fa, 0, sel.fpsm, global, 2 * step2_offset);
-						if (fzm & 0x0000000c) WritePixelSlow(fs, fa, 1, sel.fpsm, global, 2 * step2_offset);
+						if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global, 2 * step2_offset);
+						if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global, 2 * step2_offset);
 						if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global);
 						if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global);
 #if _M_SSE >= 0x501
@@ -1808,9 +1787,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #else
 			//test = const_test[7 + (steps & (steps >> 31))];
 			test = const_test[7 - 2 + (steps & (steps >> 31))];
-			// HACK
-			test.v[2] = -1; // Should be unnecessary cause of const_test
-			test.v[3] = -1;
 #endif
 		}
 	}
