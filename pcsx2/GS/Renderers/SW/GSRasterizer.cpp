@@ -1114,7 +1114,8 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 #if _M_SSE >= 0x501
 #define PIXELS_PER_LOOP 8
 #else
-#define PIXELS_PER_LOOP 4
+//#define PIXELS_PER_LOOP 4
+#define PIXELS_PER_LOOP 2
 #endif
 
 void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW& scan)

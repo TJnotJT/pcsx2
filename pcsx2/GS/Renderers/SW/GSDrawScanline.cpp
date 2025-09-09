@@ -11,7 +11,7 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-#define ENABLE_JIT_RASTERIZER
+//#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -210,7 +210,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 	const GSVector4 step_shift = GSVector4::broadcast32(&shift[0]);
 #else
 	const GSVector4* shift = (GSVector4*)g_const.m_shift_128b;
-	const GSVector4 step_shift = shift[0];
+	const GSVector4 step_shift = shift[0] / 2;
 #endif
 
 	GSVector4 tstep = dscan.t * step_shift;
@@ -482,6 +482,25 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 	}
 }
 
+template <class T>
+__ri static void WritePixelSlow(const T& src, int addr, int i, u32 psm, const GSScanlineGlobalData& global, int addr_offset = 0)
+{
+	u8* dst = (u8*)global.vm + addr * 2 + s_offsets[i + addr_offset] * 2;
+
+	switch (psm)
+	{
+		case 0:
+			*(u32*)dst = src.U32[i];
+			break;
+		case 1:
+			*(u32*)dst = (src.U32[i] & 0xffffff) | (*(u32*)dst & 0xff000000);
+			break;
+		case 2:
+			*(u16*)dst = src.U16[i * 2];
+			break;
+	}
+}
+
 void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
 {
 	CDrawScanline(pixels, left, top, scan, local, GlobalFromLocal(local).sel);
@@ -508,27 +527,38 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	int skip, steps;
 
+	sel.notest = false;
+
 	if (!sel.notest)
 	{
-		skip = left & (vlen - 1);
-		steps = pixels + skip - vlen;
+		//skip = left & (vlen - 1);
+		skip = left & (2 - 1);
+		//steps = pixels + skip - vlen;
+		steps = pixels + skip - 2;
 		left -= skip;
 #if _M_SSE >= 0x501
 		test = GSVector8i::i8to32(g_const.m_test_256b[skip]) | GSVector8i::i8to32(g_const.m_test_256b[15 + (steps & (steps >> 31))]);
 #else
-		test = const_test[skip] | const_test[7 + (steps & (steps >> 31))];
+		//test = const_test[skip] | const_test[7 + (steps & (steps >> 31))];
+		test = const_test[skip] | const_test[7 - 2 + (steps & (steps >> 31))];
+		test.v[2] = -1; // Should be unnecessary now cause of const_test
+		test.v[3] = -1;
 #endif
 	}
 	else
 	{
 		skip = 0;
-		steps = pixels - vlen;
+		//steps = pixels - vlen;
+		steps = pixels - 2;
 	}
 
-	pxAssert((left & (vlen - 1)) == 0);
+	//pxAssert((left & (vlen - 1)) == 0);
+	pxAssert((left & (2 - 1)) == 0);
 
 	const GSVector2i* fza_base = &global.fzbr[top];
 	const GSVector2i* fza_offset = &global.fzbc[left >> 2];
+
+	int step2_offset = (left >> 1) & 1;
 
 	if (sel.prim != GS_SPRITE_CLASS)
 	{
@@ -687,7 +717,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						(u8*)global.vm + za * 2     , (u8*)global.vm + za * 2 + 16,
 						(u8*)global.vm + za * 2 + 32, (u8*)global.vm + za * 2 + 48);
 #else
-					zd = GSVector4i::load((u8*)global.vm + za * 2, (u8*)global.vm + za * 2 + 16);
+					//zd = GSVector4i::load((u8*)global.vm + za * 2 + 16 * step2_offset, (u8*)global.vm + za * 2 + 16);
+					zd.U64[0] = *(u64*)((u8*)global.vm + za * 2 + 16 * step2_offset);
+					zd.U64[1] = 0xffffffffffffffff;
 #endif
 
 					VectorI zso = zs;
@@ -872,7 +904,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 						if (sel.tlu)
 						{
-							for (int i = 0; i < vlen; i++)
+							//for (int i = 0; i < vlen; i++)
+							for (int i = 0; i < 2; i++)
 							{
 								const u8* tex = (const u8*)global.tex[lodi.U32[i]];
 
@@ -884,7 +917,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						}
 						else
 						{
-							for (int i = 0; i < vlen; i++)
+							//for (int i = 0; i < vlen; i++)
+							for (int i = 0; i < 2; i++)
 							{
 								const u32* tex = (const u32*)global.tex[lodi.U32[i]];
 
@@ -920,14 +954,16 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 						if (sel.tlu)
 						{
-							for (int i = 0; i < vlen; i++)
+							//for (int i = 0; i < vlen; i++)
+							for (int i = 0; i < 2; i++)
 							{
 								c00.U32[i] = global.clut[((const u8*)global.tex[lodi.U32[i]])[addr00.U32[i]]];
 							}
 						}
 						else
 						{
-							for (int i = 0; i < vlen; i++)
+							//for (int i = 0; i < vlen; i++)
+							for (int i = 0; i < 2; i++)
 							{
 								c00.U32[i] = ((const u32*)global.tex[lodi.U32[i]])[addr00.U32[i]];
 							}
@@ -993,7 +1029,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 							if (sel.tlu)
 							{
-								for (int i = 0; i < vlen; i++)
+								//for (int i = 0; i < vlen; i++)
+								for (int i = 0; i < 2; i++)
 								{
 									const u8* tex = (const u8*)global.tex[lodi.U32[i]];
 
@@ -1005,7 +1042,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 							}
 							else
 							{
-								for (int i = 0; i < vlen; i++)
+								//for (int i = 0; i < vlen; i++)
+								for (int i = 0; i < 2; i++)
 								{
 									const u32* tex = (const u32*)global.tex[lodi.U32[i]];
 
@@ -1041,14 +1079,16 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 							if (sel.tlu)
 							{
-								for (int i = 0; i < vlen; i++)
+								//for (int i = 0; i < vlen; i++)
+								for (int i = 0; i < 2; i++)
 								{
 									c00.U32[i] = global.clut[((const u8*)global.tex[lodi.U32[i]])[addr00.U32[i]]];
 								}
 							}
 							else
 							{
-								for (int i = 0; i < vlen; i++)
+								//for (int i = 0; i < vlen; i++)c
+								for (int i = 0; i < 2; i++)
 								{
 									c00.U32[i] = ((const u32*)global.tex[lodi.U32[i]])[addr00.U32[i]];
 								}
@@ -1317,7 +1357,10 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						(u8*)global.vm + fa * 2     , (u8*)global.vm + fa * 2 + 16,
 						(u8*)global.vm + fa * 2 + 32, (u8*)global.vm + fa * 2 + 48);
 #else
-					fd = GSVector4i::load((u8*)global.vm + fa * 2, (u8*)global.vm + fa * 2 + 16);
+					//fd = GSVector4i::load((u8*)global.vm + fa * 2 + 16 * step2_offset, (u8*)global.vm + fa * 2 + 16);
+					fd.U64[0] = *(u64*)((u8*)global.vm + fa * 2 + 16 * step2_offset);
+					fd.U64[1] = 0xffffffffffffffff;
+					printf("");
 #endif
 				}
 			}
@@ -1393,7 +1436,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					zs = zs.blend8(zd, zm);
 				}
 
-				bool fast = sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest;
+				//bool fast = sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest;
+				bool fast = false;
 
 				if (sel.notest)
 				{
@@ -1439,8 +1483,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global);
-						if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global);
+						if (fzm & 0x00000300) WritePixelSlow(zs, za, 0, sel.zpsm, global, 2 * step2_offset);
+						if (fzm & 0x00000c00) WritePixelSlow(zs, za, 1, sel.zpsm, global, 2 * step2_offset);
 						if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global);
 						if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global);
 #if _M_SSE >= 0x501
@@ -1616,7 +1660,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					fs = fs.blend(fd, fm);
 				}
 
-				bool fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest;
+				//bool fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest;
+				bool fast = false;
 
 				if (sel.notest)
 				{
@@ -1634,7 +1679,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						WritePixel(fs, fa, 0, sel.fpsm, global);
+						WritePixel(fs, fa, 0, sel.fpsm, global); // TODO: Add write pixel slow here also.
 						WritePixel(fs, fa, 1, sel.fpsm, global);
 						WritePixel(fs, fa, 2, sel.fpsm, global);
 						WritePixel(fs, fa, 3, sel.fpsm, global);
@@ -1662,8 +1707,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global);
-						if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global);
+						if (fzm & 0x00000003) WritePixelSlow(fs, fa, 0, sel.fpsm, global, 2 * step2_offset);
+						if (fzm & 0x0000000c) WritePixelSlow(fs, fa, 1, sel.fpsm, global, 2 * step2_offset);
 						if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global);
 						if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global);
 #if _M_SSE >= 0x501
@@ -1685,9 +1730,13 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 		// Step
 
-		steps -= vlen;
+		//steps -= vlen;
+		steps -= 2;
+		step2_offset = (step2_offset + 1) & 1;
 
-		fza_offset += vlen / 4;
+		if (step2_offset == 0)
+			fza_offset += vlen / 4;
+			//fza_offset += vlen / 4;
 
 		if (sel.prim != GS_SPRITE_CLASS)
 		{
@@ -1757,7 +1806,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #if _M_SSE >= 0x501
 			test = GSVector8i::i8to32(g_const.m_test_256b[15 + (steps & (steps >> 31))]);
 #else
-			test = const_test[7 + (steps & (steps >> 31))];
+			//test = const_test[7 + (steps & (steps >> 31))];
+			test = const_test[7 - 2 + (steps & (steps >> 31))];
+			// HACK
+			test.v[2] = -1; // Should be unnecessary cause of const_test
+			test.v[3] = -1;
 #endif
 		}
 	}

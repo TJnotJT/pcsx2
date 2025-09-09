@@ -802,6 +802,8 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		Console.WriteLn(fmt::format("Saving dumps as {}_frameN.png", s_output_prefix));
 	}
 
+	s_settings_interface.SetBoolValue("EmuCore/GS", "UseDebugDevice", true);
+
 	return true;
 }
 
