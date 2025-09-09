@@ -193,7 +193,6 @@ typedef GSVector4  VectorF;
 #define LOCAL_STEP local.d4
 #endif
 
-// TODO: We could also replace vlen by step size here
 void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local, int step_size)
 {
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
@@ -234,7 +233,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 				local.d4.f = GSVector4i(tstep).zzzzh().wwww();
 #endif
 
-				for (int i = 0; i < vlen; i++)
+				for (int i = 0; i < step_size; i++)
 				{
 					local.d[i].f = VectorI(df * shift[1 + i]).xxzzlh();
 				}
@@ -249,7 +248,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 #else
 				local.d4.z = dz.mul64(GSVector4::f32to64(shift));
 #endif
-				for (int i = 0; i < vlen; i++)
+				for (int i = 0; i < step_size; i++)
 				{
 					local.d[i].z = dzf * shift[i + 1];
 				}
@@ -297,7 +296,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 				case 2: dstq = dt.zzzz(); break;
 			}
 
-			for (int i = 0; i < vlen; i++)
+			for (int i = 0; i < step_size; i++)
 			{
 				VectorF v = dstq * shift[1 + i];
 
@@ -336,7 +335,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 			VectorF dr = dc.xxxx();
 			VectorF db = dc.zzzz();
 
-			for (int i = 0; i < vlen; i++)
+			for (int i = 0; i < step_size; i++)
 			{
 				VectorI r = VectorI(dr * shift[1 + i]).ps32();
 				VectorI b = VectorI(db * shift[1 + i]).ps32();
@@ -347,7 +346,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 			VectorF dg = dc.yyyy();
 			VectorF da = dc.wwww();
 
-			for (int i = 0; i < vlen; i++)
+			for (int i = 0; i < step_size; i++)
 			{
 				VectorI g = VectorI(dg * shift[1 + i]).ps32();
 				VectorI a = VectorI(da * shift[1 + i]).ps32();
