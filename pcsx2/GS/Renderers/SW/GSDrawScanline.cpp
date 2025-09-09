@@ -193,7 +193,7 @@ typedef GSVector4  VectorF;
 #define LOCAL_STEP local.d4
 #endif
 
-void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local)
+void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local, int step_size)
 {
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
 	GSScanlineSelector sel = global.sel;
@@ -205,12 +205,14 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 
 	constexpr int vlen = sizeof(VectorF) / sizeof(float);
 
+	pxAssert(vlen % step_size == 0);
+
 #if _M_SSE >= 0x501
 	const GSVector8* shift = (GSVector8*)g_const.m_shift_256b;
-	const GSVector4 step_shift = GSVector4::broadcast32(&shift[0]);
+	const GSVector4 step_shift = GSVector4::broadcast32(&shift[0]) / static_cast<float>(vlen / step_size);
 #else
 	const GSVector4* shift = (GSVector4*)g_const.m_shift_128b;
-	const GSVector4 step_shift = shift[0] / 2;
+	const GSVector4 step_shift = shift[0] / static_cast<float>(vlen / step_size);
 #endif
 
 	GSVector4 tstep = dscan.t * step_shift;
@@ -482,12 +484,12 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 	}
 }
 
-void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
+void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, int step_size)
 {
-	CDrawScanline(pixels, left, top, scan, local, GlobalFromLocal(local).sel);
+	CDrawScanline(pixels, left, top, scan, local, GlobalFromLocal(local).sel, step_size);
 }
 
-__ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, GSScanlineSelector sel)
+__ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, GSScanlineSelector sel, int step_size)
 {
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
 
@@ -1792,12 +1794,12 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	}
 }
 
-void GSDrawScanline::CDrawEdge(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
+void GSDrawScanline::CDrawEdge(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, int step_size)
 {
 	GSScanlineSelector sel = local.gd->sel;
 	sel.zwrite = 0;
 	sel.edge = 1;
-	CDrawScanline(pixels, left, top, scan, local, sel);
+	CDrawScanline(pixels, left, top, scan, local, sel, step_size);
 }
 
 template <class T, bool masked>
