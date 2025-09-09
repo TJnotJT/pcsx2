@@ -57,14 +57,14 @@ using namespace Xbyak;
 			broadcast(tmpReg, src); \
 			op(dst, tmpReg); \
 		} while (0)
-	#define _rip_local_d(x) _rip_local(d8.x)
+	#define _rip_local_d(x) _rip_local(dstep.x)
 	#define _rip_local_d_p(x) _rip_local_d(p.x)
 #else
 	/// On AVX2, uses the given broadcast to load into the temp register, then applies the given op
 	/// Otherwise, applies the given op directly
 	#define BROADCAST_AND_OP(broadcast, op, dst, tmpReg, src) \
 		op(dst, src)
-	#define _rip_local_d(x) _rip_local(d4.x)
+	#define _rip_local_d(x) _rip_local(dstep.x)
 	#define _rip_local_d_p(x) _rip_local_d(x)
 #endif
 
@@ -907,7 +907,7 @@ void GSDrawScanlineCodeGenerator::Step()
 
 	if (m_sel.prim != GS_SPRITE_CLASS)
 	{
-		// z += m_local.d4.z;
+		// z += m_local.dstep.z;
 
 		if (m_sel.zb && !m_sel.zequal)
 		{
@@ -917,7 +917,7 @@ void GSDrawScanlineCodeGenerator::Step()
 			movaps(_rip_local(temp.z0), xym7);
 		}
 
-		// f = f.add16(m_local.d4.f);
+		// f = f.add16(m_local.dstep.f);
 
 		if (m_sel.fwrite && m_sel.fge)
 		{
@@ -932,7 +932,7 @@ void GSDrawScanlineCodeGenerator::Step()
 			if (m_sel.fst)
 			{
 				const XYm& stq = xym0;
-				// GSVector4i stq = m_local.d4.stq;
+				// GSVector4i stq = m_local.dstep.stq;
 
 				// s += stq.xxxx();
 				// if (!sprite) t += st.yyyy();
@@ -955,7 +955,7 @@ void GSDrawScanlineCodeGenerator::Step()
 				const XYm& s = xym2;
 				const XYm& t = xym3;
 				const XYm& q = xym1;
-				// GSVector4 stq = m_local.d4.stq;
+				// GSVector4 stq = m_local.dstep.stq;
 
 				// s += stq.xxxx();
 				// t += stq.yyyy();
@@ -991,7 +991,7 @@ void GSDrawScanlineCodeGenerator::Step()
 			if (m_sel.iip)
 			{
 				XYm c = xym0;
-				// GSVector4i c = m_local.d4.c;
+				// GSVector4i c = m_local.dstep.c;
 
 				// rb = rb.add16(c.xxxx());
 				// ga = ga.add16(c.yyyy());

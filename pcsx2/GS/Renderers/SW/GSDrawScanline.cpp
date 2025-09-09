@@ -186,12 +186,12 @@ void GSDrawScanline::PrintStats()
 #if _M_SSE >= 0x501
 typedef GSVector8i VectorI;
 typedef GSVector8  VectorF;
-#define LOCAL_STEP local.d8
 #else
 typedef GSVector4i VectorI;
 typedef GSVector4  VectorF;
-#define LOCAL_STEP local.d4
 #endif
+
+#define LOCAL_STEP local.dstep
 
 void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local, int step_size)
 {
@@ -224,13 +224,13 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 			if (has_f)
 			{
 #if _M_SSE >= 0x501
-				local.d8.p.f = GSVector4i(tstep).extract32<3>();
+				local.dstep.p.f = GSVector4i(tstep).extract32<3>();
 
 				GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
 #else
 				GSVector4 df = dscan.t.wwww();
 
-				local.d4.f = GSVector4i(tstep).zzzzh().wwww();
+				local.dstep.f = GSVector4i(tstep).zzzzh().wwww();
 #endif
 
 				for (int i = 0; i < step_size; i++)
@@ -244,9 +244,9 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 				const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
 				const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
 #if _M_SSE >= 0x501
-				GSVector4::storel(&local.d8.p.z, dz.mul64(GSVector4::f32to64(shift)));
+				GSVector4::storel(&local.dstep.p.z, dz.mul64(GSVector4::f32to64(shift)));
 #else
-				local.d4.z = dz.mul64(GSVector4::f32to64(shift));
+				local.dstep.z = dz.mul64(GSVector4::f32to64(shift));
 #endif
 				for (int i = 0; i < step_size; i++)
 				{
@@ -326,9 +326,9 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 		if (sel.iip)
 		{
 #if _M_SSE >= 0x501
-			GSVector4i::storel(&local.d8.c, GSVector4i(dscan.c * step_shift).xzyw().ps32());
+			GSVector4i::storel(&local.dstep.c, GSVector4i(dscan.c * step_shift).xzyw().ps32());
 #else
-			local.d4.c = GSVector4i(dscan.c * step_shift).xzyw().ps32();
+			local.dstep.c = GSVector4i(dscan.c * step_shift).xzyw().ps32();
 #endif
 			VectorF dc(dscan.c);
 
@@ -1779,9 +1779,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			if (sel.zb && !sel.zequal)
 			{
 #if _M_SSE >= 0x501
-				GSVector8 add = GSVector8::broadcast64(&local.d8.p.z);
+				GSVector8 add = GSVector8::broadcast64(&local.dstep.p.z);
 #else
-				GSVector4 add = local.d4.z;
+				GSVector4 add = local.dstep.z;
 #endif
 				z0 = z0.add64(add);
 				z1 = z1.add64(add);
@@ -1790,9 +1790,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			if (sel.fwrite && sel.fge)
 			{
 #if _M_SSE >= 0x501
-				f = f.add16(GSVector8i::broadcast16(&local.d8.p.f));
+				f = f.add16(GSVector8i::broadcast16(&local.dstep.p.f));
 #else
-				f = f.add16(local.d4.f);
+				f = f.add16(local.dstep.f);
 #endif
 			}
 		}
@@ -1828,9 +1828,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			if (sel.iip)
 			{
 #if _M_SSE >= 0x501
-				GSVector8i c = GSVector8i::broadcast64(&local.d8.c);
+				GSVector8i c = GSVector8i::broadcast64(&local.dstep.c);
 #else
-				GSVector4i c = local.d4.c;
+				GSVector4i c = local.dstep.c;
 #endif
 				rbf = rbf.add16(c.xxxx()).max_i16(VectorI::zero());
 				gaf = gaf.add16(c.yyyy()).max_i16(VectorI::zero());

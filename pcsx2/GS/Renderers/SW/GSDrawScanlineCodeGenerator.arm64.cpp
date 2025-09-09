@@ -63,16 +63,16 @@ static const auto& _temp_ga = v22;
 static const auto& _temp_zs = v21;
 static const auto& _temp_zd = v20;
 static const auto& _temp_vf = v19;
-static const auto& _d4_z = v18;
-static const auto& _d4_stq = v17;
-static const auto& _d4_c = v16;
+static const auto& _dstep_z = v18;
+static const auto& _dstep_stq = v17;
+static const auto& _dstep_c = v16;
 static const auto& _global_tmin = v15;
 static const auto& _global_tmax = v14;
 static const auto& _global_tmask = v13;
 static const auto& _const_movemskw_mask = v12;
 static const auto& _const_log2_coef = v11;
 static const auto& _temp_f = v10;
-static const auto& _d4_f = v9;
+static const auto& _dstep_f = v9;
 
 static const auto& _test = v8;
 static const auto& _fd = v2;
@@ -253,14 +253,14 @@ void GSDrawScanlineCodeGenerator::Init()
 	{
 		if ((m_sel.fwrite && m_sel.fge) || m_sel.zb)
 		{
-			armAsm->Ldr(_d4_z, _local(d4.z));
+			armAsm->Ldr(_d4_z, _local(dstep.z));
 
 			if (m_sel.fwrite && m_sel.fge)
 			{
 				// f = GSVector4i(v.t).zzzzh().zzzz().add16(m_local.d[skip].f);
 				armAsm->Ldr(_temp_f.S(), MemOperand(_v, offsetof(GSVertexSW, t.w)));
 				armAsm->Ldr(_vscratch, MemOperand(x1, offsetof(GSScanlineLocalData::skip, f)));
-				armAsm->Ldr(_d4_f, _local(d4.f));
+				armAsm->Ldr(_d4_f, _local(dstep.f));
 
 				armAsm->Fcvtzs(_temp_f.S(), _temp_f.S());
 				armAsm->Dup(_temp_f.V8H(), _temp_f.V8H(), 0);
@@ -373,7 +373,7 @@ void GSDrawScanlineCodeGenerator::Init()
 				armAsm->Fadd(_temp_q.V4S(), v4.V4S(), _temp_q.V4S());
 			}
 
-			armAsm->Ldr(_d4_stq, _local(d4.stq));
+			armAsm->Ldr(_dstep_stq, _local(dstep.stq));
 			armAsm->Ldr(_global_tmin, _global(t.min));
 			armAsm->Ldr(_global_tmax, _global(t.max));
 			armAsm->Ldr(_global_tmask, _global(t.mask));
@@ -412,7 +412,7 @@ void GSDrawScanlineCodeGenerator::Init()
 				armAsm->Add(_temp_rb.V8H(), _temp_rb.V8H(), v1.V8H());
 				armAsm->Add(_temp_ga.V8H(), _temp_ga.V8H(), _vscratch.V8H());
 
-				armAsm->Ldr(_d4_c, _local(d4.c));
+				armAsm->Ldr(_dstep_c, _local(dstep.c));
 			}
 			else
 			{
@@ -460,19 +460,19 @@ void GSDrawScanlineCodeGenerator::Step()
 
 	if (m_sel.prim != GS_SPRITE_CLASS)
 	{
-		// z += m_local.d4.z;
+		// z += m_local.dstep.z;
 
 		if (m_sel.zb && !m_sel.zequal)
 		{
-			armAsm->Fadd(_temp_z1.V2D(), _temp_z1.V2D(), _d4_z.V2D());
-			armAsm->Fadd(_temp_z0.V2D(), _temp_z0.V2D(), _d4_z.V2D());
+			armAsm->Fadd(_temp_z1.V2D(), _temp_z1.V2D(), _dstep_z.V2D());
+			armAsm->Fadd(_temp_z0.V2D(), _temp_z0.V2D(), _dstep_z.V2D());
 		}
 
-		// f = f.add16(m_local.d4.f);
+		// f = f.add16(m_local.dstep.f);
 
 		if (m_sel.fwrite && m_sel.fge)
 		{
-			armAsm->Add(_temp_f.V8H(), _temp_f.V8H(), _d4_f.V8H());
+			armAsm->Add(_temp_f.V8H(), _temp_f.V8H(), _dstep_f.V8H());
 		}
 	}
 
@@ -482,7 +482,7 @@ void GSDrawScanlineCodeGenerator::Step()
 		{
 			if (m_sel.fst)
 			{
-				// GSVector4i stq = m_local.d4.stq;
+				// GSVector4i stq = m_local.dstep.stq;
 
 				// s += stq.xxxx();
 				// if (!sprite) t += stq.yyyy();
@@ -498,15 +498,15 @@ void GSDrawScanlineCodeGenerator::Step()
 			}
 			else
 			{
-				// GSVector4 stq = m_local.d4.stq;
+				// GSVector4 stq = m_local.dstep.stq;
 
 				// s += stq.xxxx();
 				// t += stq.yyyy();
 				// q += stq.zzzz();
 
-				armAsm->Dup(_vscratch.V4S(), _d4_stq.V4S(), 0);
-				armAsm->Dup(_vscratch2.V4S(), _d4_stq.V4S(), 1);
-				armAsm->Dup(v1.V4S(), _d4_stq.V4S(), 2);
+				armAsm->Dup(_vscratch.V4S(), _dstep_stq.V4S(), 0);
+				armAsm->Dup(_vscratch2.V4S(), _dstep_stq.V4S(), 1);
+				armAsm->Dup(v1.V4S(), _dstep_stq.V4S(), 2);
 
 				armAsm->Fadd(_temp_s.V4S(), _temp_s.V4S(), _vscratch.V4S());
 				armAsm->Fadd(_temp_t.V4S(), _temp_t.V4S(), _vscratch2.V4S());
@@ -518,13 +518,13 @@ void GSDrawScanlineCodeGenerator::Step()
 		{
 			if (m_sel.iip)
 			{
-				// GSVector4i c = m_local.d4.c;
+				// GSVector4i c = m_local.dstep.c;
 
 				// rb = rb.add16(c.xxxx());
 				// ga = ga.add16(c.yyyy());
 
-				armAsm->Dup(_vscratch.V4S(), _d4_c.V4S(), 0);
-				armAsm->Dup(_vscratch2.V4S(), _d4_c.V4S(), 1);
+				armAsm->Dup(_vscratch.V4S(), _dstep_c.V4S(), 0);
+				armAsm->Dup(_vscratch2.V4S(), _dstep_c.V4S(), 1);
 				armAsm->Movi(v1.V8H(), 0);
 
 				armAsm->Add(_temp_rb.V8H(), _temp_rb.V8H(), _vscratch.V8H());

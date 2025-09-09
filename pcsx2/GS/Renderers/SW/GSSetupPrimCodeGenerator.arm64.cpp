@@ -73,13 +73,13 @@ void GSSetupPrimCodeGenerator::Depth()
 			armAsm->Add(_scratchaddr, _dscan, offsetof(GSVertexSW, t.w));
 			armAsm->Ld1r(v1.V4S(), MemOperand(_scratchaddr));
 
-			// m_local.d4.f = GSVector4i(df * 4.0f).xxzzlh();
+			// m_local.dstep.f = GSVector4i(df * 4.0f).xxzzlh();
 
 			armAsm->Fmul(v2.V4S(), v1.V4S(), v3.V4S());
 			armAsm->Fcvtzs(v2.V4S(), v2.V4S());
 			armAsm->Trn1(v2.V8H(), v2.V8H(), v2.V8H());
 
-			armAsm->Str(v2.V4S(), _local(d4.f));
+			armAsm->Str(v2.V4S(), _local(dstep.f));
 
 			for (int i = 0; i < (m_sel.notest ? 1 : 4); i++)
 			{
@@ -99,10 +99,10 @@ void GSSetupPrimCodeGenerator::Depth()
 			armAsm->Add(_scratchaddr, _dscan, offsetof(GSVertexSW, p.z));
 			armAsm->Ld1r(_vscratch.V2D(), MemOperand(_scratchaddr));
 
-			// m_local.d4.z = dz.mul64(GSVector4::f32to64(shift));
+			// m_local.dstep.z = dz.mul64(GSVector4::f32to64(shift));
 			armAsm->Fcvtl(v1.V2D(), v3.V2S());
 			armAsm->Fmul(v1.V2D(), v1.V2D(), _vscratch.V2D());
-			armAsm->Str(v1.V2D(), _local(d4.z));
+			armAsm->Str(v1.V2D(), _local(dstep.z));
 
 			armAsm->Fcvtn(v0.V2S(), _vscratch.V2D());
 			armAsm->Fcvtn2(v0.V4S(), _vscratch.V2D());
@@ -162,14 +162,14 @@ void GSSetupPrimCodeGenerator::Texture()
 
 	if (m_sel.fst)
 	{
-		// m_local.d4.stq = GSVector4i(t * 4.0f);
+		// m_local.dstep.stq = GSVector4i(t * 4.0f);
 		armAsm->Fcvtzs(v1.V4S(), v1.V4S());
-		armAsm->Str(v1, MemOperand(_locals, offsetof(GSScanlineLocalData, d4.stq)));
+		armAsm->Str(v1, MemOperand(_locals, offsetof(GSScanlineLocalData, dstep.stq)));
 	}
 	else
 	{
-		// m_local.d4.stq = t * 4.0f;
-		armAsm->Str(v1, MemOperand(_locals, offsetof(GSScanlineLocalData, d4.stq)));
+		// m_local.dstep.stq = t * 4.0f;
+		armAsm->Str(v1, MemOperand(_locals, offsetof(GSScanlineLocalData, dstep.stq)));
 	}
 
 	for (int j = 0, k = m_sel.fst ? 2 : 3; j < k; j++)
@@ -225,7 +225,7 @@ void GSSetupPrimCodeGenerator::Color()
 		// GSVector4 c = dscan.c;
 		armAsm->Ldr(v16, MemOperand(_dscan, offsetof(GSVertexSW, c)));
 
-		// m_local.d4.c = GSVector4i(c * 4.0f).xzyw().ps32();
+		// m_local.dstep.c = GSVector4i(c * 4.0f).xzyw().ps32();
 
 		armAsm->Fmul(v2.V4S(), v16.V4S(), v3.V4S());
 		armAsm->Fcvtzs(v2.V4S(), v2.V4S());
@@ -233,7 +233,7 @@ void GSSetupPrimCodeGenerator::Color()
 		armAsm->Uzp1(v2.V4S(), v2.V4S(), _vscratch.V4S());
 		armAsm->Sqxtn(v2.V4H(), v2.V4S());
 		armAsm->Dup(v2.V2D(), v2.V2D(), 0);
-		armAsm->Str(v2, MemOperand(_locals, offsetof(GSScanlineLocalData, d4.c)));
+		armAsm->Str(v2, MemOperand(_locals, offsetof(GSScanlineLocalData, dstep.c)));
 
 		// GSVector4 dr = c.xxxx();
 		// GSVector4 db = c.zzzz();

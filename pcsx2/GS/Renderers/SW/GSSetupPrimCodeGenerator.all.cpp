@@ -31,10 +31,10 @@ using namespace Xbyak;
 	} while (0)
 
 #if _M_SSE >= 0x501
-	#define _rip_local_d(x) _rip_local(d8.x)
+	#define _rip_local_d(x) _rip_local(dstep.x)
 	#define _rip_local_d_p(x) _rip_local_d(p.x)
 #else
-	#define _rip_local_d(x) _rip_local(d4.x)
+	#define _rip_local_d(x) _rip_local(dstep.x)
 	#define _rip_local_d_p(x) _rip_local_d(x)
 #endif
 
@@ -167,7 +167,7 @@ void GSSetupPrimCodeGenerator::Depth_XMM()
 			// GSVector4 df = t.wwww();
 			broadcastss(xym1, ptr[_dscan + offsetof(GSVertexSW, t.w)]);
 
-			// m_local.d4.f = GSVector4i(df * 4.0f).xxzzlh();
+			// m_local.dstep.f = GSVector4i(df * 4.0f).xxzzlh();
 
 			THREEARG(mulps, xmm2, xmm1, xmm3);
 			cvttps2dq(xmm2, xmm2);
@@ -192,7 +192,7 @@ void GSSetupPrimCodeGenerator::Depth_XMM()
 			// VectorF dz = VectorF::broadcast64(&dscan.p.z)
 			movddup(xmm0, ptr[_dscan + offsetof(GSVertexSW, p.z)]);
 
-			// m_local.d4.z = dz.mul64(GSVector4::f32to64(shift));
+			// m_local.dstep.z = dz.mul64(GSVector4::f32to64(shift));
 			cvtps2pd(xmm1, xmm3);
 			mulpd(xmm1, xmm0);
 			movaps(_rip_local_d_p(z), xmm1);
@@ -254,7 +254,7 @@ void GSSetupPrimCodeGenerator::Depth_YMM()
 			// GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
 			vbroadcastss(ymm1, ptr[_dscan + offsetof(GSVertexSW, t.w)]);
 
-			// local.d8.p.f = GSVector4i(tstep).extract32<3>();
+			// local.dstep.p.f = GSVector4i(tstep).extract32<3>();
 			vmulps(xmm0, xmm1, xmm3);
 			cvtps2dq(xmm0, xmm0);
 			movd(_rip_local_d_p(f), xmm0);
@@ -279,7 +279,7 @@ void GSSetupPrimCodeGenerator::Depth_YMM()
 			// const VectorF dz = VectorF::broadcast64(&dscan.p.z);
 			movsd(xmm0, ptr[_dscan + offsetof(GSVertexSW, p.z)]);
 
-			// GSVector4::storel(&local.d8.p.z, dz.extract<0>().mul64(GSVector4::f32to64(shift)));
+			// GSVector4::storel(&local.dstep.p.z, dz.extract<0>().mul64(GSVector4::f32to64(shift)));
 			vcvtss2sd(xmm1, xmm3, xmm3);
 			vmulsd(xmm1, xmm0, xmm1);
 			movsd(_rip_local_d_p(z), xmm1);
@@ -341,7 +341,7 @@ void GSSetupPrimCodeGenerator::Texture()
 
 	if (m_sel.fst)
 	{
-		// m_local.d4.stq = GSVector4i(t * 4.0f);
+		// m_local.dstep.stq = GSVector4i(t * 4.0f);
 
 		cvttps2dq(xmm1, xmm1);
 
@@ -349,7 +349,7 @@ void GSSetupPrimCodeGenerator::Texture()
 	}
 	else
 	{
-		// m_local.d4.stq = t * 4.0f;
+		// m_local.dstep.stq = t * 4.0f;
 
 		movaps(_rip_local_d(stq), xmm1);
 	}
@@ -411,7 +411,7 @@ void GSSetupPrimCodeGenerator::Color()
 
 		broadcastf128(xym0, ptr[_dscan + offsetof(GSVertexSW, c)]);
 
-		// m_local.d4.c = GSVector4i(c * 4.0f).xzyw().ps32();
+		// m_local.dstep.c = GSVector4i(c * 4.0f).xzyw().ps32();
 
 		THREEARG(mulps, xmm1, xmm0, xmm3);
 		cvttps2dq(xmm1, xmm1);
