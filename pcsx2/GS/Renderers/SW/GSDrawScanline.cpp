@@ -513,7 +513,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	int skip, steps;
 
-	sel.notest &= (step_size == vlen);
+	sel.notest &= (step_size == vlen); // FIXME: This should not be modified.
 
 	if (!sel.notest)
 	{
@@ -1450,13 +1450,15 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 			if (sel.zwrite)
 			{
-				if (sel.ztest && sel.zpsm < 2)
-				{
-					zs = zs.blend8(zd, zm);
-				}
-
-				//bool fast = (sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest); // TODO: OPTIMIZE WHEN STEP MOD IS 0
 				bool fast = false;
+				if (step_size == vlen)
+				{
+					if (sel.ztest && sel.zpsm < 2)
+					{
+						zs = zs.blend8(zd, zm);
+					}
+					fast = sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest;
+				}
 
 				if (sel.notest)
 				{
@@ -1692,13 +1694,15 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					fs = (ga >> 16) | (rb >> 9) | (ga >> 6) | (rb >> 3);
 				}
 
-				if (sel.rfb)
-				{
-					fs = fs.blend(fd, fm);
-				}
-
-				//bool fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest; // TODO: OPTIMIZE WHEN STEP MOD IS 0!
 				bool fast = false;
+				if (step_size == vlen)
+				{
+					if (sel.rfb)
+					{
+						fs = fs.blend(fd, fm);
+					}
+					fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest;
+				}
 
 				if (sel.notest)
 				{
