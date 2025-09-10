@@ -533,7 +533,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	const GSVector2i* fza_base = &global.fzbr[top];
 	const GSVector2i* fza_offset = &global.fzbc[left >> 2];
-	int step_mod = left % vlen;
 
 	if (sel.prim != GS_SPRITE_CLASS)
 	{
@@ -687,6 +686,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 				if (sel.ztest)
 				{
+					const int vlen_offset = left & (vlen - 1);
 #if _M_SSE >= 0x501
 					if (step_size == 8)
 					{
@@ -697,15 +697,15 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					else if (step_size == 4)
 					{
 						zd = GSVector8i::cast(GSVector4i::load(
-							(u8*)global.vm + za * 2 + 8 * step_mod, (u8*)global.vm + za * 2 + 8 * step_mod + 16));
+							(u8*)global.vm + za * 2 + 8 * vlen_offset, (u8*)global.vm + za * 2 + 8 * vlen_offset + 16));
 					}
 					else if (step_size == 2)
 					{
-						zd = GSVector8i::cast(GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * step_mod));
+						zd = GSVector8i::cast(GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * vlen_offset));
 					}
 					else // step_size == 1
 					{
-						zd = GSVector8i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (step_mod & ~1) + 4 * (step_mod & 1)));
+						zd = GSVector8i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
 					}
 #else
 					if (step_size == 4)
@@ -714,11 +714,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else if (step_size == 2)
 					{
-						zd = GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * step_mod);
+						zd = GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * vlen_offset);
 					}
 					else // step_size == 1
 					{
-						zd = GSVector4i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (step_mod & ~1) + 4 * (step_mod & 1)));
+						zd = GSVector4i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
 					}
 #endif
 
@@ -1344,6 +1344,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 				if (sel.rfb)
 				{
+					const int vlen_offset = left & (vlen - 1);
 #if _M_SSE >= 0x501
 					if (step_size == 8)
 					{
@@ -1354,15 +1355,15 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					else if (step_size == 4)
 					{
 						fd = GSVector8i::cast(GSVector4i::load(
-							(u8*)global.vm + fa * 2 + 8 * step_mod, (u8*)global.vm + fa * 2 + 8 * step_mod + 16));
+							(u8*)global.vm + fa * 2 + 8 * vlen_offset, (u8*)global.vm + fa * 2 + 8 * vlen_offset + 16));
 					}
 					else if (step_size == 2)
 					{
-						fd = GSVector8i::cast(GSVector4i::loadl((u8*)global.vm + fa * 2 + 8 * step_mod));
+						fd = GSVector8i::cast(GSVector4i::loadl((u8*)global.vm + fa * 2 + 8 * vlen_offset));
 					}
 					else // step_size == 1
 					{
-						fd = GSVector8i::load(*(s32*)((u8*)global.vm + fa * 2 + 8 * (step_mod & ~1) + 4 * (step_mod & 1)));
+						fd = GSVector8i::load(*(s32*)((u8*)global.vm + fa * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
 					}
 #else
 					if (step_size == 4)
@@ -1371,11 +1372,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else if (step_size == 2)
 					{
-						fd = GSVector4i::loadl((u8*)global.vm + fa * 2 + 8 * step_mod);
+						fd = GSVector4i::loadl((u8*)global.vm + fa * 2 + 8 * vlen_offset);
 					}
 					else // step_size == 1
 					{
-						fd = GSVector4i::load(*(s32*)((u8*)global.vm + fa * 2 + 8 * (step_mod & ~1) + 4 * (step_mod & 1)));
+						fd = GSVector4i::load(*(s32*)((u8*)global.vm + fa * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
 					}
 #endif
 				}
@@ -1501,15 +1502,17 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global, step_mod);
-						if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global, step_mod);
-						if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global, step_mod);
-						if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global, step_mod);
+						const int vlen_offset = left & (vlen - 1);
+
+						if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global, vlen_offset);
+						if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global, vlen_offset);
+						if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global, vlen_offset);
+						if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global, vlen_offset);
 #if _M_SSE >= 0x501
-						if (fzm & 0x03000000) WritePixel(zs, za, 4, sel.zpsm, global, step_mod);
-						if (fzm & 0x0c000000) WritePixel(zs, za, 5, sel.zpsm, global, step_mod);
-						if (fzm & 0x30000000) WritePixel(zs, za, 6, sel.zpsm, global, step_mod);
-						if (fzm & 0xc0000000) WritePixel(zs, za, 7, sel.zpsm, global, step_mod);
+						if (fzm & 0x03000000) WritePixel(zs, za, 4, sel.zpsm, global, vlen_offset);
+						if (fzm & 0x0c000000) WritePixel(zs, za, 5, sel.zpsm, global, vlen_offset);
+						if (fzm & 0x30000000) WritePixel(zs, za, 6, sel.zpsm, global, vlen_offset);
+						if (fzm & 0xc0000000) WritePixel(zs, za, 7, sel.zpsm, global, vlen_offset);
 #endif
 					}
 				}
@@ -1646,24 +1649,24 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			{
 				if (sel.fpsm == 2 && sel.dthe)
 				{
-					int y = (top & 3) << 1;
+					int x = left & 3, y = (top & 3) << 1;
 
-					if ((step_mod & 3) == 0)
+					if (x == 0)
 					{
 						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]));
 						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]));
 					}
-					else if ((step_mod & 3) == 1)
+					else if (x == 1)
 					{
 						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).yzwx());
 						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).yzwx());
 					}
-					else if ((step_mod & 3) == 2)
+					else if (x == 2)
 					{
 						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).zwxy());
 						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).zwxy());
 					}
-					else // ((step_mod & 3) == 3)
+					else // (x == 3)
 					{
 						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).wxyz());
 						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).wxyz());
@@ -1745,15 +1748,17 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global, step_mod);
-						if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global, step_mod);
-						if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global, step_mod);
-						if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global, step_mod);
+						const int vlen_offset = left & (vlen - 1);
+
+						if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global, vlen_offset);
 #if _M_SSE >= 0x501
-						if (fzm & 0x00030000) WritePixel(fs, fa, 4, sel.fpsm, global, step_mod);
-						if (fzm & 0x000c0000) WritePixel(fs, fa, 5, sel.fpsm, global, step_mod);
-						if (fzm & 0x00300000) WritePixel(fs, fa, 6, sel.fpsm, global, step_mod);
-						if (fzm & 0x00c00000) WritePixel(fs, fa, 7, sel.fpsm, global, step_mod);
+						if (fzm & 0x00030000) WritePixel(fs, fa, 4, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x000c0000) WritePixel(fs, fa, 5, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x00300000) WritePixel(fs, fa, 6, sel.fpsm, global, vlen_offset);
+						if (fzm & 0x00c00000) WritePixel(fs, fa, 7, sel.fpsm, global, vlen_offset);
 #endif
 					}
 				}
@@ -1769,9 +1774,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		// Step
 
 		steps -= step_size;
-		step_mod = (step_mod + step_size) % vlen;
+		left += step_size;
 
-		if (step_mod == 0)
+		if ((left &  (vlen - 1)) == 0)
 			fza_offset += vlen / 4;
 
 		if (sel.prim != GS_SPRITE_CLASS)
