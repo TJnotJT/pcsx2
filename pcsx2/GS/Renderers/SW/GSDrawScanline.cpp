@@ -1649,8 +1649,26 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 				{
 					int y = (top & 3) << 1;
 
-					rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]));
-					ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]));
+					if ((step_mod & 3) == 0)
+					{
+						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]));
+						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]));
+					}
+					else if ((step_mod & 3) == 1)
+					{
+						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).yzwx());
+						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).yzwx());
+					}
+					else if ((step_mod & 3) == 2)
+					{
+						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).zwxy());
+						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).zwxy());
+					}
+					else // ((step_mod & 3) == 3)
+					{
+						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).wxyz());
+						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).wxyz());
+					}
 				}
 
 				if (sel.colclamp == 0)
