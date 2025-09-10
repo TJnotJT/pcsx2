@@ -326,6 +326,17 @@ void GSDrawScanlineCodeGenerator::Generate()
 		return;
 	}
 
+	// If step_size (6th arg) < vecints, use CDrawScanline().
+#ifdef _WIN32
+	mov(eax, ptr[rsp + 48]);
+	cmp(eax, vecints);
+#else
+	cmp(r9, vecints);
+#endif
+	je("@f");
+	jmp(reinterpret_cast<const void*>(static_cast<GSDrawScanline::DrawScanlinePtr>(&GSDrawScanline::CDrawScanline)));
+	L("@@");
+
 	const bool need_tex = m_sel.fb && m_sel.tfx != TFX_NONE;
 	const bool need_clut = need_tex && m_sel.tlu;
 

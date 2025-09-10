@@ -11,7 +11,7 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-//#define ENABLE_JIT_RASTERIZER
+#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -494,7 +494,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
 
 	constexpr int vlen = sizeof(VectorF) / sizeof(float);
-	
+
 	pxAssert(vlen % step_size == 0);
 
 #if _M_SSE < 0x501
@@ -512,9 +512,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	int skip, steps;
 
-	sel.notest &= (step_size == vlen); // FIXME: This should not be modified.
-
-	if (!sel.notest)
+	if (!(step_size == vlen && sel.notest))
 	{
 		skip = left & (step_size - 1);
 		steps = pixels + skip - step_size;
@@ -1419,7 +1417,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 			int fzm = 0;
 
-			if (!sel.notest)
+			if (!(step_size == vlen && sel.notest))
 			{
 				if (sel.fwrite)
 				{
@@ -1459,7 +1457,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					fast = sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest;
 				}
 
-				if (sel.notest)
+				if (step_size == vlen && sel.notest)
 				{
 					if (fast)
 					{
@@ -1703,7 +1701,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest;
 				}
 
-				if (sel.notest)
+				if (step_size == vlen && sel.notest)
 				{
 					if (fast)
 					{
@@ -1839,7 +1837,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			}
 		}
 
-		if (!sel.notest)
+		if (!(step_size == vlen && sel.notest))
 		{
 #if _M_SSE >= 0x501
 			test = GSVector8i::i8to32(g_const.m_test_256b[7 + step_size + (steps & (steps >> 31))]);
@@ -1855,6 +1853,7 @@ void GSDrawScanline::CDrawEdge(int pixels, int left, int top, const GSVertexSW& 
 	GSScanlineSelector sel = local.gd->sel;
 	sel.zwrite = 0;
 	sel.edge = 1;
+
 	CDrawScanline(pixels, left, top, scan, local, sel, step_size);
 }
 

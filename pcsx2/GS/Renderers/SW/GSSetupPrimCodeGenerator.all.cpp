@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2025 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "GSDrawScanline.h"
 #include "GSSetupPrimCodeGenerator.all.h"
 #include "GSVertexSW.h"
 #include "common/Perf.h"
@@ -85,6 +86,18 @@ void GSSetupPrimCodeGenerator::broadcastss(const XYm& reg, const Address& mem)
 
 void GSSetupPrimCodeGenerator::Generate()
 {
+	// If step_size (5th arg) < vlen, use CSetupPrim().
+	constexpr int vlen = isXmm ? 4 : 8;
+#ifdef _WIN64
+	mov(eax, ptr[rsp + 40]);
+	cmp(eax, vlen);
+#else
+	cmp(r8, vlen);
+#endif
+	je("@f");
+	jmp(reinterpret_cast<const void*>(static_cast<GSDrawScanline::SetupPrimPtr>(&GSDrawScanline::CSetupPrim)));
+	L("@@");
+
 	bool needs_shift = ((m_en.z || m_en.f) && m_sel.prim != GS_SPRITE_CLASS) || m_en.t || (m_en.c && m_sel.iip);
 	many_regs = isYmm && !m_sel.notest && needs_shift;
 
