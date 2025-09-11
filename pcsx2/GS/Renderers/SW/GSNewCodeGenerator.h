@@ -267,6 +267,7 @@ public:
 	AFORWARD(2, packusdw,  ARGS_XO)
 	AFORWARD(2, packuswb,  ARGS_XO)
 	AFORWARD(2, paddd,     ARGS_XO)
+	AFORWARD(2, phaddd,     ARGS_XO)
 	AFORWARD(2, paddusb,   ARGS_XO)
 	AFORWARD(2, paddw,     ARGS_XO)
 	AFORWARD(2, pand,      ARGS_XO)

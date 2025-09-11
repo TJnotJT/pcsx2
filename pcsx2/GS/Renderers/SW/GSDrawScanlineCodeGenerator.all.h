@@ -44,6 +44,7 @@ class GSDrawScanlineCodeGenerator : public GSNewCodeGenerator
 	constexpr static int _64_win_xmm_start = 8 * 2;
 	// Windows has no redzone and also has 10 xmm registers to save
 	constexpr static int _64_win_stack_size = _64_win_xmm_start + 16 * 10;
+	constexpr static int _64_win_stack_args = _64_win_stack_size + 48; // 5 pushed registers and return address = 48
 #else
 	// System-V has a redzone so stick everything there
 	constexpr static int _64_rz_rbx = -8 * 1;
@@ -62,7 +63,7 @@ class GSDrawScanlineCodeGenerator : public GSNewCodeGenerator
 	/// Note: a2 and t3 are only available on x86-64
 	/// Outside of Init, usable registers are a0, t0, t1, t2, t3[x64], rax, rbx, rdx, r10+
 	const AddressReg a0, a1, a2, a3, t0, t1, t2, t3;
-	const AddressReg _m_local, _m_local__gd, _m_local__gd__vm, _m_local__gd__clut;
+	const AddressReg _m_local, _m_local__gd, _m_local__gd__vm, _m_local__gd__clut, _m_left;
 	// If use_lod, m_local.gd->tex, else m_local.gd->tex[0]
 	const AddressReg _m_local__gd__tex;
 	/// Available on both x86 and x64, not always valid
@@ -112,7 +113,7 @@ private:
 
 	void Init();
 	void Step();
-	void TestZ(const XYm& temp1, const XYm& temp2);
+	void TestZ(const XYm& temp1, const XYm& temp2, const AddressReg& temp3);
 	void SampleTexture();
 	void SampleTexture_TexelReadHelper(int mip_offset);
 	void Wrap(const XYm& uv);
@@ -138,6 +139,7 @@ private:
 	void WritePixel(const XYm& src_, const AddressReg& addr, const Xbyak::Reg32& mask, bool fast, int psm, int fz);
 #endif
 	void WritePixel(const Xmm& src, const AddressReg& addr, u8 i, u8 j, int psm);
+	void WritePixelOffset(const Xmm& src, const AddressReg& addr, u8 i, u8 j, int psm);
 	void ReadTexel1(const XYm& dst, const XYm& src, const XYm& tmp1, const XYm& tmp2, int mip_offset);
 	void ReadTexel4(
 		const XYm& d0,   const XYm& d1,

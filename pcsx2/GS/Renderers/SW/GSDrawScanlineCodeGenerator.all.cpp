@@ -9,6 +9,8 @@
 
 #include <cstddef>
 
+constexpr int step_size = 4;
+
 MULTI_ISA_UNSHARED_IMPL;
 using namespace Xbyak;
 
@@ -76,12 +78,14 @@ GSDrawScanlineCodeGenerator::GSDrawScanlineCodeGenerator(u64 key, void* code, si
 	, t0(rdi), t1(rsi)
 	, t2(r8) , t3(r9)
 	, _m_local(r10)
+	, _m_left(r14)
 #else
 	, a0(rdi), a1(rsi)
 	, a2(rdx), a3(rcx)
 	, t0(r10), t1(r9)
 	, t2(rcx), t3(rsi)
 	, _m_local(r8)
+	, _m_left(r14)
 #endif
 	, _m_local__gd(r12)
 	, _m_local__gd__vm(t3)
@@ -361,8 +365,7 @@ void GSDrawScanlineCodeGenerator::Generate()
 
 #ifdef _WIN32
 	// Local (5th arg) is passed on the stack in Windows.
-	// 32 bytes shadow space less the 5 pushed registers and return address = 80.
-	mov(_m_local, ptr[rsp + _64_win_stack_size + 80]);
+	mov(_m_local, ptr[rsp + _64_win_stack_args + 32]);
 #endif
 
 	mov(_m_local__gd, _rip_local(gd));
@@ -393,7 +396,7 @@ L("loop");
 
 	const bool tme = m_sel.tfx != TFX_NONE;
 
-	TestZ(tme ? xym5 : xym2, tme ? xym6 : xym3);
+	TestZ(tme ? xym5 : xym2, tme ? xym6 : xym3, rax);
 
 	// a0 = steps
 	// t1 = fza_base
@@ -614,22 +617,23 @@ L("exit");
 /// Inputs: a0=pixels, a1=left, a2[x64]=top, a3[x64]=v
 void GSDrawScanlineCodeGenerator::Init()
 {
-	if (!m_sel.notest)
-	{
-		// int skip = left & 3;
+	mov(_m_left.cvt32(), a1.cvt32());
 
-		mov(ebx, a1.cvt32());
-		and_(a1.cvt32(), vecints - 1);
+	if (!(m_sel.notest && step_size == vecints))
+	{
+		// int skip = left & (step_size - 1);
+
+		and_(a1.cvt32(), step_size - 1);
 
 		// left -= skip;
 
-		sub(ebx, a1.cvt32());
+		sub(_m_left.cvt32(), a1.cvt32());
 
-		// int steps = pixels + skip - 4;
+		// int steps = pixels + skip - step_size;
 
-		lea(a0.cvt32(), ptr[a0 + a1 - vecints]);
+		lea(a0.cvt32(), ptr[a0 + a1 - step_size]);
 
-		// GSVector4i test = m_test[skip] | m_test[7 + (steps & (steps >> 31))];
+		// GSVector4i test = m_test[skip] | m_test[3 + step_size + (steps & (steps >> 31))];
 
 		mov(eax, a0.cvt32());
 		sar(eax, 31); // GH: 31 to extract the sign of the register
@@ -643,20 +647,19 @@ void GSDrawScanlineCodeGenerator::Init()
 			lea(t1, _rip_const(&g_const.m_test_128b[0]));
 			shl(a1.cvt32(), 4); // * sizeof(m_test[0])
 			movdqa(_test, ptr[a1 + t1]);
-			por(_test, ptr[rax + t1 + (offsetof(GSScanlineConstantData, m_test_128b[7]) - offsetof(GSScanlineConstantData, m_test_128b[0]))]);
+			por(_test, ptr[rax + t1 + (offsetof(GSScanlineConstantData, m_test_128b[3 + step_size]) - offsetof(GSScanlineConstantData, m_test_128b[0]))]);
 		}
 		else
 		{
 			lea(t1, _rip_const(&g_const.m_test_256b[0]));
 			pmovsxbd(_test, ptr[a1 * 8 + t1]);
-			pmovsxbd(xym0, ptr[rax * 8 + t1 + (offsetof(GSScanlineConstantData, m_test_256b[15]) - offsetof(GSScanlineConstantData, m_test_256b[0]))]);
+			pmovsxbd(xym0, ptr[rax * 8 + t1 + (offsetof(GSScanlineConstantData, m_test_256b[7 + step_size]) - offsetof(GSScanlineConstantData, m_test_256b[0]))]);
 			por(_test, xym0);
 			shl(a1.cvt32(), 5); // * sizeof(m_test[0])
 		}
 	}
 	else
 	{
-		mov(ebx, a1.cvt32()); // left
 		xor_(a1.cvt32(), a1.cvt32()); // skip
 		lea(a0.cvt32(), ptr[a0 - vecints]); // steps
 	}
@@ -665,7 +668,6 @@ void GSDrawScanlineCodeGenerator::Init()
 	// a1 = skip
 	// a2[x64] = top
 	// a3[x64] = v
-	// rbx = left
 	// Free: rax, t0, t1
 
 	// GSVector2i* fza_base = &m_local.gd->fzbr[top];
@@ -674,7 +676,7 @@ void GSDrawScanlineCodeGenerator::Init()
 
 	// GSVector2i* fza_offset = &m_local.gd->fzbc[left >> 2];
 	mov(rax, _rip_global(fzbc));
-	lea(t0, ptr[rax + rbx * 2]);
+	lea(t0, ptr[rax + _m_left * 2]);
 
 	if ((m_sel.prim != GS_SPRITE_CLASS && ((m_sel.fwrite && m_sel.fge) || m_sel.zb)) || (m_sel.fb && (m_sel.edge || m_sel.tfx != TFX_NONE || m_sel.iip)))
 	{
@@ -1039,8 +1041,8 @@ void GSDrawScanlineCodeGenerator::Step()
 
 /// Inputs: xym0[x86]=z, xym7[x64]=z0, t1=fza_base, t0=fza_offset, _test
 /// Outputs: t2=za
-/// Destroys: rax, xym0, temp1, temp2
-void GSDrawScanlineCodeGenerator::TestZ(const XYm& temp1, const XYm& temp2)
+/// Destroys: rax, xym0, temp1, temp2, temp3
+void GSDrawScanlineCodeGenerator::TestZ(const XYm& temp1, const XYm& temp2, const AddressReg& temp3)
 {
 	if (!m_sel.zb)
 	{
@@ -2414,6 +2416,7 @@ void GSDrawScanlineCodeGenerator::Fog()
 }
 
 /// Outputs: _fd, rbx=fa
+/// Destroys: rax
 void GSDrawScanlineCodeGenerator::ReadFrame()
 {
 	if (!m_sel.fb)
@@ -2941,16 +2944,114 @@ void GSDrawScanlineCodeGenerator::ReadPixel(const XYm& dst, const XYm& tmp, cons
 {
 	RegExp base = _m_local__gd__vm + addr * 2;
 #if USING_XMM
-	movq(dst, qword[base]);
-	movhps(dst, qword[base + 8 * 2]);
+	//if (step_size == 4)
+	//{
+	//	zd = GSVector4i::load((u8*)global.vm + za * 2, (u8*)global.vm + za * 2 + 16);
+	//}
+	//else if (step_size == 2)
+	//{
+	//	zd = GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * vlen_offset);
+	//}
+	//else // step_size == 1
+	//{
+	//	zd = GSVector4i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
+	//}
+	if (step_size == 4)
+	{
+		movq(dst, qword[base]);
+		movhps(dst, qword[base + 8 * 2]);
+	}
+	else if (step_size == 2)
+	{
+		push(_m_left);
+		
+		// const int vlen_offset = left & (vlen - 1);
+		
+		and_(_m_left, vecints - 1);
+
+		shl(_m_left, 3);
+		add(_m_left, _m_local__gd__vm);
+
+		// zd = GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * vlen_offset);
+
+		movq(dst, qword[_m_left + addr * 2]);
+		
+		pop(_m_left);
+	}
+	else // (step_size == 1)
+	{
+		push(_m_left);
+		
+		// const int vlen_offset = left & (vlen - 1);
+
+		and_(_m_left, (vecints - 1) & ~1);
+		shl(_m_left, 3); // 8 * (vlen_offset & ~1)
+
+		push(_m_left);
+
+		mov(_m_left, qword[rsp + 8]);
+		and_(_m_left, 1);
+		shl(_m_left, 2);
+		add(_m_left, dword[rsp]); // 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)))
+
+		// zd = GSVector4i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
+		add(_m_left, _m_local__gd__vm);
+		movd(dst, dword[_m_left + addr * 2]);
+
+		add(rsp, 8);
+		pop(_m_left);
+	}
 #else
-	Xmm dstXmm = Xmm(dst.getIdx());
-	Xmm tmpXmm = Xmm(tmp.getIdx());
-	movq(dstXmm, qword[base]);
-	movhps(dstXmm, qword[base + 8 * 2]);
-	movq(tmpXmm, qword[base + 16 * 2]);
-	movhps(tmpXmm, qword[base + 24 * 2]);
-	vinserti128(dst, dst, tmpXmm, 1);
+	// const int vlen_offset = left & (vlen - 1);
+	//if (step_size == 8)
+	//{
+	//	zd = GSVector8i::load(
+	//		(u8*)global.vm + za * 2, (u8*)global.vm + za * 2 + 16,
+	//		(u8*)global.vm + za * 2 + 32, (u8*)global.vm + za * 2 + 48);
+	//}
+	//else if (step_size == 4)
+	//{
+	//	zd = GSVector8i::cast(GSVector4i::load(
+	//		(u8*)global.vm + za * 2 + 8 * vlen_offset, (u8*)global.vm + za * 2 + 8 * vlen_offset + 16));
+	//}
+	//else if (step_size == 2)
+	//{
+	//	zd = GSVector8i::cast(GSVector4i::loadl((u8*)global.vm + za * 2 + 8 * vlen_offset));
+	//}
+	//else // step_size == 1
+	//{
+	//	zd = GSVector8i::load(*(s32*)((u8*)global.vm + za * 2 + 8 * (vlen_offset & ~1) + 4 * (vlen_offset & 1)));
+	//}
+	if (step_size == 8)
+	{
+		Xmm dstXmm = Xmm(dst.getIdx());
+		Xmm tmpXmm = Xmm(tmp.getIdx());
+		movq(dstXmm, qword[base]);
+		movhps(dstXmm, qword[base + 8 * 2]);
+		movq(tmpXmm, qword[base + 16 * 2]);
+		movhps(tmpXmm, qword[base + 24 * 2]);
+		vinserti128(dst, dst, tmpXmm, 1);
+	}
+	else if (step_size == 4)
+	{
+		// const int vlen_offset = left & (vlen - 1);
+		mov(temp3.cvt32(), _m_left.cvt32());
+		_and(temp3.cvt32(), vecints - 1);
+		shl(temp3, 3);
+		add(temp3, _m_local__gd__vm);
+		movq(dst, qword[temp3 + addr * 2]);
+		movhps(dst, qword[temp3 + addr * 2 + 8 * 2]);
+	}
+	else if (step_size == 2)
+	{
+		shl(temp3, 3);
+		add(temp3, _m_local__gd__vm);
+		movd(dst, dword[temp3 + addr * 2]);
+	}
+	else if (step_size == 1)
+	{
+
+	}
 #endif
 }
 
@@ -3113,6 +3214,50 @@ void GSDrawScanlineCodeGenerator::WritePixel(const Xmm& src, const AddressReg& a
 			mov(dst, ax);
 			break;
 	}
+}
+
+void GSDrawScanlineCodeGenerator::WritePixelOffset(const Xmm& src, const AddressReg& addr, u8 i, u8 j, int psm)
+{
+	push(_m_left);
+
+	and_(_m_left, (vecints - 1) & ~1);
+	shl(_m_left, 3);
+	push(_m_left);
+	and_(_m_left, 1);
+	shl(_m_left, 2);
+	add(_m_left, qword[rsp]); // 8 * ((left & (vlen - 1)) & ~1) + 4 * (left & 1)
+	add(rsp, 8);
+
+	add(_m_left, _m_local__gd__vm);
+	lea(_m_left, ptr[addr * 2]);
+
+	switch (psm)
+	{
+		case 0:
+			if (j == 0)
+				movd(dword[_m_left], src);
+			else
+				pextrd(dword[_m_left], src, j);
+			break;
+		case 1:
+			if (j == 0)
+				movd(eax, src);
+			else
+				pextrd(eax, src, j);
+			xor_(eax, dword[_m_left]);
+			and_(eax, 0xffffff);
+			xor_(dword[_m_left], eax);
+			break;
+		case 2:
+			if (j == 0)
+				movd(eax, src);
+			else
+				pextrw(eax, src, j * 2);
+			mov(word[_m_left], ax);
+			break;
+	}
+
+	pop(_m_left);
 }
 
 /// Input:
