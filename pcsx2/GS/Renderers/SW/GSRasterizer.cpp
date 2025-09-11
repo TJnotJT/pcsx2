@@ -13,13 +13,24 @@
 #include "common/Console.h"
 #include "common/StringUtil.h"
 
-constexpr int STEP_SIZE = 1;
 
 #define ENABLE_DRAW_STATS 0
 
 MULTI_ISA_UNSHARED_IMPL;
 
 int GSRasterizerData::s_counter = 0;
+
+#if _M_SSE >= 0x501
+static constexpr int vlen = 8;
+static constexpr float vlenf = static_cast<float>(vlen);
+static constexpr std::array<int, 9> step_size_round = {1, 1, 2, 2, 4, 4, 4, 4, 8};
+#else
+static constexpr int vlen = 4;
+static constexpr float vlenf = static_cast<float>(vlen);
+static constexpr std::array<int, 5> step_size_round = {1, 1, 2, 2, 4};
+#endif
+static constexpr GSVector4 tmax = GSVector4::cxpr(static_cast<float>(0x7FFFFF80)); // 1:15:16 fixed point format.
+static constexpr GSVector4 cmax = GSVector4::cxpr(static_cast<float>(0x7FFF));     // 1:8:7 fixed point format.
 
 static int compute_best_thread_height(int threads)
 {
@@ -33,6 +44,23 @@ static int compute_best_thread_height(int threads)
 		return th;
 	else
 		return 4;
+}
+
+static int GetStepSize(const GSVector4& dt)
+{
+	GSVector4 ssf = tmax / dt.abs();
+	ssf = ssf.xyxy().min(ssf.yxyx());
+	const int ss = static_cast<int>(std::min(ssf.x, vlenf));
+	return step_size_round[ss];
+}
+
+static int GetStepSize(const GSVector4& dt, const GSVector4& dc)
+{
+	GSVector4 ssf = (tmax / dt.abs()).min(cmax / dc.abs());
+	ssf = ssf.xyxy().min(ssf.zwxy());
+	ssf = ssf.xyxy().min(ssf.yxyx());
+	int ss = static_cast<int>(std::min(ssf.x, vlenf));
+	return step_size_round[ss];
 }
 
 GSRasterizer::GSRasterizer(GSDrawScanline* ds, int id, int threads)
@@ -137,7 +165,7 @@ void GSRasterizer::Draw(GSRasterizerData& data)
 	if constexpr (ENABLE_DRAW_STATS)
 		data.start = GetCPUTicks();
 
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < n_step_sizes; i++)
 	{
 		m_setup_prim[i] = data.setup_prim[i];
 		m_draw_scanline[i] = data.draw_scanline[i];
@@ -271,9 +299,9 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 			{
 				if (IsOneOfMyScanlines(p.y))
 				{
-					m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, GSVertexSW::zero(), m_local); // FIXME
+					m_setup_prim[step_size_index[vlen]](vertex, index, GSVertexSW::zero(), m_local);
 
-					DrawScanline(1, p.x, p.y, v, STEP_SIZE); // FIXME:
+					DrawScanline(1, p.x, p.y, v, vlen);
 				}
 			}
 		}
@@ -292,9 +320,9 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 			{
 				if (IsOneOfMyScanlines(p.y))
 				{
-					m_setup_prim[step_size_index[STEP_SIZE]](vertex, tmp_index, GSVertexSW::zero(), m_local); // FIXME
+					m_setup_prim[step_size_index[vlen]](vertex, tmp_index, GSVertexSW::zero(), m_local);
 
-					DrawScanline(1, p.x, p.y, v, STEP_SIZE); // FIXME
+					DrawScanline(1, p.x, p.y, v, vlen);
 				}
 			}
 		}
@@ -360,9 +388,11 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 					scan += dscan * (l - scan.p).xxxx();
 
-					m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local); // FIXME: Need to compute optimal step size.
+					const int step_size = GetStepSize(scan.p, scan.t);
 
-					DrawScanline(pixels, left, p.y, scan, STEP_SIZE); // FIXME: Need to compute optimal step size.
+					m_setup_prim[step_size_index[step_size]](vertex, index, dscan, m_local);
+
+					DrawScanline(pixels, left, p.y, scan, step_size);
 				}
 			}
 		}
@@ -855,13 +885,15 @@ void GSRasterizer::DrawSprite(const GSVertexSW* vertex, const u16* index)
 
 	scan.t = (scan.t + dt * prestep).xyzw(scan.t);
 
-	m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local); // FIXME: Need to compute optimal step size.
+	const int step_size = GetStepSize(dscan.t);
+
+	m_setup_prim[step_size_index[step_size]](vertex, index, dscan, m_local);
 
 	while (1)
 	{
 		if (IsOneOfMyScanlines(r.top))
 		{
-			DrawScanline(r.width(), r.left, r.top, scan, STEP_SIZE); // FIXME: Need to compute optimal step size.
+			DrawScanline(r.width(), r.left, r.top, scan, step_size);
 		}
 
 		if (++r.top >= r.bottom)
@@ -1084,7 +1116,9 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 
 	if (count > 0)
 	{
-		m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local);
+		const int step_size = GetStepSize(dscan.t, dscan.c);
+
+		m_setup_prim[step_size_index[step_size]](vertex, index, dscan, m_local);
 
 		const GSVertexSW* RESTRICT e = m_edge.buff;
 		const GSVertexSW* RESTRICT ee = e + count;
@@ -1097,7 +1131,7 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 				int left = e->_pad.I32[1];
 				int top = e->_pad.I32[2];
 
-				DrawScanline(pixels, left, top, *e++, STEP_SIZE);
+				DrawScanline(pixels, left, top, *e++, step_size);
 			} while (e < ee);
 		}
 		else
@@ -1108,7 +1142,7 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 				int left = e->_pad.I32[1];
 				int top = e->_pad.I32[2];
 
-				DrawEdge(pixels, left, top, *e++, STEP_SIZE);
+				DrawEdge(pixels, left, top, *e++, step_size);
 			} while (e < ee);
 		}
 
@@ -1135,7 +1169,7 @@ void GSRasterizer::DrawEdge(int pixels, int left, int top, const GSVertexSW& sca
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
-	m_draw_edge[step_size_index[STEP_SIZE]](pixels, left, top, scan, m_local);
+	m_draw_edge[step_size_index[step_size]](pixels, left, top, scan, m_local);
 }
 
 //

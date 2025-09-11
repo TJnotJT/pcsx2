@@ -14,8 +14,6 @@
 
 MULTI_ISA_UNSHARED_START
 
-static std::array<int, 5> step_size_index = {-1, 2, 1, -1, 0}; // FIXME: DO for AVX
-
 class GSDrawScanline;
 
 class alignas(32) GSRasterizerData : public GSAlignedClass<32>
@@ -39,9 +37,9 @@ public:
 
 	GSScanlineGlobalData global;
 
-	std::array<GSDrawScanline::SetupPrimPtr, 3> setup_prim;
-	std::array<GSDrawScanline::DrawScanlinePtr, 3> draw_scanline;
-	std::array<GSDrawScanline::DrawScanlinePtr, 3> draw_edge;
+	std::array<GSDrawScanline::SetupPrimPtr, n_step_sizes> setup_prim;
+	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> draw_scanline;
+	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> draw_edge;
 
 	GSRasterizerData()
 		: scissor(GSVector4i::zero())
@@ -85,9 +83,9 @@ protected:
 
 	// For the current draw.
 	GSScanlineLocalData m_local = {};
-	std::array<GSDrawScanline::SetupPrimPtr, 3> m_setup_prim = {}; // FIXME: Do for AVX
-	std::array<GSDrawScanline::DrawScanlinePtr, 3> m_draw_scanline = {}; // FIXME: Do for AVX
-	std::array<GSDrawScanline::DrawScanlinePtr, 3> m_draw_edge = {}; // FIXME: Do for AVX
+	std::array<GSDrawScanline::SetupPrimPtr, n_step_sizes> m_setup_prim = {};
+	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_scanline = {};
+	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_edge = {};
 
 	__forceinline bool HasEdge() const { return (m_draw_edge[0] != nullptr); }
 

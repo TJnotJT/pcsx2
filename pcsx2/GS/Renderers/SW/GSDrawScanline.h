@@ -14,6 +14,14 @@
 #include "GS/Renderers/SW/GSDrawScanlineCodeGenerator.arm64.h"
 #endif
 
+#if _M_SSE >= 0x501
+static constexpr int n_step_sizes = 4;
+static std::array<int, 9> step_size_index = {-1, 3, 2, -1, 1, -1, -1, -1, 0};
+#else
+static constexpr int n_step_sizes = 3;
+static std::array<int, 5> step_size_index = {-1, 2, 1, -1, 0};
+#endif
+
 struct GSScanlineLocalData;
 
 MULTI_ISA_UNSHARED_START
@@ -52,9 +60,9 @@ public:
 	void PrintStats();
 
 private:
-	static const SetupPrimPtr m_c_setup_prim[3];
-	static const DrawScanlinePtr m_c_draw_scanline[3];
-	static const DrawScanlinePtr m_c_draw_edge[3];
+	static const std::array<SetupPrimPtr, n_step_sizes> m_c_setup_prim;
+	static const std::array<DrawScanlinePtr, n_step_sizes> m_c_draw_scanline;
+	static const std::array<DrawScanlinePtr, n_step_sizes> m_c_draw_edge;
 
 	GSCodeGeneratorFunctionMap<GSSetupPrimCodeGenerator, u64, SetupPrimPtr> m_sp_map;
 	GSCodeGeneratorFunctionMap<GSDrawScanlineCodeGenerator, u64, DrawScanlinePtr> m_ds_map;

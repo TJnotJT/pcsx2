@@ -166,7 +166,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 
 	return (data.setup_prim = m_sp_map[sel]) != nullptr;
 #else
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < n_step_sizes; i++)
 	{
 		data.setup_prim[i] = m_c_setup_prim[i];
 		data.draw_scanline[i] = m_c_draw_scanline[i];
@@ -191,12 +191,13 @@ void GSDrawScanline::PrintStats()
 typedef GSVector8i VectorI;
 typedef GSVector8  VectorF;
 #define LOCAL_STEP local.d8
+static constexpr int vlen = 8;
 #else
 typedef GSVector4i VectorI;
 typedef GSVector4  VectorF;
 #define LOCAL_STEP local.d4
+static constexpr int vlen = 4;
 #endif
-
 
 template<int step_size>
 void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local)
@@ -208,8 +209,6 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 	bool has_f = sel.fb && sel.fge;
 	bool has_t = sel.fb && sel.tfx != TFX_NONE;
 	bool has_c = sel.fb && !(sel.tfx == TFX_DECAL && sel.tcc);
-
-	constexpr int vlen = sizeof(VectorF) / sizeof(float);
 
 	pxAssert(vlen % step_size == 0);
 
@@ -490,27 +489,34 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 	}
 }
 
-template<int step_size>
-void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
-{
-	CDrawScanline<step_size>(pixels, left, top, scan, local, GlobalFromLocal(local).sel);
-}
-
+#if _M_SSE >= 0x501
 template <typename T>
-void RollVec32(T& t, int offset)
+static inline void RollVec32(T& v, int offset)
 {
 	switch (offset)
 	{
 		case 0:
 			break;
 		case 1:
-			*(GSVector4*)&t = (*(GSVector4*)&t).wxyz();
+			v = v.permute32(GSVector8i::cxpr(7, 0, 1, 2, 3, 4, 5, 6));
 			break;
 		case 2:
-			*(GSVector4*)&t = (*(GSVector4*)&t).zwxy();
+			v = v.permute32(GSVector8i::cxpr(6, 7, 0, 1, 2, 3, 4, 5));
 			break;
 		case 3:
-			*(GSVector4*)&t = (*(GSVector4*)&t).yzwx();
+			v = v.permute32(GSVector8i::cxpr(5, 6, 7, 0, 1, 2, 3, 4));
+			break;
+		case 4:
+			v = v.permute32(GSVector8i::cxpr(4, 5, 6, 7, 0, 1, 2, 3));
+			break;
+		case 5:
+			v = v.permute32(GSVector8i::cxpr(3, 4, 5, 6, 7, 0, 1, 2));
+			break;
+		case 6:
+			v = v.permute32(GSVector8i::cxpr(2, 3, 4, 5, 6, 7, 0, 1));
+			break;
+		case 7:
+			v = v.permute32(GSVector8i::cxpr(1, 2, 3, 4, 5, 6, 7, 0));
 			break;
 		default:
 			pxFail("Impossible.");
@@ -518,43 +524,112 @@ void RollVec32(T& t, int offset)
 	}
 }
 
-template<typename T>
-void RollVec64(T& v0, T& v1, int offset)
+template <typename T>
+static inline void RollVec64(T& v0, T& v1, int offset)
 {
-	u64 tmp;
 	switch (offset)
 	{
 		case 0:
 			break;
-		case 1:
-			tmp = v1.U64[1];
-			v1.U64[1] = v1.U64[0];
-			v1.U64[0] = v0.U64[1];
-			v0.U64[1] = v0.U64[0];
-			v0.U64[0] = tmp;
-			break;
-		case 2:
+		case 5:
 			std::swap(v0, v1);
+			[[fallthrough]];
+		case 1:
+			RollVec32(v0, 2);
+			RollVec32(v1, 2);
+			std::swap(v0.U64[0], v1.U64[0]);
+			break;
+		case 6:
+			std::swap(v0, v1);
+			[[fallthrough]];
+		case 2:
+			RollVec32(v0, 4);
+			RollVec32(v1, 4);
+			std::swap(v0.m0, v1.m0);
 			break;
 		case 3:
-			tmp = v0.U64[0];
-			v0.U64[0] = v0.U64[1];
-			v0.U64[1] = v1.U64[0];
-			v1.U64[0] = v1.U64[1];
-			v1.U64[1] = tmp;
+			std::swap(v0, v1);
+			[[fallthrough]];
+		case 7:
+			RollVec32(v0, 6);
+			RollVec32(v1, 6);
+			std::swap(v0.U64[3], v1.U64[3]);
+			break;
+		case 4:
+			std::swap(v0, v1);
 			break;
 		default:
 			pxFail("Impossible");
 			break;
 	}
 }
+#else
+template <typename T>
+static inline void RollVec32(T& v, int offset)
+{
+	GSVector4i tmp;
+	if constexpr (std::is_same_v<std::remove_reference_t<T>, GSVector4>)
+		tmp = GSVector4i::cast(v);
+	else
+		tmp = v;
+	switch (offset)
+	{
+		case 0:
+			break;
+		case 1:
+			tmp = tmp.wxyz();
+			break;
+		case 2:
+			tmp = tmp.zwxy();
+			break;
+		case 3:
+			tmp = tmp.yzwx();
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+	if constexpr (std::is_same_v<std::remove_reference_t<T>, GSVector4>)
+		v = GSVector4::cast(tmp);
+	else
+		v = tmp;
+}
+
+template<typename T>
+static inline void RollVec64(T& v0, T& v1, int offset)
+{
+	switch (offset)
+	{
+		case 0:
+			break;
+		case 3:
+			std::swap(v0, v1);
+			[[fallthrough]];
+		case 1:
+			RollVec32(v0, 2);
+			RollVec32(v0, 2);
+			std::swap(v0.U64[0], v1.U64[0]);
+			break;
+		case 2:
+			std::swap(v0, v1);
+			break;
+		default:
+			pxFail("Impossible");
+			break;
+	}
+}
+#endif
+
+template <int step_size>
+void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
+{
+	CDrawScanline<step_size>(pixels, left, top, scan, local, GlobalFromLocal(local).sel);
+}
 
 template<int step_size>
 __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, GSScanlineSelector sel)
 {
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
-
-	constexpr int vlen = sizeof(VectorF) / sizeof(float);
 
 	pxAssert(vlen % step_size == 0);
 
@@ -606,8 +681,19 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	pxAssert((left & (step_size - 1)) == 0);
 
-	const GSVector2i* fza_base = &global.fzbr[top];
-	const GSVector2i* fza_offset = &global.fzbc[left >> 2];
+	const GSVector2i* fza_base;
+	const GSVector2i* fza_offset;
+
+	if (step_size == vlen)
+	{
+		fza_base = &global.fzbr[top];
+		fza_offset = &global.fzbc[left >> 2];
+	}
+	else
+	{
+		fza_base = &global.fzbr[top];
+		fza_offset = &global.fzbc[(left & ~(vlen - 1)) >> 2];
+	}
 
 	if (sel.prim != GS_SPRITE_CLASS)
 	{
@@ -1495,7 +1581,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					zs = zs.blend8(zd, zm);
 				}
 
-				bool fast = sel.ztest ? sel.zpsm < 2 : sel.zpsm == 0 && sel.notest;
+				bool fast = sel.ztest ? sel.zpsm < 2 : (sel.zpsm == 0 && sel.notest && step_size == vlen);
 
 				if (sel.notest && step_size == vlen)
 				{
@@ -1718,7 +1804,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					fs = fs.blend(fd, fm);
 				}
 
-				bool fast = sel.rfb ? sel.fpsm < 2 : sel.fpsm == 0 && sel.notest;
+				bool fast = sel.rfb ? sel.fpsm < 2 : (sel.fpsm == 0 && sel.notest && step_size == vlen);
 
 				if (sel.notest && step_size == vlen)
 				{
@@ -2125,22 +2211,28 @@ void GSDrawScanline::DrawRect(const GSVector4i& r, const GSVertexSW& v, GSScanli
 	}
 }
 
-const GSDrawScanline::SetupPrimPtr GSDrawScanline::m_c_setup_prim[3] =
-{
+const std::array<GSDrawScanline::SetupPrimPtr, n_step_sizes> GSDrawScanline::m_c_setup_prim = {
+#if _M_SSE >= 0x501
+	GSDrawScanline::CSetupPrim<8>,
+#endif
 	GSDrawScanline::CSetupPrim<4>,
 	GSDrawScanline::CSetupPrim<2>,
 	GSDrawScanline::CSetupPrim<1>,
 };
 
-const GSDrawScanline::DrawScanlinePtr GSDrawScanline::m_c_draw_scanline[3]
-{
+const std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> GSDrawScanline::m_c_draw_scanline = {
+#if _M_SSE >= 0x501
+	GSDrawScanline::CDrawScanline<8>,
+#endif
 	GSDrawScanline::CDrawScanline<4>,
 	GSDrawScanline::CDrawScanline<2>,
 	GSDrawScanline::CDrawScanline<1>,
 };
 
-const GSDrawScanline::DrawScanlinePtr GSDrawScanline::m_c_draw_edge[3] =
-{
+const std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> GSDrawScanline::m_c_draw_edge = {
+#if _M_SSE >= 0x501
+	GSDrawScanline::CDrawEdge<8>,
+#endif
 	GSDrawScanline::CDrawEdge<4>,
 	GSDrawScanline::CDrawEdge<2>,
 	GSDrawScanline::CDrawEdge<1>,
