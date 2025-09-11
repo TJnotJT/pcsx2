@@ -244,9 +244,9 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 				const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
 				const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
 #if _M_SSE >= 0x501
-				GSVector4::storel(&local.dstep.p.z, dz.mul64(GSVector4::f32to64(shift)));
+				GSVector4::storel(&local.dstep.p.z, dz.mul64(GSVector4::f32to64(step_shift)));
 #else
-				local.dstep.z = dz.mul64(GSVector4::f32to64(shift));
+				local.dstep.z = dz.mul64(GSVector4::f32to64(step_shift));
 #endif
 				for (int i = 0; i < vlen; i++)
 				{
@@ -508,6 +508,58 @@ void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertex
 	CDrawScanline(pixels, left, top, scan, local, GlobalFromLocal(local).sel, step_size);
 }
 
+template <typename T>
+void RollVec(T& t, int offset)
+{
+	switch (offset)
+	{
+		case 0:
+			break;
+		case 1:
+			*(GSVector4*)&t = (*(GSVector4*)&t).wxyz();
+			break;
+		case 2:
+			*(GSVector4*)&t = (*(GSVector4*)&t).zwxy();
+			break;
+		case 3:
+			*(GSVector4*)&t = (*(GSVector4*)&t).yzwx();
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+}
+
+void RollVecZ(VectorF& z0, VectorF& z1, int offset)
+{
+	double tmp;
+	switch (offset)
+	{
+		case 0:
+			break;
+		case 1:
+			tmp = z1.F64[1];
+			z1.F64[1] = z1.F64[0];
+			z1.F64[0] = z0.F64[1];
+			z0.F64[1] = z0.F64[0];
+			z0.F64[0] = tmp;
+			break;
+		case 2:
+			std::swap(z0, z1);
+			break;
+		case 3:
+			tmp = z0.F64[0];
+			z0.F64[0] = z0.F64[1];
+			z0.F64[1] = z1.F64[0];
+			z1.F64[0] = z1.F64[1];
+			z1.F64[1] = tmp;
+			break;
+		default:
+			pxFail("Impossible");
+			break;
+	}
+}
+
 __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local, GSScanlineSelector sel, int step_size)
 {
 	const GSScanlineGlobalData& global = GlobalFromLocal(local);
@@ -650,6 +702,21 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		}
 	}
 
+	if (step_size != vlen)
+	{
+		RollVec(test, left & (vlen - 1));
+		RollVecZ(z0, z1, left & (vlen - 1));
+		RollVec(f, left & (vlen - 1));
+		RollVec(s, left & (vlen - 1));
+		RollVec(t, left & (vlen - 1));
+		RollVec(q, left & (vlen - 1));
+		RollVec(uf, left & (vlen - 1));
+		RollVec(vf, left & (vlen - 1));
+		RollVec(rbf, left & (vlen - 1));
+		RollVec(gaf, left & (vlen - 1));
+		RollVec(cov, left & (vlen - 1));
+	}
+
 	while (1)
 	{
 		do
@@ -705,31 +772,13 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 				if (sel.ztest)
 				{
-					const int vlen_offset = left & (vlen - 1);
 #if _M_SSE >= 0x501
 					zd = GSVector8i::load(
 						(u8*)global.vm + za * 2     , (u8*)global.vm + za * 2 + 16,
 						(u8*)global.vm + za * 2 + 32, (u8*)global.vm + za * 2 + 48);
 
-					// FIXME: Do the rolling here
 #else
 					zd = GSVector4i::load((u8*)global.vm + za * 2, (u8*)global.vm + za * 2 + 16);
-				
-					if (step_size != vlen)
-					{
-						if (vlen_offset == 1)
-						{
-							zd = zd.yzwx();
-						}
-						else if (vlen_offset == 2)
-						{
-							zd = zd.zwxy();
-						}
-						else if (vlen_offset == 3)
-						{
-							zd = zd.wxyz();
-						}
-					}
 #endif
 
 					VectorI zso = zs;
@@ -1178,7 +1227,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						{
 							const u8* tex = (const u8*)global.tex[0];
 
-							// FIXME: Will not work!
 							c00 = addr00.gather32_32(tex, global.clut);
 							c01 = addr01.gather32_32(tex, global.clut);
 							c10 = addr10.gather32_32(tex, global.clut);
@@ -1355,29 +1403,12 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 				if (sel.rfb)
 				{
-					const int vlen_offset = left & (vlen - 1);
 #if _M_SSE >= 0x501
 					fd = GSVector8i::load(
 						(u8*)global.vm + fa * 2     , (u8*)global.vm + fa * 2 + 16,
 						(u8*)global.vm + fa * 2 + 32, (u8*)global.vm + fa * 2 + 48);
 #else
 					fd = GSVector4i::load((u8*)global.vm + fa * 2, (u8*)global.vm + fa * 2 + 16);
-
-					if (step_size < vlen)
-					{
-						if (vlen_offset == 1)
-						{
-							fd = fd.yzwx();
-						}
-						else if (vlen_offset == 2)
-						{
-							fd = fd.zwxy();
-						}
-						else if (vlen_offset == 3)
-						{
-							fd = fd.wxyz();
-						}
-					}
 #endif
 				}
 			}
@@ -1498,20 +1529,10 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (step_size == vlen)
-						{
-							if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global);
-							if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global);
-							if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global);
-							if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global);
-						}
-						else
-						{
-							if (fzm & 0x00000300) WritePixelOffset(zs, za, 0, sel.zpsm, global, left & (vlen - 1));
-							if (fzm & 0x00000c00) WritePixelOffset(zs, za, 1, sel.zpsm, global, left & (vlen - 1));
-							if (fzm & 0x00003000) WritePixelOffset(zs, za, 2, sel.zpsm, global, left & (vlen - 1));
-							if (fzm & 0x0000c000) WritePixelOffset(zs, za, 3, sel.zpsm, global, left & (vlen - 1));
-						}
+						if (fzm & 0x00000300) WritePixel(zs, za, 0, sel.zpsm, global);
+						if (fzm & 0x00000c00) WritePixel(zs, za, 1, sel.zpsm, global);
+						if (fzm & 0x00003000) WritePixel(zs, za, 2, sel.zpsm, global);
+						if (fzm & 0x0000c000) WritePixel(zs, za, 3, sel.zpsm, global);
 #if _M_SSE >= 0x501
 						if (fzm & 0x03000000) WritePixel(zs, za, 4, sel.zpsm, global, vlen_offset);
 						if (fzm & 0x0c000000) WritePixel(zs, za, 5, sel.zpsm, global, vlen_offset);
@@ -1653,29 +1674,10 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			{
 				if (sel.fpsm == 2 && sel.dthe)
 				{
-					int x = left & 3;
 					int y = (top & 3) << 1;
 
-					if (step_size == vlen || x == 0)
-					{
-						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]));
-						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]));
-					}
-					else if (x == 1)
-					{
-						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).yzwx());
-						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).yzwx());
-					}
-					else if (x == 2)
-					{
-						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).zwxy());
-						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).zwxy());
-					}
-					else // (x == 3)
-					{
-						rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]).wxyz());
-						ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]).wxyz());
-					}
+					rb = rb.add16(VectorI::broadcast128(global.dimx[0 + y]));
+					ga = ga.add16(VectorI::broadcast128(global.dimx[1 + y]));
 				}
 
 				if (sel.colclamp == 0)
@@ -1749,20 +1751,10 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 					else
 					{
-						if (step_size == vlen)
-						{
-							if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global);
-							if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global);
-							if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global);
-							if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global);
-						}
-						else
-						{
-							if (fzm & 0x00000003) WritePixelOffset(fs, fa, 0, sel.fpsm, global, left & (vlen - 1));
-							if (fzm & 0x0000000c) WritePixelOffset(fs, fa, 1, sel.fpsm, global, left & (vlen - 1));
-							if (fzm & 0x00000030) WritePixelOffset(fs, fa, 2, sel.fpsm, global, left & (vlen - 1));
-							if (fzm & 0x000000c0) WritePixelOffset(fs, fa, 3, sel.fpsm, global, left & (vlen - 1));
-						}
+						if (fzm & 0x00000003) WritePixel(fs, fa, 0, sel.fpsm, global);
+						if (fzm & 0x0000000c) WritePixel(fs, fa, 1, sel.fpsm, global);
+						if (fzm & 0x00000030) WritePixel(fs, fa, 2, sel.fpsm, global);
+						if (fzm & 0x000000c0) WritePixel(fs, fa, 3, sel.fpsm, global);
 #if _M_SSE >= 0x501
 						if (fzm & 0x00030000) WritePixel(fs, fa, 4, sel.fpsm, global, vlen_offset);
 						if (fzm & 0x000c0000) WritePixel(fs, fa, 5, sel.fpsm, global, vlen_offset);
@@ -1858,6 +1850,21 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #else
 			test = const_test[3 + step_size + (steps & (steps >> 31))];
 #endif
+		}
+		
+		if (step_size != vlen)
+		{
+			RollVec(test, left & (vlen - 1));
+			RollVecZ(z0, z1, step_size);
+			RollVec(f, step_size);
+			RollVec(s, step_size);
+			RollVec(t, step_size);
+			RollVec(q, step_size);
+			RollVec(uf, step_size);
+			RollVec(vf, step_size);
+			RollVec(rbf, step_size);
+			RollVec(gaf, step_size);
+			RollVec(cov, step_size);
 		}
 	}
 }
