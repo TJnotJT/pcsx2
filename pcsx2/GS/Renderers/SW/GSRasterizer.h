@@ -105,8 +105,8 @@ protected:
 	__forceinline void AddScanline(GSVertexSW* e, int pixels, int left, int top, const GSVertexSW& scan);
 	__forceinline void Flush(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, bool edge = false);
 
-	__forceinline void DrawScanline(int pixels, int left, int top, const GSVertexSW& scan);
-	__forceinline void DrawEdge(int pixels, int left, int top, const GSVertexSW& scan);
+	__forceinline void DrawScanline(int pixels, int left, int top, const GSVertexSW& scan, int step_size);
+	__forceinline void DrawEdge(int pixels, int left, int top, const GSVertexSW& scan, int step_size);
 
 public:
 	GSRasterizer(GSDrawScanline* ds, int id, int threads);
