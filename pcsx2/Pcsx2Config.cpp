@@ -981,6 +981,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBoolEx(UserHacks_NativePaletteDraw, "UserHacks_NativePaletteDraw");
 	SettingsWrapIntEnumEx(UserHacks_TextureInsideRt, "UserHacks_TextureInsideRt");
 	SettingsWrapBitBoolEx(UserHacks_EstimateTextureRegion, "UserHacks_EstimateTextureRegion");
+	SettingsWrapIntEnumEx(UserHacks_SWVariableStepSize, "UserHacks_SWVariableStepSize");
 	SettingsWrapBitBoolEx(FXAA, "fxaa");
 	SettingsWrapBitBool(ShadeBoost);
 	SettingsWrapBitBoolEx(DumpGSData, "DumpGSData");
@@ -1114,6 +1115,7 @@ void Pcsx2Config::GSOptions::MaskUserHacks()
 	UserHacks_CPUCLUTRender = 0;
 	UserHacks_GPUTargetCLUTMode = GSGPUTargetCLUTMode::Disabled;
 	UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
+	UserHacks_SWVariableStepSize = 0;
 	SkipDrawStart = 0;
 	SkipDrawEnd = 0;
 }
