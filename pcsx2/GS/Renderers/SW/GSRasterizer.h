@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include "GS/Renderers/SW/GSVertexSW.h"
 #include "GS/Renderers/SW/GSDrawScanline.h"
 #include "GS/GSAlignedClass.h"
@@ -12,6 +13,8 @@
 #include "GS/MultiISA.h"
 
 MULTI_ISA_UNSHARED_START
+
+static std::array<int, 5> step_size_index = {-1, 2, 1, -1, 0}; // FIXME: DO for AVX
 
 class GSDrawScanline;
 
@@ -36,9 +39,9 @@ public:
 
 	GSScanlineGlobalData global;
 
-	GSDrawScanline::SetupPrimPtr setup_prim;
-	GSDrawScanline::DrawScanlinePtr draw_scanline;
-	GSDrawScanline::DrawScanlinePtr draw_edge;
+	std::array<GSDrawScanline::SetupPrimPtr, 3> setup_prim;
+	std::array<GSDrawScanline::DrawScanlinePtr, 3> draw_scanline;
+	std::array<GSDrawScanline::DrawScanlinePtr, 3> draw_edge;
 
 	GSRasterizerData()
 		: scissor(GSVector4i::zero())
@@ -82,11 +85,11 @@ protected:
 
 	// For the current draw.
 	GSScanlineLocalData m_local = {};
-	GSDrawScanline::SetupPrimPtr m_setup_prim = nullptr;
-	GSDrawScanline::DrawScanlinePtr m_draw_scanline = nullptr;
-	GSDrawScanline::DrawScanlinePtr m_draw_edge = nullptr;
+	std::array<GSDrawScanline::SetupPrimPtr, 3> m_setup_prim = {}; // FIXME: Do for AVX
+	std::array<GSDrawScanline::DrawScanlinePtr, 3> m_draw_scanline = {}; // FIXME: Do for AVX
+	std::array<GSDrawScanline::DrawScanlinePtr, 3> m_draw_edge = {}; // FIXME: Do for AVX
 
-	__forceinline bool HasEdge() const { return (m_draw_edge != nullptr); }
+	__forceinline bool HasEdge() const { return (m_draw_edge[0] != nullptr); }
 
 	template <bool scissor_test>
 	void DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count);

@@ -13,7 +13,7 @@
 #include "common/Console.h"
 #include "common/StringUtil.h"
 
-#define STEP_SIZE 1
+constexpr int STEP_SIZE = 1;
 
 #define ENABLE_DRAW_STATS 0
 
@@ -137,9 +137,12 @@ void GSRasterizer::Draw(GSRasterizerData& data)
 	if constexpr (ENABLE_DRAW_STATS)
 		data.start = GetCPUTicks();
 
-	m_setup_prim = data.setup_prim;
-	m_draw_scanline = data.draw_scanline;
-	m_draw_edge = data.draw_edge;
+	for (int i = 0; i < 3; i++)
+	{
+		m_setup_prim[i] = data.setup_prim[i];
+		m_draw_scanline[i] = data.draw_scanline[i];
+		m_draw_edge[i] = data.draw_edge[i];
+	}
 	GSDrawScanline::BeginDraw(data, m_local);
 
 	const GSVertexSW* vertex = data.vertex;
@@ -268,7 +271,7 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 			{
 				if (IsOneOfMyScanlines(p.y))
 				{
-					m_setup_prim(vertex, index, GSVertexSW::zero(), m_local, STEP_SIZE); // FIXME
+					m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, GSVertexSW::zero(), m_local); // FIXME
 
 					DrawScanline(1, p.x, p.y, v, STEP_SIZE); // FIXME:
 				}
@@ -289,7 +292,7 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 			{
 				if (IsOneOfMyScanlines(p.y))
 				{
-					m_setup_prim(vertex, tmp_index, GSVertexSW::zero(), m_local, STEP_SIZE); // FIXME
+					m_setup_prim[step_size_index[STEP_SIZE]](vertex, tmp_index, GSVertexSW::zero(), m_local); // FIXME
 
 					DrawScanline(1, p.x, p.y, v, STEP_SIZE); // FIXME
 				}
@@ -357,7 +360,7 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 					scan += dscan * (l - scan.p).xxxx();
 
-					m_setup_prim(vertex, index, dscan, m_local, STEP_SIZE); // FIXME: Need to compute optimal step size.
+					m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local); // FIXME: Need to compute optimal step size.
 
 					DrawScanline(pixels, left, p.y, scan, STEP_SIZE); // FIXME: Need to compute optimal step size.
 				}
@@ -852,7 +855,7 @@ void GSRasterizer::DrawSprite(const GSVertexSW* vertex, const u16* index)
 
 	scan.t = (scan.t + dt * prestep).xyzw(scan.t);
 
-	m_setup_prim(vertex, index, dscan, m_local, STEP_SIZE); // FIXME: Need to compute optimal step size.
+	m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local); // FIXME: Need to compute optimal step size.
 
 	while (1)
 	{
@@ -1078,11 +1081,10 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 	// TODO: on win64 this could be the place where xmm6-15 are preserved (not by each DrawScanline)
 
 	int count = m_edge.count;
-	int step_size = STEP_SIZE;
 
 	if (count > 0)
 	{
-		m_setup_prim(vertex, index, dscan, m_local, step_size);
+		m_setup_prim[step_size_index[STEP_SIZE]](vertex, index, dscan, m_local);
 
 		const GSVertexSW* RESTRICT e = m_edge.buff;
 		const GSVertexSW* RESTRICT ee = e + count;
@@ -1095,7 +1097,7 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 				int left = e->_pad.I32[1];
 				int top = e->_pad.I32[2];
 
-				DrawScanline(pixels, left, top, *e++, step_size);
+				DrawScanline(pixels, left, top, *e++, STEP_SIZE);
 			} while (e < ee);
 		}
 		else
@@ -1106,7 +1108,7 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 				int left = e->_pad.I32[1];
 				int top = e->_pad.I32[2];
 
-				DrawEdge(pixels, left, top, *e++, step_size);
+				DrawEdge(pixels, left, top, *e++, STEP_SIZE);
 			} while (e < ee);
 		}
 
@@ -1122,7 +1124,7 @@ void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW&
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
-	m_draw_scanline(pixels, left, top, scan, m_local, step_size);
+	m_draw_scanline[step_size_index[step_size]](pixels, left, top, scan, m_local);
 }
 
 void GSRasterizer::DrawEdge(int pixels, int left, int top, const GSVertexSW& scan, int step_size)
@@ -1133,7 +1135,7 @@ void GSRasterizer::DrawEdge(int pixels, int left, int top, const GSVertexSW& sca
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
-	m_draw_edge(pixels, left, top, scan, m_local, step_size);
+	m_draw_edge[step_size_index[STEP_SIZE]](pixels, left, top, scan, m_local);
 }
 
 //

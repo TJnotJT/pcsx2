@@ -323,7 +323,7 @@ void GSDrawScanlineCodeGenerator::Generate()
 	if (GSDrawScanline::ShouldUseCDrawScanline(m_sel.key))
 	{
 		jmp(reinterpret_cast<const void*>(static_cast<GSDrawScanline::DrawScanlinePtr>(
-			&GSDrawScanline::CDrawScanline)));
+			&GSDrawScanline::CDrawScanline<4>)));
 		return;
 	}
 
