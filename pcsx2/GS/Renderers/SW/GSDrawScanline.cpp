@@ -522,8 +522,12 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 	}
 }
 
-#if _M_SSE >= 0x501
 template <typename T>
+concept IsVector4 = std::is_same_v<T, GSVector4> || std::is_same_v<T, GSVector4i>;
+template <typename T>
+concept IsVector8 = std::is_same_v<T, GSVector8> || std::is_same_v<T, GSVector8i>;
+
+template <IsVector4 T>
 static inline void RollVec32(T& v, int offset)
 {
 	switch (offset)
@@ -531,25 +535,13 @@ static inline void RollVec32(T& v, int offset)
 		case 0:
 			break;
 		case 1:
-			v = v.permute32(GSVector8i::cxpr(7, 0, 1, 2, 3, 4, 5, 6));
+			v = v.wxyz();
 			break;
 		case 2:
-			v = v.permute32(GSVector8i::cxpr(6, 7, 0, 1, 2, 3, 4, 5));
+			v = v.zwxy();
 			break;
 		case 3:
-			v = v.permute32(GSVector8i::cxpr(5, 6, 7, 0, 1, 2, 3, 4));
-			break;
-		case 4:
-			v = v.permute32(GSVector8i::cxpr(4, 5, 6, 7, 0, 1, 2, 3));
-			break;
-		case 5:
-			v = v.permute32(GSVector8i::cxpr(3, 4, 5, 6, 7, 0, 1, 2));
-			break;
-		case 6:
-			v = v.permute32(GSVector8i::cxpr(2, 3, 4, 5, 6, 7, 0, 1));
-			break;
-		case 7:
-			v = v.permute32(GSVector8i::cxpr(1, 2, 3, 4, 5, 6, 7, 0));
+			v = v.yzwx();
 			break;
 		default:
 			pxFail("Impossible.");
@@ -557,97 +549,132 @@ static inline void RollVec32(T& v, int offset)
 	}
 }
 
-template <typename T>
-static inline void RollVec64(T& v0, T& v1, int offset)
+static inline void RollVec64(GSVector4& v0, GSVector4& v1, int offset)
 {
+	GSVector4 tmp;
 	switch (offset)
 	{
 		case 0:
 			break;
-		case 5:
-			std::swap(v0, v1);
-			[[fallthrough]];
 		case 1:
-			RollVec32(v0, 2);
-			RollVec32(v1, 2);
-			std::swap(v0.U64[0], v1.U64[0]);
+			v0 = v0.zwxy();
+			v1 = v1.zwxy();
+			tmp = v0;
+			v0 = v0.blend32<0x3>(v1);
+			v1 = v1.blend32<0x3>(tmp);
 			break;
-		case 6:
-			std::swap(v0, v1);
-			[[fallthrough]];
 		case 2:
-			RollVec32(v0, 4);
-			RollVec32(v1, 4);
-			std::swap(v0.m0, v1.m0);
+			std::swap(v0, v1);
 			break;
 		case 3:
-			std::swap(v0, v1);
-			[[fallthrough]];
-		case 7:
-			RollVec32(v0, 6);
-			RollVec32(v1, 6);
-			std::swap(v0.U64[3], v1.U64[3]);
-			break;
-		case 4:
-			std::swap(v0, v1);
+			v0 = v0.zwxy();
+			v1 = v1.zwxy();
+			tmp = v0;
+			v0 = v0.blend32<0xC>(v1);
+			v1 = v1.blend32<0xC>(tmp);
 			break;
 		default:
 			pxFail("Impossible");
 			break;
 	}
 }
-#else
-template <typename T>
+
+#if _M_SSE >= 0x501
+template <IsVector8 T>
 static inline void RollVec32(T& v, int offset)
 {
-	GSVector4i tmp;
-	if constexpr (std::is_same_v<std::remove_reference_t<T>, GSVector4>)
-		tmp = GSVector4i::cast(v);
-	else
-		tmp = v;
+	std::remove_reference_t<T> tmp;
 	switch (offset)
 	{
 		case 0:
 			break;
 		case 1:
-			tmp = tmp.wxyz();
+			v = v.wxyz();
+			tmp = v.ba();
+			v = v.blend32<0x11>(tmp);
 			break;
 		case 2:
-			tmp = tmp.zwxy();
+			v = v.dabc();
 			break;
 		case 3:
-			tmp = tmp.yzwx();
+			v = v.yzwx();
+			tmp = v.ba();
+			v = v.blend32<0x77>(tmp);
+			break;
+		case 4:
+			v = v.ba();
+			break;
+		case 5:
+			v = v.wxyz();
+			tmp = v.ba();
+			v = v.blend32<0x77>(tmp);
+			break;
+		case 6:
+			v = v.bcda();
+			break;
+		case 7:
+			v = v.yzwx();
+			tmp = v.ba();
+			v = v.blend32<0x88>(tmp);
 			break;
 		default:
 			pxFail("Impossible.");
 			break;
 	}
-	if constexpr (std::is_same_v<std::remove_reference_t<T>, GSVector4>)
-		v = GSVector4::cast(tmp);
-	else
-		v = tmp;
 }
 
-template<typename T>
-static inline void RollVec64(T& v0, T& v1, int offset)
+static inline void RollVec64(GSVector8& v0, GSVector8& v1, int offset)
 {
+	GSVector8 tmp;
 	switch (offset)
 	{
 		case 0:
 			break;
 		case 1:
-			RollVec32(v0, 2);
-			RollVec32(v1, 2);
-			std::swap(v0.U64[0], v1.U64[0]);
+			v0 = v0.dabc();
+			v1 = v1.dabc();
+			tmp = v0;
+			v0 = v0.blend32<0x03>(v1);
+			v1 = v1.blend32<0x03>(tmp);
 			break;
 		case 2:
-			std::swap(v0, v1);
+			v0 = v0.ba();
+			v1 = v1.ba();
+			tmp = v0;
+			v0 = v0.blend32<0x0F>(v1);
+			v1 = v1.blend32<0x0F>(tmp);
 			break;
 		case 3:
-			RollVec32(v0, 2);
-			RollVec32(v1, 2);
-			std::swap(v0.U64[3], v1.U64[3]);
-			break
+			v0 = v0.bcda();
+			v1 = v1.bcda();
+			tmp = v0;
+			v0 = v0.blend32<0x3F>(v1);
+			v1 = v1.blend32<0x3F>(tmp);
+			break;
+		case 4:
+			std::swap(v0, v1);
+			break;
+		case 5:
+			v0 = v0.dabc();
+			v1 = v1.dabc();
+			tmp = v0;
+			v0 = v0.blend32<0xFC>(v1);
+			v1 = v1.blend32<0xFC>(tmp);
+			break;
+		case 6:
+			v0 = v0.ba();
+			v1 = v1.ba();
+			tmp = v0;
+			v0 = v0.blend32<0xF0>(v1);
+			v1 = v1.blend32<0xF0>(tmp);
+			break;
+		case 7:
+			v0 = v0.bcda();
+			v1 = v1.bcda();
+			tmp = v0;
+			v0 = v0.blend32<0xC0>(v1);
+			v1 = v1.blend32<0xC0>(tmp);
+			break;
 		default:
 			pxFail("Impossible");
 			break;

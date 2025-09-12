@@ -1136,7 +1136,7 @@ void GSRasterizer::DrawEdge(int pixels, int left, int top, const GSVertexSW& sca
 {
 	if ((m_scanmsk_value & 2) && (m_scanmsk_value & 1) == (top & 1)) return;
 	m_pixels.actual += 1;
-	m_pixels.total += step_size - 1;
+	m_pixels.total += step_size;
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
