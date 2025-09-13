@@ -7,6 +7,8 @@
 #include "GSNewCodeGenerator.h"
 #include "GS/MultiISA.h"
 
+#include <tuple>
+
 #undef _t // Conflict with wx, hopefully no one needs this
 
 #if _M_SSE >= 0x501
@@ -57,6 +59,7 @@ class GSDrawScanlineCodeGenerator : public GSNewCodeGenerator
 
 	GSScanlineSelector m_sel;
 	bool use_lod;
+	int step_size;
 
 	const XYm xym0{0}, xym1{1}, xym2{2}, xym3{3}, xym4{4}, xym5{5}, xym6{6}, xym7{7}, xym8{8}, xym9{9}, xym10{10}, xym11{11}, xym12{12}, xym13{13}, xym14{14}, xym15{15};
 	/// Note: a2 and t3 are only available on x86-64
@@ -69,6 +72,8 @@ class GSDrawScanlineCodeGenerator : public GSNewCodeGenerator
 	const XYm _rb, _ga, _fm, _zm, _fd, _test;
 	/// Always valid if needed, x64 only
 	const XYm _z, _f, _s, _t, _q, _f_rb, _f_ga;
+	/// Always valid when step_size != vecints; otherwise unused.
+	const AddressReg _left;
 
 public:
 	GSDrawScanlineCodeGenerator(u64 key, void* code, size_t maxsize);
@@ -164,6 +169,23 @@ private:
 		const Xmm& s2,   const Xmm& s3,
 		int pixels,      int mip_offset);
 	void ReadTexelImpl(const Xmm& dst, const Xmm& addr, u8 i, bool texInA3, bool preserveDst);
+
+	template <int n, typename T>
+	void RollSwitch(const T& genCase, const AddressReg& roll);
+
+#if _M_SSE >= 0x501
+	void SwapYmm(const Ymm& r0, const Ymm& r1, const Ymm& tmp);
+	void RollVec32Ymm(const Ymm& dst, const Ymm& tmp, int roll);
+	void RollVec64Ymm(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, int roll);
+	void RollVec32YmmSwitch(const Ymm& dst, const Ymm& tmp, const AddressReg& roll);
+	void RollVec64YmmSwitch(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, const AddressReg& roll);
+#else
+	void SwapXmm(const Xmm& r0, const Xmm& r1, const Xmm& tmp);
+	void RollVec32Xmm(const Xmm& dst, int roll);
+	void RollVec64Xmm(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, int roll);
+	void RollVec32XmmSwitch(const Xmm& dst, const AddressReg& roll);
+	void RollVec64XmmSwitch(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, const AddressReg& roll);
+#endif
 };
 
 MULTI_ISA_UNSHARED_END

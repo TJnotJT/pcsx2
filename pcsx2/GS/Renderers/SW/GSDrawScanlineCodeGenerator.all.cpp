@@ -76,12 +76,14 @@ GSDrawScanlineCodeGenerator::GSDrawScanlineCodeGenerator(u64 key, void* code, si
 	, t0(rdi), t1(rsi)
 	, t2(r8) , t3(r9)
 	, _m_local(r10)
+	, _left(r14) // only used if step_size != vecints
 #else
 	, a0(rdi), a1(rsi)
 	, a2(rdx), a3(rcx)
 	, t0(r10), t1(r9)
 	, t2(rcx), t3(rsi)
 	, _m_local(r8)
+	, _left(r14) // only used if step_size != vecints
 #endif
 	, _m_local__gd(r12)
 	, _m_local__gd__vm(t3)
@@ -90,9 +92,10 @@ GSDrawScanlineCodeGenerator::GSDrawScanlineCodeGenerator(u64 key, void* code, si
 	, _rb(xym5), _ga(xym6), _fm(xym3), _zm(xym4), _fd(xym2), _test(xym15)
 	, _z(xym8), _f(xym9), _s(xym10), _t(xym11), _q(xym12), _f_rb(xym13), _f_ga(xym14)
 {
-	// Free: r14, r15, rbp, to use, remember to save them.
+	// Free: r14 (if step_size == vecints), r15, rbp, to use, remember to save them.
 	m_sel.key = key;
 	use_lod = m_sel.mmin;
+	step_size = step_size_order[m_sel.sss];
 	if (isYmm)
 		pxAssert(hasAVX2);
 }
@@ -331,13 +334,24 @@ void GSDrawScanlineCodeGenerator::Generate()
 	const bool need_clut = need_tex && m_sel.tlu;
 
 #ifdef _WIN32
+	// Note: If adding more saved registers, rsp_shadow_offset must be updated and stack should be 16-byte aligned.
+	int rsp_shadow_offset = 8; // return address
 	push(rbx);
 	push(rsi);
 	push(rdi);
 	push(r12);
 	push(r13);
+	rsp_shadow_offset += 40;  // 5 saved regs
+	
+	if (step_size != vecints)
+	{
+		push(r14);
+		sub(rsp, 8);
+		rsp_shadow_offset += 16; // 1 saved reg + alignment
+	}
 
 	sub(rsp, _64_win_stack_size);
+	rsp_shadow_offset += _64_win_stack_size;
 
 	for (int i = 0; i < 10; i++)
 	{
@@ -347,12 +361,13 @@ void GSDrawScanlineCodeGenerator::Generate()
 	mov(ptr[rsp + _64_rz_rbx], rbx);
 	mov(ptr[rsp + _64_rz_r12], r12);
 	mov(ptr[rsp + _64_rz_r13], r13);
+	if (step_size != vecints)
+		mov(ptr[rsp + _64_rz_r14], r14);
 #endif
 
 #ifdef _WIN32
 	// Local (5th arg) is passed on the stack in Windows.
-	// 32 bytes shadow space less the 5 pushed registers and return address = 80.
-	mov(_m_local, ptr[rsp + _64_win_stack_size + 80]);
+	mov(_m_local, ptr[rsp + rsp_shadow_offset + 32]);
 #endif
 
 	mov(_m_local__gd, _rip_local(gd));
@@ -584,6 +599,11 @@ L("exit");
 	}
 	add(rsp, _64_win_stack_size);
 
+	if (step_size != vecints)
+	{
+		add(rsp, 8);
+		pop(r14);
+	}
 	pop(r13);
 	pop(r12);
 	pop(rdi);
@@ -593,6 +613,8 @@ L("exit");
 	mov(rbx, ptr[rsp + _64_rz_rbx]);
 	mov(r12, ptr[rsp + _64_rz_r12]);
 	mov(r13, ptr[rsp + _64_rz_r13]);
+	if (step_size != vecints)
+		mov(r14, ptr[rsp + _64_rz_r14]);
 #endif
 	if (isYmm)
 		vzeroupper();
@@ -602,24 +624,74 @@ L("exit");
 }
 
 /// Inputs: a0=pixels, a1=left, a2[x64]=top, a3[x64]=v
+/// Outputs: xym7=z0
 void GSDrawScanlineCodeGenerator::Init()
 {
-	if (!m_sel.notest)
+	if (step_size == vecints)
 	{
-		// int skip = left & 3;
+		if (!m_sel.notest)
+		{
+			// int skip = left & 3;
+
+			mov(ebx, a1.cvt32());
+			and_(a1.cvt32(), vecints - 1);
+
+			// left -= skip;
+
+			sub(ebx, a1.cvt32());
+
+			// int steps = pixels + skip - 4;
+
+			lea(a0.cvt32(), ptr[a0 + a1 - vecints]);
+
+			// GSVector4i test = m_test[skip] | m_test[7 + (steps & (steps >> 31))];
+
+			mov(eax, a0.cvt32());
+			sar(eax, 31); // GH: 31 to extract the sign of the register
+			and_(eax, a0.cvt32());
+			if (isXmm)
+				shl(eax, 4); // * sizeof(m_test[0])
+			cdqe();
+
+			if (isXmm)
+			{
+				lea(t1, _rip_const(&g_const.m_test_128b[0]));
+				shl(a1.cvt32(), 4); // * sizeof(m_test[0])
+				movdqa(_test, ptr[a1 + t1]);
+				por(_test, ptr[rax + t1 + (offsetof(GSScanlineConstantData, m_test_128b[7]) - offsetof(GSScanlineConstantData, m_test_128b[0]))]);
+			}
+			else
+			{
+				lea(t1, _rip_const(&g_const.m_test_256b[0]));
+				pmovsxbd(_test, ptr[a1 * 8 + t1]);
+				pmovsxbd(xym0, ptr[rax * 8 + t1 + (offsetof(GSScanlineConstantData, m_test_256b[15]) - offsetof(GSScanlineConstantData, m_test_256b[0]))]);
+				por(_test, xym0);
+				shl(a1.cvt32(), 5); // * sizeof(m_test[0])
+			}
+		}
+		else
+		{
+			mov(ebx, a1.cvt32()); // left
+			xor_(a1.cvt32(), a1.cvt32()); // skip
+			lea(a0.cvt32(), ptr[a0 - vecints]); // steps
+		}
+	}
+	else // step_size != vecints
+	{
+		// int skip = left & (step_size - 1);
 
 		mov(ebx, a1.cvt32());
-		and_(a1.cvt32(), vecints - 1);
+		and_(a1.cvt32(), step_size - 1);
 
 		// left -= skip;
 
 		sub(ebx, a1.cvt32());
 
-		// int steps = pixels + skip - 4;
+		// int steps = pixels + skip - step_size;
 
-		lea(a0.cvt32(), ptr[a0 + a1 - vecints]);
+		lea(a0.cvt32(), ptr[a0 + a1 - step_size]);
 
-		// GSVector4i test = m_test[skip] | m_test[7 + (steps & (steps >> 31))];
+		// GSVector4i test = m_test[skip] | m_test[3 + step_size + (steps & (steps >> 31))];
 
 		mov(eax, a0.cvt32());
 		sar(eax, 31); // GH: 31 to extract the sign of the register
@@ -633,22 +705,18 @@ void GSDrawScanlineCodeGenerator::Init()
 			lea(t1, _rip_const(&g_const.m_test_128b[0]));
 			shl(a1.cvt32(), 4); // * sizeof(m_test[0])
 			movdqa(_test, ptr[a1 + t1]);
-			por(_test, ptr[rax + t1 + (offsetof(GSScanlineConstantData, m_test_128b[7]) - offsetof(GSScanlineConstantData, m_test_128b[0]))]);
+			por(_test, ptr[rax + t1 + (offsetof(GSScanlineConstantData, m_test_128b[3 + step_size]) - offsetof(GSScanlineConstantData, m_test_128b[0]))]);
 		}
 		else
 		{
 			lea(t1, _rip_const(&g_const.m_test_256b[0]));
 			pmovsxbd(_test, ptr[a1 * 8 + t1]);
-			pmovsxbd(xym0, ptr[rax * 8 + t1 + (offsetof(GSScanlineConstantData, m_test_256b[15]) - offsetof(GSScanlineConstantData, m_test_256b[0]))]);
+			pmovsxbd(xym0, ptr[rax * 8 + t1 + (offsetof(GSScanlineConstantData, m_test_256b[7 + step_size]) - offsetof(GSScanlineConstantData, m_test_256b[0]))]);
 			por(_test, xym0);
 			shl(a1.cvt32(), 5); // * sizeof(m_test[0])
 		}
-	}
-	else
-	{
-		mov(ebx, a1.cvt32()); // left
-		xor_(a1.cvt32(), a1.cvt32()); // skip
-		lea(a0.cvt32(), ptr[a0 - vecints]); // steps
+
+		mov(_left, rbx); // save left
 	}
 
 	// a0 = steps
@@ -661,10 +729,19 @@ void GSDrawScanlineCodeGenerator::Init()
 	// GSVector2i* fza_base = &m_local.gd->fzbr[top];
 	mov(rax, _rip_global(fzbr));
 	lea(t1, ptr[rax + a2 * 8]);
-
-	// GSVector2i* fza_offset = &m_local.gd->fzbc[left >> 2];
-	mov(rax, _rip_global(fzbc));
-	lea(t0, ptr[rax + rbx * 2]);
+	if (step_size == vecints)
+	{
+		// GSVector2i* fza_offset = &m_local.gd->fzbc[left >> 2];
+		mov(rax, _rip_global(fzbc));
+		lea(t0, ptr[rax + rbx * 2]);
+	}
+	else
+	{
+		// GSVector2i* fza_offset = &m_local.gd->fzbc[(left & ~(vlen - 1)) >> 2];
+		mov(rax, _rip_global(fzbc));
+		and_(rbx, ~(vecints - 1));
+		lea(t0, ptr[rax + rbx * 2]);
+	}
 
 	if ((m_sel.prim != GS_SPRITE_CLASS && ((m_sel.fwrite && m_sel.fge) || m_sel.zb)) || (m_sel.fb && (m_sel.edge || m_sel.tfx != TFX_NONE || m_sel.iip)))
 	{
@@ -862,6 +939,54 @@ void GSDrawScanlineCodeGenerator::Init()
 		}
 	}
 
+	if (step_size != vecints)
+	{
+		// const int roll = left & (vlen - 1);
+	
+		mov(rax, _left);
+		and_(rax, vecints - 1);
+
+#if _M_SSE >= 0x501
+		RollVec32YmmSwitch(_test, xym0, rax);
+		if (!m_sel.zequal)
+		{
+			RollVec64YmmSwitch(xym7, _z, xym0, rax);
+			movaps(_rip_local(temp.z0), xym7);
+		}
+		RollVec32YmmSwitch(_f, xym0, rax);
+		RollVec32YmmSwitch(_s, xym0, rax);
+		RollVec32YmmSwitch(_t, xym0, rax);
+		RollVec32YmmSwitch(_q, xym0, rax);
+		RollVec32YmmSwitch(_f_rb, xym0, rax);
+		RollVec32YmmSwitch(_f_ga, xym0, rax);
+		RollVec32YmmSwitch(_rb, xym0, rax);
+		RollVec32YmmSwitch(_ga, xym0, rax);
+
+		movaps(xym1, _rip_local(temp.cov));
+		RollVec32YmmSwitch(xym1, xym0, rax);
+		movaps(_rip_local(temp.cov), xym1);
+#else
+		RollVec32XmmSwitch(_test, rax);
+		if (!m_sel.zequal)
+		{
+			RollVec64XmmSwitch(xmm7, _z, xmm0, rax);
+			movaps(_rip_local(temp.z0), xmm7);
+		}
+		RollVec32XmmSwitch(_f, rax);
+		RollVec32XmmSwitch(_s, rax);
+		RollVec32XmmSwitch(_t, rax);
+		RollVec32XmmSwitch(_q, rax);
+		RollVec32XmmSwitch(_f_rb, rax);
+		RollVec32XmmSwitch(_f_ga, rax);
+		RollVec32XmmSwitch(_rb, rax);
+		RollVec32XmmSwitch(_ga, rax);
+
+		movaps(xmm1, _rip_local(temp.cov));
+		RollVec32XmmSwitch(xmm1, rax);
+		movaps(_rip_local(temp.cov), xmm1);
+#endif
+	}
+
 	if (m_sel.fwrite && m_sel.fpsm == 2 && m_sel.dthe)
 	{
 		// On linux, a2 is edx which will be used for fzm
@@ -885,13 +1010,34 @@ void GSDrawScanlineCodeGenerator::Init()
 /// Destroys[x64]: xym0, xym1, xym2, xym3
 void GSDrawScanlineCodeGenerator::Step()
 {
-	// steps -= 4;
+	if (step_size == vecints)
+	{
+		// steps -= 4;
 
-	sub(a0.cvt32(), vecints);
+		sub(a0.cvt32(), vecints);
 
-	// fza_offset++;
+		// fza_offset += vlen / 4;
 
-	add(t0, vecsize / 2);
+		add(t0, vecsize / 2);
+	}
+	else
+	{
+		// steps -= step_size;
+
+		sub(a0.cvt32(), step_size);
+
+		// left += step_size;
+
+		add(_left, step_size);
+
+		// if ((left & (vlen - 1)) == 0)
+		//   fza_offset += vlen / 4;
+
+		test(_left, vecints - 1);
+		jne("@f");
+		add(t0, vecsize / 2);
+		L("@@");
+	}
 
 	const XYm& f = _f;
 
@@ -1006,9 +1152,31 @@ void GSDrawScanlineCodeGenerator::Step()
 		}
 	}
 
-	if (!m_sel.notest)
+	if (step_size == vecints)
 	{
-		// test = m_test[7 + (steps & (steps >> 31))];
+		if (!m_sel.notest)
+		{
+			// test = m_test[7 + (steps & (steps >> 31))];
+
+			mov(eax, a0.cvt32());
+			sar(eax, 31); // GH: 31 to extract the sign of the register
+			and_(eax, a0.cvt32());
+			if (isXmm)
+				shl(eax, 4);
+			cdqe();
+
+#if USING_XMM
+			lea(t2, _rip_const(&g_const.m_test_128b[7]));
+			movdqa(_test, ptr[rax + t2]);
+#else
+			lea(t2, _rip_const(&g_const.m_test_256b[15]));
+			pmovsxbd(_test, ptr[rax * 8 + t2]);
+#endif
+		}
+	}
+	else // step_size != vecints
+	{
+		// test = m_test[3 + step_size + (steps & (steps >> 31))];
 
 		mov(eax, a0.cvt32());
 		sar(eax, 31); // GH: 31 to extract the sign of the register
@@ -1018,11 +1186,66 @@ void GSDrawScanlineCodeGenerator::Step()
 		cdqe();
 
 #if USING_XMM
-		lea(t2, _rip_const(&g_const.m_test_128b[7]));
+		lea(t2, _rip_const(&g_const.m_test_128b[3 + step_size]));
 		movdqa(_test, ptr[rax + t2]);
 #else
-		lea(t2, _rip_const(&g_const.m_test_256b[15]));
+		lea(t2, _rip_const(&g_const.m_test_256b[7 + step_size]));
 		pmovsxbd(_test, ptr[rax * 8 + t2]);
+#endif
+	}
+
+	if (step_size != vecints)
+	{
+		// RollVec32(test, left & (vlen - 1));
+
+		// DEBUGGING
+		//Label end;
+		//mov(rax, 0xdeadbeef);
+		//mov(rax, _rip_local(temp.bp));
+		//test(rax, rax);
+		//je(end);
+		//mov(rax, _left);
+		//cmp(rax, 1);
+		//jne(end);
+		//mov(eax, ptr[rsp + _top]);
+		//cmp(eax, 12);
+		//jne(end);
+		//db(0xcc);
+		//L(end);
+		
+		mov(rax, _left);
+		and_(rax, vecints - 1);
+
+#if _M_SSE >= 0x501
+		RollVec32YmmSwitch(_test, xym0, rax);
+		if (!m_sel.zequal)
+		{
+			RollVec64Ymm(xym7, _z, xym0, step_size);
+			movaps(_rip_local(temp.z0), xym7);
+		}
+		RollVec32Ymm(_f, xym0, step_size);
+		RollVec32Ymm(_s, xym0, step_size);
+		RollVec32Ymm(_t, xym0, step_size);
+		RollVec32Ymm(_q, xym0, step_size);
+		RollVec32Ymm(_f_rb, xym0, step_size);
+		RollVec32Ymm(_f_ga, xym0, step_size);
+		RollVec32Ymm(_rb, xym0, step_size);
+		RollVec32Ymm(_ga, xym0, step_size);
+#else
+		RollVec32XmmSwitch(_test, rax);
+		if (!m_sel.zequal)
+		{
+			RollVec64Xmm(xmm7, _z, xmm0, step_size);
+			movaps(_rip_local(temp.z0), xmm7);
+		}
+		RollVec32Xmm(_f, step_size);
+		RollVec32Xmm(_s, step_size);
+		RollVec32Xmm(_t, step_size);
+		RollVec32Xmm(_q, step_size);
+		RollVec32Xmm(_f_rb, step_size);
+		RollVec32Xmm(_f_ga, step_size);
+		RollVec32Xmm(_rb, step_size);
+		RollVec32Xmm(_ga, step_size);
 #endif
 	}
 }
@@ -2474,7 +2697,7 @@ void GSDrawScanlineCodeGenerator::TestDestAlpha()
 /// Destroys: xym0, xym1
 void GSDrawScanlineCodeGenerator::WriteMask()
 {
-	if (m_sel.notest)
+	if (m_sel.notest && step_size == vecints)
 	{
 		return;
 	}
@@ -2548,7 +2771,7 @@ void GSDrawScanlineCodeGenerator::WriteZBuf()
 		}
 	}
 
-	bool fast = m_sel.ztest ? m_sel.zpsm < 2 : m_sel.zpsm == 0 && m_sel.notest;
+	bool fast = m_sel.ztest ? m_sel.zpsm < 2 : (m_sel.zpsm == 0 && m_sel.notest && step_size == vecints);
 
 #if USING_XMM
 	WritePixel(xym1, t2, dh, fast, m_sel.zpsm, 1);
@@ -2917,7 +3140,7 @@ void GSDrawScanlineCodeGenerator::WriteFrame()
 		blend(xym5, _fd, _fm); // TODO: could be skipped in certain cases, depending on fpsm and fm
 	}
 
-	bool fast = m_sel.rfb ? m_sel.fpsm < 2 : m_sel.fpsm == 0 && m_sel.notest;
+	bool fast = m_sel.rfb ? m_sel.fpsm < 2 : (m_sel.fpsm == 0 && m_sel.notest && step_size == vecints);
 
 #if USING_XMM
 	WritePixel(xym5, rbx, dl, fast, m_sel.fpsm, 0);
@@ -2959,7 +3182,7 @@ void GSDrawScanlineCodeGenerator::WritePixel(const XYm& src_, const AddressReg& 
 #endif
 	RegExp base = _m_local__gd__vm + addr * 2;
 
-	if (m_sel.notest)
+	if (m_sel.notest && step_size == vecints)
 	{
 		if (fast)
 		{
@@ -3305,3 +3528,216 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 	else
 		pinsrd(dst, src, i);
 }
+
+#define MY_MASK(x, y, z, w) (((x)&3) | (((y)&3) << 2) | (((z)&3) << 4) | (((w)&3) << 6))
+
+template <int n, typename T>
+void GSDrawScanlineCodeGenerator::RollSwitch(const T& genCase, const AddressReg& roll)
+{
+	std::array<Label, n> cases;
+	Label end;
+
+	for (int i = 0; i < n; i++)
+	{
+		if (i > 0)
+			L(cases[i - 1]);
+		cmp(roll, i);
+		jne(cases[i], CodeGenerator::T_NEAR);
+		genCase(i);
+		jmp(end, CodeGenerator::T_NEAR);
+	}
+
+	L(cases[n - 1]);
+	db(0xCC); // Breakpoint - default case, shouldn't be reachable.
+
+	L(end);
+}
+
+#if _M_SSE >= 0x501
+void GSDrawScanlineCodeGenerator::SwapYmm(const Ymm& r0, const Ymm& r1, const Ymm& tmp)
+{
+	movdqa(tmp, r0);
+	movdqa(r0, r1);
+	movdqa(r1, tmp);
+}
+
+// FIXME: Should allow an array of values to avoid doing the switch statement too many times.
+void GSDrawScanlineCodeGenerator::RollVec32Ymm(const Ymm& dst, const Ymm& tmp, int roll)
+{
+	switch (roll)
+	{
+		case 0:
+			break;
+		case 1:
+			vshufps(dst, dst, dst, MY_MASK(3, 0, 1, 2));
+			vperm2f128(tmp, dst, dst, 0x01);
+			vpblendd(dst, dst, tmp, 0x11);
+			break;
+		case 2:
+			vpermq(dst, dst, MY_MASK(3, 0, 1, 2));
+			break;
+		case 3:
+			vshufps(dst, dst, dst, MY_MASK(1, 2, 3, 0));
+			vperm2f128(tmp, dst, dst, 0x01);
+			vpblendd(dst, dst, tmp, 0x77);
+			break;
+		case 4:
+			vperm2f128(dst, dst, dst, 0x01);
+			break;
+		case 5:
+			vshufps(dst, dst, dst, MY_MASK(3, 0, 1, 2));
+			vperm2f128(tmp, dst, dst, 0x01);
+			vpblendd(dst, dst, tmp, 0x77);
+			break;
+		case 6:
+			vpermq(dst, dst, MY_MASK(1, 2, 3, 0));
+			break;
+		case 7:
+			vshufps(dst, dst, dst, MY_MASK(1, 2, 3, 0));
+			vperm2f128(tmp, dst, dst, 0x01);
+			vpblendd(dst, dst, tmp, 0x88);
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+}
+
+void GSDrawScanlineCodeGenerator::RollVec64Ymm(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, int roll)
+{
+	switch (roll)
+	{
+		case 0:
+			break;
+		case 1:
+			vpermq(dst0, dst0, MY_MASK(3, 0, 1, 2));
+			vpermq(dst1, dst1, MY_MASK(3, 0, 1, 2));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0x03);
+			vpblendd(dst1, dst1, tmp, 0x03);
+			break;
+		case 2:
+			vpermq(dst0, dst0, MY_MASK(2, 3, 0, 1));
+			vpermq(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0x0F);
+			vpblendd(dst1, dst1, tmp, 0x0F);
+			break;
+		case 3:
+			vpermq(dst0, dst0, MY_MASK(1, 2, 3, 0));
+			vpermq(dst1, dst1, MY_MASK(1, 2, 3, 0));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0x3F);
+			vpblendd(dst1, dst1, tmp, 0x3F);
+			break;
+		case 4:
+			SwapYmm(dst0, dst1, tmp);
+			break;
+		case 5:
+			vpermq(dst0, dst0, MY_MASK(3, 0, 1, 2));
+			vpermq(dst1, dst1, MY_MASK(3, 0, 1, 2));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0xFC);
+			vpblendd(dst1, dst1, tmp, 0xFC);
+			break;
+		case 6:
+			vpermq(dst0, dst0, MY_MASK(2, 3, 0, 1));
+			vpermq(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0xF0);
+			vpblendd(dst1, dst1, tmp, 0xF0);
+			break;
+		case 7:
+			vpermq(dst0, dst0, MY_MASK(1, 2, 3, 0));
+			vpermq(dst1, dst1, MY_MASK(1, 2, 3, 0));
+			movdqa(tmp, dst0);
+			vpblendd(dst0, dst0, dst1, 0xC0);
+			vpblendd(dst1, dst1, tmp, 0xC0);
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+}
+
+void GSDrawScanlineCodeGenerator::RollVec32YmmSwitch(const Ymm& dst, const Ymm& tmp, const AddressReg& roll)
+{
+	const auto genCase = [this, &dst, &tmp](int i) { RollVec32Ymm(dst, tmp, i); };
+	RollSwitch<vecints>(genCase, roll);
+}
+
+void GSDrawScanlineCodeGenerator::RollVec64YmmSwitch(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, const AddressReg& roll)
+{
+	const auto& genCase = [this, &dst0, &dst1, &tmp](int i) { RollVec64Ymm(dst0, dst1, tmp, i); };
+	RollSwitch<vecints>(genCase, roll);
+}
+#else
+void GSDrawScanlineCodeGenerator::SwapXmm(const Xmm& r0, const Xmm& r1, const Xmm& tmp)
+{
+	movdqa(tmp, r0);
+	movdqa(r0, r1);
+	movdqa(r1, tmp);
+}
+
+void GSDrawScanlineCodeGenerator::RollVec32Xmm(const Xmm& dst, int roll)
+{
+	switch (roll)
+	{
+		case 0:
+			break;
+		case 1:
+			pshufd(dst, dst, MY_MASK(3, 0, 1, 2));
+			break;
+		case 2:
+			pshufd(dst, dst, MY_MASK(2, 3, 0, 1));
+			break;
+		case 3:
+			pshufd(dst, dst, MY_MASK(1, 2, 3, 0));
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+}
+
+void GSDrawScanlineCodeGenerator::RollVec64Xmm(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, int roll)
+{
+	switch (roll)
+	{
+		case 0:
+			break;
+		case 1:
+			pshufd(dst0, dst0, MY_MASK(2, 3, 0, 1));
+			pshufd(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			movdqa(tmp, dst0);
+			pblendw(dst0, dst1, 0x0F);
+			pblendw(dst1, tmp, 0x0F);
+			break;
+		case 2:
+			SwapXmm(dst0, dst1, tmp);
+			break;
+		case 3:
+			pshufd(dst0, dst0, MY_MASK(2, 3, 0, 1));
+			pshufd(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			movdqa(tmp, dst0);
+			pblendw(dst0, dst1, 0xF0);
+			pblendw(dst1, tmp, 0xF0);
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+}
+
+void GSDrawScanlineCodeGenerator::RollVec32XmmSwitch(const Xmm& dst, const AddressReg& roll)
+{
+	const auto genCase = [this, &dst](int i) { RollVec32Xmm(dst, i); };
+	RollSwitch<vecints>(genCase, roll);
+}
+
+void GSDrawScanlineCodeGenerator::RollVec64XmmSwitch(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, const AddressReg& roll)
+{
+	const auto genCase = [this, &dst0, &dst1, &tmp](int i) { RollVec64Xmm(dst0, dst1, tmp, i); };
+	RollSwitch<vecints>(genCase, roll);
+}
+#endif
