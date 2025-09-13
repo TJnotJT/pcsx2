@@ -11,7 +11,7 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-//#define ENABLE_JIT_RASTERIZER
+#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -250,7 +250,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 
 	if (step_size != vlen)
 	{
-		step_shift /= static_cast<float>(vlen / step_size);
+		step_shift *= static_cast<float>(vlen) / static_cast<float>(step_size);
 	}
 
 	GSVector4 tstep = dscan.t * step_shift;
@@ -856,14 +856,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	{
 		const int roll = left & (vlen - 1);
 		RollVec32(test, roll);
-		if (sel.zequal)
-		{
-			RollVec32(z0, roll);
-		}
-		else
-		{
+		if (!sel.zequal)
 			RollVec64(z0, z1, roll);
-		}
 		RollVec32(f, roll);
 		RollVec32(s, roll);
 		RollVec32(t, roll);
@@ -2042,8 +2036,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			RollVec32(s, step_size);
 			RollVec32(t, step_size);
 			RollVec32(q, step_size);
-			RollVec32(uf, step_size);
-			RollVec32(vf, step_size);
+			RollVec32(uf, step_size); // FIXME: Not Needed?
+			RollVec32(vf, step_size); // FIXME: Not Needed?
 			RollVec32(rbf, step_size);
 			RollVec32(gaf, step_size);
 			RollVec32(cov, step_size);
