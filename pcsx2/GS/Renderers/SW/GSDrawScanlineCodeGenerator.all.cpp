@@ -935,6 +935,9 @@ void GSDrawScanlineCodeGenerator::Init()
 		}
 	}
 
+	// xym7 = z0[if needed]
+	// Free: xym0, xym1
+
 	if (step_size != vecints)
 	{
 		// const int roll = left & (vlen - 1);
@@ -942,45 +945,63 @@ void GSDrawScanlineCodeGenerator::Init()
 		mov(rax, _left);
 		and_(rax, vecints - 1);
 
-#if _M_SSE >= 0x501
-		RollVec32YmmSwitch(_test, xym0, rax);
-		if (!m_sel.zequal)
-		{
-			RollVec64YmmSwitch(xym7, _z, xym0, rax);
-			movaps(_rip_local(temp.z0), xym7);
-		}
-		RollVec32YmmSwitch(_f, xym0, rax);
-		RollVec32YmmSwitch(_s, xym0, rax);
-		RollVec32YmmSwitch(_t, xym0, rax);
-		RollVec32YmmSwitch(_q, xym0, rax);
-		RollVec32YmmSwitch(_f_rb, xym0, rax);
-		RollVec32YmmSwitch(_f_ga, xym0, rax);
-		RollVec32YmmSwitch(_rb, xym0, rax);
-		RollVec32YmmSwitch(_ga, xym0, rax);
+		// Get the list of registers to roll and emit in a single switch statement.
+		XYm regs[11];
+		int nregs = 0;
+		const XYm& tmp = xym0;
+		const XYm& z0 = xym7;
+		const XYm& tmp_cov = xym1;
+		bool roll_z = false, roll_cov = false;
 
-		movaps(xym1, _rip_local(temp.cov));
-		RollVec32YmmSwitch(xym1, xym0, rax);
-		movaps(_rip_local(temp.cov), xym1);
-#else
-		RollVec32XmmSwitch(_test, rax);
-		if (!m_sel.zequal)
+		regs[nregs++] = _test;
+		if (m_sel.prim != GS_SPRITE_CLASS)
 		{
-			RollVec64XmmSwitch(xmm7, _z, xmm0, rax);
-			movaps(_rip_local(temp.z0), xmm7);
+			if (m_sel.fwrite && m_sel.fge)
+				regs[nregs++] = _f;
+			if (m_sel.zb && !m_sel.zequal)
+				regs[nregs++] = _z;
 		}
-		RollVec32XmmSwitch(_f, rax);
-		RollVec32XmmSwitch(_s, rax);
-		RollVec32XmmSwitch(_t, rax);
-		RollVec32XmmSwitch(_q, rax);
-		RollVec32XmmSwitch(_f_rb, rax);
-		RollVec32XmmSwitch(_f_ga, rax);
-		RollVec32XmmSwitch(_rb, rax);
-		RollVec32XmmSwitch(_ga, rax);
+		if (m_sel.fb)
+		{
+			if (m_sel.edge)
+			{
+				regs[nregs++] = tmp_cov;
+				roll_cov = true;
+			}
+			if (m_sel.tfx != TFX_NONE)
+			{
+				if (m_sel.fst)
+				{
+					regs[nregs++] = _s;
+					if (m_sel.prim != GS_SPRITE_CLASS || m_sel.mmin)
+						regs[nregs++] = _t;
+				}
+				else
+				{
+					regs[nregs++] = _s;
+					regs[nregs++] = _t;
+					regs[nregs++] = _q;
+				}
+			}
+			if (!(m_sel.tfx == TFX_DECAL && m_sel.tcc) && m_sel.iip)
+			{
+				regs[nregs++] = _f_rb;
+				regs[nregs++] = _f_ga;
+				regs[nregs++] = _rb;
+				regs[nregs++] = _ga;
+			}
+		}
 
-		movaps(xmm1, _rip_local(temp.cov));
-		RollVec32XmmSwitch(xmm1, rax);
-		movaps(_rip_local(temp.cov), xmm1);
-#endif
+		if (roll_cov)
+			movaps(tmp_cov, _rip_local(temp.cov));
+
+		RollVecSwitch(regs, nregs, tmp, rax, z0);
+
+		if (roll_z)
+			movaps(_rip_local(temp.z0), z0);
+
+		if (roll_cov)
+			movaps(_rip_local(temp.cov), tmp_cov);
 	}
 
 	if (m_sel.fwrite && m_sel.fpsm == 2 && m_sel.dthe)
@@ -1189,6 +1210,9 @@ void GSDrawScanlineCodeGenerator::Step()
 #endif
 	}
 
+	// xym7 = z0[if needed]
+	// Free: xym0
+
 	if (step_size != vecints)
 	{
 		// RollVec32(test, left & (vlen - 1));
@@ -1207,41 +1231,49 @@ void GSDrawScanlineCodeGenerator::Step()
 		//jne(end);
 		//db(0xcc);
 		//L(end);
-		
+
 		mov(rax, _left);
 		and_(rax, vecints - 1);
 
-#if _M_SSE >= 0x501
-		RollVec32YmmSwitch(_test, xym0, rax);
-		if (!m_sel.zequal)
+		const XYm& tmp = xym0;
+		const XYm& z0 = xym7;
+
+		if (m_sel.prim != GS_SPRITE_CLASS)
 		{
-			RollVec64Ymm(xym7, _z, xym0, step_size);
-			movaps(_rip_local(temp.z0), xym7);
+			if (m_sel.zb && !m_sel.zequal)
+			{
+				RollVec64(z0, _z, tmp, step_size);
+				movaps(_rip_local(temp.z0), z0);
+			}
+			if (m_sel.fwrite && m_sel.fge)
+				RollVec32(_f, tmp, step_size);
 		}
-		RollVec32Ymm(_f, xym0, step_size);
-		RollVec32Ymm(_s, xym0, step_size);
-		RollVec32Ymm(_t, xym0, step_size);
-		RollVec32Ymm(_q, xym0, step_size);
-		RollVec32Ymm(_f_rb, xym0, step_size);
-		RollVec32Ymm(_f_ga, xym0, step_size);
-		RollVec32Ymm(_rb, xym0, step_size);
-		RollVec32Ymm(_ga, xym0, step_size);
-#else
-		RollVec32XmmSwitch(_test, rax);
-		if (!m_sel.zequal)
+		if (m_sel.fb)
 		{
-			RollVec64Xmm(xmm7, _z, xmm0, step_size);
-			movaps(_rip_local(temp.z0), xmm7);
+			if (m_sel.tfx != TFX_NONE)
+			{
+				if (m_sel.fst)
+				{
+					RollVec32(_s, tmp, step_size);
+					if (m_sel.prim != GS_SPRITE_CLASS || m_sel.mmin)
+						RollVec32(_t, tmp, step_size);
+				}
+				else
+				{
+					RollVec32(_s, tmp, step_size);
+					RollVec32(_t, tmp, step_size);
+					RollVec32(_q, tmp, step_size);
+				}
+			}
+			if (!(m_sel.tfx == TFX_DECAL && m_sel.tcc) && m_sel.iip)
+			{
+				RollVec32(_f_rb, tmp, step_size);
+				RollVec32(_f_ga, tmp, step_size);
+				RollVec32(_rb, tmp, step_size);
+				RollVec32(_ga, tmp, step_size);
+			}
 		}
-		RollVec32Xmm(_f, step_size);
-		RollVec32Xmm(_s, step_size);
-		RollVec32Xmm(_t, step_size);
-		RollVec32Xmm(_q, step_size);
-		RollVec32Xmm(_f_rb, step_size);
-		RollVec32Xmm(_f_ga, step_size);
-		RollVec32Xmm(_rb, step_size);
-		RollVec32Xmm(_ga, step_size);
-#endif
+		RollVecSwitch(&_test, 1, tmp, rax, XYm(-1));
 	}
 }
 
@@ -3511,15 +3543,13 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 		pinsrd(dst, src, i);
 }
 
-#define MY_MASK(x, y, z, w) (((x)&3) | (((y)&3) << 2) | (((z)&3) << 4) | (((w)&3) << 6))
-
-template <int n, typename T>
-void GSDrawScanlineCodeGenerator::RollSwitch(const T& genCase, const AddressReg& roll)
+template <int ncases, typename T>
+void GSDrawScanlineCodeGenerator::Switch(const T& genCase, const AddressReg& roll)
 {
-	std::array<Label, n> cases;
+	std::array<Label, ncases> cases;
 	Label end;
 
-	for (int i = 0; i < n; i++)
+	for (int i = 0; i < ncases; i++)
 	{
 		if (i > 0)
 			L(cases[i - 1]);
@@ -3529,37 +3559,36 @@ void GSDrawScanlineCodeGenerator::RollSwitch(const T& genCase, const AddressReg&
 		jmp(end, CodeGenerator::T_NEAR);
 	}
 
-	L(cases[n - 1]);
+	L(cases[ncases - 1]);
 	db(0xCC); // Breakpoint - default case, shouldn't be reachable.
 
 	L(end);
 }
 
-#if _M_SSE >= 0x501
-void GSDrawScanlineCodeGenerator::SwapYmm(const Ymm& r0, const Ymm& r1, const Ymm& tmp)
+void GSDrawScanlineCodeGenerator::Swap(const XYm& r0, const XYm& r1, const XYm& tmp)
 {
 	movdqa(tmp, r0);
 	movdqa(r0, r1);
 	movdqa(r1, tmp);
 }
 
-// FIXME: Should allow an array of values to avoid doing the switch statement too many times.
-void GSDrawScanlineCodeGenerator::RollVec32Ymm(const Ymm& dst, const Ymm& tmp, int roll)
+void GSDrawScanlineCodeGenerator::RollVec32(const XYm& dst, const XYm& tmp, int roll)
 {
+#if _M_SSE >= 0x501
 	switch (roll)
 	{
 		case 0:
 			break;
 		case 1:
-			vshufps(dst, dst, dst, MY_MASK(3, 0, 1, 2));
+			vshufps(dst, dst, dst, _MM_SHUFFLE(2, 1, 0, 3));
 			vperm2f128(tmp, dst, dst, 0x01);
 			vpblendd(dst, dst, tmp, 0x11);
 			break;
 		case 2:
-			vpermq(dst, dst, MY_MASK(3, 0, 1, 2));
+			vpermq(dst, dst, _MM_SHUFFLE(2, 1, 0, 3));
 			break;
 		case 3:
-			vshufps(dst, dst, dst, MY_MASK(1, 2, 3, 0));
+			vshufps(dst, dst, dst, _MM_SHUFFLE(0, 3, 2, 1));
 			vperm2f128(tmp, dst, dst, 0x01);
 			vpblendd(dst, dst, tmp, 0x77);
 			break;
@@ -3567,15 +3596,15 @@ void GSDrawScanlineCodeGenerator::RollVec32Ymm(const Ymm& dst, const Ymm& tmp, i
 			vperm2f128(dst, dst, dst, 0x01);
 			break;
 		case 5:
-			vshufps(dst, dst, dst, MY_MASK(3, 0, 1, 2));
+			vshufps(dst, dst, dst, _MM_SHUFFLE(2, 1, 0, 3));
 			vperm2f128(tmp, dst, dst, 0x01);
 			vpblendd(dst, dst, tmp, 0x77);
 			break;
 		case 6:
-			vpermq(dst, dst, MY_MASK(1, 2, 3, 0));
+			vpermq(dst, dst, _MM_SHUFFLE(0, 3, 2, 1));
 			break;
 		case 7:
-			vshufps(dst, dst, dst, MY_MASK(1, 2, 3, 0));
+			vshufps(dst, dst, dst, _MM_SHUFFLE(0, 3, 2, 1));
 			vperm2f128(tmp, dst, dst, 0x01);
 			vpblendd(dst, dst, tmp, 0x88);
 			break;
@@ -3583,55 +3612,75 @@ void GSDrawScanlineCodeGenerator::RollVec32Ymm(const Ymm& dst, const Ymm& tmp, i
 			pxFail("Impossible.");
 			break;
 	}
-}
-
-void GSDrawScanlineCodeGenerator::RollVec64Ymm(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, int roll)
-{
+#else
 	switch (roll)
 	{
 		case 0:
 			break;
 		case 1:
-			vpermq(dst0, dst0, MY_MASK(3, 0, 1, 2));
-			vpermq(dst1, dst1, MY_MASK(3, 0, 1, 2));
+			pshufd(dst, dst, _MM_SHUFFLE(2, 1, 0, 3));
+			break;
+		case 2:
+			pshufd(dst, dst, _MM_SHUFFLE(1, 0, 3, 2));
+			break;
+		case 3:
+			pshufd(dst, dst, _MM_SHUFFLE(0, 3, 2, 1));
+			break;
+		default:
+			pxFail("Impossible.");
+			break;
+	}
+#endif
+}
+
+void GSDrawScanlineCodeGenerator::RollVec64(const XYm& dst0, const XYm& dst1, const XYm& tmp, int roll)
+{
+#if _M_SSE >= 0x501
+	switch (roll)
+	{
+		case 0:
+			break;
+		case 1:
+			vpermq(dst0, dst0, _MM_SHUFFLE(2, 1, 0, 3));
+			vpermq(dst1, dst1, _MM_SHUFFLE(2, 1, 0, 3));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0x03);
 			vpblendd(dst1, dst1, tmp, 0x03);
 			break;
 		case 2:
-			vpermq(dst0, dst0, MY_MASK(2, 3, 0, 1));
-			vpermq(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			vpermq(dst0, dst0, _MM_SHUFFLE(1, 0, 3, 2));
+			vpermq(dst1, dst1, _MM_SHUFFLE(1, 0, 3, 2));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0x0F);
 			vpblendd(dst1, dst1, tmp, 0x0F);
 			break;
 		case 3:
-			vpermq(dst0, dst0, MY_MASK(1, 2, 3, 0));
-			vpermq(dst1, dst1, MY_MASK(1, 2, 3, 0));
+			vpermq(dst0, dst0, _MM_SHUFFLE(0, 3, 2, 1));
+			vpermq(dst1, dst1, _MM_SHUFFLE(0, 3, 2, 1));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0x3F);
 			vpblendd(dst1, dst1, tmp, 0x3F);
 			break;
 		case 4:
-			SwapYmm(dst0, dst1, tmp);
+			Swap(dst0, dst1, tmp);
 			break;
 		case 5:
-			vpermq(dst0, dst0, MY_MASK(3, 0, 1, 2));
-			vpermq(dst1, dst1, MY_MASK(3, 0, 1, 2));
+			vpermq(dst0, dst0, _MM_SHUFFLE(2, 1, 0, 3));
+			vpermq(dst1, dst1, _MM_SHUFFLE(2, 1, 0, 3));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0xFC);
 			vpblendd(dst1, dst1, tmp, 0xFC);
 			break;
 		case 6:
-			vpermq(dst0, dst0, MY_MASK(2, 3, 0, 1));
-			vpermq(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			vpermq(dst0, dst0, _MM_SHUFFLE(1, 0, 3, 2));
+			vpermq(dst1, dst1, _MM_SHUFFLE(1, 0, 3, 2));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0xF0);
 			vpblendd(dst1, dst1, tmp, 0xF0);
 			break;
 		case 7:
-			vpermq(dst0, dst0, MY_MASK(1, 2, 3, 0));
-			vpermq(dst1, dst1, MY_MASK(1, 2, 3, 0));
+			vpermq(dst0, dst0, _MM_SHUFFLE(0, 3, 2, 1));
+			vpermq(dst1, dst1, _MM_SHUFFLE(0, 3, 2, 1));
 			movdqa(tmp, dst0);
 			vpblendd(dst0, dst0, dst1, 0xC0);
 			vpblendd(dst1, dst1, tmp, 0xC0);
@@ -3640,67 +3689,25 @@ void GSDrawScanlineCodeGenerator::RollVec64Ymm(const Ymm& dst0, const Ymm& dst1,
 			pxFail("Impossible.");
 			break;
 	}
-}
-
-void GSDrawScanlineCodeGenerator::RollVec32YmmSwitch(const Ymm& dst, const Ymm& tmp, const AddressReg& roll)
-{
-	const auto genCase = [this, &dst, &tmp](int i) { RollVec32Ymm(dst, tmp, i); };
-	RollSwitch<vecints>(genCase, roll);
-}
-
-void GSDrawScanlineCodeGenerator::RollVec64YmmSwitch(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, const AddressReg& roll)
-{
-	const auto& genCase = [this, &dst0, &dst1, &tmp](int i) { RollVec64Ymm(dst0, dst1, tmp, i); };
-	RollSwitch<vecints>(genCase, roll);
-}
 #else
-void GSDrawScanlineCodeGenerator::SwapXmm(const Xmm& r0, const Xmm& r1, const Xmm& tmp)
-{
-	movdqa(tmp, r0);
-	movdqa(r0, r1);
-	movdqa(r1, tmp);
-}
-
-void GSDrawScanlineCodeGenerator::RollVec32Xmm(const Xmm& dst, int roll)
-{
+	static_cast<void>(tmp); // Unused.
 	switch (roll)
 	{
 		case 0:
 			break;
 		case 1:
-			pshufd(dst, dst, MY_MASK(3, 0, 1, 2));
-			break;
-		case 2:
-			pshufd(dst, dst, MY_MASK(2, 3, 0, 1));
-			break;
-		case 3:
-			pshufd(dst, dst, MY_MASK(1, 2, 3, 0));
-			break;
-		default:
-			pxFail("Impossible.");
-			break;
-	}
-}
-
-void GSDrawScanlineCodeGenerator::RollVec64Xmm(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, int roll)
-{
-	switch (roll)
-	{
-		case 0:
-			break;
-		case 1:
-			pshufd(dst0, dst0, MY_MASK(2, 3, 0, 1));
-			pshufd(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			pshufd(dst0, dst0, _MM_SHUFFLE(1, 0, 3, 2));
+			pshufd(dst1, dst1, _MM_SHUFFLE(1, 0, 3, 2));
 			movdqa(tmp, dst0);
 			pblendw(dst0, dst1, 0x0F);
 			pblendw(dst1, tmp, 0x0F);
 			break;
 		case 2:
-			SwapXmm(dst0, dst1, tmp);
+			Swap(dst0, dst1, tmp);
 			break;
 		case 3:
-			pshufd(dst0, dst0, MY_MASK(2, 3, 0, 1));
-			pshufd(dst1, dst1, MY_MASK(2, 3, 0, 1));
+			pshufd(dst0, dst0, _MM_SHUFFLE(1, 0, 3, 2));
+			pshufd(dst1, dst1, _MM_SHUFFLE(1, 0, 3, 2));
 			movdqa(tmp, dst0);
 			pblendw(dst0, dst1, 0xF0);
 			pblendw(dst1, tmp, 0xF0);
@@ -3709,17 +3716,19 @@ void GSDrawScanlineCodeGenerator::RollVec64Xmm(const Xmm& dst0, const Xmm& dst1,
 			pxFail("Impossible.");
 			break;
 	}
-}
-
-void GSDrawScanlineCodeGenerator::RollVec32XmmSwitch(const Xmm& dst, const AddressReg& roll)
-{
-	const auto genCase = [this, &dst](int i) { RollVec32Xmm(dst, i); };
-	RollSwitch<vecints>(genCase, roll);
-}
-
-void GSDrawScanlineCodeGenerator::RollVec64XmmSwitch(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, const AddressReg& roll)
-{
-	const auto genCase = [this, &dst0, &dst1, &tmp](int i) { RollVec64Xmm(dst0, dst1, tmp, i); };
-	RollSwitch<vecints>(genCase, roll);
-}
 #endif
+}
+
+void GSDrawScanlineCodeGenerator::RollVecSwitch(const XYm* dsts, int ndsts, const XYm& tmp, const AddressReg& rollreg, const XYm& z0)
+{
+	const auto gencase = [this, dsts, ndsts, &tmp, &z0](int roll) {
+		for (int reg = 0; reg < ndsts; reg++)
+		{
+			if (dsts[reg] == _z)
+				RollVec64(z0, _z, tmp, roll);
+			else
+				RollVec32(dsts[reg], tmp, roll);
+		}
+	};
+	Switch<vecints>(gencase, rollreg);
+}

@@ -169,22 +169,13 @@ private:
 		int pixels,      int mip_offset);
 	void ReadTexelImpl(const Xmm& dst, const Xmm& addr, u8 i, bool texInA3, bool preserveDst);
 
-	template <int n, typename T>
-	void RollSwitch(const T& genCase, const AddressReg& roll);
+	template <int ncases, typename T>
+	void Switch(const T& gencase, const AddressReg& roll);
 
-#if _M_SSE >= 0x501
-	void SwapYmm(const Ymm& r0, const Ymm& r1, const Ymm& tmp);
-	void RollVec32Ymm(const Ymm& dst, const Ymm& tmp, int roll);
-	void RollVec64Ymm(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, int roll);
-	void RollVec32YmmSwitch(const Ymm& dst, const Ymm& tmp, const AddressReg& roll);
-	void RollVec64YmmSwitch(const Ymm& dst0, const Ymm& dst1, const Ymm& tmp, const AddressReg& roll);
-#else
-	void SwapXmm(const Xmm& r0, const Xmm& r1, const Xmm& tmp);
-	void RollVec32Xmm(const Xmm& dst, int roll);
-	void RollVec64Xmm(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, int roll);
-	void RollVec32XmmSwitch(const Xmm& dst, const AddressReg& roll);
-	void RollVec64XmmSwitch(const Xmm& dst0, const Xmm& dst1, const Xmm& tmp, const AddressReg& roll);
-#endif
+	void Swap(const XYm& r0, const XYm& r1, const XYm& tmp);
+	void RollVec32(const XYm& dst, const XYm& tmp, int roll);
+	void RollVec64(const XYm& dst0, const XYm& dst1, const XYm& tmp, int roll);
+	void RollVecSwitch(const XYm* dsts, int ndsts, const XYm& tmp, const AddressReg& rollreg, const XYm& z0);
 };
 
 MULTI_ISA_UNSHARED_END
