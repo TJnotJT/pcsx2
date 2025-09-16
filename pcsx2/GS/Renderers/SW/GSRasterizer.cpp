@@ -1150,81 +1150,79 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	GSVertexSW dv = v1 - v0;
 
-	GSVector4 dp = dv.p.abs();
-
-	int i = (dp < dp.yxwz()).mask() & 1; // |dx| <= |dy|
+	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
 
 	if (HasEdge())
 	{
-		if (!i)
+		if (step_x)
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<true, true, true, 1>(v0, v1, dv);
+					DrawLineImpl<1, 1, 1, 1>(v0, v1, dv);
 				else
-					DrawLineImpl<true, true, false, 1>(v0, v1, dv);
+					DrawLineImpl<1, 1, 0, 1>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<true, false, true, 1>(v0, v1, dv);
+					DrawLineImpl<1, 0, 1, 1>(v0, v1, dv);
 				else
-					DrawLineImpl<true, false, false, 1>(v0, v1, dv);
+					DrawLineImpl<1, 0, 0, 1>(v0, v1, dv);
 			}
 		}
-		else
+		else // !step_x
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<false, true, true, 1>(v0, v1, dv);
+					DrawLineImpl<0, 1, 1, 1>(v0, v1, dv);
 				else
-					DrawLineImpl<false, true, false, 1>(v0, v1, dv);
+					DrawLineImpl<0, 1, 0, 1>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<false, false, true, 1>(v0, v1, dv);
+					DrawLineImpl<0, 0, 1, 1>(v0, v1, dv);
 				else
-					DrawLineImpl<false, false, false, 1>(v0, v1, dv);
+					DrawLineImpl<0, 0, 0, 1>(v0, v1, dv);
 			}
 		}
 	}
-	else
+	else // !HasEdge()
 	{
-		if (!i)
+		if (step_x)
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<true, true, true, 0>(v0, v1, dv);
+					DrawLineImpl<1, 1, 1, 0>(v0, v1, dv);
 				else
-					DrawLineImpl<true, true, false, 0>(v0, v1, dv);
+					DrawLineImpl<1, 1, 0, 0>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<true, false, true, 0>(v0, v1, dv);
+					DrawLineImpl<1, 0, 1, 0>(v0, v1, dv);
 				else
-					DrawLineImpl<true, false, false, 0>(v0, v1, dv);
+					DrawLineImpl<1, 0, 0, 0>(v0, v1, dv);
 			}
 		}
-		else
+		else // !step_x
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<false, true, true, 0>(v0, v1, dv);
+					DrawLineImpl<0, 1, 1, 0>(v0, v1, dv);
 				else
-					DrawLineImpl<false, true, false, 0>(v0, v1, dv);
+					DrawLineImpl<0, 1, 0, 0>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawLineImpl<false, false, true, 0>(v0, v1, dv);
+					DrawLineImpl<0, 0, 1, 0>(v0, v1, dv);
 				else
-					DrawLineImpl<false, false, false, 0>(v0, v1, dv);
+					DrawLineImpl<0, 0, 0, 0>(v0, v1, dv);
 			}
 		}
 	}
@@ -1232,96 +1230,6 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 	Flush(vertex, index, GSVertexSW::zero(), HasEdge());
 
 	return;
-
-	if (HasEdge())
-	{
-		DrawEdge(v0, v1, dv, i, 0);
-		DrawEdge(v0, v1, dv, i, 1);
-
-		Flush(vertex, index, GSVertexSW::zero(), true);
-
-		return;
-	}
-
-	GSVector4i dpi(dp);
-
-	if (dpi.y == 0)
-	{
-		if (dpi.x > 0)
-		{
-			// shortcut for horizontal lines
-
-			GSVector4 mask = (v0.p > v1.p).xxxx();
-
-			GSVertexSW scan;
-
-			scan.p = v0.p.blend32(v1.p, mask);
-			scan.t = v0.t.blend32(v1.t, mask);
-			scan.c = v0.c.blend32(v1.c, mask);
-
-			GSVector4i p(scan.p);
-
-			if (m_scissor.top <= p.y && p.y < m_scissor.bottom && IsOneOfMyScanlines(p.y))
-			{
-				GSVector4 lrf = scan.p.upl(v1.p.blend32(v0.p, mask)).ceil();
-				GSVector4 l = lrf.max(m_fscissor_x);
-				GSVector4 r = lrf.min(m_fscissor_x);
-				GSVector4i lr = GSVector4i(l.xxyy(r));
-
-				int left = lr.extract32<0>();
-				int right = lr.extract32<2>();
-
-				int pixels = right - left;
-
-				if (pixels > 0)
-				{
-					GSVertexSW dscan = dv / dv.p.xxxx();
-
-					scan += dscan * (l - scan.p).xxxx();
-
-					m_setup_prim(vertex, index, dscan, m_local);
-
-					DrawScanline(pixels, left, p.y, scan);
-				}
-			}
-		}
-
-		return;
-	}
-
-	int steps = dpi.v[i];
-
-	if (steps > 0)
-	{
-		GSVertexSW edge = v0;
-		GSVertexSW dedge = dv / GSVector4(dp.v[i]);
-
-		GSVertexSW* RESTRICT e = m_edge.buff;
-
-		while (1)
-		{
-			GSVector4i p(edge.p);
-
-			if (m_scissor.left <= p.x && p.x < m_scissor.right && m_scissor.top <= p.y && p.y < m_scissor.bottom)
-			{
-				if (IsOneOfMyScanlines(p.y))
-				{
-					AddScanline(e, 1, p.x, p.y, edge);
-
-					e++;
-				}
-			}
-
-			if (--steps == 0)
-				break;
-
-			edge += dedge;
-		}
-
-		m_edge.count = e - m_edge.buff;
-
-		Flush(vertex, index, GSVertexSW::zero());
-	}
 }
 
 static const u8 s_ysort[8][4] =
