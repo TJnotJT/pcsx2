@@ -90,6 +90,8 @@ protected:
 
 	template <bool scissor_test>
 	void DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count);
+	template <bool step_x, bool pos_x, bool pos_y>
+	void DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
 	void DrawLine(const GSVertexSW* vertex, const u16* index);
 	void DrawTriangle(const GSVertexSW* vertex, const u16* index);
 	void DrawSprite(const GSVertexSW* vertex, const u16* index);

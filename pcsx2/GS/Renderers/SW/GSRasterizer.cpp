@@ -296,6 +296,95 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 	}
 }
 
+template<bool step_x, bool pos_x, bool pos_y>
+void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
+{
+	GSVector4 dp = dv.p;
+
+	const float x0 = v0.p.x;
+	const float y0 = v0.p.y;
+
+	const float x1 = v1.p.x;
+	const float y1 = v1.p.y;
+
+	const float rx0 = std::floor(x0 + 0.5f);
+	const float ry0 = std::floor(y0 + 0.5f);
+	const float rx1 = std::floor(x1 + 0.5f);
+	const float ry1 = std::floor(y1 + 0.5f);
+
+	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
+
+	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
+
+	float x = step_x ? rx0 : x0;
+	float y = step_x ? y0 : ry0;
+
+	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
+	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
+
+	dx *= step_x ? 1.0f : dy;
+	dy *= step_x ? dx : 1.0f;
+
+	GSVertexSW edge(v0);
+
+	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
+	x += step_x ? 0.0f : slope * (y - y0);
+	y += step_x ? slope * (x - x0) : 0.0f;
+
+	// Diamond exit rule that GS uses for determining line coverage.
+	const auto TestRegion = [](float dx, float dy) -> bool {
+		float dist = std::abs(dx) + std::abs(dy);
+		if (dist < 0.5)
+			return false;
+		if (step_x)
+		{
+			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
+			return x_good && (dist > 0.5 || dy >= 0);
+		}
+		else
+		{
+			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
+			return y_good && (dist > 0.5 || dx >= 0);
+		}
+	};
+
+	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
+	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
+
+	GSVertexSW* RESTRICT e = m_edge.buff;
+
+	while (true)
+	{
+		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
+		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
+
+		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
+		            m_scissor.top <= yi && yi < m_scissor.bottom &&
+		            IsOneOfMyScanlines(yi);
+
+		if (step_x ? (x == rx0) : (y == ry0))
+			draw = draw && draw_first;
+		if (step_x ? (x == rx1) : (y == ry1))
+			draw = draw && draw_last;
+
+		if  (draw)
+		{
+			AddScanline(e, 1, xi, yi, edge);
+
+			e++;
+		}
+
+		if (step_x ? (x == rx1) : (y == ry1))
+			break;
+
+		edge += dedge;
+		x += dx;
+		y += dy;
+	}
+
+	m_edge.count = e - m_edge.buff;
+}
+
 void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
@@ -308,6 +397,45 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 	GSVector4 dp = dv.p.abs();
 
 	int i = (dp < dp.yxwz()).mask() & 1; // |dx| <= |dy|
+
+	if (!i)
+	{
+		if (dv.p.x >= 0)
+		{
+			if (dv.p.y >= 0)
+				DrawLineImpl<true, true, true>(v0, v1, dv);
+			else
+				DrawLineImpl<true, true, false>(v0, v1, dv);
+		}
+		else
+		{
+			if (dv.p.y >= 0)
+				DrawLineImpl<true, false, true>(v0, v1, dv);
+			else
+				DrawLineImpl<true, false, false>(v0, v1, dv);
+		}
+	}
+	else
+	{
+		if (dv.p.x >= 0)
+		{
+			if (dv.p.y >= 0)
+				DrawLineImpl<false, true, true>(v0, v1, dv);
+			else
+				DrawLineImpl<false, true, false>(v0, v1, dv);
+		}
+		else
+		{
+			if (dv.p.y >= 0)
+				DrawLineImpl<false, false, true>(v0, v1, dv);
+			else
+				DrawLineImpl<false, false, false>(v0, v1, dv);
+		}
+	}
+
+	Flush(vertex, index, GSVertexSW::zero());
+
+	return;
 
 	if (HasEdge())
 	{
