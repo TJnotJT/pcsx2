@@ -960,8 +960,7 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 }
 #endif
 
-// FIXME: overflow?
-template <bool step_x, bool pos_x, bool pos_y>
+template <bool step_x, bool pos_x, bool pos_y, bool has_edge>
 void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
 {
 	const float delta_x = dv.p.x;
@@ -969,7 +968,6 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	const float x0 = v0.p.x;
 	const float y0 = v0.p.y;
-
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
 
@@ -996,13 +994,9 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	// Decision value for stepping minor direction.
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
+	const float scaleDf = static_cast<float>(scaleD); // Needed only if use_edge == true.
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) - 0.5f));
-
-	// Pre-steps
-	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
-	const int step_sign = step_x ? (pos_x ? 1 : -1) : (pos_y ? 1 : -1);
-	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * step_sign;
 
 	// Diamond exit rule for determining coverage of first/last pixel.
 	const auto TestRegion = [](float dx, float dy) -> bool {
@@ -1026,9 +1020,13 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
+
 	int xi = rxi0;
 	int yi = ryi0;
 
+	// Pre-steps
+	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
+	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * (step_x ? dxi : dyi);
 	if (D >= 0)
 	{
 		D -= scaleD;
@@ -1061,9 +1059,49 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 		if (draw)
 		{
-			AddScanline(e, 1, xi, yi, edge);
+			if (has_edge)
+			{
+				const float d = (static_cast<float>(D) / scaleDf) + 0.5f;
+				if (d >= 0.0f)
+				{
+					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
+					
+					AddScanline(e, 1, xi, yi, edge);
+					
+					e->p.U32[0] = 0xffff - cov;
+					
+					e++;
 
-			e++;
+					AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
+
+					e->p.U32[0] = cov;
+
+					e++;
+				}
+				else if (d < 0.0f)
+				{
+					const int cov = static_cast<int>(0x10000 * (-d));
+
+					AddScanline(e, 1, xi, yi, edge);
+
+					e->p.U32[0] = 0xffff - cov;
+
+					e++;
+
+					AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
+
+					e->p.U32[0] = cov;
+
+					e++;
+				}
+			}
+			else // No antialiasing.
+			{
+				AddScanline(e, 1, xi, yi, edge);
+
+				e++;
+			}
+
 		}
 
 		if (last)
@@ -1109,42 +1147,82 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	int i = (dp < dp.yxwz()).mask() & 1; // |dx| <= |dy|
 
-	if (!i)
+	if (HasEdge())
 	{
-		if (dv.p.x >= 0)
+		if (!i)
 		{
-			if (dv.p.y >= 0)
-				DrawLineImpl<true, true, true>(v0, v1, dv);
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<true, true, true, 1>(v0, v1, dv);
+				else
+					DrawLineImpl<true, true, false, 1>(v0, v1, dv);
+			}
 			else
-				DrawLineImpl<true, true, false>(v0, v1, dv);
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<true, false, true, 1>(v0, v1, dv);
+				else
+					DrawLineImpl<true, false, false, 1>(v0, v1, dv);
+			}
 		}
 		else
 		{
-			if (dv.p.y >= 0)
-				DrawLineImpl<true, false, true>(v0, v1, dv);
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<false, true, true, 1>(v0, v1, dv);
+				else
+					DrawLineImpl<false, true, false, 1>(v0, v1, dv);
+			}
 			else
-				DrawLineImpl<true, false, false>(v0, v1, dv);
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<false, false, true, 1>(v0, v1, dv);
+				else
+					DrawLineImpl<false, false, false, 1>(v0, v1, dv);
+			}
 		}
 	}
 	else
 	{
-		if (dv.p.x >= 0)
+		if (!i)
 		{
-			if (dv.p.y >= 0)
-				DrawLineImpl<false, true, true>(v0, v1, dv);
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<true, true, true, 0>(v0, v1, dv);
+				else
+					DrawLineImpl<true, true, false, 0>(v0, v1, dv);
+			}
 			else
-				DrawLineImpl<false, true, false>(v0, v1, dv);
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<true, false, true, 0>(v0, v1, dv);
+				else
+					DrawLineImpl<true, false, false, 0>(v0, v1, dv);
+			}
 		}
 		else
 		{
-			if (dv.p.y >= 0)
-				DrawLineImpl<false, false, true>(v0, v1, dv);
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<false, true, true, 0>(v0, v1, dv);
+				else
+					DrawLineImpl<false, true, false, 0>(v0, v1, dv);
+			}
 			else
-				DrawLineImpl<false, false, false>(v0, v1, dv);
+			{
+				if (dv.p.y >= 0)
+					DrawLineImpl<false, false, true, 0>(v0, v1, dv);
+				else
+					DrawLineImpl<false, false, false, 0>(v0, v1, dv);
+			}
 		}
 	}
 
-	Flush(vertex, index, GSVertexSW::zero());
+	Flush(vertex, index, GSVertexSW::zero(), HasEdge());
 
 	return;
 
