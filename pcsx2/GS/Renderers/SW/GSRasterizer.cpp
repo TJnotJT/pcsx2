@@ -963,8 +963,14 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 template <bool step_x, bool pos_x, bool pos_y, bool has_edge>
 void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
 {
+	constexpr int dxi = pos_x ? 1 : -1;
+	constexpr int dyi = pos_y ? 1 : -1;
+
 	const float delta_x = dv.p.x;
 	const float delta_y = dv.p.y;
+
+	if (delta_x == 0.0f && delta_y == 0.0f)
+		return;
 
 	const float x0 = v0.p.x;
 	const float y0 = v0.p.y;
@@ -992,11 +998,15 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	GSVertexSW* RESTRICT e = m_edge.buff;
 
-	// Decision value for stepping minor direction.
+	// Decision value for y when step_x == true (and vice versa).
+	// D is the fractional part of y scaled and shifted. When pos_y == true, D is kept in the range [-scaleD, 0)
+	// so that D >= 0 indicated a +1 step in y. When pos_y == false, D is kept in the range [0, scaleD) so that
+	// D < 0 indicates a -1 step in y.
+	constexpr bool pos_D = step_x ? pos_y : pos_x;
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
 	const float scaleDf = static_cast<float>(scaleD); // Needed only if use_edge == true.
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) - 0.5f));
+	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
 
 	// Diamond exit rule for determining coverage of first/last pixel.
 	const auto TestRegion = [](float dx, float dy) -> bool {
@@ -1018,29 +1028,26 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	bool draw_first = !TestRegion(fx0, fy0);
 	bool draw_last = TestRegion(fx1, fy1);
 
-	constexpr int dxi = pos_x ? 1 : -1;
-	constexpr int dyi = pos_y ? 1 : -1;
-
 	int xi = rxi0;
 	int yi = ryi0;
 
 	// Pre-steps
 	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
 	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * (step_x ? dxi : dyi);
-	if (D >= 0)
+	if (D >= (pos_D ? 0 : scaleD))
 	{
 		D -= scaleD;
 		xi += step_x ? 0 : 1;
 		yi += step_x ? 1 : 0;
 	}
-	else if (D < -scaleD)
+	else if (D < (pos_D ? -scaleD : 0))
 	{
 		D += scaleD;
 		xi += step_x ? 0 : -1;
 		yi += step_x ? -1 : 0;
 	}
 
-	pxAssert(-scaleD <= D && D <= 0);
+	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
 	while (true)
 	{
@@ -1061,7 +1068,7 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		{
 			if (has_edge)
 			{
-				const float d = (static_cast<float>(D) / scaleDf) + 0.5f;
+				const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f);
 				if (d >= 0.0f)
 				{
 					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
@@ -1111,9 +1118,9 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		D += dD;
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
-		if constexpr (step_x ? pos_y : pos_x)
+		if constexpr (pos_D)
 		{
-			if (D >= 0)
+			if (D >= 0.0f)
 			{
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
@@ -1122,7 +1129,7 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		}
 		else
 		{
-			if (D < -scaleD)
+			if (D < 0.0f)
 			{
 				D += scaleD;
 				xi += step_x ? 0 : -1;
