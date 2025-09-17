@@ -56,6 +56,30 @@ GSRasterizer::GSRasterizer(GSDrawScanline* ds, int id, int threads)
 	{
 		m_scanline[i] = (i % threads) == id ? 1 : 0;
 	}
+
+//#define INIT_DRAW_EDGE_0(step_x, pos_x, pos_y)                                       \
+//	m_draw_edge_static[step_x][pos_x][pos_y][0] = DrawEdge<step_x, pos_x, pos_x, 0>; \
+//	m_draw_edge_static[step_x][pos_x][pos_y][1] = DrawEdge<step_x, pos_x, pos_x, 1>; \
+//	m_draw_edge_static[step_x][pos_x][pos_y][2] = DrawEdge<step_x, pos_x, pos_x, 2>;
+//
+//#define INIT_DRAW_EDGE_1(step_x, pos_x) \
+//	INIT_DRAW_EDGE_0(step_x, pos_x, 0)   \
+//	INIT_DRAW_EDGE_0(step_x, pos_x, 1)
+//
+//#define INIT_DRAW_EDGE_2(step_x) \
+//	INIT_DRAW_EDGE_1(step_x, 0)  \
+//	INIT_DRAW_EDGE_1(step_x, 1)
+//
+//#define INIT_DRAW_EDGE_3 \
+//	INIT_DRAW_EDGE_2(0)  \
+//	INIT_DRAW_EDGE_2(1)
+//
+//	INIT_DRAW_EDGE_3
+
+#undef INIT_DRAW_EDGE_3
+#undef INIT_DRAW_EDGE_2
+#undef INIT_DRAW_EDGE_1
+#undef INIT_DRAW_EDGE_0
 }
 
 GSRasterizer::~GSRasterizer()
@@ -296,672 +320,187 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 	}
 }
 
-#if 0
-template<bool step_x, bool pos_x, bool pos_y>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
+template <bool step_x, bool pos_x, bool pos_y, int edge_type>
+void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
+	GSVector4 abc0, bool tl0,
+	GSVector4 abc1, bool tl1,
+	bool topleft, bool test)
 {
-
-	GSVector4 dp = dv.p;
-
-	const float x0 = v0.p.x;
-	const float y0 = v0.p.y;
-
-	const float x1 = v1.p.x;
-	const float y1 = v1.p.y;
-
-	if (x0 == 173.3750 && y0 == 266.2500)
-	{
-		printf("");
-	}
-
-
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
-
-	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
-
-	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
-
-	float x = step_x ? rx0 : x0;
-	float y = step_x ? y0 : ry0;
-
-	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
-	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
-
-	dx *= step_x ? 1.0f : dy;
-	dy *= step_x ? dx : 1.0f;
-
-	GSVertexSW edge(v0);
-
-	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
-	x += step_x ? 0.0f : slope * (y - y0);
-	y += step_x ? slope * (x - x0) : 0.0f;
-
-	// Diamond exit rule that GS uses for determining line coverage.
-	const auto TestRegion = [](float dx, float dy) -> bool {
-		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
-			return false;
-		if (step_x)
-		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
-		}
-		else
-		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
-		}
-	};
-
-	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
-	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
-
-	GSVertexSW* RESTRICT e = m_edge.buff;
-
-	while (true)
-	{
-		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
-		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		if (step_x ? (x == rx0) : (y == ry0))
-			draw = draw && draw_first;
-		if (step_x ? (x == rx1) : (y == ry1))
-			draw = draw && draw_last;
-
-		if  (draw)
-		{
-			AddScanline(e, 1, xi, yi, edge);
-
-			e++;
-		}
-
-		if (step_x ? (x == rx1) : (y == ry1))
-			break;
-
-		edge += dedge;
-		x += dx;
-		y += dy;
-	}
-
-	m_edge.count = e - m_edge.buff;
-}
-#endif
-
-#if 0
-// Floating point decision
-template <bool step_x, bool pos_x, bool pos_y>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
-{
-
-	GSVector4 dp = dv.p;
-
-	const float x0 = v0.p.x;
-	const float y0 = v0.p.y;
-
-	const float x1 = v1.p.x;
-	const float y1 = v1.p.y;
-
-	if (x0 == 173.3750 && y0 == 266.2500)
-	{
-		printf("");
-	}
-
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
-
-	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
-
-	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
-
-	const int delta_x = static_cast<int>(16.0f * (x1 - x0));
-	const int delta_y = static_cast<int>(16.0f * (y1 - y0));
-
-	int slope_scale = static_cast<int>(16.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-
-	float x = step_x ? rx0 : x0;
-	float y = step_x ? y0 : ry0;
-
-	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
-	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
-
-	dx *= step_x ? 1.0f : dy;
-	dy *= step_x ? dx : 1.0f;
-
-	float decision = (step_x ? y - ry0 : x - rx0) - 0.5f;
-	float step_decision = step_x ? dy : dx;
-
-	GSVertexSW edge(v0);
-	int xi = static_cast<int>(rx0);
-	int yi = static_cast<int>(ry0);
-
-	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
-	x += step_x ? 0.0f : slope * (y - y0);
-	y += step_x ? slope * (x - x0) : 0.0f;
-	decision += slope * (step_x ? (x - x0) : (y - y0)); 
-
-	// Diamond exit rule that GS uses for determining line coverage.
-	const auto TestRegion = [](float dx, float dy) -> bool {
-		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
-			return false;
-		if (step_x)
-		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
-		}
-		else
-		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
-		}
-	};
-
-	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
-	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
-
-	GSVertexSW* RESTRICT e = m_edge.buff;
-
-	while (true)
-	{
-		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
-		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
-
-		float tmp = step_x ? (y - static_cast<float>(yi) - 0.5f) : (x - static_cast<float>(xi) - 0.5f);
-		if (std::abs(decision - tmp) > 0.001f)
-		{
-			printf("");
-		}
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		if (step_x ? (x == rx0) : (y == ry0))
-			draw = draw && draw_first;
-		if (step_x ? (x == rx1) : (y == ry1))
-			draw = draw && draw_last;
-
-		if (draw)
-		{
-			AddScanline(e, 1, xi, yi, edge);
-
-			e++;
-		}
-
-		if (step_x ? (x == rx1) : (y == ry1))
-			break;
-
-		edge += dedge;
-		x += dx;
-		y += dy;
-		decision += step_decision;
-		if (decision >= 0.0f)
-			decision -= 1.0f;
-		if (decision < -1.0f)
-			decision += 1.0f;
-	}
-
-	m_edge.count = e - m_edge.buff;
-}
-#endif
-
-#if 0
-// Scaled decision variable
-template <bool step_x, bool pos_x, bool pos_y>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
-{
-	GSVector4 dp = dv.p;
-
-	const float x0 = v0.p.x;
-	const float y0 = v0.p.y;
-
-	const float x1 = v1.p.x;
-	const float y1 = v1.p.y;
-
-	if (x0 == 173.3750 && y0 == 266.2500)
-	{
-		printf("");
-	}
-
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
-
-	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
-
-	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
-
-	const int delta_x = static_cast<int>(16.0f * (x1 - x0));
-	const int delta_y = static_cast<int>(16.0f * (y1 - y0));
-
-	int slope_scale = static_cast<int>(16.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-
-	float x = step_x ? rx0 : x0;
-	float y = step_x ? y0 : ry0;
-
-	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
-	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
-
-	dx *= step_x ? 1.0f : dy;
-	dy *= step_x ? dx : 1.0f;
-
-	float decision_scale = std::abs(2.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-	float decision = (decision_scale) * ((step_x ? y - ry0 : x - rx0) - 0.5f);
-	float step_decision = (decision_scale) * (step_x ? dy : dx);
-
-	GSVertexSW edge(v0);
-	int xi = static_cast<int>(rx0);
-	int yi = static_cast<int>(ry0);
-
-	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
-	x += step_x ? 0.0f : slope * (y - y0);
-	y += step_x ? slope * (x - x0) : 0.0f;
-	decision += decision_scale * slope * (step_x ? (x - x0) : (y - y0));
-
-	// Diamond exit rule that GS uses for determining line coverage.
-	const auto TestRegion = [](float dx, float dy) -> bool {
-		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
-			return false;
-		if (step_x)
-		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
-		}
-		else
-		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
-		}
-	};
-
-	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
-	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
-
-	GSVertexSW* RESTRICT e = m_edge.buff;
-
-	if (decision >= 0.0f)
-		decision -= (decision_scale);
-	if (decision < -decision_scale)
-		decision += (decision_scale);
-
-	while (true)
-	{
-		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
-		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
-
-		float tmp = (decision_scale) * (step_x ? (y - static_cast<float>(yi) - 0.5f) : (x - static_cast<float>(xi) - 0.5f));
-		if (std::abs(decision - tmp) > 0.1f && std::abs(decision + decision_scale - tmp) > 0.1f)
-		{
-			printf("");
-		}
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		if (step_x ? (x == rx0) : (y == ry0))
-			draw = draw && draw_first;
-		if (step_x ? (x == rx1) : (y == ry1))
-			draw = draw && draw_last;
-
-		if (draw)
-		{
-			AddScanline(e, 1, xi, yi, edge);
-
-			e++;
-		}
-
-		if (step_x ? (x == rx1) : (y == ry1))
-			break;
-
-		edge += dedge;
-		x += dx;
-		y += dy;
-		decision += step_decision;
-		if (decision >= 0.0f)
-			decision -= (decision_scale);
-		if (decision < -decision_scale)
-			decision += (decision_scale);
-	}
-
-	m_edge.count = e - m_edge.buff;
-}
-#endif
-
-#if 0
-// ADDED THE INTEGER DECISION
-template <bool step_x, bool pos_x, bool pos_y>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
-{
-	GSVector4 dp = dv.p;
-
-	const float x0 = v0.p.x;
-	const float y0 = v0.p.y;
-
-	const float x1 = v1.p.x;
-	const float y1 = v1.p.y;
-
-	if (x0 == 173.3750 && y0 == 266.2500)
-	{
-		printf("");
-	}
-
-	const auto FPToInt = [](float f) { return static_cast<int>(16.0f * f); };
-
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
-
-	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
-
-	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
-
-	int slope_scale = static_cast<int>(16.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-
-	float x = step_x ? rx0 : x0;
-	float y = step_x ? y0 : ry0;
-
-	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
-	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
-
-	dx *= step_x ? 1.0f : dy;
-	dy *= step_x ? dx : 1.0f;
-
-	float decision_scale = std::abs(16.0f * 32.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-	float decision = (decision_scale) * ((step_x ? y - ry0 : x - rx0) - 0.5f);
-	float step_decision = (decision_scale) * (step_x ? dy : dx);
-
-	const float delta_x = x1 - x0;
-	const float delta_y = y1 - y0;
-	int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
-	int D = static_cast<int>(scaleD * ((step_x ? (y0 - ry0) : (x0 - rx0)) - 0.5f));
-	int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int sign_step = step_x ? (pos_x ? 1 : -1) : (pos_y ? 1 : -1);
-
-	GSVertexSW edge(v0);
-	int xi = static_cast<int>(rx0);
-	int yi = static_cast<int>(ry0);
-
-	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
-	x += step_x ? 0.0f : slope * (y - y0);
-	y += step_x ? slope * (x - x0) : 0.0f;
-	decision += decision_scale * slope * (step_x ? (x - x0) : (y - y0));
-	D += static_cast<int>(dD * (step_x ? (rx0 - x0) : (ry0 - y0))) * sign_step; // FIXME: overflow?
-
-	// Diamond exit rule that GS uses for determining line coverage.
-	const auto TestRegion = [](float dx, float dy) -> bool {
-		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
-			return false;
-		if (step_x)
-		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
-		}
-		else
-		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
-		}
-	};
-
-	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
-	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
-
-	GSVertexSW* RESTRICT e = m_edge.buff;
-
-	if (decision >= 0.0f)
-		decision -= (decision_scale);
-	if (decision < -decision_scale)
-		decision += (decision_scale);
-	if (D >= 0)
-		D -= scaleD;
-	if (D < -scaleD)
-		D += scaleD;
-
-	while (true)
-	{
-		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
-		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
-
-		float tmp0 = (step_x ? (y - static_cast<float>(yi) - 0.5f) : (x - static_cast<float>(xi) - 0.5f));
-		float tmp1 = decision / decision_scale;
-		float tmp2 = static_cast<float>(D) / static_cast<float>(scaleD);
-		if (std::abs(tmp1 - tmp0) > 0.01f && std::abs(tmp1 + 1.0f - tmp0) > 0.1f)
-		{
-			printf("");
-		}
-		if (std::abs(tmp2 - tmp0) > 0.01f && std::abs(tmp2 + 1.0f - tmp0) > 0.1f)
-		{
-			printf("");
-		}
-		
-		//printf("%f %f %f\n", tmp0, tmp1, tmp2);
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		if (step_x ? (x == rx0) : (y == ry0))
-			draw = draw && draw_first;
-		if (step_x ? (x == rx1) : (y == ry1))
-			draw = draw && draw_last;
-
-		if (draw)
-		{
-			AddScanline(e, 1, xi, yi, edge);
-
-			e++;
-		}
-
-		if (step_x ? (x == rx1) : (y == ry1))
-			break;
-
-		edge += dedge;
-		x += dx;
-		y += dy;
-		decision += step_decision;
-		if (decision >= 0.0f)
-			decision -= (decision_scale);
-		if (decision < -decision_scale)
-			decision += (decision_scale);
-		D += dD;
-		if (step_x ? pos_y : pos_x)
-		{
-			if (D >= 0)
-				D -= scaleD;
-		}
-		else
-		{
-			if (D < -scaleD)
-				D += scaleD;
-		}
-	}
-
-	m_edge.count = e - m_edge.buff;
-}
-#endif
-
-#if 0
-// Results seem to match almost exactly with PS2. Now remove the FP parts.
-template <bool step_x, bool pos_x, bool pos_y>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
-{
-	GSVector4 dp = dv.p;
-
-	const float x0 = v0.p.x;
-	const float y0 = v0.p.y;
-
-	const float x1 = v1.p.x;
-	const float y1 = v1.p.y;
-
-	if (x0 == 173.3750 && y0 == 266.2500)
-	{
-		printf("");
-	}
-
-	const auto FPToInt = [](float f) { return static_cast<int>(16.0f * f); };
-
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
-
-	float slope = step_x ? ((y1 - y0) / (x1 - x0)) : ((x1 - x0) / (y1 - y0));
-
-	GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
-
-	int slope_scale = static_cast<int>(16.0f * (step_x ? (x1 - x0) : (y1 - y0)));
-
-	float x = step_x ? rx0 : x0;
-	float y = step_x ? y0 : ry0;
-
-	float dx = step_x ? (pos_x ? 1.0f : -1.0f) : slope;
-	float dy = step_x ? slope : (pos_y ? 1.0f : -1.0f);
-
-	dx *= step_x ? 1.0f : dy;
-	dy *= step_x ? dx : 1.0f;
-
-	const float delta_x = x1 - x0;
-	const float delta_y = y1 - y0;
-	int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
-	int D = static_cast<int>(scaleD * ((step_x ? (y0 - ry0) : (x0 - rx0)) - 0.5f));
-	int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int sign_step = step_x ? (pos_x ? 1 : -1) : (pos_y ? 1 : -1);
-
-	GSVertexSW edge(v0);
-	
-
-	edge += dedge * GSVector4(step_x ? (x - x0) : (y - y0));
-	x += step_x ? 0.0f : slope * (y - y0);
-	y += step_x ? slope * (x - x0) : 0.0f;
-	D += static_cast<int>(dD * (step_x ? (rx0 - x0) : (ry0 - y0))) * sign_step; // FIXME: overflow?
-
-	// Diamond exit rule that GS uses for determining line coverage.
-	const auto TestRegion = [](float dx, float dy) -> bool {
-		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
-			return false;
-		if (step_x)
-		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
-		}
-		else
-		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
-		}
-	};
-
-	bool draw_first = !TestRegion(x0 - rx0, y0 - ry0);
-	bool draw_last = TestRegion(x1 - rx1, y1 - ry1);
-
-	GSVertexSW* RESTRICT e = m_edge.buff;
-
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
-	int xi2 = static_cast<int>(rx0);
-	int yi2 = static_cast<int>(ry0);
 
+	const float delta_x = dv.p.x;
+	const float delta_y = dv.p.y;
 
-	if (D >= 0)
+	if (delta_x == 0.0f && delta_y == 0.0f)
+		return;
+
+	const float x0 = v0.p.x;
+	const float y0 = v0.p.y;
+	const float x1 = v1.p.x;
+	const float y1 = v1.p.y;
+
+	const auto RoundFirst = [](float f) {
+		return (step_x ? pos_x : pos_y) ? std::ceil(f - 1.0f) : std::floor(f + 1.0f);
+	};
+
+	const auto RoundLast = [](float f) {
+		return (step_x ? pos_x : pos_y) ? std::floor(f + 1.0f) : std::ceil(f - 1.0f);
+	}; 
+
+	const float rx0 = RoundFirst(x0);
+	const float ry0 = RoundFirst(y0);
+	const float rx1 = RoundLast(x1);
+	const float ry1 = RoundLast(y1);
+
+	const float fx0 = x0 - rx0;
+	const float fy0 = y0 - ry0;
+	const float fx1 = x1 - rx1;
+	const float fy1 = y1 - ry1;
+
+	const int rxi0 = static_cast<int>(rx0);
+	const int ryi0 = static_cast<int>(ry0);
+	const int rxi1 = static_cast<int>(rx1);
+	const int ryi1 = static_cast<int>(ry1);
+
+	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
+
+	GSVertexSW edge(v0);
+
+	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
+
+	// Decision value for y when step_x == true (and vice versa).
+	// D is the fractional part of y scaled and shifted. When pos_y == true, D is kept in the range [-scaleD, 0)
+	// so that D >= 0 indicated a +1 step in y. When pos_y == false, D is kept in the range [0, scaleD) so that
+	// D < 0 indicates a -1 step in y.
+	constexpr bool pos_D = step_x ? pos_y : pos_x;
+	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
+	const float scaleDf = static_cast<float>(scaleD); // Needed only if use_edge == true.
+	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
+	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
+
+	const auto TestEndpoint = [&](float x, float y) -> bool {
+		float k0 = abc0.x * x + abc0.y * y + abc0.z;
+		float k1 = abc1.x * x + abc1.y * y + abc1.z;
+		bool b0 = tl0 ? k0 >= 0 : k0 > 0;
+		bool b1 = tl1 ? k1 >= 0 : k1 > 0;
+		return b0 && b1;
+	};
+
+	int xi = rxi0;
+	int yi = ryi0;
+
+	// Pre-steps
+	float prestep = step_x ? fx0 : fy0;
+	edge += dedge * -GSVector4(prestep);
+	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
+	
+	while (D >= (pos_D ? 0 : scaleD))
 	{
 		D -= scaleD;
-		xi2 += step_x ? 0 : 1;
-		yi2 += step_x ? 1 : 0;
-	}
-	else if (D < -scaleD)
-	{
-		D += scaleD;
-		xi2 += step_x ? 0 : -1;
-		yi2 += step_x ? -1 : 0;
+		xi += step_x ? 0 : 1;
+		yi += step_x ? 1 : 0;
 	}
 
-	pxAssert(-scaleD <= D && D <= 0);
+	while (D < (pos_D ? -scaleD : 0))
+	{
+		D += scaleD;
+		xi += step_x ? 0 : -1;
+		yi += step_x ? -1 : 0;
+	}
+
+	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
 	while (true)
 	{
-		int xi = step_x ? static_cast<int>(x) : static_cast<int>(std::floor(x + 0.5f));
-		int yi = step_x ? static_cast<int>(std::floor(y + 0.5f)) : static_cast<int>(y);
-
-		if (xi != xi2 || yi != yi2)
-		{
-			printf("");
-		}
-
-		float tmp0 = (step_x ? (y - static_cast<float>(yi) - 0.5f) : (x - static_cast<float>(xi) - 0.5f));
-		float tmp1 = static_cast<float>(D) / static_cast<float>(scaleD);
-		if (std::abs(tmp1 - tmp0) > 0.01f && std::abs(tmp1 + 1.0f - tmp0) > 0.1f)
-		{
-			printf("");
-		}
-
-		//printf("%f %f %f\n", tmp0, tmp1);
 
 		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
 		            m_scissor.top <= yi && yi < m_scissor.bottom &&
 		            IsOneOfMyScanlines(yi);
 
-		if (step_x ? (x == rx0) : (y == ry0))
-			draw = draw && draw_first;
-		if (step_x ? (x == rx1) : (y == ry1))
-			draw = draw && draw_last;
+		draw = draw && TestEndpoint((float)xi, float(yi));
 
+		// FIXME: Do the proper top/bottom criteria
 		if (draw)
 		{
-			AddScanline(e, 1, xi, yi, edge);
+			const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f); // FIXME: Can optimize this
+			if (d >= 0.0f)
+			{
+				const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
 
-			e++;
+				if (topleft)
+				{
+					AddScanline(e, 1, xi, yi, edge);
+
+					e->p.U32[0] = 0xffff - cov;
+
+					e++;
+				}
+				else
+				{
+					AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
+
+					e->p.U32[0] = cov;
+
+					e++;
+				}
+			}
+			else if (d < 0.0f)
+			{
+				const int cov = static_cast<int>(0x10000 * (-d));
+
+				if (topleft)
+				{
+					AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
+
+					e->p.U32[0] = cov;
+
+					e++;
+				}
+				else
+				{
+					AddScanline(e, 1, xi, yi, edge);
+
+					e->p.U32[0] = 0xffff - cov;
+
+					e++;
+				}
+
+			}
 		}
 
-		if (step_x ? (x == rx1) : (y == ry1))
+		if (step_x ? (xi == rxi1) : (yi == ryi1))
 			break;
 
 		edge += dedge;
-		x += dx;
-		y += dy;
 		D += dD;
-		xi2 += step_x ? dxi : 0;
-		yi2 += step_x ? 0 : dyi;
-		if (step_x ? pos_y : pos_x)
+		xi += step_x ? dxi : 0;
+		yi += step_x ? 0 : dyi;
+		if constexpr (pos_D)
 		{
-			if (D >= 0)
+			if (D >= 0.0f)
 			{
 				D -= scaleD;
-				xi2 += step_x ? 0 : 1;
-				yi2 += step_x ? 1 : 0;
+				xi += step_x ? 0 : 1;
+				yi += step_x ? 1 : 0;
 			}
 		}
 		else
 		{
-			if (D < -scaleD)
+			if (D < 0.0f)
 			{
 				D += scaleD;
-				xi2 += step_x ? 0 : -1;
-				yi2 += step_x ? -1 : 0;
+				xi += step_x ? 0 : -1;
+				yi += step_x ? -1 : 0;
 			}
 		}
 	}
 
-	m_edge.count = e - m_edge.buff;
+	m_edge.count += e - &m_edge.buff[m_edge.count];
 }
-#endif
 
-template <bool step_x, bool pos_x, bool pos_y, bool has_edge>
-void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
+template <bool step_x, bool pos_x, bool pos_y, int edge_type>
+void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
 {
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
@@ -996,7 +535,7 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	
 	GSVertexSW edge(v0);
 
-	GSVertexSW* RESTRICT e = m_edge.buff;
+	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
 
 	// Decision value for y when step_x == true (and vice versa).
 	// D is the fractional part of y scaled and shifted. When pos_y == true, D is kept in the range [-scaleD, 0)
@@ -1011,17 +550,17 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	// Diamond exit rule for determining coverage of first/last pixel.
 	const auto TestRegion = [](float dx, float dy) -> bool {
 		float dist = std::abs(dx) + std::abs(dy);
-		if (dist < 0.5)
+		if (dist < 0.5f)
 			return false;
 		if constexpr (step_x)
 		{
-			const bool x_good = pos_x ? (dx > 0) : (dx < 0);
-			return x_good && (dist > 0.5 || dy >= 0);
+			const bool x_good = pos_x ? (dx > 0.0f) : (dx < 0.0f);
+			return x_good && (dist > 0.5f || dy >= 0.0f);
 		}
 		else
 		{
-			const bool y_good = pos_y ? (dy > 0) : (dy < 0);
-			return y_good && (dist > 0.5 || dx >= 0);
+			const bool y_good = pos_y ? (dy > 0.0f) : (dy < 0.0f);
+			return y_good && (dist > 0.5f || dx >= 0.0f);
 		}
 	};
 
@@ -1066,38 +605,58 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 		if (draw)
 		{
-			if (has_edge)
+			if constexpr (edge_type)
 			{
 				const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f);
-				if (d >= 0.0f)
+				if (d > 0.0f)
 				{
 					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
 					
-					AddScanline(e, 1, xi, yi, edge);
-					
-					e->p.U32[0] = 0xffff - cov;
-					
-					e++;
+					if constexpr (edge_type & EDGE_TL)
+					{
+						AddScanline(e, 1, xi, yi, edge);
 
-					AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
+						e->p.U32[0] = 0xffff - cov;
 
-					e->p.U32[0] = cov;
+						e++;
+					}
 
-					e++;
+					if constexpr (edge_type & EDGE_BR)
+					{
+						AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
+
+						e->p.U32[0] = cov;
+
+						e++;
+					}
 				}
 				else if (d < 0.0f)
 				{
 					const int cov = static_cast<int>(0x10000 * (-d));
 
+					if constexpr (edge_type & EDGE_BR)
+					{
+						AddScanline(e, 1, xi, yi, edge);
+
+						e->p.U32[0] = 0xffff - cov;
+
+						e++;
+					}
+
+					if constexpr (edge_type & EDGE_TL)
+					{
+						AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
+
+						e->p.U32[0] = cov;
+
+						e++;
+					}
+				}
+				else // d == 0.0f => full coverage.
+				{
 					AddScanline(e, 1, xi, yi, edge);
 
-					e->p.U32[0] = 0xffff - cov;
-
-					e++;
-
-					AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
-
-					e->p.U32[0] = cov;
+					e->p.U32[0] = 0xffff;
 
 					e++;
 				}
@@ -1120,7 +679,7 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		yi += step_x ? 0 : dyi;
 		if constexpr (pos_D)
 		{
-			if (D >= 0.0f)
+			if (D >= 0.0f) // FIXME: Change to integer
 			{
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
@@ -1138,7 +697,252 @@ void GSRasterizer::DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		}
 	}
 
-	m_edge.count = e - m_edge.buff;
+	m_edge.count += e - &m_edge.buff[m_edge.count];
+}
+
+// FIXME: Make reference again!
+void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
+	GSVector4 abc0, bool br0,
+	GSVector4 abc1, bool br1,
+	bool topleft, bool test)
+{
+	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
+	// More efficient to step right to left or some such?
+	if (step_x)
+	{
+		if (dv.p.x <= 0)
+		{
+			std::swap(v0, v1);
+		}
+	}
+	else
+	{
+		if (dv.p.y <= 0)
+		{
+			std::swap(v0, v1);
+		}
+	}
+	dv = v1 - v0;
+
+	if (true)
+	{
+		if (step_x)
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdgeTriangle<1, 1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+				else
+					DrawEdgeTriangle<1, 1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdgeTriangle<1, 0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+				else
+					DrawEdgeTriangle<1, 0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+			}
+		}
+		else // !step_x
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdgeTriangle<0, 1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+				else
+					DrawEdgeTriangle<0, 1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdgeTriangle<0, 0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+				else
+					DrawEdgeTriangle<0, 0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+			}
+		}
+	}
+
+	return;
+}
+
+// TODO: Make the traignle edge and line edge separate. The line edge can be simplified,
+// while the triangle edge needs to evalualte auxiliary edge functions!!!
+
+// FIXME: Make reference again!
+void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edge_type)
+{
+	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
+
+	// FIXME: Not for triangles!!
+	if (edge_type)
+	{
+		if (step_x)
+		{
+			if (dv.p.x <= 0)
+			{
+				std::swap(v0, v1);
+			}
+		}
+		else
+		{
+			if (dv.p.y <= 0)
+			{
+				std::swap(v0, v1);
+			}
+		}
+		dv = v1 - v0;
+	}
+
+	if (edge_type == 0)
+	{
+		if (step_x)
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 1, 1, 0>(v0, v1, dv);
+				else
+					DrawEdge<1, 1, 0, 0>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 0, 1, 0>(v0, v1, dv);
+				else
+					DrawEdge<1, 0, 0, 0>(v0, v1, dv);
+			}
+		}
+		else // !step_x
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 1, 1, 0>(v0, v1, dv);
+				else
+					DrawEdge<0, 1, 0, 0>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 0, 1, 0>(v0, v1, dv);
+				else
+					DrawEdge<0, 0, 0, 0>(v0, v1, dv);
+			}
+		}
+	}
+	else if (edge_type == 1)
+	{
+		if (step_x)
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 1, 1, 1>(v0, v1, dv);
+				else
+					DrawEdge<1, 1, 0, 1>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 0, 1, 1>(v0, v1, dv);
+				else
+					DrawEdge<1, 0, 0, 1>(v0, v1, dv);
+			}
+		}
+		else // !step_x
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 1, 1, 1>(v0, v1, dv);
+				else
+					DrawEdge<0, 1, 0, 1>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 0, 1, 1>(v0, v1, dv);
+				else
+					DrawEdge<0, 0, 0, 1>(v0, v1, dv);
+			}
+		}
+	}
+	else if (edge_type == 2)
+	{
+		if (step_x)
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 1, 1, 2>(v0, v1, dv);
+				else
+					DrawEdge<1, 1, 0, 2>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 0, 1, 2>(v0, v1, dv);
+				else
+					DrawEdge<1, 0, 0, 2>(v0, v1, dv);
+			}
+		}
+		else // !step_x
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 1, 1, 2>(v0, v1, dv);
+				else
+					DrawEdge<0, 1, 0, 2>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 0, 1, 2>(v0, v1, dv);
+				else
+					DrawEdge<0, 0, 0, 2>(v0, v1, dv);
+			}
+		}
+	}
+	else if (edge_type == 3)
+	{
+		if (step_x)
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 1, 1, 3>(v0, v1, dv);
+				else
+					DrawEdge<1, 1, 0, 3>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<1, 0, 1, 3>(v0, v1, dv);
+				else
+					DrawEdge<1, 0, 0, 3>(v0, v1, dv);
+			}
+		}
+		else // !step_x
+		{
+			if (dv.p.x >= 0)
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 1, 1, 3>(v0, v1, dv);
+				else
+					DrawEdge<0, 1, 0, 3>(v0, v1, dv);
+			}
+			else
+			{
+				if (dv.p.y >= 0)
+					DrawEdge<0, 0, 1, 3>(v0, v1, dv);
+				else
+					DrawEdge<0, 0, 0, 3>(v0, v1, dv);
+			}
+		}
+	}
+
+	return;
 }
 
 void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
@@ -1150,82 +954,7 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	GSVertexSW dv = v1 - v0;
 
-	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
-
-	if (HasEdge())
-	{
-		if (step_x)
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<1, 1, 1, 1>(v0, v1, dv);
-				else
-					DrawLineImpl<1, 1, 0, 1>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<1, 0, 1, 1>(v0, v1, dv);
-				else
-					DrawLineImpl<1, 0, 0, 1>(v0, v1, dv);
-			}
-		}
-		else // !step_x
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<0, 1, 1, 1>(v0, v1, dv);
-				else
-					DrawLineImpl<0, 1, 0, 1>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<0, 0, 1, 1>(v0, v1, dv);
-				else
-					DrawLineImpl<0, 0, 0, 1>(v0, v1, dv);
-			}
-		}
-	}
-	else // !HasEdge()
-	{
-		if (step_x)
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<1, 1, 1, 0>(v0, v1, dv);
-				else
-					DrawLineImpl<1, 1, 0, 0>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<1, 0, 1, 0>(v0, v1, dv);
-				else
-					DrawLineImpl<1, 0, 0, 0>(v0, v1, dv);
-			}
-		}
-		else // !step_x
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<0, 1, 1, 0>(v0, v1, dv);
-				else
-					DrawLineImpl<0, 1, 0, 0>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawLineImpl<0, 0, 1, 0>(v0, v1, dv);
-				else
-					DrawLineImpl<0, 0, 0, 0>(v0, v1, dv);
-			}
-		}
-	}
+	DrawEdge(v0, v1, dv, HasEdge() ? (EDGE_TL | EDGE_BR) : EDGE_NONE);
 
 	Flush(vertex, index, GSVertexSW::zero(), HasEdge());
 
@@ -1364,12 +1093,16 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		GSVector4 b = dx < GSVector4::zero();    // dx < 0
 		GSVector4 c = cross < GSVector4::zero(); // longest.p.x < 0
 
-		int orientation = a.mask();
+		//int orientation = a.mask();
 		int side = ((a | b) ^ c).mask() ^ 2; // evil
 
-		DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v1, (GSVertexSW&)dv0, orientation & 1, side & 1);
-		DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v2, (GSVertexSW&)dv1, orientation & 2, side & 2);
-		DrawEdge((GSVertexSW&)v1, (GSVertexSW&)v2, (GSVertexSW&)dv2, orientation & 4, side & 4);
+		//DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v1, (GSVertexSW&)dv0, orientation & 1, side & 1);
+		//DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v2, (GSVertexSW&)dv1, orientation & 2, side & 2);
+		//DrawEdge((GSVertexSW&)v1, (GSVertexSW&)v2, (GSVertexSW&)dv2, orientation & 4, side & 4);
+
+		DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v1, (GSVertexSW&)dv0, (side & 1) ? EDGE_TL : EDGE_BR);
+		DrawEdge((GSVertexSW&)v0, (GSVertexSW&)v2, (GSVertexSW&)dv1, (side & 2) ? EDGE_TL : EDGE_BR);
+		DrawEdge((GSVertexSW&)v1, (GSVertexSW&)v2, (GSVertexSW&)dv2, (side & 4) ? EDGE_TL : EDGE_BR);
 
 		Flush(vertex, index, GSVertexSW::zero(), true);
 	}
@@ -1546,9 +1279,50 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		int orientation = a.mask();
 		int side = ((a | b) ^ c).mask() ^ 2; // evil
 
-		DrawEdge(v0, v1, dv0, orientation & 1, side & 1);
-		DrawEdge(v0, v2, dv1, orientation & 2, side & 2);
-		DrawEdge(v1, v2, dv2, orientation & 4, side & 4);
+		if (v0.p.x == 9.3750 && v0.p.y == 75.6250)
+		{
+			printf("");
+		}
+
+		//DrawEdge(v0, v1, dv0, orientation & 1, side & 1);
+		//DrawEdge(v0, v2, dv1, orientation & 2, side & 2);
+		//DrawEdge(v1, v2, dv2, orientation & 4, side & 4);
+
+		if (v0.p.x == 9.3750 && v0.p.y == 75.6250)
+		{
+			printf("");
+		}
+
+		// (side & 1) ? EDGE_TL : EDGE_BR
+		// (side & 2) ? EDGE_TL : EDGE_BR
+		// (side & 4) ? EDGE_TL : EDGE_BR
+
+		GSVector4 f0;
+		f0.x = dv0.p.y;
+		f0.y = -dv0.p.x;
+		f0.z = v1.p.x * v0.p.y - v1.p.y * v0.p.x;
+
+		GSVector4 f1;
+		f1.x = dv1.p.y;
+		f1.y = -dv1.p.x;
+		f1.z = v2.p.x * v0.p.y - v2.p.y * v0.p.x;
+		f1 = -f1; // TODO: WHy negative?
+
+		GSVector4 f2;
+		f2.x = dv2.p.y;
+		f2.y = -dv2.p.x;
+		f2.z = v2.p.x * v1.p.y - v2.p.y * v1.p.x;
+
+		if (cross.x < 0)
+		{
+			f0 *= -1;
+			f1 *= -1;
+			f2 *= -1;
+		}
+
+		DrawEdgeTriangle(v0, v1, dv0, f1, side & 2, f2, side & 4, side & 1, cross.x < 0);
+		DrawEdgeTriangle(v0, v2, dv1, f2, side & 4, f0, side & 1, side & 2, cross.x < 0);
+		DrawEdgeTriangle(v1, v2, dv2, f0, side & 1, f1, side & 2, side & 4, cross.x < 0);
 
 		Flush(vertex, index, GSVertexSW::zero(), true);
 	}

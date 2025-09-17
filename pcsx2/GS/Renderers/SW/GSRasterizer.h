@@ -88,13 +88,34 @@ protected:
 
 	__forceinline bool HasEdge() const { return (m_draw_edge != nullptr); }
 
+	enum EdgeType : int
+	{
+		EDGE_NONE    = 0,
+		EDGE_TL      = 1,
+		EDGE_BR      = 2,
+	};
+
 	template <bool scissor_test>
 	void DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count);
-	template <bool step_x, bool pos_x, bool pos_y, bool has_edge>
-	void DrawLineImpl(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
+	template <bool step_x, bool pos_x, bool pos_y, int has_edge>
+	void DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
+	void DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edge_type);
 	void DrawLine(const GSVertexSW* vertex, const u16* index);
 	void DrawTriangle(const GSVertexSW* vertex, const u16* index);
 	void DrawSprite(const GSVertexSW* vertex, const u16* index);
+
+
+	template <bool step_x, bool pos_x, bool pos_y, int has_edge>
+	void DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
+		GSVector4 abc0, bool br0,
+		GSVector4 abc1, bool br1,
+		bool topleft, bool test);
+
+	void DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, GSVector4 abc0, bool br0,
+		GSVector4 abc1, bool br1, bool topleft, bool test);
+
+	using DrawEdgePtr = void (GSRasterizer::*)(const GSVertexSW&, const GSVertexSW&, const GSVertexSW&);
+	DrawEdgePtr m_draw_edge_static[2][2][2][2][3];
 
 #if _M_SSE >= 0x501
 	__forceinline void DrawTriangleSection(int top, int bottom, GSVertexSW2& RESTRICT edge, const GSVertexSW2& RESTRICT dedge, const GSVertexSW2& RESTRICT dscan, const GSVector4& RESTRICT p0);
