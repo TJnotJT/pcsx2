@@ -325,8 +325,8 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 
 template <bool step_x, bool pos_x, bool pos_y, int edge_type>
 void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
-	GSVector4 abc0, bool tl0,
-	GSVector4 abc1, bool tl1,
+	GSVector4i abc0, bool tl0,
+	GSVector4i abc1, bool tl1,
 	bool topleft, bool test)
 {
 	constexpr int dxi = pos_x ? 1 : -1;
@@ -342,6 +342,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const float y0 = v0.p.y;
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
+
+	if ((x0 == 960 && y0 == 932.0625) || (x1 == 968.75 && y1 == 924.25))
+	{
+		printf("");
+	}
 
 	const auto RoundFirst = [](float f) {
 		return (step_x ? pos_x : pos_y) ? std::ceil(f - 1.0f) : std::floor(f + 1.0f);
@@ -382,9 +387,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
 
-	const auto TestEndpoint = [&](float x, float y) -> bool {
-		float k0 = abc0.x * x + abc0.y * y + abc0.z;
-		float k1 = abc1.x * x + abc1.y * y + abc1.z;
+	const auto TestEndpoint = [&](int x, int y) -> bool {
+		int k0 = abc0.x * x + abc0.y * y + abc0.z;
+		int k1 = abc1.x * x + abc1.y * y + abc1.z;
 		bool b0 = tl0 ? k0 >= 0 : k0 > 0;
 		bool b1 = tl1 ? k1 >= 0 : k1 > 0;
 		return b0 && b1;
@@ -412,25 +417,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		yi += step_x ? -1 : 0;
 	}
 
-	//32.0000, 176.0000 24.0000, 168.0000
+	//960.0000, 932.0625, 0 968.7500, 924.2500, 0
 
-	if ((x1 == 32 && y1 == 176) && (x0 == 24 && y0 == 168))
-	{
-		printf("");
-	}
 
-	if ((x0 == 56 && y0 == 72.0625) || (x0 == 56 && y0 == 80.4375))
-	{
-		printf("");
-	}
-
-		//v5167:
-	//240.8125, 272.0625 240.8125, 264.8125
-
-	if ((x0 == 240.8125 && y0 == 272.0625) || (x0 == 240.8125 && y0 == 264.8125))
-	{
-		printf("");
-	}
 
 	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
@@ -745,8 +734,8 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 
 // FIXME: Make reference again!
 void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
-	GSVector4 abc0, bool br0,
-	GSVector4 abc1, bool br1,
+	GSVector4i abc0, bool br0,
+	GSVector4i abc1, bool br1,
 	bool topleft, bool test)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
@@ -1372,27 +1361,50 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		// (side & 2) ? EDGE_TL : EDGE_BR
 		// (side & 4) ? EDGE_TL : EDGE_BR
 
-		GSVector4 f0;
-		f0.x = dv0.p.y;
-		f0.y = -dv0.p.x;
-		f0.z = v1.p.x * v0.p.y - v1.p.y * v0.p.x;
+		GSVector4i xy0 = GSVector4i(v0.p * GSVector4::cxpr(16.0f));
+		GSVector4i xy1 = GSVector4i(v1.p * GSVector4::cxpr(16.0f));
+		GSVector4i xy2 = GSVector4i(v2.p * GSVector4::cxpr(16.0f));
 
-		GSVector4 f1;
-		f1.x = dv1.p.y;
-		f1.y = -dv1.p.x;
-		f1.z = v2.p.x * v0.p.y - v2.p.y * v0.p.x;
-		f1 = -f1; // TODO: WHy negative?
+		GSVector4 ff0;
+		ff0.x = dv0.p.y;
+		ff0.y = -dv0.p.x;
+		ff0.z = v1.p.x * v0.p.y - v1.p.y * v0.p.x;
 
-		GSVector4 f2;
-		f2.x = dv2.p.y;
-		f2.y = -dv2.p.x;
-		f2.z = v2.p.x * v1.p.y - v2.p.y * v1.p.x;
+		GSVector4 ff1;
+		ff1.x = dv1.p.y;
+		ff1.y = -dv1.p.x;
+		ff1.z = v2.p.x * v0.p.y - v2.p.y * v0.p.x;
+		ff1 = -ff1; // TODO: WHy negative?
+
+		GSVector4 ff2;
+		ff2.x = dv2.p.y;
+		ff2.y = -dv2.p.x;
+		ff2.z = v2.p.x * v1.p.y - v2.p.y * v1.p.x;
+
+		ff0 = ff0 * GSVector4(256);
+		ff1 = ff1 * GSVector4(256);
+		ff2 = ff2 * GSVector4(256);
 
 		if (cross.x < 0)
 		{
-			f0 *= -1;
-			f1 *= -1;
-			f2 *= -1;
+			ff0 = GSVector4::cxpr(0) - ff0;
+			ff1 = GSVector4::cxpr(0) - ff1;
+			ff2 = GSVector4::cxpr(0) - ff2;
+		}
+
+		GSVector4i f0 = (xy1 - xy0).yxyx().upl32(xy0 - xy1).sll32<4>();
+		GSVector4i f1 = (xy0 - xy2).yxyx().upl32(xy2 - xy0).sll32<4>();
+		GSVector4i f2 = (xy2 - xy1).yxyx().upl32(xy1 - xy2).sll32<4>();
+
+		f0 = f0.insert32<2>(xy1.x * xy0.y - xy0.x * xy1.y);
+		f1 = f1.insert32<2>(xy0.x * xy2.y - xy2.x * xy0.y);
+		f2 = f2.insert32<2>(xy2.x * xy1.y - xy1.x * xy2.y);
+
+		if (cross.x < 0)
+		{
+			f0 = GSVector4i::cxpr(0) - f0;
+			f1 = GSVector4i::cxpr(0) - f1;
+			f2 = GSVector4i::cxpr(0) - f2;
 		}
 
 		my_topleft = my_side & 1;

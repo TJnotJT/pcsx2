@@ -107,12 +107,12 @@ protected:
 
 	template <bool step_x, bool pos_x, bool pos_y, int has_edge>
 	void DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
-		GSVector4 abc0, bool br0,
-		GSVector4 abc1, bool br1,
+		GSVector4i abc0, bool br0,
+		GSVector4i abc1, bool br1,
 		bool topleft, bool test);
 
-	void DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, GSVector4 abc0, bool br0,
-		GSVector4 abc1, bool br1, bool topleft, bool test);
+	void DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, GSVector4i abc0, bool br0,
+		GSVector4i abc1, bool br1, bool topleft, bool test);
 
 	using DrawEdgePtr = void (GSRasterizer::*)(const GSVertexSW&, const GSVertexSW&, const GSVertexSW&);
 	DrawEdgePtr m_draw_edge_static[2][2][2][2][3];
