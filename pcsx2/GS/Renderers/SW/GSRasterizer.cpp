@@ -424,6 +424,14 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		printf("");
 	}
 
+		//v5167:
+	//240.8125, 272.0625 240.8125, 264.8125
+
+	if ((x0 == 240.8125 && y0 == 272.0625) || (x0 == 240.8125 && y0 == 264.8125))
+	{
+		printf("");
+	}
+
 	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
 	bool aaleft = my_topleft;
@@ -440,13 +448,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	while (true)
 	{
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		draw = draw && TestEndpoint((float)xi, float(yi));
-
 		// FIXME: Do the proper top/bottom criteria
 		const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f); // FIXME: Can optimize this
 
@@ -471,7 +472,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				e++;
 			}
 		}
-		else if (d <= 0.0f)
+		else if (d < 0.0f)
 		{
 			const int cov = static_cast<int>(0xffff * (topleft ? -d : 1 + d));
 
@@ -493,25 +494,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		}
 		else if (d == 0.0f)
 		{
-			int cov = static_cast<int>(0x10000 * (-d));
-
-			int bias_x = topleft ? -1 : 1;
-			int bias_y = (pos_x == pos_y) ? -1 : 1;
-			if (topleft)
-			{
-				bias_x = -bias_x;
-				bias_y = -bias_y;
-				cov = 0;
-			}
-			else
-			{
-				bias_x = 0;
-				bias_y = 0;
-				cov = 0xffff;
-			}
-
-			int xi2 = xi + (step_x ? 0 : bias_x);
-			int yi2 = yi + (step_x ? bias_y : 0);
+			int cov = my_topleft ? 0 : 0xffff;
+			int xi2 = xi + ((step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
+			int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
 			bool draw = TestEndpoint(xi2, yi2);
 			draw = draw &&
 					m_scissor.left <= xi2 && xi2 < m_scissor.right &&
