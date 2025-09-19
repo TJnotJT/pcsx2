@@ -388,7 +388,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	int e1 = efun1.x * xi + efun1.y * yi + efun1.z;
 	int e2 = efun2.x * xi + efun2.y * yi + efun2.z;
 
-	const auto StepDependentPos = [&D, &scaleD, &xi, &yi, &e1, &e2, &efun1, &efun2]() {
+	const auto StepDependentPos = [&]() {
 		D -= scaleD;
 		xi += step_x ? 0 : 1;
 		yi += step_x ? 1 : 0;
@@ -396,7 +396,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		e2 += step_x ? efun2.y : efun2.x;
 	};
 
-	const auto StepDependentNeg = [&D, &scaleD, &xi, &yi, &e1, &e2, &efun1, &efun2]() {
+	const auto StepDependentNeg = [&]() {
 		D += scaleD;
 		xi += step_x ? 0 : -1;
 		yi += step_x ? -1 : 0;
@@ -420,31 +420,37 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	while (true)
 	{
 		const float d = static_cast<float>(D) / scaleDf;
-		int cov, offset;
 
-		// Coverage and offset for anti-aliased point.
+		// Coverage and coordinates for anti-aliased point.
+		int cov, xi2, yi2, e12, e22;
+
+		const auto GetOffsetVars = [&]<int offset>() {
+			xi2 = xi + (step_x ? 0 : offset);
+			yi2 = yi + (step_x ? offset : 0);
+			e12 = e1 + (step_x ? efun1.y : efun1.x) * offset;
+			e22 = e2 + (step_x ? efun2.y : efun2.x) * offset;
+		};
+
 		if (d > 0.0f)
 		{
 			cov = static_cast<int>(0xffff * (side ? 1.0 - d : d));
-			offset = (side ? 0 : 1);
+			constexpr int offset = (side ? 0 : 1);
+			GetOffsetVars.template operator()<offset>();
 		}
 		else if (d < 0.0f)
 		{
 			cov = static_cast<int>(0xffff * (side ? -d : 1.0 + d));
-			offset = (side ? -1 : 0);
+			constexpr int offset = (side ? -1 : 0);
+			GetOffsetVars.template operator()<offset>();
 		}
 		else // d == 0.0f
 		{
 			// When exactly on the pixel center, top-left edges can create 0 coverage points and
 			// bottom-right edges can create full coverage points (with some rounding error).
 			cov = tl ? 0 : 0xffff;
-			offset = tl ? (side ? -1 : 1) : 0;
+			constexpr int offset = tl ? (side ? -1 : 1) : 0;
+			GetOffsetVars.template operator()<offset>();
 		}
-
-		const int xi2 = xi + (step_x ? 0 : offset);
-		const int yi2 = yi + (step_x ? offset : 0);
-		const int e12 = e1 + (step_x ? efun1.y : efun1.x) * offset;
-		const int e22 = e2 + (step_x ? efun2.y : efun2.x) * offset;
 
 		if (e12 > 0 && e22 > 0 &&
 			bxi0 <= xi2 && xi2 <= bxi1 &&
