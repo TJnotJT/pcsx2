@@ -362,10 +362,16 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	// totally accurate: PS2 sometimes has strict comparison for the x bound and sometimes
 	// non-strict. We use always strict comparison for x and always non-strict for y since it
 	// seems to give the most accurate results.
-	const int bxi0 = static_cast<int>(std::floor(std::min(x0, x1)));
-	const int byi0 = static_cast<int>(std::ceil(std::min(y0, y1) - 1.0f));
-	const int bxi1 = static_cast<int>(std::ceil(std::max(x0, x1)));
-	const int byi1 = static_cast<int>(std::floor(std::max(y0, y1) + 1.0f));
+	int bxi0 = static_cast<int>(std::floor(std::min(x0, x1)));
+	int byi0 = static_cast<int>(std::ceil(std::min(y0, y1) - 1.0f));
+	int bxi1 = static_cast<int>(std::ceil(std::max(x0, x1)));
+	int byi1 = static_cast<int>(std::floor(std::max(y0, y1) + 1.0f));
+
+	// Combine with scissor region
+	bxi0 = std::max(bxi0, m_scissor.x);
+	byi0 = std::max(byi0, m_scissor.y);
+	bxi1 = std::min(bxi1, m_scissor.z - 1); // b is inclusive.
+	byi1 = std::min(byi1, m_scissor.w - 1); // b is inclusive.
 
 	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
 
@@ -426,8 +432,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const auto TestEndpoint = [&](int x, int y) -> bool {
 		return (abc0.x * x + abc0.y * y + abc0.z >= (tl0 ? 0 : 1)) &&
 		       (abc1.x * x + abc1.y * y + abc1.z >= (tl1 ? 0 : 1)) &&
-		       m_scissor.left <= x && x < m_scissor.right &&
-		       m_scissor.top <= y && y < m_scissor.bottom &&
 		       bxi0 <= x && x <= bxi1 &&
 			   byi0 <= y && y <= byi1 &&
 		       IsOneOfMyScanlines(y);
