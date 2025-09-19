@@ -320,11 +320,9 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 	}
 }
 
-template <bool step_x, bool pos_x, bool pos_y>
+template <bool step_x, bool pos_x, bool pos_y, bool tl0, bool tl1, bool tl2>
 void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
-	GSVector4i efun0, bool tl0,
-	GSVector4i efun1, bool tl1,
-	bool topleft)
+	const GSVector4i efun1, const GSVector4i efun2)
 {
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
@@ -410,7 +408,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	// side == true => outside of triangle is towards top or left.
 	// side == false => outside of triangle is towards bottom or right.
-	bool side = topleft ^ (step_x && (delta_y != 0) && (pos_x == pos_y));
+	// FIXME: Should have this constexpr!
+	bool side = tl0 ^ (step_x && (delta_y != 0) && (pos_x == pos_y));
 
 	while (true)
 	{
@@ -434,16 +433,17 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		{
 			// When exactly on the pixel center, top-left edges can create 0 coverage points and
 			// bottom-right edges can create full coverage points (with some rounding error).
-			cov = topleft ? 0 : 0xffff;
-			ofx = ((step_x || !topleft) ? 0 : (side ? -1.0 : 1));
-			ofy = ((!step_x || !topleft) ? 0 : (side ? -1.0 : 1));
+			cov = tl0 ? 0 : 0xffff;
+			ofx = (step_x || !tl0) ? 0 : (side ? -1 : 1);
+			ofy = (!step_x || !tl0) ? 0 : (side ? -1 : 1);
 		}
 
+		// CLEAN THIS UP: PUT THE CHECK FOR STEP_X HERE. IGNORE OTHERWISE!
 		const int xi2 = xi + ofx;
 		const int yi2 = yi + ofy;
 
-		if ((efun0.x * xi2 + efun0.y * yi2 + efun0.z >= (tl0 ? 0 : 1)) &&
-			(efun1.x * xi2 + efun1.y * yi2 + efun1.z >= (tl1 ? 0 : 1)) &&
+		if ((efun1.x * xi2 + efun1.y * yi2 + efun1.z >= (tl1 ? 0 : 1)) &&
+			(efun2.x * xi2 + efun2.y * yi2 + efun2.z >= (tl2 ? 0 : 1)) &&
 			bxi0 <= xi2 && xi2 <= bxi1 &&
 			byi0 <= yi2 && yi2 <= byi1 &&
 			IsOneOfMyScanlines(yi2))
@@ -689,48 +689,14 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 
 // FIXME: Make reference again!
 void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
-	GSVector4i abc0, bool br0,
-	GSVector4i abc1, bool br1,
-	bool topleft)
+	GSVector4i abc1, bool tl1,
+	GSVector4i abc2, bool tl2,
+	bool tl0)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
-
-	if (step_x)
-	{
-		if (dv.p.x >= 0)
-		{
-			if (dv.p.y >= 0)
-				DrawEdgeTriangle<1, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			else
-				DrawEdgeTriangle<1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-		}
-		else
-		{
-			if (dv.p.y >= 0)
-				DrawEdgeTriangle<1, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			else
-				DrawEdgeTriangle<1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-		}
-	}
-	else // !step_x
-	{
-		if (dv.p.x >= 0)
-		{
-			if (dv.p.y >= 0)
-				DrawEdgeTriangle<0, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			else
-				DrawEdgeTriangle<0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-		}
-		else
-		{
-			if (dv.p.y >= 0)
-				DrawEdgeTriangle<0, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			else
-				DrawEdgeTriangle<0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-		}
-	}
-
-	return;
+	const bool pos_x = dv.p.x >= 0.0f;
+	const bool pos_y = dv.p.y >= 0.0f;
+	(this->*m_draw_edge_triangle[step_x][pos_x][pos_y][tl0][tl1][tl2])(v0, v1, dv, abc1, abc2);
 }
 
 // TODO: Make the traignle edge and line edge separate. The line edge can be simplified,
@@ -1871,3 +1837,23 @@ std::unique_ptr<IRasterizer> GSRasterizerList::Create(int threads)
 void GSRasterizerList::PrintStats()
 {
 }
+
+#define INIT5(x0, x1, x2, x3, x4, x5) \
+	static_cast<DrawEdgeTrianglePtr>(&GSRasterizer::DrawEdgeTriangle<x0, x1, x2, x3, x4, x5>)
+#define INIT4(x0, x1, x2, x3, x4)      { INIT5(x0, x1, x2, x3, x4, false), INIT5(x0, x1, x2, x3, x4, true) }
+#define INIT3(x0, x1, x2, x3)          { INIT4(x0, x1, x2, x3, false)    , INIT4(x0, x1, x2, x3, true)     } 
+#define INIT2(x0, x1, x2)              { INIT3(x0, x1, x2, false)        , INIT3(x0, x1, x2, true)         } 
+#define INIT1(x0, x1)                  { INIT2(x0, x1, false)            , INIT2(x0, x1, true)              }
+#define INIT0(x0)                      { INIT1(x0, false)                , INIT1(x0, true)                  }
+
+const GSRasterizer::DrawEdgeTrianglePtr GSRasterizer::m_draw_edge_triangle[2][2][2][2][2][2] = {
+	INIT0(false),
+	INIT0(true)
+};
+
+#undef INIT0
+#undef INIT1
+#undef INIT2
+#undef INIT3
+#undef INIT4
+#undef INIT5
