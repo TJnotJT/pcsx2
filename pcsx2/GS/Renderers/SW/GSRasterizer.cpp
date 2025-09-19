@@ -343,7 +343,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
 
-	if ((x0 == 960 && y0 == 932.0625) || (x1 == 968.75 && y1 == 924.25))
+	//0.2500, 1.0625
+	//15.3125, 9.7500, 0
+	if (
+		((x0 == .25 && y0 == 1.0625) && (x1 == 15.3125 && y1 == 9.7500)) ||
+		((x1 == .25 && y1 == 1.0625) && (x0 == 15.3125 && y0 == 9.7500)))
 	{
 		printf("");
 	}
@@ -435,71 +439,105 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		pxAssert(aaleft == topleft);
 	}
 
+	if ((x0 == 24.6250 && y0 == 44.7500) || (x0 == 32.0000 && y0 == 36.0000))
+	{
+		printf("");
+	}
+
 	while (true)
 	{
 		// FIXME: Do the proper top/bottom criteria
 		const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f); // FIXME: Can optimize this
 
-		// TODO: Unify both cases if possible.
-		if (d > 0.0f)
+		//bool draw = TestEndpoint(xi, yi);
+
+		bool draw_temp = TestEndpoint(xi, yi);
+
+		GSVertexSW temp_edge = edge;
+
+		bool draw=true;
+		if (true)
 		{
-			int cov = std::clamp(static_cast<int>(0xffff * (topleft ? 1 - d : d)), 0, 0xffff);
-			int xi2 = xi + (step_x ? 0 : (topleft ? 0 : 1));
-			int yi2 = yi + (step_x ? (topleft ? 0 : 1) : 0);
-			bool draw = TestEndpoint(xi2, yi2);
-			draw = draw &&
-					m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-					m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-					IsOneOfMyScanlines(yi2);
-
-			if (draw)
+			// TODO: Unify both cases if possible.
+			if (d > 0.0f)
 			{
-				AddScanline(e, 1, xi2, yi2, edge);
+				int cov = std::clamp(static_cast<int>(0xffff * (topleft ? 1 - d : d)), 0, 0xffff);
+				int xi2 = xi + (step_x ? 0 : (topleft ? 0 : 1));
+				int yi2 = yi + (step_x ? (topleft ? 0 : 1) : 0);
+				//bool draw = TestEndpoint(xi2, yi2);
+				draw = draw && TestEndpoint(xi2, yi2);
+				draw = draw &&
+				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
+				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
+				       IsOneOfMyScanlines(yi2);
 
-				e->p.U32[0] = cov;
+				draw = draw &&
+					(step_x ?
+					(std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
+					(std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
 
-				e++;
+				if (draw)
+				{
+					AddScanline(e, 1, xi2, yi2, edge);
+
+					e->p.U32[0] = cov;
+
+					e++;
+				}
 			}
-		}
-		else if (d < 0.0f)
-		{
-			const int cov = static_cast<int>(0xffff * (topleft ? -d : 1 + d));
-
-			int xi2 = xi + (step_x ? 0 : (topleft ? -1 : 0));
-			int yi2 = yi + (step_x ? (topleft ? -1 : 0) : 0);
-			bool draw = TestEndpoint(xi2, yi2);
-			draw = draw &&
-					m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-					m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-					IsOneOfMyScanlines(yi2);
-			if (draw)
+			else if (d < 0.0f)
 			{
-				AddScanline(e, 1, xi2, yi2, edge);
+				const int cov = static_cast<int>(0xffff * (topleft ? -d : 1 + d));
 
-				e->p.U32[0] = cov;
+				int xi2 = xi + (step_x ? 0 : (topleft ? -1 : 0));
+				int yi2 = yi + (step_x ? (topleft ? -1 : 0) : 0);
+				//bool draw = TestEndpoint(xi2, yi2);
+				draw = draw && TestEndpoint(xi2, yi2);
+				draw = draw &&
+				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
+				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
+				       IsOneOfMyScanlines(yi2);
+				draw = draw &&
+				       (step_x ?
+							   (std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
+							   (std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
+				if (draw)
+				{
+					AddScanline(e, 1, xi2, yi2, edge);
 
-				e++;
+					e->p.U32[0] = cov;
+
+					e++;
+				}
 			}
-		}
-		else if (d == 0.0f)
-		{
-			int cov = my_topleft ? 0 : 0xffff;
-			int xi2 = xi + ((step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
-			int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
-			bool draw = TestEndpoint(xi2, yi2);
-			draw = draw &&
-					m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-					m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-					IsOneOfMyScanlines(yi2);
-			if (draw)
+			else if (d == 0.0f)
 			{
-				AddScanline(e, 1, xi2, yi2, edge);
+				int cov = my_topleft ? 0 : 0xffff;
+				int xi2 = xi + ((step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
+				int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
+				//bool draw = TestEndpoint(xi2, yi2);
+				draw = draw && TestEndpoint(xi2, yi2);
+				draw = draw &&
+				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
+				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
+				       IsOneOfMyScanlines(yi2);
+				draw = draw &&
+				       (step_x ?
+							   (std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
+							   (std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
+				if (draw)
+				{
+					AddScanline(e, 1, xi2, yi2, edge);
 
-				e->p.U32[0] = cov;
+					e->p.U32[0] = cov;
 
-				e++;
+					e++;
+				}
 			}
+
 		}
+
+		edge = temp_edge;
 
 		if (step_x ? (xi == rxi1) : (yi == ryi1))
 			break;
