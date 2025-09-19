@@ -382,8 +382,27 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
+	// Stepping variables.
 	int xi = rxi0;
 	int yi = ryi0;
+	int e1 = efun1.x * xi + efun1.y * yi + efun1.z;
+	int e2 = efun2.x * xi + efun2.y * yi + efun2.z;
+
+	const auto StepDependentPos = [&D, &scaleD, &xi, &yi, &e1, &e2, &efun1, &efun2]() {
+		D -= scaleD;
+		xi += step_x ? 0 : 1;
+		yi += step_x ? 1 : 0;
+		e1 += step_x ? efun1.y : efun1.x;
+		e2 += step_x ? efun2.y : efun2.x;
+	};
+
+	const auto StepDependentNeg = [&D, &scaleD, &xi, &yi, &e1, &e2, &efun1, &efun2]() {
+		D += scaleD;
+		xi += step_x ? 0 : -1;
+		yi += step_x ? -1 : 0;
+		e1 += step_x ? -efun1.y : -efun1.x;
+		e2 += step_x ? -efun2.y : -efun2.x;
+	};
 
 	// Pre-steps
 	const float prestep = step_x ? fx0 : fy0;
@@ -391,18 +410,10 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
 	
 	while (D >= scaleD / 2)
-	{
-		D -= scaleD;
-		xi += step_x ? 0 : 1;
-		yi += step_x ? 1 : 0;
-	}
+		StepDependentPos();
 
 	while (D < -scaleD / 2)
-	{
-		D += scaleD;
-		xi += step_x ? 0 : -1;
-		yi += step_x ? -1 : 0;
-	}
+		StepDependentNeg();
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
@@ -432,9 +443,10 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 		const int xi2 = xi + (step_x ? 0 : offset);
 		const int yi2 = yi + (step_x ? offset : 0);
+		const int e12 = e1 + (step_x ? efun1.y : efun1.x) * offset;
+		const int e22 = e2 + (step_x ? efun2.y : efun2.x) * offset;
 
-		if ((efun1.x * xi2 + efun1.y * yi2 + efun1.z > 0) &&
-			(efun2.x * xi2 + efun2.y * yi2 + efun2.z > 0) &&
+		if (e12 > 0 && e22 > 0 &&
 			bxi0 <= xi2 && xi2 <= bxi1 &&
 			byi0 <= yi2 && yi2 <= byi1 &&
 			IsOneOfMyScanlines(yi2))
@@ -449,28 +461,24 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		if (step_x ? (xi == rxi1) : (yi == ryi1))
 			break;
 
+		// Step driving axis.
 		edge += dedge;
 		D += dD;
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
+		e1 += step_x ? (dxi * efun1.x) : (dyi * efun1.y);
+		e2 += step_x ? (dxi * efun2.x) : (dyi * efun2.y);
 
+		// Step dependent axis.
 		if constexpr (pos_D)
 		{
 			if (D >= scaleD / 2)
-			{
-				D -= scaleD;
-				xi += step_x ? 0 : 1;
-				yi += step_x ? 1 : 0;
-			}
+				StepDependentPos();
 		}
 		else
 		{
 			if (D < -scaleD / 2)
-			{
-				D += scaleD;
-				xi += step_x ? 0 : -1;
-				yi += step_x ? -1 : 0;
-			}
+				StepDependentNeg();
 		}
 	}
 
