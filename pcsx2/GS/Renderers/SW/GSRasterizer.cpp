@@ -353,20 +353,19 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int rxi1 = static_cast<int>(rx1);
 	const int ryi1 = static_cast<int>(ry1);
 
-	// Note: appears to be asymmetry in how x bound and y bound is handled. This is still not
-	// totally accurate: PS2 sometimes has strict comparison for the x bound and sometimes
-	// non-strict. We use always strict comparison for x and always non-strict for y since it
-	// seems to give the most accurate results.
+	// Note: appears to be asymmetry in how x bound and y bound is handled. Y bounds checking
+	// seems to be accurate here but not x. PS2 sometimes allows antialiased pixel to be +/-1 away
+	// from min/max x values and sometimes not. Not sure the reason so just arbitrarily pick the following for x.
 	int bxi0 = static_cast<int>(std::floor(std::min(x0, x1)));
 	int byi0 = static_cast<int>(std::ceil(std::min(y0, y1) - 1.0f));
 	int bxi1 = static_cast<int>(std::ceil(std::max(x0, x1)));
 	int byi1 = static_cast<int>(std::floor(std::max(y0, y1) + 1.0f));
 
-	// Combine with scissor region
+	// Combine with scissor region.
 	bxi0 = std::max(bxi0, m_scissor.x);
 	byi0 = std::max(byi0, m_scissor.y);
-	bxi1 = std::min(bxi1, m_scissor.z - 1); // b is inclusive.
-	byi1 = std::min(byi1, m_scissor.w - 1); // b is inclusive.
+	bxi1 = std::min(bxi1, m_scissor.z - 1); // b has inclusive coordinates.
+	byi1 = std::min(byi1, m_scissor.w - 1); // b has inclusive coordinates.
 
 	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
 
@@ -382,7 +381,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
-	// Stepping variables.
+	// Stepping variables
 	int xi = rxi0;
 	int yi = ryi0;
 	int e1 = efun1.x * xi + efun1.y * yi + efun1.z;
@@ -549,7 +548,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	const bool draw_first = !TestEndpoint(fx0, fy0);
 	const bool draw_last = TestEndpoint(fx1, fy1);
 
-	// Stepping variables.
+	// Stepping variables
 	int xi = rxi0;
 	int yi = ryi0;
 
