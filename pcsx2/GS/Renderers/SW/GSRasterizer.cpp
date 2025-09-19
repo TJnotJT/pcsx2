@@ -411,12 +411,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
-	bool aaleft = my_topleft;
-	bool aatop = (delta_y == 0) ? my_topleft : ((pos_x != pos_y) ? my_topleft : !my_topleft);
+	// side == true => outside of triangle is towards top or left.
+	// side == false => outside of triangle is towards bottom or right.
+	bool side = my_topleft ^ (step_x && (delta_y != 0) && (pos_x == pos_y));
 
-	bool aaneg = step_x ? aatop : aaleft;
-
-	pxAssert(aaneg == topleft);
+	pxAssert(side == topleft);
 
 	const auto TestEndpoint = [&](int x, int y) -> bool {
 		return (abc0.x * x + abc0.y * y + abc0.z >= (tl0 ? 0 : 1)) &&
@@ -434,23 +433,23 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		// Coverage and offsets for anti-aliased point.
 		if (d > 0.0f)
 		{
-			cov = static_cast<int>(0xffff * (aaneg ? 1.0 - d : d));
-			ofx = (step_x ? 0 : (aaneg ? 0 : 1));
-			ofy = (step_x ? (aaneg ? 0 : 1) : 0);
+			cov = static_cast<int>(0xffff * (side ? 1.0 - d : d));
+			ofx = (step_x ? 0 : (side ? 0 : 1));
+			ofy = (step_x ? (side ? 0 : 1) : 0);
 		}
 		else if (d < 0.0f)
 		{
-			cov = static_cast<int>(0xffff * (aaneg ? -d : 1.0 + d));
-			ofx = (step_x ? 0 : (aaneg ? -1 : 0));
-			ofy = (step_x ? (aaneg ? -1 : 0) : 0);
+			cov = static_cast<int>(0xffff * (side ? -d : 1.0 + d));
+			ofx = (step_x ? 0 : (side ? -1 : 0));
+			ofy = (step_x ? (side ? -1 : 0) : 0);
 		}
 		else // d == 0.0f
 		{
 			// When exactly on the pixel center, top-left edges can create 0 coverage points and
 			// bottom-right edges can create full coverage points (with some rounding error).
 			cov = my_topleft ? 0 : 0xffff;
-			ofx = ((step_x || !my_topleft) ? 0 : (aaneg ? -1.0 : 1));
-			ofy = ((!step_x || !my_topleft) ? 0 : (aaneg ? -1.0 : 1));
+			ofx = ((step_x || !my_topleft) ? 0 : (side ? -1.0 : 1));
+			ofy = ((!step_x || !my_topleft) ? 0 : (side ? -1.0 : 1));
 		}
 
 		const int xi2 = xi + ofx;
