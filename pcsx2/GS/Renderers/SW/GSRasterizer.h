@@ -88,18 +88,11 @@ protected:
 
 	__forceinline bool HasEdge() const { return (m_draw_edge != nullptr); }
 
-	enum EdgeType : int
-	{
-		EDGE_NONE    = 0,
-		EDGE_TL      = 1,
-		EDGE_BR      = 2,
-	};
-
 	template <bool scissor_test>
 	void DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count);
 	template <bool step_x, bool pos_x, bool pos_y, bool aa>
 	void DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
-	void DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, bool has_edge);
+	void DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv, bool has_edge);
 	void DrawLine(const GSVertexSW* vertex, const u16* index);
 	void DrawTriangle(const GSVertexSW* vertex, const u16* index);
 	void DrawSprite(const GSVertexSW* vertex, const u16* index);

@@ -688,29 +688,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 // TODO: Make the traignle edge and line edge separate. The line edge can be simplified,
 // while the triangle edge needs to evalualte auxiliary edge functions!!!
 
-// FIXME: Make reference again!
-void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, bool has_edge)
+void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv, bool has_edge)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
-
-	if (has_edge)
-	{
-		if (step_x)
-		{
-			if (dv.p.x <= 0)
-			{
-				std::swap(v0, v1);
-			}
-		}
-		else
-		{
-			if (dv.p.y <= 0)
-			{
-				std::swap(v0, v1);
-			}
-		}
-		dv = v1 - v0;
-	}
 
 	if (!has_edge)
 	{
@@ -799,7 +779,7 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	GSVertexSW dv = v1 - v0;
 
-	DrawEdge(v0, v1, dv, HasEdge());
+	DrawEdgeLine(v0, v1, dv, HasEdge());
 
 	Flush(vertex, index, GSVertexSW::zero(), HasEdge());
 
