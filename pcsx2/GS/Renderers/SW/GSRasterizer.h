@@ -105,7 +105,7 @@ protected:
 	void DrawSprite(const GSVertexSW* vertex, const u16* index);
 
 
-	template <bool step_x, bool pos_x, bool pos_y, bool tl>
+	template <bool step_x, bool pos_x, bool pos_y, bool tl, bool side>
 	void DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
 		const GSVector4i& efun1, const GSVector4i& efun2);
 
@@ -114,7 +114,7 @@ protected:
 
 	using DrawEdgeTrianglePtr = void (GSRasterizer::*)(const GSVertexSW& , const GSVertexSW&, const GSVertexSW&,
 		const GSVector4i&, const GSVector4i&);
-	static const DrawEdgeTrianglePtr m_draw_edge_triangle[2][2][2][2];
+	static const DrawEdgeTrianglePtr m_draw_edge_triangle[2][2][2][2][2];
 
 #if _M_SSE >= 0x501
 	__forceinline void DrawTriangleSection(int top, int bottom, GSVertexSW2& RESTRICT edge, const GSVertexSW2& RESTRICT dedge, const GSVertexSW2& RESTRICT dscan, const GSVector4& RESTRICT p0);
