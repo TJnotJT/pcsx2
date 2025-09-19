@@ -414,33 +414,29 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	while (true)
 	{
 		const float d = static_cast<float>(D) / scaleDf;
-		int cov, ofx, ofy;
+		int cov, offset;
 
-		// Coverage and offsets for anti-aliased point.
+		// Coverage and offset for anti-aliased point.
 		if (d > 0.0f)
 		{
 			cov = static_cast<int>(0xffff * (side ? 1.0 - d : d));
-			ofx = (step_x ? 0 : (side ? 0 : 1));
-			ofy = (step_x ? (side ? 0 : 1) : 0);
+			offset = (side ? 0 : 1);
 		}
 		else if (d < 0.0f)
 		{
 			cov = static_cast<int>(0xffff * (side ? -d : 1.0 + d));
-			ofx = (step_x ? 0 : (side ? -1 : 0));
-			ofy = (step_x ? (side ? -1 : 0) : 0);
+			offset = (side ? -1 : 0);
 		}
 		else // d == 0.0f
 		{
 			// When exactly on the pixel center, top-left edges can create 0 coverage points and
 			// bottom-right edges can create full coverage points (with some rounding error).
 			cov = tl ? 0 : 0xffff;
-			ofx = (step_x || !tl) ? 0 : (side ? -1 : 1);
-			ofy = (!step_x || !tl) ? 0 : (side ? -1 : 1);
+			offset = tl ? (side ? -1 : 1) : 0;
 		}
 
-		// CLEAN THIS UP: PUT THE CHECK FOR STEP_X HERE. IGNORE OTHERWISE!
-		const int xi2 = xi + ofx;
-		const int yi2 = yi + ofy;
+		const int xi2 = xi + (step_x ? 0 : offset);
+		const int yi2 = yi + (step_x ? offset : 0);
 
 		if ((efun1.x * xi2 + efun1.y * yi2 + efun1.z > 0) &&
 			(efun2.x * xi2 + efun2.y * yi2 + efun2.z > 0) &&
