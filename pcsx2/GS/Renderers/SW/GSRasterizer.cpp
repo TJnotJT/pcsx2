@@ -483,8 +483,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	m_edge.count += e - &m_edge.buff[m_edge.count];
 }
 
-template <bool step_x, bool pos_x, bool pos_y, int edge_type>
-void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
+template <bool step_x, bool pos_x, bool pos_y, bool aa>
+void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
 {
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
@@ -589,52 +589,40 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 
 		if (draw)
 		{
-			if constexpr (edge_type)
+			if constexpr (aa)
 			{
 				const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f);
 				if (d > 0.0f)
 				{
 					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
 					
-					if constexpr (edge_type & EDGE_TL)
-					{
-						AddScanline(e, 1, xi, yi, edge);
+					AddScanline(e, 1, xi, yi, edge);
 
-						e->p.U32[0] = 0xffff - cov;
+					e->p.U32[0] = 0xffff - cov;
 
-						e++;
-					}
+					e++;
 
-					if constexpr (edge_type & EDGE_BR)
-					{
-						AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
+					AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
 
-						e->p.U32[0] = cov;
+					e->p.U32[0] = cov;
 
-						e++;
-					}
+					e++;
 				}
 				else if (d < 0.0f)
 				{
 					const int cov = static_cast<int>(0x10000 * (-d));
 
-					if constexpr (edge_type & EDGE_BR)
-					{
-						AddScanline(e, 1, xi, yi, edge);
+					AddScanline(e, 1, xi, yi, edge);
 
-						e->p.U32[0] = 0xffff - cov;
+					e->p.U32[0] = 0xffff - cov;
 
-						e++;
-					}
+					e++;
 
-					if constexpr (edge_type & EDGE_TL)
-					{
-						AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
+					AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
 
-						e->p.U32[0] = cov;
+					e->p.U32[0] = cov;
 
-						e++;
-					}
+					e++;
 				}
 				else // d == 0.0f => full coverage.
 				{
@@ -663,7 +651,7 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 		yi += step_x ? 0 : dyi;
 		if constexpr (pos_D)
 		{
-			if (D >= 0.0f) // FIXME: Change to integer
+			if (D >= 0) // FIXME: Change to integer
 			{
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
@@ -672,7 +660,7 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 		}
 		else
 		{
-			if (D < 0.0f)
+			if (D < 0)
 			{
 				D += scaleD;
 				xi += step_x ? 0 : -1;
@@ -701,12 +689,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 // while the triangle edge needs to evalualte auxiliary edge functions!!!
 
 // FIXME: Make reference again!
-void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edge_type)
+void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, bool has_edge)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
 
-	// FIXME: Not for triangles!!
-	if (edge_type)
+	if (has_edge)
 	{
 		if (step_x)
 		{
@@ -725,23 +712,23 @@ void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edg
 		dv = v1 - v0;
 	}
 
-	if (edge_type == 0)
+	if (!has_edge)
 	{
 		if (step_x)
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<1, 1, 1, 0>(v0, v1, dv);
+					DrawEdgeLine<1, 1, 1, 0>(v0, v1, dv);
 				else
-					DrawEdge<1, 1, 0, 0>(v0, v1, dv);
+					DrawEdgeLine<1, 1, 0, 0>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<1, 0, 1, 0>(v0, v1, dv);
+					DrawEdgeLine<1, 0, 1, 0>(v0, v1, dv);
 				else
-					DrawEdge<1, 0, 0, 0>(v0, v1, dv);
+					DrawEdgeLine<1, 0, 0, 0>(v0, v1, dv);
 			}
 		}
 		else // !step_x
@@ -749,36 +736,36 @@ void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edg
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<0, 1, 1, 0>(v0, v1, dv);
+					DrawEdgeLine<0, 1, 1, 0>(v0, v1, dv);
 				else
-					DrawEdge<0, 1, 0, 0>(v0, v1, dv);
+					DrawEdgeLine<0, 1, 0, 0>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<0, 0, 1, 0>(v0, v1, dv);
+					DrawEdgeLine<0, 0, 1, 0>(v0, v1, dv);
 				else
-					DrawEdge<0, 0, 0, 0>(v0, v1, dv);
+					DrawEdgeLine<0, 0, 0, 0>(v0, v1, dv);
 			}
 		}
 	}
-	else if (edge_type == 1)
+	else
 	{
 		if (step_x)
 		{
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<1, 1, 1, 1>(v0, v1, dv);
+					DrawEdgeLine<1, 1, 1, 1>(v0, v1, dv);
 				else
-					DrawEdge<1, 1, 0, 1>(v0, v1, dv);
+					DrawEdgeLine<1, 1, 0, 1>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<1, 0, 1, 1>(v0, v1, dv);
+					DrawEdgeLine<1, 0, 1, 1>(v0, v1, dv);
 				else
-					DrawEdge<1, 0, 0, 1>(v0, v1, dv);
+					DrawEdgeLine<1, 0, 0, 1>(v0, v1, dv);
 			}
 		}
 		else // !step_x
@@ -786,90 +773,16 @@ void GSRasterizer::DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edg
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<0, 1, 1, 1>(v0, v1, dv);
+					DrawEdgeLine<0, 1, 1, 1>(v0, v1, dv);
 				else
-					DrawEdge<0, 1, 0, 1>(v0, v1, dv);
+					DrawEdgeLine<0, 1, 0, 1>(v0, v1, dv);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdge<0, 0, 1, 1>(v0, v1, dv);
+					DrawEdgeLine<0, 0, 1, 1>(v0, v1, dv);
 				else
-					DrawEdge<0, 0, 0, 1>(v0, v1, dv);
-			}
-		}
-	}
-	else if (edge_type == 2)
-	{
-		if (step_x)
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<1, 1, 1, 2>(v0, v1, dv);
-				else
-					DrawEdge<1, 1, 0, 2>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<1, 0, 1, 2>(v0, v1, dv);
-				else
-					DrawEdge<1, 0, 0, 2>(v0, v1, dv);
-			}
-		}
-		else // !step_x
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<0, 1, 1, 2>(v0, v1, dv);
-				else
-					DrawEdge<0, 1, 0, 2>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<0, 0, 1, 2>(v0, v1, dv);
-				else
-					DrawEdge<0, 0, 0, 2>(v0, v1, dv);
-			}
-		}
-	}
-	else if (edge_type == 3)
-	{
-		if (step_x)
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<1, 1, 1, 3>(v0, v1, dv);
-				else
-					DrawEdge<1, 1, 0, 3>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<1, 0, 1, 3>(v0, v1, dv);
-				else
-					DrawEdge<1, 0, 0, 3>(v0, v1, dv);
-			}
-		}
-		else // !step_x
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<0, 1, 1, 3>(v0, v1, dv);
-				else
-					DrawEdge<0, 1, 0, 3>(v0, v1, dv);
-			}
-			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdge<0, 0, 1, 3>(v0, v1, dv);
-				else
-					DrawEdge<0, 0, 0, 3>(v0, v1, dv);
+					DrawEdgeLine<0, 0, 0, 1>(v0, v1, dv);
 			}
 		}
 	}
@@ -886,7 +799,7 @@ void GSRasterizer::DrawLine(const GSVertexSW* vertex, const u16* index)
 
 	GSVertexSW dv = v1 - v0;
 
-	DrawEdge(v0, v1, dv, HasEdge() ? (EDGE_TL | EDGE_BR) : EDGE_NONE);
+	DrawEdge(v0, v1, dv, HasEdge());
 
 	Flush(vertex, index, GSVertexSW::zero(), HasEdge());
 

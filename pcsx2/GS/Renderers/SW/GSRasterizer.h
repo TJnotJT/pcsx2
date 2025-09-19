@@ -97,9 +97,9 @@ protected:
 
 	template <bool scissor_test>
 	void DrawPoint(const GSVertexSW* vertex, int vertex_count, const u16* index, int index_count);
-	template <bool step_x, bool pos_x, bool pos_y, int has_edge>
-	void DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
-	void DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, int edge_type);
+	template <bool step_x, bool pos_x, bool pos_y, bool aa>
+	void DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv);
+	void DrawEdge(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv, bool has_edge);
 	void DrawLine(const GSVertexSW* vertex, const u16* index);
 	void DrawTriangle(const GSVertexSW* vertex, const u16* index);
 	void DrawSprite(const GSVertexSW* vertex, const u16* index);
