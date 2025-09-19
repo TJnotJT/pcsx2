@@ -588,55 +588,35 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 		if (draw)
 		{
+			const auto AddScanlineStepEdge = [&](int x, int y, int cov = 0) {
+				AddScanline(e, 1, x, y, edge);
+
+				if constexpr (aa)
+					e->p.U32[0] = cov;
+
+				e++;
+			};
+
 			if constexpr (aa)
 			{
 				const float d = static_cast<float>(D) / scaleDf;
-				if (d > 0.0f)
+
+				if (d >= 0.0f)
 				{
-					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
-					
-					AddScanline(e, 1, xi, yi, edge);
-
-					e->p.U32[0] = 0xffff - cov;
-
-					e++;
-
-					AddScanline(e, 1, xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), edge);
-
-					e->p.U32[0] = cov;
-
-					e++;
+					const int cov = std::clamp(static_cast<int>(0xffff * d), 0, 0xffff);
+					AddScanlineStepEdge(xi, yi, 0xffff - cov);
+					AddScanlineStepEdge(xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), cov);
 				}
 				else if (d < 0.0f)
 				{
-					const int cov = static_cast<int>(0x10000 * (-d));
-
-					AddScanline(e, 1, xi, yi, edge);
-
-					e->p.U32[0] = 0xffff - cov;
-
-					e++;
-
-					AddScanline(e, 1, xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), edge);
-
-					e->p.U32[0] = cov;
-
-					e++;
-				}
-				else // d == 0.0f => full coverage.
-				{
-					AddScanline(e, 1, xi, yi, edge);
-
-					e->p.U32[0] = 0xffff;
-
-					e++;
+					const int cov = static_cast<int>(0xffff * (-d));
+					AddScanlineStepEdge(xi, yi, 0xffff - cov);
+					AddScanlineStepEdge(xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), cov);
 				}
 			}
 			else // No antialiasing.
 			{
-				AddScanline(e, 1, xi, yi, edge);
-
-				e++;
+				AddScanlineStepEdge(xi, yi);
 			}
 
 		}
