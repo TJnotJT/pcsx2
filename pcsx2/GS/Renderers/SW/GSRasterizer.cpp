@@ -390,13 +390,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	int xi = rxi0;
 	int yi = ryi0;
 
-	int xi3 = xi;
-	int yi3 = yi;
-
-	// Edge functions
-	int e0 = abc0.x * xi + abc0.y * yi + abc0.z;
-	int e1 = abc1.x * xi + abc1.y * yi + abc1.z;
-
 	// Pre-steps
 	const float prestep = step_x ? fx0 : fy0;
 	edge += dedge * -GSVector4(prestep);
@@ -407,8 +400,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D -= scaleD;
 		xi += step_x ? 0 : 1;
 		yi += step_x ? 1 : 0;
-		e0 += step_x ? abc0.y : abc0.x;
-		e1 += step_x ? abc1.y : abc1.x;
 	}
 
 	while (D < -scaleD / 2)
@@ -416,8 +407,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D += scaleD;
 		xi += step_x ? 0 : -1;
 		yi += step_x ? -1 : 0;
-		e0 += step_x ? -abc0.y : -abc0.x;
-		e1 += step_x ? -abc1.y : -abc1.x;
 	}
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
@@ -439,56 +428,41 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	while (true)
 	{
-		// FIXME: Do the proper top/bottom criteria
 		const float d = static_cast<float>(D) / scaleDf;
+		int cov, ofx, ofy;
 
-		if (true)
+		// Coverage and offsets for anti-aliased point.
+		if (d > 0.0f)
 		{
-			// TODO: Unify both cases if possible.
-			if (d > 0.0f)
-			{
-				int cov = std::clamp(static_cast<int>(0xffff * (aaneg ? 1 - d : d)), 0, 0xffff);
-				int xi2 = xi + (step_x ? 0 : (aaneg ? 0 : 1));
-				int yi2 = yi + (step_x ? (aaneg ? 0 : 1) : 0);
+			cov = static_cast<int>(0xffff * (aaneg ? 1.0 - d : d));
+			ofx = (step_x ? 0 : (aaneg ? 0 : 1));
+			ofy = (step_x ? (aaneg ? 0 : 1) : 0);
+		}
+		else if (d < 0.0f)
+		{
+			cov = static_cast<int>(0xffff * (aaneg ? -d : 1.0 + d));
+			ofx = (step_x ? 0 : (aaneg ? -1 : 0));
+			ofy = (step_x ? (aaneg ? -1 : 0) : 0);
+		}
+		else // d == 0.0f
+		{
+			// When exactly on the pixel center, top-left edges can create 0 coverage points and
+			// bottom-right edges can create full coverage points (with some rounding error).
+			cov = my_topleft ? 0 : 0xffff;
+			ofx = ((step_x || !my_topleft) ? 0 : (aaneg ? -1.0 : 1));
+			ofy = ((!step_x || !my_topleft) ? 0 : (aaneg ? -1.0 : 1));
+		}
 
-				if (TestEndpoint(xi2, yi2))
-				{
-					AddScanline(e, 1, xi2, yi2, edge);
+		const int xi2 = xi + ofx;
+		const int yi2 = yi + ofy;
 
-					e->p.U32[0] = cov;
+		if (TestEndpoint(xi2, yi2))
+		{
+			AddScanline(e, 1, xi2, yi2, edge);
 
-					e++;
-				}
-			}
-			else if (d < 0.0f)
-			{
-				const int cov = static_cast<int>(0xffff * (aaneg ? -d : 1 + d));
+			e->p.U32[0] = std::clamp(cov, 0, 0xffff);
 
-				int xi2 = xi + (step_x ? 0 : (aaneg ? -1 : 0));
-				int yi2 = yi + (step_x ? (aaneg ? -1 : 0) : 0);
-				if (TestEndpoint(xi2, yi2))
-				{
-					AddScanline(e, 1, xi2, yi2, edge);
-
-					e->p.U32[0] = cov;
-
-					e++;
-				}
-			}
-			else if (d == 0.0f)
-			{
-				int cov = my_topleft ? 0 : 0xffff;
-				int xi2 = xi + ((step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
-				int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
-				if (TestEndpoint(xi2, yi2))
-				{
-					AddScanline(e, 1, xi2, yi2, edge);
-
-					e->p.U32[0] = cov;
-
-					e++;
-				}
-			}
+			e++;
 		}
 
 		if (step_x ? (xi == rxi1) : (yi == ryi1))
@@ -498,8 +472,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D += dD;
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
-		e0 += step_x ? (dxi * abc0.x) : (dyi * abc0.y);
-		e1 += step_x ? (dxi * abc1.x) : (dyi * abc1.y);
 
 		if constexpr (pos_D)
 		{
@@ -508,8 +480,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
 				yi += step_x ? 1 : 0;
-				e0 += step_x ? (dyi * abc0.y) : (dxi * abc0.x);
-				e1 += step_x ? (dyi * abc1.y) : (dxi * abc1.x);
 			}
 		}
 		else
@@ -519,8 +489,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				D += scaleD;
 				xi += step_x ? 0 : -1;
 				yi += step_x ? -1 : 0;
-				e0 += step_x ? (dyi * -abc0.y) : (dxi * -abc0.x);
-				e1 += step_x ? (dyi * -abc1.y) : (dxi * -abc1.x);
 			}
 		}
 	}
