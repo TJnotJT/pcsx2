@@ -521,18 +521,16 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
 
-	// Decision value for y when step_x == true (and vice versa).
-	// D is the fractional part of y scaled and shifted. When pos_y == true, D is kept in the range [-scaleD, 0)
-	// so that D >= 0 indicated a +1 step in y. When pos_y == false, D is kept in the range [0, scaleD) so that
-	// D < 0 indicates a -1 step in y.
+	// Decision value for stepping the dependent direction.
+	// D is the fractional part of dependent coordinate scaled by scaleD.
 	constexpr bool pos_D = step_x ? pos_y : pos_x;
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
-	const float scaleDf = static_cast<float>(scaleD); // Needed only if use_edge == true.
+	const float scaleDf = static_cast<float>(scaleD);
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
+	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
 	// Diamond exit rule for determining coverage of first/last pixel.
-	const auto TestRegion = [](float dx, float dy) -> bool {
+	const auto TestEndpoint = [](float dx, float dy) -> bool {
 		float dist = std::abs(dx) + std::abs(dy);
 		if (dist < 0.5f)
 			return false;
@@ -548,8 +546,8 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		}
 	};
 
-	bool draw_first = !TestRegion(fx0, fy0);
-	bool draw_last = TestRegion(fx1, fy1);
+	const bool draw_first = !TestEndpoint(fx0, fy0);
+	const bool draw_last = TestEndpoint(fx1, fy1);
 
 	// Stepping variables.
 	int xi = rxi0;
@@ -564,12 +562,14 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	// Pre-steps
 	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
 	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * (step_x ? dxi : dyi);
-	if (D >= (pos_D ? 0 : scaleD))
+
+	if (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
-	else if (D < (pos_D ? -scaleD : 0))
+	
+	if (D < -scaleD / 2)
 		StepDependent.template operator()<-1>();
 
-	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
+	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
 	while (true)
 	{
@@ -590,7 +590,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		{
 			if constexpr (aa)
 			{
-				const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f);
+				const float d = static_cast<float>(D) / scaleDf;
 				if (d > 0.0f)
 				{
 					const int cov = std::clamp(static_cast<int>(0x10000 * d), 0, 0xffff);
@@ -650,14 +650,15 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
 
+		// Step dependent axis.
 		if constexpr (pos_D)
 		{
-			if (D >= 0)
+			if (D >= scaleD / 2)
 				StepDependent.template operator()<1>();
 		}
 		else
 		{
-			if (D < 0)
+			if (D < -scaleD / 2)
 				StepDependent.template operator()<-1>();
 		}
 	}
