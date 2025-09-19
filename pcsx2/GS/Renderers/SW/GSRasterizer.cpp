@@ -388,20 +388,12 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	int e1 = efun1.x * xi + efun1.y * yi + efun1.z;
 	int e2 = efun2.x * xi + efun2.y * yi + efun2.z;
 
-	const auto StepDependentPos = [&]() {
-		D -= scaleD;
-		xi += step_x ? 0 : 1;
-		yi += step_x ? 1 : 0;
-		e1 += step_x ? efun1.y : efun1.x;
-		e2 += step_x ? efun2.y : efun2.x;
-	};
-
-	const auto StepDependentNeg = [&]() {
-		D += scaleD;
-		xi += step_x ? 0 : -1;
-		yi += step_x ? -1 : 0;
-		e1 += step_x ? -efun1.y : -efun1.x;
-		e2 += step_x ? -efun2.y : -efun2.x;
+	const auto StepDependent = [&]<int sign>() {
+		D -= scaleD * sign;
+		xi += (step_x ? 0 : 1) * sign;
+		yi += (step_x ? 1 : 0) * sign;
+		e1 += (step_x ? efun1.y : efun1.x) * sign;
+		e2 += (step_x ? efun2.y : efun2.x) * sign;
 	};
 
 	// Pre-steps
@@ -410,10 +402,10 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
 	
 	while (D >= scaleD / 2)
-		StepDependentPos();
+		StepDependent.template operator()<1>();
 
 	while (D < -scaleD / 2)
-		StepDependentNeg();
+		StepDependent.template operator()<-1>();
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
@@ -479,12 +471,12 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		if constexpr (pos_D)
 		{
 			if (D >= scaleD / 2)
-				StepDependentPos();
+				StepDependent.template operator()<1>();
 		}
 		else
 		{
 			if (D < -scaleD / 2)
-				StepDependentNeg();
+				StepDependent.template operator()<-1>();
 		}
 	}
 
