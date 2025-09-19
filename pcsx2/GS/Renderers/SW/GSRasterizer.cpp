@@ -19,9 +19,6 @@ MULTI_ISA_UNSHARED_IMPL;
 
 int GSRasterizerData::s_counter = 0;
 
-int my_side;
-bool my_topleft;
-
 static int compute_best_thread_height(int threads)
 {
 	// - for more threads screen segments should be smaller to better distribute the pixels
@@ -413,9 +410,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	// side == true => outside of triangle is towards top or left.
 	// side == false => outside of triangle is towards bottom or right.
-	bool side = my_topleft ^ (step_x && (delta_y != 0) && (pos_x == pos_y));
-
-	pxAssert(side == topleft);
+	bool side = topleft ^ (step_x && (delta_y != 0) && (pos_x == pos_y));
 
 	while (true)
 	{
@@ -439,9 +434,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		{
 			// When exactly on the pixel center, top-left edges can create 0 coverage points and
 			// bottom-right edges can create full coverage points (with some rounding error).
-			cov = my_topleft ? 0 : 0xffff;
-			ofx = ((step_x || !my_topleft) ? 0 : (side ? -1.0 : 1));
-			ofy = ((!step_x || !my_topleft) ? 0 : (side ? -1.0 : 1));
+			cov = topleft ? 0 : 0xffff;
+			ofx = ((step_x || !topleft) ? 0 : (side ? -1.0 : 1));
+			ofy = ((!step_x || !topleft) ? 0 : (side ? -1.0 : 1));
 		}
 
 		const int xi2 = xi + ofx;
@@ -1280,77 +1275,17 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		int orientation = a.mask();
 		int side = ((a | b) ^ c).mask() ^ 2; // evil
 
-		my_side = 0;
-		if (v0.p.y == v1.p.y) // top edge
-		{
-			my_side |= 1;
-		}
-		else
-		{
-			if (!c.U32[0])
-				my_side |= 1;
-		}
-
-		if (v2.p.y == v1.p.y) // bottom edge
-		{
-		}
-		else
-		{
-			if (!c.U32[0])
-				my_side |= 4;
-		}
-
-		if (c.U32[0])
-			my_side |= 2;
-
-		if (v0.p.x == 9.3750 && v0.p.y == 75.6250)
-		{
-			printf("");
-		}
+		bool tl0 = (v0.p.y == v1.p.y) || !c.U32[0];
+		bool tl1 = c.U32[0] != 0;
+		bool tl2 = (v1.p.y != v2.p.y) && !c.U32[0];
 
 		//DrawEdge(v0, v1, dv0, orientation & 1, side & 1);
 		//DrawEdge(v0, v2, dv1, orientation & 2, side & 2);
 		//DrawEdge(v1, v2, dv2, orientation & 4, side & 4);
 
-		if (v0.p.x == 9.3750 && v0.p.y == 75.6250)
-		{
-			printf("");
-		}
-
-		// (side & 1) ? EDGE_TL : EDGE_BR
-		// (side & 2) ? EDGE_TL : EDGE_BR
-		// (side & 4) ? EDGE_TL : EDGE_BR
-
 		GSVector4i xy0 = GSVector4i(v0.p * GSVector4::cxpr(16.0f));
 		GSVector4i xy1 = GSVector4i(v1.p * GSVector4::cxpr(16.0f));
 		GSVector4i xy2 = GSVector4i(v2.p * GSVector4::cxpr(16.0f));
-
-		GSVector4 ff0;
-		ff0.x = dv0.p.y;
-		ff0.y = -dv0.p.x;
-		ff0.z = v1.p.x * v0.p.y - v1.p.y * v0.p.x;
-
-		GSVector4 ff1;
-		ff1.x = dv1.p.y;
-		ff1.y = -dv1.p.x;
-		ff1.z = v2.p.x * v0.p.y - v2.p.y * v0.p.x;
-		ff1 = -ff1; // TODO: WHy negative?
-
-		GSVector4 ff2;
-		ff2.x = dv2.p.y;
-		ff2.y = -dv2.p.x;
-		ff2.z = v2.p.x * v1.p.y - v2.p.y * v1.p.x;
-
-		ff0 = ff0 * GSVector4(256);
-		ff1 = ff1 * GSVector4(256);
-		ff2 = ff2 * GSVector4(256);
-
-		if (cross.x < 0)
-		{
-			ff0 = GSVector4::cxpr(0) - ff0;
-			ff1 = GSVector4::cxpr(0) - ff1;
-			ff2 = GSVector4::cxpr(0) - ff2;
-		}
 
 		GSVector4i f0 = (xy1 - xy0).yxyx().upl32(xy0 - xy1).sll32<4>();
 		GSVector4i f1 = (xy0 - xy2).yxyx().upl32(xy2 - xy0).sll32<4>();
@@ -1367,12 +1302,9 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 			f2 = GSVector4i::cxpr(0) - f2;
 		}
 
-		my_topleft = my_side & 1;
-		DrawEdgeTriangle(v0, v1, dv0, f1, my_side & 2, f2, my_side & 4, side & 1);
-		my_topleft = my_side & 2;
-		DrawEdgeTriangle(v0, v2, dv1, f2, my_side & 4, f0, my_side & 1, side & 2);
-		my_topleft = my_side & 4;
-		DrawEdgeTriangle(v1, v2, dv2, f0, my_side & 1, f1, my_side & 2, side & 4);
+		DrawEdgeTriangle(v0, v1, dv0, f1, tl1, f2, tl2, tl0);
+		DrawEdgeTriangle(v0, v2, dv1, f2, tl2, f0, tl0, tl1);
+		DrawEdgeTriangle(v1, v2, dv2, f0, tl0, f1, tl1, tl2);
 
 		Flush(vertex, index, GSVertexSW::zero(), true);
 	}
