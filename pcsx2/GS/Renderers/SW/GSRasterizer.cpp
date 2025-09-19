@@ -1259,29 +1259,11 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 
 	if (HasEdge())
 	{
-		if (v0.p.x == 32 && v0.p.y == 168)
-		{
-			printf("");
-		}
-		//56.0000, 80.4375
-		if (v0.p.x == 56 && v0.p.y == 72.0625)
-		{
-			printf("");
-		}
-		GSVector4 a = dx.abs() < dy.abs();       // |dx| <= |dy|
-		GSVector4 b = dx < GSVector4::zero();    // dx < 0
-		GSVector4 c = cross < GSVector4::zero(); // longest.p.x < 0
+		bool clockwise = (cross < GSVector4::zero()).mask();
 
-		int orientation = a.mask();
-		int side = ((a | b) ^ c).mask() ^ 2; // evil
-
-		bool tl0 = (v0.p.y == v1.p.y) || !c.U32[0];
-		bool tl1 = c.U32[0] != 0;
-		bool tl2 = (v1.p.y != v2.p.y) && !c.U32[0];
-
-		//DrawEdge(v0, v1, dv0, orientation & 1, side & 1);
-		//DrawEdge(v0, v2, dv1, orientation & 2, side & 2);
-		//DrawEdge(v1, v2, dv2, orientation & 4, side & 4);
+		bool tl0 = (v0.p.y == v1.p.y) || !clockwise;
+		bool tl1 = clockwise;
+		bool tl2 = (v1.p.y != v2.p.y) && !clockwise;
 
 		GSVector4i xy0 = GSVector4i(v0.p * GSVector4::cxpr(16.0f));
 		GSVector4i xy1 = GSVector4i(v1.p * GSVector4::cxpr(16.0f));
@@ -1295,7 +1277,7 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		f1 = f1.insert32<2>(xy0.x * xy2.y - xy2.x * xy0.y);
 		f2 = f2.insert32<2>(xy2.x * xy1.y - xy1.x * xy2.y);
 
-		if (cross.x < 0)
+		if (clockwise)
 		{
 			f0 = GSVector4i::cxpr(0) - f0;
 			f1 = GSVector4i::cxpr(0) - f1;
