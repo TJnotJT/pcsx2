@@ -323,11 +323,11 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 	}
 }
 
-template <bool step_x, bool pos_x, bool pos_y, int edge_type>
+template <bool step_x, bool pos_x, bool pos_y>
 void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
-	GSVector4i abc0, bool tl0,
-	GSVector4i abc1, bool tl1,
-	bool topleft, bool test)
+	GSVector4i efun0, bool tl0,
+	GSVector4i efun1, bool tl1,
+	bool topleft)
 {
 	constexpr int dxi = pos_x ? 1 : -1;
 	constexpr int dyi = pos_y ? 1 : -1;
@@ -417,14 +417,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	pxAssert(side == topleft);
 
-	const auto TestEndpoint = [&](int x, int y) -> bool {
-		return (abc0.x * x + abc0.y * y + abc0.z >= (tl0 ? 0 : 1)) &&
-		       (abc1.x * x + abc1.y * y + abc1.z >= (tl1 ? 0 : 1)) &&
-		       bxi0 <= x && x <= bxi1 &&
-			   byi0 <= y && y <= byi1 &&
-		       IsOneOfMyScanlines(y);
-	};
-
 	while (true)
 	{
 		const float d = static_cast<float>(D) / scaleDf;
@@ -455,7 +447,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		const int xi2 = xi + ofx;
 		const int yi2 = yi + ofy;
 
-		if (TestEndpoint(xi2, yi2))
+		if ((efun0.x * xi2 + efun0.y * yi2 + efun0.z >= (tl0 ? 0 : 1)) &&
+			(efun1.x * xi2 + efun1.y * yi2 + efun1.z >= (tl1 ? 0 : 1)) &&
+			bxi0 <= xi2 && xi2 <= bxi1 &&
+			byi0 <= yi2 && yi2 <= byi1 &&
+			IsOneOfMyScanlines(yi2))
 		{
 			AddScanline(e, 1, xi2, yi2, edge);
 
@@ -700,7 +696,7 @@ void GSRasterizer::DrawEdge(const GSVertexSW& v0, const GSVertexSW& v1, const GS
 void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
 	GSVector4i abc0, bool br0,
 	GSVector4i abc1, bool br1,
-	bool topleft, bool test)
+	bool topleft)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
 	// More efficient to step right to left or some such?
@@ -727,16 +723,16 @@ void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdgeTriangle<1, 1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<1, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 				else
-					DrawEdgeTriangle<1, 1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdgeTriangle<1, 0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<1, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 				else
-					DrawEdgeTriangle<1, 0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			}
 		}
 		else // !step_x
@@ -744,16 +740,16 @@ void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
 			if (dv.p.x >= 0)
 			{
 				if (dv.p.y >= 0)
-					DrawEdgeTriangle<0, 1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<0, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 				else
-					DrawEdgeTriangle<0, 1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			}
 			else
 			{
 				if (dv.p.y >= 0)
-					DrawEdgeTriangle<0, 0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<0, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 				else
-					DrawEdgeTriangle<0, 0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft, test);
+					DrawEdgeTriangle<0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			}
 		}
 	}
@@ -1372,11 +1368,11 @@ void GSRasterizer::DrawTriangle(const GSVertexSW* vertex, const u16* index)
 		}
 
 		my_topleft = my_side & 1;
-		DrawEdgeTriangle(v0, v1, dv0, f1, my_side & 2, f2, my_side & 4, side & 1, cross.x < 0);
+		DrawEdgeTriangle(v0, v1, dv0, f1, my_side & 2, f2, my_side & 4, side & 1);
 		my_topleft = my_side & 2;
-		DrawEdgeTriangle(v0, v2, dv1, f2, my_side & 4, f0, my_side & 1, side & 2, cross.x < 0);
+		DrawEdgeTriangle(v0, v2, dv1, f2, my_side & 4, f0, my_side & 1, side & 2);
 		my_topleft = my_side & 4;
-		DrawEdgeTriangle(v1, v2, dv2, f0, my_side & 1, f1, my_side & 2, side & 4, cross.x < 0);
+		DrawEdgeTriangle(v1, v2, dv2, f0, my_side & 1, f1, my_side & 2, side & 4);
 
 		Flush(vertex, index, GSVertexSW::zero(), true);
 	}
