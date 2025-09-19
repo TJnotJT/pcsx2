@@ -381,19 +381,18 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
-	const auto TestEndpoint = [&](int x, int y) -> bool {
-		int k0 = abc0.x * x + abc0.y * y + abc0.z;
-		int k1 = abc1.x * x + abc1.y * y + abc1.z;
-		bool b0 = tl0 ? k0 >= 0 : k0 > 0;
-		bool b1 = tl1 ? k1 >= 0 : k1 > 0;
-		return b0 && b1;
-	};
-
 	int xi = rxi0;
 	int yi = ryi0;
 
+	int xi3 = xi;
+	int yi3 = yi;
+
+	// Edge functions
+	int e0 = abc0.x * xi + abc0.y * yi + abc0.z;
+	int e1 = abc1.x * xi + abc1.y * yi + abc1.z;
+
 	// Pre-steps
-	float prestep = step_x ? fx0 : fy0;
+	const float prestep = step_x ? fx0 : fy0;
 	edge += dedge * -GSVector4(prestep);
 	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
 	
@@ -402,6 +401,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D -= scaleD;
 		xi += step_x ? 0 : 1;
 		yi += step_x ? 1 : 0;
+		e0 += step_x ? abc0.y : abc0.x;
+		e1 += step_x ? abc1.y : abc1.x;
 	}
 
 	while (D < -scaleD / 2)
@@ -409,6 +410,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D += scaleD;
 		xi += step_x ? 0 : -1;
 		yi += step_x ? -1 : 0;
+		e0 += step_x ? -abc0.y : -abc0.x;
+		e1 += step_x ? -abc1.y : -abc1.x;
 	}
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
@@ -420,23 +423,21 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	pxAssert(aaneg == topleft);
 
+	const auto TestEndpoint = [&](int x, int y) -> bool {
+		return (abc0.x * x + abc0.y * y + abc0.z >= (tl0 ? 0 : 1)) &&
+		       (abc1.x * x + abc1.y * y + abc1.z >= (tl1 ? 0 : 1)) &&
+		       m_scissor.left <= x && x < m_scissor.right &&
+		       m_scissor.top <= y && y < m_scissor.bottom &&
+		       bxi0 <= x && x <= bxi1 &&
+			   byi0 <= y && y <= byi1 &&
+		       IsOneOfMyScanlines(y);
+	};
+
 	while (true)
 	{
 		// FIXME: Do the proper top/bottom criteria
 		const float d = static_cast<float>(D) / scaleDf;
 
-		//bool draw = TestEndpoint(xi, yi);
-
-		bool draw_temp = TestEndpoint(xi, yi);
-
-		GSVertexSW temp_edge = edge;
-
-#define DRAW_BOUND \
-				draw = draw && \
-				(byi0 <= yi2 && yi2 <= byi1) && \
-				(bxi0 <= xi2 && xi2 <= bxi1); \
-
-		bool draw=true;
 		if (true)
 		{
 			// TODO: Unify both cases if possible.
@@ -445,16 +446,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				int cov = std::clamp(static_cast<int>(0xffff * (aaneg ? 1 - d : d)), 0, 0xffff);
 				int xi2 = xi + (step_x ? 0 : (aaneg ? 0 : 1));
 				int yi2 = yi + (step_x ? (aaneg ? 0 : 1) : 0);
-				//bool draw = TestEndpoint(xi2, yi2);
-				draw = draw && TestEndpoint(xi2, yi2);
-				draw = draw &&
-				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-				       IsOneOfMyScanlines(yi2);
 
-				DRAW_BOUND;
-
-				if (draw)
+				if (TestEndpoint(xi2, yi2))
 				{
 					AddScanline(e, 1, xi2, yi2, edge);
 
@@ -469,14 +462,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 				int xi2 = xi + (step_x ? 0 : (aaneg ? -1 : 0));
 				int yi2 = yi + (step_x ? (aaneg ? -1 : 0) : 0);
-				//bool draw = TestEndpoint(xi2, yi2);
-				draw = draw && TestEndpoint(xi2, yi2);
-				draw = draw &&
-				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-				       IsOneOfMyScanlines(yi2);
-				DRAW_BOUND;
-				if (draw)
+				if (TestEndpoint(xi2, yi2))
 				{
 					AddScanline(e, 1, xi2, yi2, edge);
 
@@ -490,14 +476,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				int cov = my_topleft ? 0 : 0xffff;
 				int xi2 = xi + ((step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
 				int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
-				//bool draw = TestEndpoint(xi2, yi2);
-				draw = draw && TestEndpoint(xi2, yi2);
-				draw = draw &&
-				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
-				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
-				       IsOneOfMyScanlines(yi2);
-				DRAW_BOUND;
-				if (draw)
+				if (TestEndpoint(xi2, yi2))
 				{
 					AddScanline(e, 1, xi2, yi2, edge);
 
@@ -506,10 +485,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 					e++;
 				}
 			}
-
 		}
-
-		edge = temp_edge;
 
 		if (step_x ? (xi == rxi1) : (yi == ryi1))
 			break;
@@ -518,6 +494,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		D += dD;
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
+		e0 += step_x ? (dxi * abc0.x) : (dyi * abc0.y);
+		e1 += step_x ? (dxi * abc1.x) : (dyi * abc1.y);
+
 		if constexpr (pos_D)
 		{
 			if (D >= scaleD / 2)
@@ -525,6 +504,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
 				yi += step_x ? 1 : 0;
+				e0 += step_x ? (dyi * abc0.y) : (dxi * abc0.x);
+				e1 += step_x ? (dyi * abc1.y) : (dxi * abc1.x);
 			}
 		}
 		else
@@ -534,6 +515,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				D += scaleD;
 				xi += step_x ? 0 : -1;
 				yi += step_x ? -1 : 0;
+				e0 += step_x ? (dyi * -abc0.y) : (dxi * -abc0.x);
+				e1 += step_x ? (dyi * -abc1.y) : (dxi * -abc1.x);
 			}
 		}
 	}
