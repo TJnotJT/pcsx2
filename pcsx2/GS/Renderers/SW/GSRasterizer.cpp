@@ -373,15 +373,13 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
 
-	// Decision value for y when step_x == true (and vice versa).
-	// D is the fractional part of y scaled and shifted. When pos_y == true, D is kept in the range [-scaleD, 0)
-	// so that D >= 0 indicated a +1 step in y. When pos_y == false, D is kept in the range [0, scaleD) so that
-	// D < 0 indicates a -1 step in y.
+	// Decision value for stepping the dependent direction.
+	// D is the fractional part of dependent coordinate scaled by scaleD.
 	constexpr bool pos_D = step_x ? pos_y : pos_x;
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
 	const float scaleDf = static_cast<float>(scaleD);
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
+	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
 	const auto TestEndpoint = [&](int x, int y) -> bool {
 		int k0 = abc0.x * x + abc0.y * y + abc0.z;
@@ -399,21 +397,21 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	edge += dedge * -GSVector4(prestep);
 	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
 	
-	while (D >= (pos_D ? 0 : scaleD))
+	while (D >= scaleD / 2)
 	{
 		D -= scaleD;
 		xi += step_x ? 0 : 1;
 		yi += step_x ? 1 : 0;
 	}
 
-	while (D < (pos_D ? -scaleD : 0))
+	while (D < -scaleD / 2)
 	{
 		D += scaleD;
 		xi += step_x ? 0 : -1;
 		yi += step_x ? -1 : 0;
 	}
 
-	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
+	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
 	bool aaleft = my_topleft;
 	bool aatop = (delta_y == 0) ? my_topleft : ((pos_x != pos_y) ? my_topleft : !my_topleft);
@@ -425,7 +423,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	while (true)
 	{
 		// FIXME: Do the proper top/bottom criteria
-		const float d = (static_cast<float>(D) / scaleDf) + (pos_D ? 0.5f : -0.5f); // FIXME: Can optimize this
+		const float d = static_cast<float>(D) / scaleDf;
 
 		//bool draw = TestEndpoint(xi, yi);
 
@@ -522,7 +520,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		yi += step_x ? 0 : dyi;
 		if constexpr (pos_D)
 		{
-			if (D >= 0.0f)
+			if (D >= scaleD / 2)
 			{
 				D -= scaleD;
 				xi += step_x ? 0 : 1;
@@ -531,7 +529,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		}
 		else
 		{
-			if (D < 0.0f)
+			if (D < -scaleD / 2)
 			{
 				D += scaleD;
 				xi += step_x ? 0 : -1;
