@@ -551,24 +551,23 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	bool draw_first = !TestRegion(fx0, fy0);
 	bool draw_last = TestRegion(fx1, fy1);
 
+	// Stepping variables.
 	int xi = rxi0;
 	int yi = ryi0;
+
+	const auto StepDependent = [&]<int sign>() {
+		D -= scaleD * sign;
+		xi += (step_x ? 0 : 1) * sign;
+		yi += (step_x ? 1 : 0) * sign;
+	};
 
 	// Pre-steps
 	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
 	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * (step_x ? dxi : dyi);
 	if (D >= (pos_D ? 0 : scaleD))
-	{
-		D -= scaleD;
-		xi += step_x ? 0 : 1;
-		yi += step_x ? 1 : 0;
-	}
+		StepDependent.template operator()<1>();
 	else if (D < (pos_D ? -scaleD : 0))
-	{
-		D += scaleD;
-		xi += step_x ? 0 : -1;
-		yi += step_x ? -1 : 0;
-	}
+		StepDependent.template operator()<-1>();
 
 	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
@@ -645,27 +644,21 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		if (last)
 			break;
 
+		// Step driving axis.
 		edge += dedge;
 		D += dD;
 		xi += step_x ? dxi : 0;
 		yi += step_x ? 0 : dyi;
+
 		if constexpr (pos_D)
 		{
-			if (D >= 0) // FIXME: Change to integer
-			{
-				D -= scaleD;
-				xi += step_x ? 0 : 1;
-				yi += step_x ? 1 : 0;
-			}
+			if (D >= 0)
+				StepDependent.template operator()<1>();
 		}
 		else
 		{
 			if (D < 0)
-			{
-				D += scaleD;
-				xi += step_x ? 0 : -1;
-				yi += step_x ? -1 : 0;
-			}
+				StepDependent.template operator()<-1>();
 		}
 	}
 
@@ -684,9 +677,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 	(this->*m_draw_edge_triangle[step_x][pos_x][pos_y][tl][side])(v0, v1, dv, efun1, efun2);
 }
-
-// TODO: Make the traignle edge and line edge separate. The line edge can be simplified,
-// while the triangle edge needs to evalualte auxiliary edge functions!!!
 
 void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv, bool has_edge)
 {
