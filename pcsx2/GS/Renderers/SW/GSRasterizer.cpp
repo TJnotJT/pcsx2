@@ -439,7 +439,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		pxAssert(aaleft == topleft);
 	}
 
-	if ((x0 == 24.6250 && y0 == 44.7500) || (x0 == 32.0000 && y0 == 36.0000))
+	if ((x0 == 396.6875 && y0 == 946.1875) && (x1 == 411.0000 && y1 == 944.8750))
 	{
 		printf("");
 	}
@@ -454,6 +454,11 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		bool draw_temp = TestEndpoint(xi, yi);
 
 		GSVertexSW temp_edge = edge;
+
+#define DRAW_BOUND \
+				draw = draw && \
+				(std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) && \
+				(std::min(x0, x1) - 1 < xi2 && xi2 < std::max(x0, x1) + 1); \
 
 		bool draw=true;
 		if (true)
@@ -471,10 +476,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
 				       IsOneOfMyScanlines(yi2);
 
-				draw = draw &&
-					(step_x ?
-					(std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
-					(std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
+				DRAW_BOUND;
 
 				if (draw)
 				{
@@ -497,10 +499,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
 				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
 				       IsOneOfMyScanlines(yi2);
-				draw = draw &&
-				       (step_x ?
-							   (std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
-							   (std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
+				DRAW_BOUND;
 				if (draw)
 				{
 					AddScanline(e, 1, xi2, yi2, edge);
@@ -521,10 +520,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 				       m_scissor.left <= xi2 && xi2 < m_scissor.right &&
 				       m_scissor.top <= yi2 && yi2 < m_scissor.bottom &&
 				       IsOneOfMyScanlines(yi2);
-				draw = draw &&
-				       (step_x ?
-							   (std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) :
-							   (std::min(x0, x1) - 1 <= xi2 && xi2 <= std::max(x0, x1) + 1));
+				DRAW_BOUND;
 				if (draw)
 				{
 					AddScanline(e, 1, xi2, yi2, edge);
