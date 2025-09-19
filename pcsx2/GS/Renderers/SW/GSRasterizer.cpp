@@ -343,27 +343,10 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
 
-	//0.2500, 1.0625
-	//15.3125, 9.7500, 0
-	if (
-		((x0 == .25 && y0 == 1.0625) && (x1 == 15.3125 && y1 == 9.7500)) ||
-		((x1 == .25 && y1 == 1.0625) && (x0 == 15.3125 && y0 == 9.7500)))
-	{
-		printf("");
-	}
-
-	const auto RoundFirst = [](float f) {
-		return (step_x ? pos_x : pos_y) ? std::ceil(f - 1.0f) : std::floor(f + 1.0f);
-	};
-
-	const auto RoundLast = [](float f) {
-		return (step_x ? pos_x : pos_y) ? std::floor(f + 1.0f) : std::ceil(f - 1.0f);
-	}; 
-
-	const float rx0 = RoundFirst(x0);
-	const float ry0 = RoundFirst(y0);
-	const float rx1 = RoundLast(x1);
-	const float ry1 = RoundLast(y1);
+	const float rx0 = pos_x ? std::ceil(x0 - 1.0f) : std::floor(x0 + 1.0f);
+	const float ry0 = pos_y ? std::ceil(y0 - 1.0f) : std::floor(y0 + 1.0f);
+	const float rx1 = pos_x ? std::floor(x1 + 1.0f) : std::ceil(x1 - 1.0f);
+	const float ry1 = pos_y ? std::floor(y1 + 1.0f) : std::ceil(y1 - 1.0f);
 
 	const float fx0 = x0 - rx0;
 	const float fy0 = y0 - ry0;
@@ -374,6 +357,15 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int ryi0 = static_cast<int>(ry0);
 	const int rxi1 = static_cast<int>(rx1);
 	const int ryi1 = static_cast<int>(ry1);
+
+	// Note: appears to be asymmetry in how x bound and y bound is handled. This is still not
+	// totally accurate: PS2 sometimes has strict comparison for the x bound and sometimes
+	// non-strict. We use always strict comparison for x and always non-strict for y since it
+	// seems to give the most accurate results.
+	const int bxi0 = static_cast<int>(std::floor(std::min(x0, x1)));
+	const int byi0 = static_cast<int>(std::ceil(std::min(y0, y1) - 1.0f));
+	const int bxi1 = static_cast<int>(std::ceil(std::max(x0, x1)));
+	const int byi1 = static_cast<int>(std::floor(std::max(y0, y1) + 1.0f));
 
 	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
 
@@ -387,7 +379,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	// D < 0 indicates a -1 step in y.
 	constexpr bool pos_D = step_x ? pos_y : pos_x;
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
-	const float scaleDf = static_cast<float>(scaleD); // Needed only if use_edge == true.
+	const float scaleDf = static_cast<float>(scaleD);
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
 	int D = static_cast<int>(scaleD * ((step_x ? fy0 : fx0) + (pos_D ? -0.5f : 0.5f)));
 
@@ -421,28 +413,14 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 		yi += step_x ? -1 : 0;
 	}
 
-	//960.0000, 932.0625, 0 968.7500, 924.2500, 0
-
-
-
 	pxAssert(pos_D ? (-scaleD <= D && D < 0) : (0 <= D && D < scaleD));
 
 	bool aaleft = my_topleft;
 	bool aatop = (delta_y == 0) ? my_topleft : ((pos_x != pos_y) ? my_topleft : !my_topleft);
 
-	if (step_x)
-	{
-		pxAssert(aatop == topleft);
-	}
-	else
-	{
-		pxAssert(aaleft == topleft);
-	}
+	bool aaneg = step_x ? aatop : aaleft;
 
-	if ((x0 == 396.6875 && y0 == 946.1875) && (x1 == 411.0000 && y1 == 944.8750))
-	{
-		printf("");
-	}
+	pxAssert(aaneg == topleft);
 
 	while (true)
 	{
@@ -457,8 +435,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 
 #define DRAW_BOUND \
 				draw = draw && \
-				(std::min(y0, y1) - 1 <= yi2 && yi2 <= std::max(y0, y1) + 1) && \
-				(std::min(x0, x1) - 1 < xi2 && xi2 < std::max(x0, x1) + 1); \
+				(byi0 <= yi2 && yi2 <= byi1) && \
+				(bxi0 <= xi2 && xi2 <= bxi1); \
 
 		bool draw=true;
 		if (true)
@@ -466,9 +444,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 			// TODO: Unify both cases if possible.
 			if (d > 0.0f)
 			{
-				int cov = std::clamp(static_cast<int>(0xffff * (topleft ? 1 - d : d)), 0, 0xffff);
-				int xi2 = xi + (step_x ? 0 : (topleft ? 0 : 1));
-				int yi2 = yi + (step_x ? (topleft ? 0 : 1) : 0);
+				int cov = std::clamp(static_cast<int>(0xffff * (aaneg ? 1 - d : d)), 0, 0xffff);
+				int xi2 = xi + (step_x ? 0 : (aaneg ? 0 : 1));
+				int yi2 = yi + (step_x ? (aaneg ? 0 : 1) : 0);
 				//bool draw = TestEndpoint(xi2, yi2);
 				draw = draw && TestEndpoint(xi2, yi2);
 				draw = draw &&
@@ -489,10 +467,10 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 			}
 			else if (d < 0.0f)
 			{
-				const int cov = static_cast<int>(0xffff * (topleft ? -d : 1 + d));
+				const int cov = static_cast<int>(0xffff * (aaneg ? -d : 1 + d));
 
-				int xi2 = xi + (step_x ? 0 : (topleft ? -1 : 0));
-				int yi2 = yi + (step_x ? (topleft ? -1 : 0) : 0);
+				int xi2 = xi + (step_x ? 0 : (aaneg ? -1 : 0));
+				int yi2 = yi + (step_x ? (aaneg ? -1 : 0) : 0);
 				//bool draw = TestEndpoint(xi2, yi2);
 				draw = draw && TestEndpoint(xi2, yi2);
 				draw = draw &&
@@ -512,8 +490,8 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 			else if (d == 0.0f)
 			{
 				int cov = my_topleft ? 0 : 0xffff;
-				int xi2 = xi + ((step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
-				int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (topleft ? -1 : 1));
+				int xi2 = xi + ((step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
+				int yi2 = yi + ((!step_x || !my_topleft) ? 0 : (aaneg ? -1 : 1));
 				//bool draw = TestEndpoint(xi2, yi2);
 				draw = draw && TestEndpoint(xi2, yi2);
 				draw = draw &&
