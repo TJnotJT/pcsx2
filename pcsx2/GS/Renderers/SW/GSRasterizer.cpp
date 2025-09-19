@@ -694,58 +694,39 @@ void GSRasterizer::DrawEdgeTriangle(GSVertexSW v0, GSVertexSW v1, GSVertexSW dv,
 	bool topleft)
 {
 	const bool step_x = std::abs(dv.p.x) >= std::abs(dv.p.y);
-	// More efficient to step right to left or some such?
+
 	if (step_x)
 	{
-		if (dv.p.x <= 0)
+		if (dv.p.x >= 0)
 		{
-			std::swap(v0, v1);
+			if (dv.p.y >= 0)
+				DrawEdgeTriangle<1, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
+			else
+				DrawEdgeTriangle<1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
+		}
+		else
+		{
+			if (dv.p.y >= 0)
+				DrawEdgeTriangle<1, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
+			else
+				DrawEdgeTriangle<1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 		}
 	}
-	else
+	else // !step_x
 	{
-		if (dv.p.y <= 0)
+		if (dv.p.x >= 0)
 		{
-			std::swap(v0, v1);
-		}
-	}
-	dv = v1 - v0;
-
-	if (true)
-	{
-		if (step_x)
-		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdgeTriangle<1, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-				else
-					DrawEdgeTriangle<1, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			}
+			if (dv.p.y >= 0)
+				DrawEdgeTriangle<0, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdgeTriangle<1, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-				else
-					DrawEdgeTriangle<1, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			}
+				DrawEdgeTriangle<0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 		}
-		else // !step_x
+		else
 		{
-			if (dv.p.x >= 0)
-			{
-				if (dv.p.y >= 0)
-					DrawEdgeTriangle<0, 1, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-				else
-					DrawEdgeTriangle<0, 1, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			}
+			if (dv.p.y >= 0)
+				DrawEdgeTriangle<0, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 			else
-			{
-				if (dv.p.y >= 0)
-					DrawEdgeTriangle<0, 0, 1>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-				else
-					DrawEdgeTriangle<0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
-			}
+				DrawEdgeTriangle<0, 0, 0>(v0, v1, dv, abc0, br0, abc1, br1, topleft);
 		}
 	}
 
