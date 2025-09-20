@@ -467,42 +467,20 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	const float delta_x = dv.p.x;
 	const float delta_y = dv.p.y;
 
-	if (delta_x == 0.0f && delta_y == 0.0f)
-		return;
-
 	const float x0 = v0.p.x;
 	const float y0 = v0.p.y;
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
 
-	const float rx0 = std::floor(x0 + 0.5f);
-	const float ry0 = std::floor(y0 + 0.5f);
-	const float rx1 = std::floor(x1 + 0.5f);
-	const float ry1 = std::floor(y1 + 0.5f);
+	float rx0 = std::floor(x0 + 0.5f);
+	float ry0 = std::floor(y0 + 0.5f);
+	float rx1 = std::floor(x1 + 0.5f);
+	float ry1 = std::floor(y1 + 0.5f);
 
-	const float fx0 = x0 - rx0;
-	const float fy0 = y0 - ry0;
-	const float fx1 = x1 - rx1;
-	const float fy1 = y1 - ry1;
-
-	const int rxi0 = static_cast<int>(rx0);
-	const int ryi0 = static_cast<int>(ry0);
-	const int rxi1 = static_cast<int>(rx1);
-	const int ryi1 = static_cast<int>(ry1);
-
-	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? (x1 - x0) : (y1 - y0)));
-	
-	GSVertexSW edge(v0);
-
-	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
-
-	// Decision value for stepping the dependent direction.
-	// D is the fractional part of dependent coordinate scaled by scaleD.
-	constexpr bool pos_D = step_x ? pos_y : pos_x;
-	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
-	const float scaleDf = static_cast<float>(scaleD);
-	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
+	float fx0 = x0 - rx0;
+	float fy0 = y0 - ry0;
+	float fx1 = x1 - rx1;
+	float fy1 = y1 - ry1;
 
 	// Diamond exit rule for determining coverage of first/last pixel.
 	const auto TestEndpoint = [](float dx, float dy) -> bool {
@@ -520,9 +498,48 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 			return y_good && (dist > 0.5f || dx >= 0.0f);
 		}
 	};
+	// Need to fix end points criteria? Maybe should round the end point fdifferently?.
 
 	const bool draw_first = !TestEndpoint(fx0, fy0);
 	const bool draw_last = TestEndpoint(fx1, fy1);
+
+	if (!draw_first)
+	{
+		rx0 += step_x ? dxi : 0.0f;
+		ry0 += step_x ? 0.0f : dyi;
+		fx0 -= step_x ? dxi : 0.0f;
+		fy0 -= step_x ? 0.0f : dyi;
+	}
+
+	if (!draw_last)
+	{
+		rx1 -= step_x ? dxi : 0.0f;
+		ry1 -= step_x ? 0.0f : dyi;
+		fx1 += step_x ? dxi : 0.0f;
+		fy1 += step_x ? 0.0f : dyi;
+	}
+
+	if ((step_x ? (dxi * (rx1 - rx0)) : (dyi * (ry1 - ry0))) <= 0.0f)
+		return;
+
+	const int rxi0 = static_cast<int>(rx0);
+	const int ryi0 = static_cast<int>(ry0);
+	const int rxi1 = static_cast<int>(rx1);
+	const int ryi1 = static_cast<int>(ry1);
+
+	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? delta_x : delta_y));
+	
+	GSVertexSW edge(v0);
+
+	GSVertexSW* RESTRICT e = &m_edge.buff[m_edge.count];
+
+	// Decision value for stepping the dependent direction.
+	// D is the fractional part of dependent coordinate scaled by scaleD.
+	constexpr bool pos_D = step_x ? pos_y : pos_x;
+	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
+	const float scaleDf = static_cast<float>(scaleD);
+	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
+	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
 
 	// Stepping variables
 	int xi = rxi0;
@@ -539,30 +556,19 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	edge += dedge * -GSVector4(prestep);
 	D += -static_cast<int>(dD * prestep);
 
-	if (D >= scaleD / 2)
+	while (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
 	
-	if (D < -scaleD / 2)
+	while (D < -scaleD / 2)
 		StepDependent.template operator()<-1>();
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
 	while (true)
 	{
-
-		bool draw = m_scissor.left <= xi && xi < m_scissor.right &&
-		            m_scissor.top <= yi && yi < m_scissor.bottom &&
-		            IsOneOfMyScanlines(yi);
-
-		const bool first = step_x ? (xi == rxi0) : (yi == ryi0);
-		const bool last = step_x ? (xi == rxi1) : (yi == ryi1);
-
-		if (first)
-			draw = draw && draw_first;
-		if (last)
-			draw = draw && draw_last;
-
-		if (draw)
+		if (m_scissor.left <= xi && xi < m_scissor.right &&
+			m_scissor.top <= yi && yi < m_scissor.bottom &&
+			IsOneOfMyScanlines(yi))
 		{
 			const auto AddScanlineStepEdge = [&](int x, int y, int cov = 0) {
 				AddScanline(e, 1, x, y, edge);
@@ -597,7 +603,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 		}
 
-		if (last)
+		if (step_x ? (xi == rxi1) : (yi == ryi1))
 			break;
 
 		// Step driving axis.
