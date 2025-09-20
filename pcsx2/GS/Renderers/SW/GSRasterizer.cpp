@@ -498,7 +498,6 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 			return y_good && (dist > 0.5f || dx >= 0.0f);
 		}
 	};
-	// Need to fix end points criteria? Maybe should round the end point fdifferently?.
 
 	const bool draw_first = !TestEndpoint(fx0, fy0);
 	const bool draw_last = TestEndpoint(fx1, fy1);
@@ -519,7 +518,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		fy1 += step_x ? 0.0f : dyi;
 	}
 
-	if ((step_x ? (dxi * (rx1 - rx0)) : (dyi * (ry1 - ry0))) <= 0.0f)
+	if ((step_x ? (dxi * (rx1 - rx0)) : (dyi * (ry1 - ry0))) < 0.0f)
 		return;
 
 	const int rxi0 = static_cast<int>(rx0);
@@ -564,21 +563,21 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
+	const auto AddScanlineStepEdge = [&](int x, int y, int cov = 0) {
+		AddScanline(e, 1, x, y, edge);
+
+		if constexpr (aa)
+			e->p.U32[0] = cov;
+
+		e++;
+	};
+
 	while (true)
 	{
 		if (m_scissor.left <= xi && xi < m_scissor.right &&
 			m_scissor.top <= yi && yi < m_scissor.bottom &&
 			IsOneOfMyScanlines(yi))
 		{
-			const auto AddScanlineStepEdge = [&](int x, int y, int cov = 0) {
-				AddScanline(e, 1, x, y, edge);
-
-				if constexpr (aa)
-					e->p.U32[0] = cov;
-
-				e++;
-			};
-
 			if constexpr (aa)
 			{
 				const float d = static_cast<float>(D) / scaleDf;
@@ -591,7 +590,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 				}
 				else if (d < 0.0f)
 				{
-					const int cov = static_cast<int>(0xffff * (-d));
+					const int cov = std::clamp(static_cast<int>(0xffff * (-d), 0, 0xffff);
 					AddScanlineStepEdge(xi, yi, 0xffff - cov);
 					AddScanlineStepEdge(xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), cov);
 				}
