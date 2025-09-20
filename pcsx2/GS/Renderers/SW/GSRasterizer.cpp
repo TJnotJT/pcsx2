@@ -580,22 +580,14 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		{
 			if constexpr (aa)
 			{
-				const float d = static_cast<float>(D) / scaleDf;
+				const float cov = 0xffff * std::abs(static_cast<float>(D) / scaleDf);
+				const int covi = std::clamp(static_cast<int>(cov), 0, 0xffff);
+				const int offset = D >= 0 ? 1 : -1;
 
-				if (d >= 0.0f)
-				{
-					const int cov = std::clamp(static_cast<int>(0xffff * d), 0, 0xffff);
-					AddScanlineStepEdge(xi, yi, 0xffff - cov);
-					AddScanlineStepEdge(xi + (step_x ? 0 : 1), yi + (step_x ? 1 : 0), cov);
-				}
-				else if (d < 0.0f)
-				{
-					const int cov = std::clamp(static_cast<int>(0xffff * (-d), 0, 0xffff);
-					AddScanlineStepEdge(xi, yi, 0xffff - cov);
-					AddScanlineStepEdge(xi + (step_x ? 0 : -1), yi + (step_x ? -1 : 0), cov);
-				}
+				AddScanlineStepEdge(xi, yi, 0xffff - covi);
+				AddScanlineStepEdge(xi + (step_x ? 0 : offset), yi + (step_x ? offset : 0), covi);
 			}
-			else // No antialiasing.
+			else
 			{
 				AddScanlineStepEdge(xi, yi);
 			}
