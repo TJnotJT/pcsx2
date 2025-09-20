@@ -319,11 +319,6 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const float rx1 = pos_x ? std::floor(x1 + 1.0f) : std::ceil(x1 - 1.0f);
 	const float ry1 = pos_y ? std::floor(y1 + 1.0f) : std::ceil(y1 - 1.0f);
 
-	const float fx0 = x0 - rx0;
-	const float fy0 = y0 - ry0;
-	const float fx1 = x1 - rx1;
-	const float fy1 = y1 - ry1;
-
 	const int rxi0 = static_cast<int>(rx0);
 	const int ryi0 = static_cast<int>(ry0);
 	const int rxi1 = static_cast<int>(rx1);
@@ -343,7 +338,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	bxi1 = std::min(bxi1, m_scissor.z - 1); // b has inclusive coordinates.
 	byi1 = std::min(byi1, m_scissor.w - 1); // b has inclusive coordinates.
 
-	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? (x1 - x0) : (y1 - y0)));
+	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? delta_x : delta_y));
 
 	GSVertexSW edge(v0);
 
@@ -355,7 +350,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
 	const float scaleDf = static_cast<float>(scaleD);
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
+	int D = static_cast<int>(scaleD * (step_x ? (y0 - ry0) : (x0 - rx0)));
 
 	// Stepping variables
 	int xi = rxi0;
@@ -372,9 +367,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	};
 
 	// Pre-steps
-	const float prestep = step_x ? (dxi * fx0) : (dyi * fy0);
-	edge += dedge * -GSVector4(prestep);
-	D += -static_cast<int>(dD * prestep);
+	const float prestep = step_x ? dxi * (rx0 - x0) : dyi * (ry0 - y0);
+	edge += dedge * GSVector4(prestep);
+	D += static_cast<int>(dD * prestep);
 	
 	while (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
@@ -548,6 +543,14 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	pxAssert(-scaleD / 2 <= D && D < scaleD / 2);
 
+	if (x0 == 354.125 &&
+		y0 == 106.5625 &&
+		x1 == 365.625 &&
+		y1 == 108.875)
+	{
+		printf("");
+	}
+
 	while (true)
 	{
 
@@ -564,10 +567,14 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		if (draw)
 		{
 			const auto AddScanlineStepEdge = [&](int x, int y, int cov = 0) {
-				if (m_scissor.left <= xi && xi < m_scissor.right &&
-					m_scissor.top <= yi && yi < m_scissor.bottom &&
-					IsOneOfMyScanlines(yi))
+				if (m_scissor.left <= x && x < m_scissor.right &&
+					m_scissor.top <= y && y < m_scissor.bottom &&
+					IsOneOfMyScanlines(y))
 				{
+					if (GSState::s_n == 128 && (x == 355 && y == 107))
+					{
+						printf("%d, %d: %f\n", x, y, e->c.x);
+					}
 					AddScanline(e, 1, x, y, edge);
 
 					if constexpr (aa)
@@ -624,7 +631,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 
 	m_edge.count += e - &m_edge.buff[m_edge.count];
 }
-# else
+#else
 template <bool step_x, bool pos_x, bool pos_y, bool aa>
 void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv)
 {
@@ -639,15 +646,18 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	const float x1 = v1.p.x;
 	const float y1 = v1.p.y;
 
+	if (x0 == 354.125 &&
+		y0 == 106.5625 &&
+		x1 == 365.625 &&
+		y1 == 108.875)
+	{
+		printf("");
+	}
+
 	float rx0 = std::floor(x0 + 0.5f);
 	float ry0 = std::floor(y0 + 0.5f);
 	float rx1 = std::floor(x1 + 0.5f);
 	float ry1 = std::floor(y1 + 0.5f);
-
-	float fx0 = x0 - rx0;
-	float fy0 = y0 - ry0;
-	float fx1 = x1 - rx1;
-	float fy1 = y1 - ry1;
 
 	// Diamond exit rule for determining coverage of first/last pixel.
 	const auto TestEndpoint = [](float dx, float dy) -> bool {
@@ -666,23 +676,19 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		}
 	};
 
-	const bool draw_first = !TestEndpoint(fx0, fy0);
-	const bool draw_last = TestEndpoint(fx1, fy1);
+	const bool draw_first = !TestEndpoint(x0 - rx0, y0 - ry0);
+	const bool draw_last = TestEndpoint(x1 - rx1, y1 - ry1);
 
 	if (!draw_first)
 	{
 		rx0 += step_x ? dxi : 0.0f;
 		ry0 += step_x ? 0.0f : dyi;
-		fx0 -= step_x ? dxi : 0.0f;
-		fy0 -= step_x ? 0.0f : dyi;
 	}
 
 	if (!draw_last)
 	{
 		rx1 -= step_x ? dxi : 0.0f;
 		ry1 -= step_x ? 0.0f : dyi;
-		fx1 += step_x ? dxi : 0.0f;
-		fy1 += step_x ? 0.0f : dyi;
 	}
 
 	if ((step_x ? (dxi * (rx1 - rx0)) : (dyi * (ry1 - ry0))) < 0.0f)
@@ -705,7 +711,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	const int scaleD = static_cast<int>(2 * 16 * 16 * std::abs(step_x ? delta_x : delta_y));
 	const float scaleDf = static_cast<float>(scaleD);
 	const int dD = static_cast<int>(2 * 16 * 16 * (step_x ? delta_y : delta_x));
-	int D = static_cast<int>(scaleD * (step_x ? fy0 : fx0));
+	int D = static_cast<int>(scaleD * (step_x ? (y0 - ry0) : (x0 - rx0)));
 
 	// Stepping variables
 	int xi = rxi0;
@@ -718,9 +724,9 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	};
 
 	// Pre-steps
-	const float prestep = step_x ? (dxi * fx0) : (dyi * fy0);
-	edge += dedge * -GSVector4(prestep);
-	D += -static_cast<int>(dD * prestep);
+	const float prestep = step_x ? dxi * (rx0 - x0) : dyi * (ry0 - y0);
+	edge += dedge * GSVector4(prestep);
+	D += static_cast<int>(dD * prestep);
 
 	while (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
@@ -737,12 +743,23 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 		{
 			AddScanline(e, 1, x, y, edge);
 
+			if (GSState::s_n == 128 && (x == 355 && y == 107))
+			{
+				printf("%d, %d: %f\n", x, y, e->c.x);
+			}
+
 			if constexpr (aa)
 				e->p.U32[0] = cov;
 
 			e++;
 		}
 	};
+
+		if (GSState::s_n == 54 && (x0 == 393 && y0 == 102.5))
+	//if (GSState::s_n == 54)
+	{
+		printf("");
+	}
 
 	while (true)
 	{
