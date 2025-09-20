@@ -343,7 +343,7 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	bxi1 = std::min(bxi1, m_scissor.z - 1); // b has inclusive coordinates.
 	byi1 = std::min(byi1, m_scissor.w - 1); // b has inclusive coordinates.
 
-	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
+	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? (x1 - x0) : (y1 - y0)));
 
 	GSVertexSW edge(v0);
 
@@ -372,9 +372,9 @@ void GSRasterizer::DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, 
 	};
 
 	// Pre-steps
-	const float prestep = step_x ? fx0 : fy0;
+	const float prestep = step_x ? (dxi * fx0) : (dyi * fy0);
 	edge += dedge * -GSVector4(prestep);
-	D += -static_cast<int>(dD * prestep) * (step_x ? dxi : dyi);
+	D += -static_cast<int>(dD * prestep);
 	
 	while (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
@@ -490,7 +490,7 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	const int rxi1 = static_cast<int>(rx1);
 	const int ryi1 = static_cast<int>(ry1);
 
-	const GSVertexSW dedge = dv / GSVector4(step_x ? (x1 - x0) : (y1 - y0));
+	const GSVertexSW dedge = dv / GSVector4(std::abs(step_x ? (x1 - x0) : (y1 - y0)));
 	
 	GSVertexSW edge(v0);
 
@@ -535,8 +535,9 @@ void GSRasterizer::DrawEdgeLine(const GSVertexSW& v0, const GSVertexSW& v1, cons
 	};
 
 	// Pre-steps
-	edge += dedge * -GSVector4(step_x ? fx0 : fy0);
-	D += -static_cast<int>(dD * (step_x ? fx0 : fy0)) * (step_x ? dxi : dyi);
+	const float prestep = step_x ? (dxi * fx0) : (dyi * fy0);
+	edge += dedge * -GSVector4(prestep);
+	D += -static_cast<int>(dD * prestep);
 
 	if (D >= scaleD / 2)
 		StepDependent.template operator()<1>();
