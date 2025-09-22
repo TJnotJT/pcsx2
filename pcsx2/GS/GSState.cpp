@@ -2142,7 +2142,6 @@ void GSState::FlushPrim()
 					GSVector4i* RESTRICT vert_ptr = (GSVector4i*)&m_vertex.buff[i];
 					GSVector4i v = vert_ptr[1];
 					v = v.xxxx().u16to32().sub32(m_xyof);
-					v = v.blend32<12>(v.sra32<4>());
 					m_vertex.xy[i & 3] = v;
 					m_vertex.xy_tail = unused;
 				}
@@ -4047,6 +4046,7 @@ template <u32 prim, bool auto_flush>
 __forceinline void GSState::VertexKick(u32 skip)
 {
 	constexpr u32 n = NumIndicesForPrim(prim);
+	constexpr int primclass = GSUtil::GetPrimClass(prim);
 	static_assert(n > 0);
 
 	pxAssert(m_vertex.tail < m_vertex.maxcount + 3);
@@ -4079,11 +4079,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 
 	// We maintain the X/Y coordinates for the last 4 vertices, as well as the head for triangle fans, so we can compute
 	// the min/max, and cull degenerate triangles, which saves draws in some cases. Why 4? Mod 4 is cheaper than Mod 3.
-	// These vertices are a full vector containing <X_Fixed_Point, Y_Fixed_Point, X_Integer, Y_Integer>. We use the
-	// integer coordinates for culling at native resolution, and the fixed point for all others. The XY offset has to be
-	// applied, then we split it into the fixed/integer portions.
-	const GSVector4i xy_ofs = new_v1.xxxx().u16to32().sub32(m_xyof);
-	const GSVector4i xy = xy_ofs.blend32<12>(xy_ofs.sra32<4>());
+	const GSVector4i xy = new_v1.xxxx().u16to32().sub32(m_xyof);
 	m_vertex.xy[xy_tail & 3] = xy;
 
 	// Backup head for triangle fans so we can read it later, otherwise it'll get lost after the 4th vertex.
@@ -4131,40 +4127,46 @@ __forceinline void GSState::VertexKick(u32 skip)
 				break;
 		}
 
-		GSVector4i test = pmax.lt32(m_scissor_cull_min) | pmin.gt32(m_scissor_cull_max);
-
-		switch (prim)
+		// Round bbox appropriately when using native resolution.
+		if (m_nativeres)
 		{
-			case GS_TRIANGLELIST:
-			case GS_TRIANGLESTRIP:
-			case GS_TRIANGLEFAN:
-			case GS_SPRITE:
+
+			if constexpr (primclass == GS_POINT_CLASS || primclass == GS_LINE_CLASS)
 			{
-				// Discard degenerate triangles which don't cover at least one pixel. Since the vertices are in native
-				// resolution space, we can use the integer locations. When upscaling, we can't, because a primitive which
-				// does not span a single pixel at 1x may span multiple pixels at higher resolutions.
-				const GSVector4i degen_test = pmin.eq32(pmax);
-				test |= m_nativeres ? degen_test.zwzw() : degen_test;
+				// Points and lines have coordinates rounded up to nearest pixel.
+				pmin = (pmin + GSVector4i(8)) & GSVector4i(~0xF);
+				pmax = (pmax + GSVector4i(8)) & GSVector4i(~0xF);
 			}
-			break;
-			default:
-				break;
+			else
+			{
+				// For triangles and sprites take the region strictly within the bounds.
+				pmin = ((pmin + GSVector4i(0xF)) & GSVector4i(~0xF)); // ceil
+				pmax = (pmax & GSVector4i(~0xF));                     // floor
+			}
 		}
 
-		switch (prim)
+		if (PRIM->AA1 && (primclass == GS_LINE_CLASS || primclass == GS_TRIANGLE_CLASS))
 		{
-			case GS_TRIANGLELIST:
-			case GS_TRIANGLESTRIP:
-			case GS_TRIANGLEFAN:
-				test = (test | v0.eq64(v1)) | (v1.eq64(v2) | v0.eq64(v2));
-				break;
-			default:
-				break;
+			// Expand the bbox by 1 on all sides for antialiased primitives.
+			pmin -= GSVector4i(0x10);
+			pmax += GSVector4i(0x10);
+		}
+
+		GSVector4i test = pmax.lt32(m_scissor_cull_min) | pmin.gt32(m_scissor_cull_max);
+
+		if constexpr (primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE)
+		{
+			test |= (pmin > pmax);
+		}
+
+		if constexpr (primclass == GS_TRIANGLE_CLASS)
+		{
+			test = (test | v0.eq64(v1)) | (v1.eq64(v2) | v0.eq64(v2));
 		}
 
 #ifndef _M_ARM64
-		// We only care about the xy passing the skip test. zw is the offset coordinates for native culling.
-		skip |= test.mask() & 0xff;
+		// We only care about the xy passing the skip test.
+		skip |= test.mask();
 #else
 		// mask() is slow on ARM, so just pull the bits out instead, thankfully we only care about the first 4 bytes.
 		skip |= (static_cast<u64>(test.extract64<0>()) & UINT64_C(0x8080808080808080)) != 0;
@@ -4289,13 +4291,12 @@ __forceinline void GSState::VertexKick(u32 skip)
 			ASSUME(0);
 	}
 
-	// Update rectangle for the current draw. We can use the re-integer coordinates from min/max here.
-	const GSVector4i draw_min = pmin.zwzw();
-	const GSVector4i draw_max = pmax;
+	// Update rectangle for the current draw.
+	const GSVector4i draw_rect = pmin.sra32<4>().upl64(pmax.sra32<4>());
 	if (m_vertex.tail != n)
-		temp_draw_rect = temp_draw_rect.min_i32(draw_min).blend32<12>(temp_draw_rect.max_i32(draw_max));
+		temp_draw_rect = temp_draw_rect.runion(draw_rect);
 	else
-		temp_draw_rect = draw_min.blend32<12>(draw_max);
+		temp_draw_rect = draw_rect;
 	temp_draw_rect = temp_draw_rect.rintersect(m_context->scissor.in);
 
 	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
