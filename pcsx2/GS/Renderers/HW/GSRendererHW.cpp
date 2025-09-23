@@ -8135,6 +8135,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	m_conf.drawlist = (m_conf.require_full_barrier && m_vt.m_primclass == GS_SPRITE_CLASS) ? &m_drawlist : nullptr;
+	m_conf.drawlist_bbox = (m_conf.drawlist && !g_gs_device->Features().texture_barrier) ? &m_drawlist_bbox : nullptr;
+	m_conf.xyof = m_context->scissor.xyof;
 
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);

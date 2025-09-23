@@ -3405,7 +3405,13 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap()
 	PRIM_OVERLAP overlap = PRIM_OVERLAP_NO;
 	const GSVertex* v = m_vertex.buff;
 
+	// When we don't have barriers we may need the bbox of the batches for determining
+	// what areas of the RT to copy.
+	const bool save_bbox = !g_gs_device->Features().texture_barrier && g_gs_device->Features().multidraw_fb_copy;
+
 	m_drawlist.clear();
+	if (save_bbox)
+		m_drawlist_bbox.clear(); // FIXME: ONLY USE IN CASES WHERE WE NEED BARRIER!
 	u32 i = 0;
 	while (i < count)
 	{
@@ -3445,6 +3451,8 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap()
 			j += 2;
 		}
 		m_drawlist.push_back((j - i) >> 1); // Sprite count
+		if (save_bbox)
+			m_drawlist_bbox.push_back(all);  // FIXME: ONLY USE IN CASES WHERE WE NEED BARRIER!
 		i = j;
 	}
 

@@ -319,6 +319,7 @@ public:
 
 	PRIM_OVERLAP m_prim_overlap = PRIM_OVERLAP_UNKNOW;
 	std::vector<size_t> m_drawlist;
+	std::vector<GSVector4i> m_drawlist_bbox;
 
 	struct GSPCRTCRegs
 	{

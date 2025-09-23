@@ -2804,49 +2804,125 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config, GSTexture* draw_rt_clo
 
 		const u32 indices_per_prim = config.indices_per_prim;
 
-		auto CopyAndBind = [&]() {
-			CopyRect(draw_rt, draw_rt_clone, config.drawarea, config.drawarea.left, config.drawarea.top);
+		auto CopyAndBind = [&](const GSVector4i& drawarea) {
+			CopyRect(draw_rt, draw_rt_clone, drawarea, drawarea.left, drawarea.top);
 			if (one_barrier || full_barrier)
 				PSSetShaderResource(2, draw_rt_clone);
 			if (config.tex && config.tex == config.rt)
 				PSSetShaderResource(0, draw_rt_clone);
 		};
 
-		// Copy once per batch, primitives don't overlap each other.
+		constexpr GSVector4i null_area = GSVector4i::cxpr(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
+
+		// Copy the draw area then accumulate the dirty region. If a new prim batch intersects the dirty
+		// region, update it and repeat.
 		if (m_features.multidraw_fb_copy && full_barrier && config.drawlist)
 		{
 			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
+
+			pxAssert(config.drawlist_bbox && static_cast<u32>(config.drawlist_bbox->size()) == draw_list_size);
+
+			CopyAndBind(config.drawarea); // Initial copy.
+
+			GSVector4i dirty_area = null_area;
 
 			for (u32 n = 0, p = 0; n < draw_list_size; n++)
 			{
 				const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
-				CopyAndBind();
+				GSVector4i bbox = ((*config.drawlist_bbox)[n] - config.xyof + GSVector4i(0, 0, 15, 15)).sra32<4>();
+
+				if (bbox.rintersects(dirty_area))
+				{
+					// Hazard, copy and reset.
+					CopyAndBind(dirty_area);
+					dirty_area = null_area;
+				}
+
 				DrawIndexedPrimitive(p, count);
 				p += count;
+				dirty_area = dirty_area.runion(bbox);
 			}
 
 			return;
 		}
 
-		// Copy once per primitive.
-		// TODO: Optimization try to use prim area for copy instead of draw area,
-		// might need current prim and previous prim area due to overlap,
-		// will need to use vertex cords to get the new copy rect.
+		// Copy the draw area then accumulate the dirty region. If a new prim intersects the dirty
+		// region update it and repeat.
 		if (m_features.multidraw_fb_copy && full_barrier)
 		{
-			for (u32 p = 0; p < config.nindices; p += indices_per_prim)
-			{
-				CopyAndBind();
-				DrawIndexedPrimitive(p, indices_per_prim);
-			}
+			const auto GetBBox1 = [&](const GSVertex& v) {
+				return GSVector4i(v.m[1]).upl16().xyxy();
+			};
 
+			const auto GetBBox2 = [&](const GSVertex& v0, const GSVertex& v1) {
+				return GetBBox1(v0).runion(GetBBox1(v1));
+			};
+
+			const auto GetBBox3 = [&](const GSVertex& v0, const GSVertex& v1, const GSVertex& v2) {
+				return GetBBox2(v0, v1).runion(GetBBox1(v2));
+			};
+
+			CopyAndBind(config.drawarea); // Initial copy.
+
+			GSVector4i dirty_area = null_area;
+
+			const auto DoMultidraw = [&]<int n>() {
+				for (u32 p = 0; p < config.nindices; p += n)
+				{
+					GSVector4i bbox;
+					if constexpr (n == 3)
+					{
+						bbox = GetBBox3(
+							config.verts[config.indices[p + 0]],
+							config.verts[config.indices[p + 1]],
+							config.verts[config.indices[p + 2]]);
+					}
+					else if constexpr (n == 2)
+					{
+						bbox = GetBBox2(
+							config.verts[config.indices[p + 0]],
+							config.verts[config.indices[p + 1]]);
+					}
+					else // n == 1
+					{
+						bbox = GetBBox1(config.verts[config.indices[p]]);
+					}
+
+					bbox = (bbox - config.xyof + GSVector4i(0, 0, 15, 15)).sra32<4>();
+
+					if (bbox.rintersects(dirty_area))
+					{
+						// Hazard, copy and reset.
+						CopyAndBind(dirty_area);
+						dirty_area = null_area;
+					}
+
+					DrawIndexedPrimitive(p, indices_per_prim);
+					dirty_area = dirty_area.runion(bbox);
+				}
+			};
+
+			switch (config.indices_per_prim)
+			{
+				case 1:
+					DoMultidraw.template operator()<1>();
+					break;
+				case 2:
+					DoMultidraw.template operator()<2>();
+					break;
+				case 3:
+					DoMultidraw.template operator()<3>();
+					break;
+				default:
+					pxAssert("Invalid number of vertices."); // Impossible.
+			}
 			return;
 		}
 
 		// Optimization: For alpha second pass we can reuse the copy snapshot from the first pass.
 		if (!skip_first_barrier)
-			CopyAndBind();
+			CopyAndBind(config.drawarea);
 	}
 
 	DrawIndexedPrimitive();
