@@ -3388,7 +3388,109 @@ bool GSState::TrianglesAreQuads(bool shuffle_check)
 	return true;
 }
 
-GSState::PRIM_OVERLAP GSState::PrimitiveOverlap()
+template<u32 primclass>
+GSState::PRIM_OVERLAP GSState::BatchPrimsNoOverlap(bool save_drawlist, bool save_bbox)
+{
+	constexpr int n = GSUtil::GetClassVertexCount(primclass);
+
+	// We should should only have to compute the drawlist/bboxes once per draw.
+	pxAssert(!save_drawlist || m_drawlist.empty());
+	pxAssert(!save_bbox || m_drawlist_bbox.empty());
+	
+	pxAssert(!save_bbox || save_drawlist); // We should only save bboxes when saving drawlist.
+
+	const GSVertex* RESTRICT v = m_vertex.buff;
+	const u16* RESTRICT index = m_index.buff;
+	const u32 count = m_index.tail;
+
+	// Optimize out using indices for sprites and points; probably not much difference.
+	const auto GetIndex = [&](int i) {
+		if constexpr (primclass == GS_SPRITE_CLASS || primclass == GS_POINT_CLASS)
+			return i;
+		else
+			return index[i];
+	};
+
+	// Batch prim into groups so that within each group the cumulative bboxes are non-overlapping.
+	// Allows faster comparison than using O(n^2) for full pairwise intersections.
+	// Check Virtua Fighter for example.
+
+	PRIM_OVERLAP overlap = PRIM_OVERLAP_NO;
+
+	u32 i = 0;
+	while (i < count)
+	{
+		constexpr GSVector4i null = GSVector4i::cxpr(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
+		GSVector4i all = null;
+
+		u32 j = i;
+		while (j < count)
+		{
+			GSVector4i prim = GSVector4i(v[GetIndex(j + 0)].m[1]).upl16().xyxy();
+			for (int k = 1; k < n; k++) // Please unroll me.
+				prim = prim.runion(GSVector4i(v[GetIndex(j + k)].m[1]).upl16().xyxy());
+
+			// Check for triangles that form quads.
+			if (primclass == GS_TRIANGLE_CLASS && (j == i + 3) && (all == prim).mask() == 0xffff)
+			{
+
+				GSUtil::TriangleOrdering tri0;
+				GSUtil::TriangleOrdering tri1;
+
+				if (!GSUtil::AreTrianglesQuad<0, 0>(m_vertex.buff, &index[i], &index[j], &tri0, &tri1))
+				{
+					overlap = PRIM_OVERLAP_YES;
+					break;
+				}
+			}
+			else if (all.rintersects(prim))
+			{
+				overlap = PRIM_OVERLAP_YES;
+				break;
+			}
+			else
+			{
+				all = all.runion(prim);
+			}
+
+			j += n;
+		}
+
+		if (save_drawlist)
+			m_drawlist.push_back((j - i) / n); // Prim count
+		else if (j < count)
+			return PRIM_OVERLAP_YES;
+
+		if (save_bbox)
+			m_drawlist_bbox.push_back(all);
+
+		i = j;
+	}
+
+	return overlap;
+}
+
+GSState::PRIM_OVERLAP GSState::BatchPrimsNoOverlap(bool save_drawlist)
+{
+	const bool save_bbox = save_drawlist && !g_gs_device->Features().texture_barrier && g_gs_device->Features().multidraw_fb_copy;
+
+	switch (m_vt.m_primclass)
+	{
+		case GS_POINT_CLASS:
+			return BatchPrimsNoOverlap<GS_POINT_CLASS>(save_drawlist, save_bbox);
+		case GS_LINE_CLASS:
+			return BatchPrimsNoOverlap<GS_LINE_CLASS>(save_drawlist, save_bbox);
+		case GS_TRIANGLE_CLASS:
+			return BatchPrimsNoOverlap<GS_TRIANGLE_CLASS>(save_drawlist, save_bbox);
+		case GS_SPRITE_CLASS:
+			return BatchPrimsNoOverlap<GS_SPRITE_CLASS>(save_drawlist, save_bbox);
+		default:
+			pxFail("Invalid prim class."); // Impossible.
+			return PRIM_OVERLAP_UNKNOW;
+	}
+}
+
+GSState::PRIM_OVERLAP GSState::PrimitiveOverlap(bool save_drawlist)
 {
 	// Either 1 triangle or 1 line or 3 POINTs
 	// It is bad for the POINTs but low probability that they overlap
@@ -3400,106 +3502,14 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap()
 	else if (m_vt.m_primclass != GS_SPRITE_CLASS)
 		return PRIM_OVERLAP_UNKNOW; // maybe, maybe not
 
-	// Check intersection of sprite primitive only
-	const u32 count = m_vertex.next;
-	PRIM_OVERLAP overlap = PRIM_OVERLAP_NO;
-	const GSVertex* v = m_vertex.buff;
+	return BatchPrimsNoOverlap(save_drawlist);
+}
 
-	// When we don't have barriers we may need the bbox of the batches for determining
-	// what areas of the RT to copy.
-	const bool save_bbox = !g_gs_device->Features().texture_barrier && g_gs_device->Features().multidraw_fb_copy;
-
-	m_drawlist.clear();
-	if (save_bbox)
-		m_drawlist_bbox.clear(); // FIXME: ONLY USE IN CASES WHERE WE NEED BARRIER!
-	u32 i = 0;
-	while (i < count)
-	{
-		// In order to speed up comparison a bounding-box is accumulated. It removes a
-		// loop so code is much faster (check game virtua fighter). Besides it allow to check
-		// properly the Y order.
-
-		// .x = min(v[i].XYZ.X, v[i+1].XYZ.X)
-		// .y = min(v[i].XYZ.Y, v[i+1].XYZ.Y)
-		// .z = max(v[i].XYZ.X, v[i+1].XYZ.X)
-		// .w = max(v[i].XYZ.Y, v[i+1].XYZ.Y)
-		GSVector4i all = GSVector4i(v[i].m[1]).upl16(GSVector4i(v[i + 1].m[1])).upl16().xzyw();
-		all = all.xyxy().blend(all.zwzw(), all > all.zwxy());
-
-		u32 j = i + 2;
-		while (j < count)
-		{
-			GSVector4i sprite = GSVector4i(v[j].m[1]).upl16(GSVector4i(v[j + 1].m[1])).upl16().xzyw();
-			sprite = sprite.xyxy().blend(sprite.zwzw(), sprite > sprite.zwxy());
-
-			// Be sure to get vertex in good order, otherwise .r* function doesn't
-			// work as expected.
-			pxAssert(sprite.x <= sprite.z);
-			pxAssert(sprite.y <= sprite.w);
-			pxAssert(all.x <= all.z);
-			pxAssert(all.y <= all.w);
-
-			if (all.rintersect(sprite).rempty())
-			{
-				all = all.runion(sprite);
-			}
-			else
-			{
-				overlap = PRIM_OVERLAP_YES;
-				break;
-			}
-			j += 2;
-		}
-		m_drawlist.push_back((j - i) >> 1); // Sprite count
-		if (save_bbox)
-			m_drawlist_bbox.push_back(all);  // FIXME: ONLY USE IN CASES WHERE WE NEED BARRIER!
-		i = j;
-	}
-
-#if 0
-	// Old algo: less constraint but O(n^2) instead of O(n) as above
-
-	// You have no guarantee on the sprite order, first vertex can be either top-left or bottom-left
-	// There is a high probability that the draw call will uses same ordering for all vertices.
-	// In order to keep a small performance impact only the first sprite will be checked
-	//
-	// Some safe-guard will be added in the outer-loop to avoid corruption with a limited perf impact
-	if (v[1].XYZ.Y < v[0].XYZ.Y) {
-		// First vertex is Top-Left
-		for (u32 i = 0; i < count; i += 2) {
-			if (v[i + 1].XYZ.Y > v[i].XYZ.Y) {
-				return PRIM_OVERLAP_UNKNOW;
-			}
-			GSVector4i vi(v[i].XYZ.X, v[i + 1].XYZ.Y, v[i + 1].XYZ.X, v[i].XYZ.Y);
-			for (u32 j = i + 2; j < count; j += 2) {
-				GSVector4i vj(v[j].XYZ.X, v[j + 1].XYZ.Y, v[j + 1].XYZ.X, v[j].XYZ.Y);
-				GSVector4i inter = vi.rintersect(vj);
-				if (!inter.rempty()) {
-					return PRIM_OVERLAP_YES;
-				}
-			}
-		}
-	}
-	else {
-		// First vertex is Bottom-Left
-		for (u32 i = 0; i < count; i += 2) {
-			if (v[i + 1].XYZ.Y < v[i].XYZ.Y) {
-				return PRIM_OVERLAP_UNKNOW;
-			}
-			GSVector4i vi(v[i].XYZ.X, v[i].XYZ.Y, v[i + 1].XYZ.X, v[i + 1].XYZ.Y);
-			for (u32 j = i + 2; j < count; j += 2) {
-				GSVector4i vj(v[j].XYZ.X, v[j].XYZ.Y, v[j + 1].XYZ.X, v[j + 1].XYZ.Y);
-				GSVector4i inter = vi.rintersect(vj);
-				if (!inter.rempty()) {
-					return PRIM_OVERLAP_YES;
-				}
-			}
-		}
-	}
-#endif
-
-	// fprintf(stderr, "%d: Yes, code can be optimized (draw of %d vertices)\n", s_n, count);
-	return overlap;
+std::size_t GSState::EnsureDrawlistGetSize()
+{
+	if (m_drawlist.empty())
+		BatchPrimsNoOverlap(true);
+	return m_drawlist.size();
 }
 
 bool GSState::SpriteDrawWithoutGaps()
