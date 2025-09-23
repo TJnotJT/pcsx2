@@ -3265,7 +3265,62 @@ void GSState::GrowVertexBuffer()
 	m_vertex.maxcount = maxcount - 3; // -3 to have some space at the end of the buffer before DrawingKick can grow it
 }
 
-bool GSState::TrianglesAreQuads(bool shuffle_check)
+template<bool shuffle_check>
+bool GSState::TrianglesAreQuads2()
+{
+	if (!shuffle_check && m_quad_check_valid)
+		return m_are_quads;
+
+	const GSVertex* const v = m_vertex.buff;
+	m_are_quads = false;
+	m_quad_check_valid = !shuffle_check;
+
+	constexpr GSVector4i offset = shuffle_check ? GSVector4i::cxpr(8 << 4, 0, 8 << 4, 0) : GSVector4i::cxpr(0);
+
+	GSVector4i prev_bbox;
+
+	for (u32 idx = 0; idx < m_index.tail; idx += 6)
+	{
+		const u16* const i = m_index.buff + idx;
+
+		GSUtil::TriangleOrdering tri0;
+		GSUtil::TriangleOrdering tri1;
+
+		if (!GSUtil::AreTrianglesQuad<0, 0>(m_vertex.buff, &i[idx], &i[idx + 3], &tri0, &tri1))
+			return false;
+
+		GSVector4i corner0 = GSVector4i(v[i[tri0.b]].m[1]).upl16().xyxy(); // tri.b: right angle corner.
+		GSVector4i corner1 = GSVector4i(v[i[tri1.b]].m[1]).upl16().xyxy(); // tri.b: right angle corner.
+		GSVector4i bbox = corner0.runion(corner1);
+
+		if (idx > 0)
+		{
+			GSVector4i bbox_offset = bbox - offset;
+
+			// Check that the two bboxes have exactly 1 edge in common.
+			int m = GSVector4::cast(bbox_offset == prev_bbox).mask();
+			int halign = (m & 0b0101) == 0b0101;
+			int valign = (m & 0b1010) == 0b1010;
+			int hadj = GSVector4::cast(bbox_offset.xzxz() == prev_bbox.zxzx()).mask() & 3;
+			int vadj = GSVector4::cast(bbox_offset.ywyw() == prev_bbox.ywyw()).mask() & 3;
+
+			bool adjacent =
+				(halign && (hadj == 0b01 || hadj == 0b10)) ||
+				(valign && (vadj == 0b01 || vadj == 0b10));
+
+			if (!adjacent)
+				return false;
+		}
+
+		prev_bbox = bbox;
+	}
+
+	m_prim_overlap = PRIM_OVERLAP_NO;
+	m_are_quads = true;
+	return true;
+}
+
+bool GSState::TrianglesAreQuads0(bool shuffle_check)
 {
 	// If this is a quad, there should only be two distinct values for both X and Y, which
 	// also happen to be the minimum/maximum bounds of the primitive.
@@ -3390,6 +3445,26 @@ bool GSState::TrianglesAreQuads(bool shuffle_check)
 	return true;
 }
 
+bool GSState::TrianglesAreQuads(bool shuffle_check)
+{
+	bool b2 = shuffle_check ? TrianglesAreQuads2<true>() : TrianglesAreQuads2<false>();
+	bool are_quads2 = m_are_quads;
+	PRIM_OVERLAP overlap2 = m_prim_overlap;
+
+	bool b0 = TrianglesAreQuads0(shuffle_check);
+	bool are_quads0 = m_are_quads;
+	PRIM_OVERLAP overlap0 = m_prim_overlap;
+
+	if (b0 != b2 || are_quads0 != are_quads2 || overlap0 != overlap2)
+	{
+		printf("");
+	}
+
+	m_are_quads = are_quads2;
+	m_prim_overlap = overlap2;
+	return b2;
+}
+
 template<u32 primclass>
 GSState::PRIM_OVERLAP GSState::BatchPrimsNoOverlap(bool save_drawlist, bool save_bbox)
 {
@@ -3493,17 +3568,17 @@ GSState::PRIM_OVERLAP GSState::BatchPrimsNoOverlap(bool save_drawlist)
 
 GSState::PRIM_OVERLAP GSState::PrimitiveOverlap(bool save_drawlist)
 {
-	// Either 1 triangle or 1 line or 3 POINTs
-	// It is bad for the POINTs but low probability that they overlap
+	// Assume non-overlapping for 1 triangle, 1 sprite, 1 line, or 3 points.
+	// Not accurate for points but low probability that they overlap.
 	if (m_vertex.next < 4)
 		return PRIM_OVERLAP_NO;
 
 	if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
-		return (m_index.tail == 6 && TrianglesAreQuads()) ? PRIM_OVERLAP_NO : PRIM_OVERLAP_UNKNOW;
-	else if (m_vt.m_primclass != GS_SPRITE_CLASS)
-		return PRIM_OVERLAP_UNKNOW; // maybe, maybe not
-
-	return BatchPrimsNoOverlap(save_drawlist);
+		return (TrianglesAreQuads() && BatchPrimsNoOverlap(save_drawlist)) ? PRIM_OVERLAP_NO : PRIM_OVERLAP_UNKNOW;
+	else if (m_vt.m_primclass == GS_SPRITE_CLASS)
+		return BatchPrimsNoOverlap(save_drawlist);
+	else
+		return PRIM_OVERLAP_UNKNOW;
 }
 
 std::size_t GSState::EnsureDrawlistGetSize()

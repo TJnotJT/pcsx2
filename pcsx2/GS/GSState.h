@@ -447,7 +447,10 @@ public:
 	void DumpVertices(const std::string& filename);
 	void DumpTransferList(const std::string& filename);
 	void DumpTransferImages();
-
+	
+	template<bool shuffle_check>
+	bool TrianglesAreQuads2();
+	bool TrianglesAreQuads0(bool shuffle_check = false);
 	bool TrianglesAreQuads(bool shuffle_check = false);
 	template <u32 primclass>
 	PRIM_OVERLAP BatchPrimsNoOverlap(bool save_drawlist = false, bool save_bbox = false);
