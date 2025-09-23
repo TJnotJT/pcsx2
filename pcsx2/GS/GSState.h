@@ -319,6 +319,7 @@ public:
 
 	PRIM_OVERLAP m_prim_overlap = PRIM_OVERLAP_UNKNOW;
 	std::vector<size_t> m_drawlist;
+	std::vector<GSVector4i> m_drawlist_bbox;
 
 	struct GSPCRTCRegs
 	{
@@ -448,7 +449,11 @@ public:
 	void DumpTransferImages();
 
 	bool TrianglesAreQuads(bool shuffle_check = false);
-	PRIM_OVERLAP PrimitiveOverlap();
+	template <u32 primclass>
+	PRIM_OVERLAP BatchPrimsNoOverlap(bool save_drawlist = false, bool save_bbox = false);
+	PRIM_OVERLAP BatchPrimsNoOverlap(bool save_drawlist = false);
+	PRIM_OVERLAP PrimitiveOverlap(bool save_drawlist = false);
+	std::size_t EnsureDrawlistGetSize();
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
