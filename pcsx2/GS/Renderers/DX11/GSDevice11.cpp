@@ -2812,19 +2812,13 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config, GSTexture* draw_rt_clo
 				PSSetShaderResource(0, draw_rt_clone);
 		};
 
-		constexpr GSVector4i null_area = GSVector4i::cxpr(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
-
 		// Copy the draw area then accumulate the dirty region. If a new prim batch intersects the dirty
 		// region, update it and repeat.
-		if (m_features.multidraw_fb_copy && full_barrier && config.drawlist)
+		if (m_features.multidraw_fb_copy && full_barrier)
 		{
 			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
 
 			pxAssert(config.drawlist_bbox && static_cast<u32>(config.drawlist_bbox->size()) == draw_list_size);
-
-			CopyAndBind(config.drawarea); // Initial copy.
-
-			GSVector4i dirty_area = null_area;
 
 			for (u32 n = 0, p = 0; n < draw_list_size; n++)
 			{
@@ -2832,91 +2826,12 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config, GSTexture* draw_rt_clo
 
 				GSVector4i bbox = ((*config.drawlist_bbox)[n] - config.xyof + GSVector4i(0, 0, 15, 15)).sra32<4>();
 
-				if (bbox.rintersects(dirty_area))
-				{
-					// Hazard, copy and reset.
-					CopyAndBind(dirty_area);
-					dirty_area = null_area;
-				}
+				CopyAndBind(bbox);
 
 				DrawIndexedPrimitive(p, count);
 				p += count;
-				dirty_area = dirty_area.runion(bbox);
 			}
 
-			return;
-		}
-
-		// Copy the draw area then accumulate the dirty region. If a new prim intersects the dirty
-		// region update it and repeat.
-		if (m_features.multidraw_fb_copy && full_barrier)
-		{
-			const auto GetBBox1 = [&](const GSVertex& v) {
-				return GSVector4i(v.m[1]).upl16().xyxy();
-			};
-
-			const auto GetBBox2 = [&](const GSVertex& v0, const GSVertex& v1) {
-				return GetBBox1(v0).runion(GetBBox1(v1));
-			};
-
-			const auto GetBBox3 = [&](const GSVertex& v0, const GSVertex& v1, const GSVertex& v2) {
-				return GetBBox2(v0, v1).runion(GetBBox1(v2));
-			};
-
-			CopyAndBind(config.drawarea); // Initial copy.
-
-			GSVector4i dirty_area = null_area;
-
-			const auto DoMultidraw = [&]<int n>() {
-				for (u32 p = 0; p < config.nindices; p += n)
-				{
-					GSVector4i bbox;
-					if constexpr (n == 3)
-					{
-						bbox = GetBBox3(
-							config.verts[config.indices[p + 0]],
-							config.verts[config.indices[p + 1]],
-							config.verts[config.indices[p + 2]]);
-					}
-					else if constexpr (n == 2)
-					{
-						bbox = GetBBox2(
-							config.verts[config.indices[p + 0]],
-							config.verts[config.indices[p + 1]]);
-					}
-					else // n == 1
-					{
-						bbox = GetBBox1(config.verts[config.indices[p]]);
-					}
-
-					bbox = (bbox - config.xyof + GSVector4i(0, 0, 15, 15)).sra32<4>();
-
-					if (bbox.rintersects(dirty_area))
-					{
-						// Hazard, copy and reset.
-						CopyAndBind(dirty_area);
-						dirty_area = null_area;
-					}
-
-					DrawIndexedPrimitive(p, indices_per_prim);
-					dirty_area = dirty_area.runion(bbox);
-				}
-			};
-
-			switch (config.indices_per_prim)
-			{
-				case 1:
-					DoMultidraw.template operator()<1>();
-					break;
-				case 2:
-					DoMultidraw.template operator()<2>();
-					break;
-				case 3:
-					DoMultidraw.template operator()<3>();
-					break;
-				default:
-					pxAssert("Invalid number of vertices."); // Impossible.
-			}
 			return;
 		}
 
