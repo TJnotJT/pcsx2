@@ -53,3 +53,18 @@ void EndRegressionTest();
 RegressionPacket* GetRegressionPacketWrite();
 
 float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket* p2, int threshold);
+
+struct Process
+{
+	std::string command;
+#ifdef __WIN32__
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+#else
+	// Not implemented.
+#endif
+	bool Start(const std::string& command);
+	bool IsRunning();
+	int WaitForExit();
+	bool Close();
+};

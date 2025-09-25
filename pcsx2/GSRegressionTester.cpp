@@ -314,3 +314,71 @@ float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket
 		return NAN;
 	}
 }
+
+bool Process::Start(const std::string& command)
+{
+#ifdef __WIN32__
+	memset(&si, 0, sizeof(STARTUPINFO));
+	si.cb = sizeof(STARTUPINFO);
+	memset(&pi, 0, sizeof(PROCESS_INFORMATION));
+
+	std::wstring wcommand = StringUtil::UTF8StringToWideString(command);
+	std::vector<wchar_t> wcommand_buf(wcommand.begin(), wcommand.end());
+	wcommand_buf.push_back(L'\0');
+
+	if (!CreateProcess(
+			NULL,
+			wcommand_buf.data(),
+			NULL,
+			NULL,
+			FALSE,
+			0,
+			NULL,
+			NULL,
+			&si,
+			&pi))
+	{
+		Console.Error("Unable to create runner process with command: \"{}\"", command);
+		return false;
+	}
+
+	Console.WriteLnFmt("Created runner process (PID: {}) with command: \"{}\"", pi.dwProcessId, command);
+
+	this->command = command;
+
+	return true;
+#else
+	// Not implemented
+#endif
+}
+
+bool Process::IsRunning()
+{
+#ifdef __WIN32__
+	DWORD status = WaitForSingleObject(pi.hProcess, 0);
+	return status == WAIT_TIMEOUT;
+#else
+	// Not implemented
+	return false;
+#endif
+}
+
+int Process::WaitForExit()
+{
+#ifdef __WIN32__
+	return WaitForSingleObject(pi.hProcess, INFINITE);
+#else
+	// Not implemented
+	return false;
+#endif
+}
+
+bool Process::Close()
+{
+#ifdef __WIN32__
+	return CloseHandle(pi.hProcess) && CloseHandle(pi.hThread);
+#else
+	// Not implemented
+	return false;
+#endif
+}
