@@ -1,14 +1,46 @@
 #pragma once
 
+#ifdef __WIN32__
+#include <windows.h>
+#endif
+
 struct alignas(32) RegressionPacket
 {
+	std::atomic<bool> ready; // Contains data to be consumed.
 	char name[4096];
 	int size, w, h, pitch, bytes_per_pixel;
 	u8 data[1024 * 1024 * 4];
+
+	void SetFilename(const char* fn);
+	void SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel);
+};
+
+/// Ring buffer of regression packets.
+struct alignas(32) RegressionPacketBuffer
+{
+	std::string name;
+#ifdef __WIN32__
+	HANDLE packets_h; // Handle to shared memory.
+#else
+	// Not implemented.
+#endif
+	RegressionPacket* packets = nullptr;
+	int num_packets = 0;
+	int read = 0;  // read index.
+	int write = 0; // write index;
+
+	// Windows defines CreateFile as a macro so use CreateFile_.
+	bool CreateFile_(const std::string& name, int num_packets);
+	bool OpenFile(const std::string& name, int num_packets);
+	bool CloseFile();
+
+	RegressionPacket* GetPacketWrite(bool block = true);
+	RegressionPacket* GetPacketRead(bool block = false);
 };
 
 extern bool regression_testing;
-constexpr int n_regression_packets = 10;
-extern RegressionPacket regression_packets[n_regression_packets];
+extern RegressionPacketBuffer regression_buffer_write;
 
-RegressionPacket* GetRegressionPacket();
+void StartRegressionTest(const std::string& fn, int num_packets);
+void EndRegressionTest();
+RegressionPacket* GetRegressionPacketWrite();

@@ -61,18 +61,8 @@ bool GSTexture::Save(const std::string& fn, RegressionPacket* packet)
 
 	if (packet)
 	{
-		memcpy(packet->data, dl->GetMapPointer(), m_size.y * dl->GetMapPitch());
-
-		if (fn.length() > std::size(packet->name))
-		{
-			Console.Warning("File name is too large for regression packet.");
-		}
-
-		strncpy(packet->name, fn.c_str(), std::size(packet->name));
-		packet->w = m_size.x;
-		packet->h = m_size.y;
-		packet->pitch = dl->GetMapPitch();
-		packet->bytes_per_pixel = GSPng::pixel[format].bytes_per_pixel_in;
+		packet->SetFilename(fn.c_str());
+		packet->SetImageData(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
 		return true;
 	}
 
