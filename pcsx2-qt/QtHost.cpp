@@ -982,6 +982,16 @@ void Host::OnVMResumed()
 	emit g_emu_thread->onVMResumed();
 }
 
+void Host::OnBatchDumpStart(const std::string& dump_name)
+{
+	// Not required; only for GSRunner batch mode.
+}
+
+void Host::OnBatchDumpEnd(const std::string& dump_name)
+{
+	// Not required; only for GSRunner batch mode.
+}
+
 void Host::OnGameChanged(const std::string& title, const std::string& elf_override, const std::string& disc_path,
 	const std::string& disc_serial, u32 disc_crc, u32 current_crc)
 {

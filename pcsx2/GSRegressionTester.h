@@ -1,0 +1,374 @@
+#pragma once
+
+#include <mutex>
+
+#ifdef __WIN32__
+#include <windows.h>
+#endif
+
+// Atomic integer for inter-process shared memory since std::atomic is not guaranteed across processes.
+struct GSIntSharedMemory
+{
+
+#ifdef __WIN32__
+	using ValType = LONG;
+#else
+	using ValType = long;
+#endif
+	ValType val;
+	ValType CompareExchange(ValType expected, ValType desired);
+	ValType Get();
+	void Set(ValType i);
+	void Init();
+	static std::size_t GetTotalSize();
+};
+
+struct GSEvent
+{
+#ifdef __WIN32__
+	HANDLE handle = NULL;
+	std::string name;
+
+	static std::wstring GetGlobalName(const std::string& name);
+#else
+	// Not inplemented;
+#endif
+	bool Open_(const std::string& name);
+	bool Create(const std::string& name, std::size_t count, std::size_t max_count);
+	bool Close() const;
+	bool Wait(double seconds) const;
+	bool Reset() const;
+	bool Signal() const;
+};
+
+// Spinlock using the inter-process atomic.
+struct GSSpinlockSharedMemory
+{
+	// For producer/consumer semantics.
+	enum : GSIntSharedMemory::ValType
+	{
+		WRITEABLE = 0, // Must be same as UNLOCKED.
+		READABLE = 1
+	};
+
+	GSIntSharedMemory lock;
+
+	bool LockWrite(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
+	bool LockRead(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
+	bool UnlockWrite();
+	bool UnlockRead();
+	bool Writeable();
+	bool Readable();
+
+	// For lock/unlock.
+	enum : GSIntSharedMemory::ValType
+	{
+		UNLOCKED = 0, // Must be same as WRITEABLE.
+		LOCKED = 1
+	};
+
+	bool Lock(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
+	bool Unlock();
+};
+
+// Packet holding data uploaded by runners for tester to consume and diff.
+// Lives in shared memory.
+struct GSRegressionPacket
+{
+	static constexpr std::size_t name_size = 4096;
+
+	enum : u32
+	{
+		IMAGE,
+		HWSTAT,
+		DONE_DUMP
+	};
+
+	struct alignas(32) HWStat
+	{
+		std::size_t frames;
+		std::size_t draws;
+		std::size_t render_passes;
+		std::size_t barriers;
+		std::size_t copies;
+		std::size_t uploads;
+		std::size_t readbacks;
+
+		bool operator==(const HWStat& other)
+		{
+			return memcmp(this, &other, sizeof(HWStat)) == 0;
+		};
+
+		bool operator!=(const HWStat& other)
+		{
+			return !operator==(other);
+		};
+	};
+
+	struct alignas(32) ImageHeader
+	{
+		std::size_t size;
+		std::size_t w;
+		std::size_t h;
+		std::size_t pitch;
+		std::size_t bytes_per_pixel;
+	};
+
+	GSSpinlockSharedMemory lock;
+	u32 type;
+	char name_dump[name_size];
+	char name_packet[name_size];
+
+	union
+	{
+		ImageHeader image_header;
+		HWStat hwstat;
+	};
+
+	std::size_t packet_size;
+
+	// Call by owner.
+	void SetNameDump(const std::string& name);
+	void SetNamePacket(const std::string& name);
+	void SetName(char* dst, const std::string& name); // Helper (private)
+	void SetImage(const void* src, int w, int h, int pitch, int bytes_per_pixel);
+	void SetHWStat(const HWStat& hwstat);
+	void SetDoneDump();
+	std::string GetNameDump();
+	std::string GetNamePacket();
+	void* GetData();
+	const void* GetData() const;
+
+	// Call only once before sharing. Not thread safe.
+	void Init(std::size_t packet_size);
+
+	// Static
+	static std::size_t GetTotalSize(std::size_t packet_size);
+};
+
+// Cross-platform shared memory file for regression testing.
+struct GSSharedMemoryFile
+{
+	std::string name = "";
+	void* data = nullptr;
+	std::size_t size;
+#ifdef __WIN32__
+	HANDLE handle; // Handle to shared memory.
+#else
+	// Not implemented.
+#endif
+
+	// Windows defines CreateFile as a macro so use CreateFile_.
+	bool CreateFile_(const std::string& name, std::size_t size);
+	bool OpenFile(const std::string& name, std::size_t size);
+	bool CloseFile();
+	void ResetFile();
+};
+
+// GSDumpFile that lives in shared memory. Allows the tester to read/decode dump
+// files from disk once and upload for runners.
+struct GSDumpFileSharedMemory
+{
+	static constexpr std::size_t name_size = 4096;
+
+	GSSpinlockSharedMemory lock;
+	char name[name_size];
+
+	// Note: not the true dump size; just size of buffer.
+	// The actual dump size is obtained by parsing the buffer.
+	std::size_t dump_size;
+
+	// Call only once before sharing. Not thread safe.
+	void Init(std::size_t dump_size);
+
+	// Call by owner.
+	void* GetPtrDump();
+	std::size_t GetSizeDump();
+	std::string GetNameDump();
+	void SetSizeDump(std::size_t size);
+	void SetNameDump(const std::string& str);
+
+	// Static.
+	static std::size_t GetTotalSize(std::size_t dump_size);
+};
+
+struct GSSemaphore
+{
+#ifdef __WIN32__
+	HANDLE handle = NULL;
+	std::string name;
+
+	static std::wstring GetGlobalName(const std::string& name);
+#else
+	// Not inplemented;
+#endif
+	bool Open_(const std::string& name);
+	bool Create(const std::string& name, std::size_t count, std::size_t max_count);
+	bool Close() const;
+	bool Decrement(double seconds) const;
+	bool Increment() const;
+};
+
+// Ring buffers of regression packets and dump files.
+struct GSRegressionBuffer
+{
+	enum : u32
+	{
+		RUNNER = 0,
+		TESTER = 1
+	};
+
+	enum : u32
+	{
+		DEFAULT, // Both
+		WRITE_DATA, // Runner
+		WAIT_DUMP, // Runner
+		DONE_RUNNING, // Running
+		DONE_UPLOADING, // Tester
+		EXIT // Tester
+	};
+
+	GSSharedMemoryFile shm;
+
+	// (Runner) Owned by GS thread.
+	void* packets = nullptr;
+	std::size_t num_packets = 0;
+	std::size_t packet_size = 0;
+	std::size_t packet_write = 0;
+	std::size_t packet_read = 0;
+
+	GSEvent event_packet_write;
+	GSEvent event_packet_read;
+
+	// (Runner) Owned by main thread.
+	void* dumps = nullptr;
+	std::size_t num_dumps = 0;
+	std::size_t dump_write = 0;
+	std::size_t dump_read = 0;
+	std::size_t dump_size = 0;
+	std::string dump_name;
+
+	GSEvent event_dump_write;
+	GSEvent event_dump_read;
+
+	// (Runner) Owned by GS thread.
+	static constexpr std::size_t num_states = 2;
+	GSIntSharedMemory* state; // Two states owned by runner and tester.
+
+	// Call only once before sharing.
+	bool CreateFile_(std::string& semaphore_name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+
+	// Call only once by child.
+	bool OpenFile(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+
+	// Call only once by parent.
+	bool CloseFile();
+
+	// Call only once to initialize.
+	void Init(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+	void Reset();
+
+	// Thread safe; acquire ownership.
+	// (Runner) GS thread only.
+	GSRegressionPacket* GetPacketWrite(bool block = true, bool check_parent = false);
+	GSRegressionPacket* GetPacketRead(bool block = false, bool check_parent = false);
+
+	// Call only by owner to release ownership.
+	// (Runner) GS thread only.
+	void DonePacketWrite();
+	void DonePacketRead();
+
+	// Thread safe; acquire ownership.
+	// (Runner) Main thread only.
+	GSDumpFileSharedMemory* GetDumpWrite(bool block = true, bool check_parent = false);
+	GSDumpFileSharedMemory* GetDumpRead(bool block = false, bool check_parent = false);
+
+	// Call only by owner to release ownership.
+	// (Runner) Main thread only.
+	void DoneDumpWrite();
+	void DoneDumpRead();
+
+	// Thread safe.
+	u32 GetState(u32 which);
+	void SetState(u32 which, u32 state);
+	u32 GetStateRunner();
+	u32 GetStateTester();
+	void SetStateRunner(u32 state); // (Runner) GS thread only.
+	void SetStateTester(u32 state);
+
+	// Local copy of dump name.
+	void SetNameDump(const std::string& name); // (Runner) main thread only.
+	std::string GetNameDump(); // (Runner) GS thread only.
+
+	// Unsafe, for private use only.
+	GSRegressionPacket* GetPacket(std::size_t i);
+	GSDumpFileSharedMemory* GetDump(std::size_t i);
+
+	// Static.
+	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+	static std::string GetSemPacketWriteName(const std::string& name);
+	static std::string GetSemPacketReadName(const std::string& name);
+	static std::string GetSemDumpWriteName(const std::string& name);
+	static std::string GetSemDumpReadName(const std::string& name);
+
+	static std::string GetEventPacketWriteName(const std::string& name);
+	static std::string GetEventPacketReadName(const std::string& name);
+	static std::string GetEventDumpWriteName(const std::string& name);
+	static std::string GetEventDumpReadName(const std::string& name);
+
+	// Debug; unsafe.
+	void DebugDumpBuffer();
+	void DebugPacketBuffer();
+	void DebugState();
+};
+
+// To be call by the runner process when in regression test mode.
+bool GSIsRegressionTesting();
+void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t packet_size,
+	std::size_t num_dumps, std::size_t dump_size);
+void GSEndRegressionTest();
+GSRegressionBuffer* GSGetRegressionBuffer();
+
+// Used by the tester process to compare images.
+int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2);
+
+// Cross-platform process.
+struct GSProcess
+{
+#ifdef __WIN32__
+	using PID_t = DWORD;
+	using Handle_t = HANDLE;
+	using Time_t = DWORD;
+	static constexpr double infinite = static_cast<double>(0xFFFFFFFF);
+#else
+	using PID_t = int;
+	using Handle_t = int;
+	using Time_t = u32;
+	using constexpr double infinite = static_cast<double>(0x7FFFFFFF);
+#endif
+
+	static PID_t current_pid;
+	static PID_t parent_pid;
+	static Handle_t parent_h;
+
+	std::string command;
+#ifdef __WIN32__
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+
+	static bool IsRunning(Handle_t handle, double seconds = 0.0); // private
+#else
+	// Not implemented.
+#endif
+	bool Start(const std::string& command, bool detached);
+
+	bool IsRunning(double seconds = 0.0);
+	int WaitForExit(double seconds = infinite);
+	bool Close();
+	void Terminate();
+	PID_t GetPID();
+	static bool SetParentPID(PID_t pid);
+	static PID_t GetParentPID();
+	static bool IsParentRunning(double seconds = 0.0);
+	static PID_t GetCurrentPID();
+};
