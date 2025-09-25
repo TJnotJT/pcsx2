@@ -651,11 +651,12 @@ void GSLocalMemory::ReadTexture(const GSOffset& off, const GSVector4i& r, u8* ds
 
 //
 
-void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x, int y)
+void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x, int y,
+	RegressionPacket* packet)
 {
 	int pitch = w * 4;
 	int size = pitch * h;
-	void* bits = _aligned_malloc(size, VECTOR_ALIGNMENT);
+	void* bits = packet ? _aligned_malloc(size, VECTOR_ALIGNMENT) : packet->data;
 
 	GIFRegTEX0 TEX0;
 
@@ -673,6 +674,16 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 		{
 			((u32*)p)[i] = (this->*rp)(x + i, y + j, TEX0.TBP0, TEX0.TBW);
 		}
+	}
+
+	if (packet)
+	{
+		strncpy(packet->name, fn.c_str(), std::size(packet->name));
+		packet->w = w;
+		packet->h = h;
+		packet->pitch = pitch;
+		packet->bytes_per_pixel = 4;
+		return;
 	}
 
 	GSPng::Save((IsDevBuild || GSConfig.SaveAlpha) ? GSPng::RGB_A_PNG : GSPng::RGB_PNG, fn, static_cast<u8*>(bits), w, h, pitch, GSConfig.PNGCompressionLevel, false);
