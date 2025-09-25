@@ -16,7 +16,7 @@ GSTexture::GSTexture() = default;
 
 GSTexture::~GSTexture() = default;
 
-bool GSTexture::Save(const std::string& fn)
+bool GSTexture::Save(const std::string& fn, RegressionPacket* packet)
 {
 	// Depth textures need special treatment - we have a stencil component.
 	// Just re-use the existing conversion shader instead.
@@ -30,7 +30,7 @@ bool GSTexture::Save(const std::string& fn)
 		}
 
 		g_gs_device->StretchRect(this, GSVector4::cxpr(0.0f, 0.0f, 1.0f, 1.0f), temp, GSVector4(GetRect()), ShaderConvert::FLOAT32_TO_RGBA8, false);
-		const bool res = temp->Save(fn);
+		const bool res = temp->Save(fn, packet);
 		g_gs_device->Recycle(temp);
 		return res;
 	}
@@ -58,6 +58,24 @@ bool GSTexture::Save(const std::string& fn)
 	}
 
 	const int compression = GSConfig.PNGCompressionLevel;
+
+	if (packet)
+	{
+		memcpy(packet->data, dl->GetMapPointer(), m_size.y * dl->GetMapPitch());
+
+		if (fn.length() > std::size(packet->name))
+		{
+			Console.Warning("File name is too large for regression packet.");
+		}
+
+		strncpy(packet->name, fn.c_str(), std::size(packet->name));
+		packet->w = m_size.x;
+		packet->h = m_size.y;
+		packet->pitch = dl->GetMapPitch();
+		packet->bytes_per_pixel = GSPng::pixel[format].bytes_per_pixel_in;
+		return true;
+	}
+
 	return GSPng::Save(format, fn, dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), compression, false);
 }
 
