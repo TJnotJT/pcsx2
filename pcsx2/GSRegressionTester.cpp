@@ -9,12 +9,7 @@
 #include "common/StringUtil.h"
 #endif
 
-bool regression_testing = true;                 // Are we running a regression test.
-RegressionPacketBuffer regression_buffer_write; // Used by GS runner producer processes.
-
-#ifdef __WIN32__
-HANDLE regression_packet_h;
-#endif
+static RegressionPacketBuffer* regression_buffer; // Used by GS runner processes.
 
 RegressionPacket* RegressionPacketBuffer::GetPacketWrite(bool block)
 {
@@ -58,6 +53,7 @@ void RegressionPacket::SetFilename(const char* fn)
 #else
 	strncpy_s(name, p.c_str(), std::size(name));
 #endif
+	Console.WriteLnFmt("New regression packet: {}", name);
 }
 
 void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel)
@@ -95,7 +91,7 @@ bool RegressionPacketBuffer::CreateFile_(const std::string& name, int num_packet
 
 	if (!packets_h)
 	{
-		Console.Error("Failed to create regression packets file.");
+		Console.ErrorFmt("Failed to create regression packets file: {}", name);
 		return false;
 	}
 
@@ -109,13 +105,14 @@ bool RegressionPacketBuffer::CreateFile_(const std::string& name, int num_packet
 
 	if (!packets)
 	{
-		Console.Error("Failed to map view of regressions packet file.");
+		Console.ErrorFmt("Failed to map view of regressions packet file: {}", name);
 		CloseHandle(packets_h);
 		return false;
 	}
 
-	Console.WriteLn("Successfully created regression packets file: {}", name.c_str());
+	Console.WriteLnFmt("Successfully created regression packets file: {}", name);
 
+	this->name = name;
 	this->num_packets = num_packets;
 
 	return true;
@@ -131,20 +128,21 @@ bool RegressionPacketBuffer::OpenFile(const std::string& name, int num_packets)
 	packets_h = OpenFileMappingA(FILE_MAP_WRITE, FALSE, name.c_str());
 	if (!packets_h)
 	{
-		Console.ErrorFmt("Not able to open file for regression packets: {}", name.c_str());
+		Console.ErrorFmt("Not able to open file for regression packets: {}", name);
 		return false;
 	}
 	
 	packets = static_cast<RegressionPacket*>(MapViewOfFile(packets_h, FILE_MAP_WRITE, 0, 0, num_packets * sizeof(RegressionPacket)));
 	if (!packets)
 	{
-		Console.ErrorFmt("Unable to map regression packet file to memory: {}", name.c_str());
+		Console.ErrorFmt("Unable to map regression packet file to memory: {}", name);
 		CloseHandle(packets_h);
 		return false;
 	}
 
-	Console.WriteLn("Successfully opened/mapped regression packet file: {}", name.c_str());
+	Console.WriteLnFmt("Successfully opened/mapped regression packet file: {}", name);
 
+	this->name = name;
 	this->num_packets = num_packets;
 
 	return true;
@@ -180,29 +178,46 @@ bool RegressionPacketBuffer::CloseFile()
 		return false;
 	}
 
-	Console.WriteLn("Successfully closed/unmapped regression packets file.");
+	Console.WriteLnFmt("Successfully closed/unmapped regression packets file: {}", name);
+
+	name = "";
+	packets_h = 0;
+	packets = nullptr;
+
 	return true;
 #else
 	return false; // Not implemented.
 #endif
 }
 
+bool IsRegressionTesting()
+{
+	return regression_buffer != nullptr;
+}
 
 /// Start regression testing within the producer/GS runner process.
-void StartRegressionTest(const std::string& fn, int num_packets)
+void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int num_packets)
 {
-	if (!regression_buffer_write.OpenFile(fn, num_packets))
+	if (!rpb->OpenFile(fn, num_packets))
 	{
 		pxFail("Unable to start regression test.");
 		return;
 	}
 
-	regression_testing = true;
+	Console.WriteLnFmt("Successfully opened {} for regression testing.", fn);
+
+	regression_buffer = rpb;
 }
 
 void EndRegressionTest()
 {
-	if (!regression_buffer_write.CloseFile())
+	if (!regression_buffer)
+	{
+		pxFail("No regression buffer to close.");
+		return;
+	}
+
+	if (!regression_buffer->CloseFile())
 	{
 		pxFail("Unable to end regression test.");
 		return;
@@ -211,5 +226,5 @@ void EndRegressionTest()
 
 RegressionPacket* GetRegressionPacketWrite()
 {
-	return regression_testing ? regression_buffer_write.GetPacketWrite() : nullptr;
+	return IsRegressionTesting() ? regression_buffer->GetPacketWrite() : nullptr;
 }

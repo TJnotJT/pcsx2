@@ -15,6 +15,7 @@
 
 #include "fmt/format.h"
 
+#include "common/Error.h"
 #include "common/Assertions.h"
 #include "common/CocoaTools.h"
 #include "common/Console.h"
@@ -53,7 +54,8 @@ namespace GSRunner
 {
 	static void InitializeConsole();
 	static bool InitializeConfig();
-	static bool ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params);
+	static bool ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParameters& params);
+	static bool ParseCommandLineArgsTester(int argc, char* argv[]);
 	static void DumpStats();
 
 	static bool CreatePlatformWindow();
@@ -69,6 +71,8 @@ static constexpr u32 WINDOW_HEIGHT = 480;
 static MemorySettingsInterface s_settings_interface;
 
 static std::string s_output_prefix;
+static std::string s_regression_file;
+RegressionPacketBuffer s_regression_buffer;
 static s32 s_loop_count = 1;
 static std::optional<bool> s_use_window;
 static bool s_no_console = false;
@@ -93,7 +97,17 @@ static u64 s_total_readbacks = 0;
 static u32 s_total_frames = 0;
 static u32 s_total_drawn_frames = 0;
 
-static RegressionPacketBuffer regression_buffer;
+// For the tester
+static std::string regression_output_dir;
+static RegressionPacketBuffer regression_buffer[2];
+static std::string regression_runner[2];
+static std::string regression_shared_file[2];
+#ifdef __WIN32__
+STARTUPINFO regression_runner_si[2];
+PROCESS_INFORMATION regression_runner_pi[2];
+#else
+// Not implemented
+#endif
 
 bool GSRunner::InitializeConfig()
 {
@@ -304,8 +318,8 @@ void Host::BeginPresentFrame()
 		std::atomic_thread_fence(std::memory_order_release);
 	}
 
-	while (RegressionPacket* packet = regression_buffer.GetPacketRead())
-		Console.WriteLn(packet->name);
+	//while (RegressionPacket* packet = regression_buffer.GetPacketRead())
+	//	Console.WriteLn(packet->name);
 }
 
 void Host::RequestResizeHostDisplay(s32 width, s32 height)
@@ -472,7 +486,7 @@ static void PrintCommandLineVersion()
 	std::fprintf(stderr, "\n");
 }
 
-static void PrintCommandLineHelp(const char* progname)
+static void PrintCommandLineHelpRunner(const char* progname)
 {
 	PrintCommandLineVersion();
 	std::fprintf(stderr, "Usage: %s [parameters] [--] [filename]\n", progname);
@@ -501,6 +515,15 @@ static void PrintCommandLineHelp(const char* progname)
 	std::fprintf(stderr, "\n");
 }
 
+static void PrintCommandLineHelpTester(const char* progname)
+{
+	PrintCommandLineVersion();
+	std::fprintf(stderr, "Usage: %s [parameters] [--] [filename]\n", progname);
+	std::fprintf(stderr, "\n");
+	std::fprintf(stderr, "  -help: Displays this information and exits.\n");
+	std::fprintf(stderr, "\n");
+}
+
 void GSRunner::InitializeConsole()
 {
 	const char* var = std::getenv("PCSX2_NOCONSOLE");
@@ -509,10 +532,8 @@ void GSRunner::InitializeConsole()
 		Log::SetConsoleOutputLevel(LOGLEVEL_DEBUG);
 }
 
-bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
+bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParameters& params)
 {
-	regression_testing = true;
-
 	std::string dumpdir; // Save from argument -dumpdir for creating sub-directories
 	bool no_more_args = false;
 	for (int i = 1; i < argc; i++)
@@ -524,7 +545,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 
 			if (CHECK_ARG("-help"))
 			{
-				PrintCommandLineHelp(argv[0]);
+				PrintCommandLineHelpRunner(argv[0]);
 				return false;
 			}
 			else if (CHECK_ARG("-version"))
@@ -737,6 +758,11 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-regression-test"))
+			{
+				s_regression_file = std::string(argv[++i]);
+				continue;
+			}
 			else if (CHECK_ARG("-noshadercache"))
 			{
 				Console.WriteLn("Disabling shader cache");
@@ -814,6 +840,86 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 	return true;
 }
 
+bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
+{
+	bool no_more_args = false;
+	for (int i = 1; i < argc; i++)
+	{
+		if (!no_more_args)
+		{
+#define CHECK_ARG(str) !std::strcmp(argv[i], str)
+#define CHECK_ARG_PARAM(str) (!std::strcmp(argv[i], str) && ((i + 1) < argc))
+#define CHECK_ARG_PARAM_2(str) (!std::strcmp(argv[i], str) && ((i + 2) < argc))
+
+			if (CHECK_ARG("-help"))
+			{
+				PrintCommandLineHelpTester(argv[0]);
+				return false;
+			}
+			else if (CHECK_ARG("-version"))
+			{
+				PrintCommandLineVersion();
+				return false;
+			}
+			else if (CHECK_ARG_PARAM("-output"))
+			{
+				regression_output_dir = StringUtil::StripWhitespace(argv[++i]);
+				if (regression_output_dir.empty())
+				{
+					Console.Error("Invalid output directory specified.");
+					return false;
+				}
+
+				if (!FileSystem::DirectoryExists(regression_output_dir.c_str()) && !FileSystem::CreateDirectoryPath(regression_output_dir.c_str(), false))
+				{
+					Console.Error("Failed to create output directory");
+					return false;
+				}
+
+				continue;
+			}
+			else if (CHECK_ARG_PARAM_2("-path"))
+			{
+				regression_runner[0] = std::string(argv[++i]);
+				regression_runner[1] = std::string(argv[++i]);
+			}
+#undef CHECK_ARG
+#undef CHECK_ARG_PARAM
+#undef CHECK_ARG_PARAM_2
+		}
+	}
+
+	if (regression_output_dir.empty())
+	{
+		Console.Error("Output directory not provided.");
+		return false;
+	}
+
+	Error e;
+	if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
+	{
+		Console.Error("Error creating/checking directory: {}", e.GetDescription());
+		return false;
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		if (regression_runner[i].empty())
+		{
+			Console.Error("Runner {} paths not provided.", i + 1);
+			return false;
+		}
+
+		if (!FileSystem::FileExists(regression_runner[i].c_str()))
+		{
+			Console.Error("Runner {} does not exist: {}", i + 1, regression_runner[i]);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 void GSRunner::DumpStats()
 {
 	std::atomic_thread_fence(std::memory_order_acquire);
@@ -833,10 +939,6 @@ void GSRunner::DumpStats()
 #endif
 
 static void CPUThreadMain(VMBootParameters* params) {
-	regression_buffer.CreateFile_("regression-testing-file", 10);
-
-	StartRegressionTest("regression-testing-file", 10);
-
 	if (VMManager::Initialize(*params))
 	{
 		// run until end
@@ -848,17 +950,12 @@ static void CPUThreadMain(VMBootParameters* params) {
 		GSRunner::DumpStats();
 	}
 
-	regression_buffer.CloseFile();
-
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::StopPlatformMessagePump();
 }
 
-int main(int argc, char* argv[])
+int main_runner(int argc, char* argv[])
 {
-	CrashHandler::Install();
-	GSRunner::InitializeConsole();
-
 	if (!GSRunner::InitializeConfig())
 	{
 		Console.Error("Failed to initialize config.");
@@ -866,7 +963,7 @@ int main(int argc, char* argv[])
 	}
 
 	VMBootParameters params;
-	if (!GSRunner::ParseCommandLineArgs(argc, argv, params))
+	if (!GSRunner::ParseCommandLineArgsRunner(argc, argv, params))
 		return EXIT_FAILURE;
 
 	if (!VMManager::Internal::CPUThreadInitialize())
@@ -877,6 +974,12 @@ int main(int argc, char* argv[])
 		Console.Error("Failed to create window.");
 		return EXIT_FAILURE;
 	}
+
+	// Regression testing needs to be started before applying settings
+	// or it might complain that there is no dumping directory
+	// (regression test data is dumped to memory).
+	if (!s_regression_file.empty())
+		StartRegressionTest(&s_regression_buffer, s_regression_file, 10);
 
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
@@ -889,7 +992,140 @@ int main(int argc, char* argv[])
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::DestroyPlatformWindow();
 
+	if (!s_regression_file.empty())
+		EndRegressionTest();
+
 	return EXIT_SUCCESS;
+}
+
+bool StartRunnerProcess(const std::string& command, STARTUPINFO* si, PROCESS_INFORMATION* pi)
+{
+#ifdef __WIN32__
+	memset(si, 0, sizeof(STARTUPINFO));
+	si->cb = sizeof(STARTUPINFO);
+	memset(pi, 0, sizeof(PROCESS_INFORMATION));
+
+	std::wstring wcommand = StringUtil::UTF8StringToWideString(command);
+	std::vector<wchar_t> wcommand_buf(wcommand.begin(), wcommand.end());
+	wcommand_buf.push_back(L'\0');
+
+	if (!CreateProcess(
+		NULL,
+		wcommand_buf.data(),
+		NULL,
+		NULL,
+		FALSE,
+		0,
+		NULL,
+		NULL,
+		si,
+		pi))
+	{
+		Console.Error("Unable to create runner process with command: \"{}\"", command);
+		return false;
+	}
+
+	Console.WriteLnFmt("Created runner process (PID: {}) with command: \"{}\"", pi->dwProcessId, command);
+
+	return true;
+#else
+	// Not implemented
+#endif
+}
+
+int main_tester(int argc, char* argv[])
+{
+	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
+		return EXIT_FAILURE;
+
+	for (int i = 0; i < 2; i++)
+	{
+		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
+
+		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], 10))
+		{
+			Console.ErrorFmt("Unable to create regression shared file: {}", regression_shared_file[i]);
+			return EXIT_FAILURE;
+		}
+
+		std::string command =
+			regression_runner[i] +
+			std::string(" runner ") +
+			std::string(" C:\\tmp\\toto_aa.gs.xz ") +
+			std::string(" -renderer sw ") +
+			std::string(" -surfaceless ") +
+			std::string(" -loop 1 ") +
+			std::string(" -dump f ") +
+			std::string(" -regression-test ") +
+			regression_shared_file[i];
+		
+		if (!StartRunnerProcess(command, &regression_runner_si[i], &regression_runner_pi[i]))
+		{
+			Console.ErrorFmt("Unable to start runner: {}", i);
+			return EXIT_FAILURE;
+		}
+	}
+
+	while (1)
+	{
+		int num_exited = 0;
+		for (int i = 0; i < 2; i++)
+		{
+			DWORD status = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
+			if (status != WAIT_TIMEOUT)
+				num_exited++;
+		}
+
+		for (int i = 0; i < 2; i++)
+		{
+			while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
+			{
+				Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
+			}
+		}
+
+		if (num_exited == 2)
+			break;
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		CloseHandle(regression_runner_pi[i].hProcess);
+		CloseHandle(regression_runner_pi[i].hThread);
+		
+		regression_buffer[i].CloseFile();
+	}
+
+
+	return EXIT_SUCCESS;
+}
+
+int main(int argc, char* argv[])
+{
+	CrashHandler::Install();
+	GSRunner::InitializeConsole();
+
+	if (argc < 2)
+	{
+		Console.Error("Need at least one argument");
+		return EXIT_FAILURE;
+	}
+
+	std::string mode(argv[1]);
+
+	if (mode == "runner")
+	{
+		return main_runner(argc - 1, &argv[1]);
+	}
+	else if (mode == "tester")
+	{
+		return main_tester(argc - 1, &argv[1]);
+	}
+	else
+	{
+		Console.Error("First argument should be [runner|tester] not \"{}\"", mode.c_str());
+		return EXIT_FAILURE;
+	}
 }
 
 void Host::PumpMessagesOnCPUThread()

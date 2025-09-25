@@ -38,9 +38,7 @@ struct alignas(32) RegressionPacketBuffer
 	RegressionPacket* GetPacketRead(bool block = false);
 };
 
-extern bool regression_testing;
-extern RegressionPacketBuffer regression_buffer_write;
-
-void StartRegressionTest(const std::string& fn, int num_packets);
+bool IsRegressionTesting();
+void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int num_packets);
 void EndRegressionTest();
 RegressionPacket* GetRegressionPacketWrite();
