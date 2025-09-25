@@ -678,17 +678,15 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 
 	if (packet)
 	{
-		strncpy(packet->name, fn.c_str(), std::size(packet->name));
-		packet->w = w;
-		packet->h = h;
-		packet->pitch = pitch;
-		packet->bytes_per_pixel = 4;
-		return;
+		packet->SetFilename(fn.c_str());
+		packet->SetImageData(nullptr, w, h, pitch, 4);
 	}
-
-	GSPng::Save((IsDevBuild || GSConfig.SaveAlpha) ? GSPng::RGB_A_PNG : GSPng::RGB_PNG, fn, static_cast<u8*>(bits), w, h, pitch, GSConfig.PNGCompressionLevel, false);
-
-	_aligned_free(bits);
+	else
+	{
+		GSPng::Save((IsDevBuild || GSConfig.SaveAlpha) ? GSPng::RGB_A_PNG : GSPng::RGB_PNG, fn, static_cast<u8*>(bits), w, h, pitch, GSConfig.PNGCompressionLevel, false);
+		
+		_aligned_free(bits);
+	}
 }
 
 // GSOffset

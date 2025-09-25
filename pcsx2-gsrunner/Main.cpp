@@ -45,6 +45,8 @@
 #include "pcsx2/PerformanceMetrics.h"
 #include "pcsx2/VMManager.h"
 
+#include "pcsx2/GSRegressionTester.h"
+
 #include "svnrev.h"
 
 namespace GSRunner
@@ -90,6 +92,8 @@ static u64 s_total_uploads = 0;
 static u64 s_total_readbacks = 0;
 static u32 s_total_frames = 0;
 static u32 s_total_drawn_frames = 0;
+
+static RegressionPacketBuffer regression_buffer;
 
 bool GSRunner::InitializeConfig()
 {
@@ -299,6 +303,9 @@ void Host::BeginPresentFrame()
 
 		std::atomic_thread_fence(std::memory_order_release);
 	}
+
+	while (RegressionPacket* packet = regression_buffer.GetPacketRead())
+		Console.WriteLn(packet->name);
 }
 
 void Host::RequestResizeHostDisplay(s32 width, s32 height)
@@ -504,6 +511,8 @@ void GSRunner::InitializeConsole()
 
 bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
 {
+	regression_testing = true;
+
 	std::string dumpdir; // Save from argument -dumpdir for creating sub-directories
 	bool no_more_args = false;
 	for (int i = 1; i < argc; i++)
@@ -824,6 +833,10 @@ void GSRunner::DumpStats()
 #endif
 
 static void CPUThreadMain(VMBootParameters* params) {
+	regression_buffer.CreateFile_("regression-testing-file", 10);
+
+	StartRegressionTest("regression-testing-file", 10);
+
 	if (VMManager::Initialize(*params))
 	{
 		// run until end
@@ -834,6 +847,8 @@ static void CPUThreadMain(VMBootParameters* params) {
 		VMManager::Shutdown(false);
 		GSRunner::DumpStats();
 	}
+
+	regression_buffer.CloseFile();
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::StopPlatformMessagePump();
