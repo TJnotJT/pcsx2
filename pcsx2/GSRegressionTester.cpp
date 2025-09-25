@@ -228,3 +228,82 @@ RegressionPacket* GetRegressionPacketWrite()
 {
 	return IsRegressionTesting() ? regression_buffer->GetPacketWrite() : nullptr;
 }
+
+template<int bytes_per_pixel>
+static float RegressionCompareImagesImpl(const RegressionPacket& p1, const RegressionPacket& p2, int threshold)
+{
+	const u8* data1 = p1.data;
+	const u8* data2 = p2.data;
+
+	int num_diff_pixels = 0;
+
+	for (int y = 0; y < p1.h; y++, data1 += p1.pitch, data2 += p2.pitch)
+	{
+		const u8* data1_row = data1;
+		const u8* data2_row = data2;
+		for (int x = 0; x < p1.w; x++, data1_row += bytes_per_pixel, data2_row += bytes_per_pixel)
+		{
+			if constexpr (bytes_per_pixel == 4)
+			{
+				u32 d1 = *(u32*)data1;
+				u32 d2 = *(u32*)data2;
+
+				int r1 = (d1 >> 0) & 0xFF;
+				int g1 = (d1 >> 8) & 0xFF;
+				int b1 = (d1 >> 16) & 0xFF;
+				int a1 = (d1 >> 24) & 0xFF;
+
+				int r2 = (d1 >> 0) & 0xFF;
+				int g2 = (d1 >> 8) & 0xFF;
+				int b2 = (d1 >> 16) & 0xFF;
+				int a2 = (d1 >> 24) & 0xFF;
+
+				if (d1 != d2)
+				{
+					num_diff_pixels++;
+				}
+			}
+			else if constexpr (bytes_per_pixel == 2)
+			{
+				u16 d1 = *(u16*)data1;
+				u16 d2 = *(u16*)data2;
+
+				if (d1 != d2)
+				{
+					num_diff_pixels++;
+				}
+			}
+			else
+			{
+				pxFail("Failed");
+			}
+		}
+
+		data1_row += p1.pitch;
+		data2_row += p2.pitch;
+	}
+
+	int total_pixels = p1.w * p2.h;
+
+	return static_cast<float>(num_diff_pixels) / total_pixels;
+}
+
+float RegressionCompareImages(const RegressionPacket& p1, const RegressionPacket& p2, int threshold)
+{
+	if (p1.w != p2.w || p1.h != p2.h || p1.bytes_per_pixel != p2.bytes_per_pixel)
+		return 1.0f; // Formats are different.
+
+	if (p1.bytes_per_pixel == 4)
+	{
+		return RegressionCompareImagesImpl<4>(p1, p2, threshold);
+	}
+	else if (p1.bytes_per_pixel == 2)
+	{
+		return RegressionCompareImagesImpl<2>(p1, p2, threshold);
+	}
+	else
+	{
+		pxFail("");
+		return NAN;
+	}
+}
