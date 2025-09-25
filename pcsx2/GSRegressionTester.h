@@ -29,10 +29,19 @@ struct alignas(32) RegressionPacketBuffer
 	int read = 0;  // read index.
 	int write = 0; // write index;
 
+	int frames = 0;
+	int draws = 0;
+	int render_passes = 0;
+	int barriers = 0;
+	int copies = 0;
+	int uploads = 0;
+	int readbacks = 0;
+
 	// Windows defines CreateFile as a macro so use CreateFile_.
 	bool CreateFile_(const std::string& name, int num_packets);
 	bool OpenFile(const std::string& name, int num_packets);
 	bool CloseFile();
+	void ResetFile();
 
 	RegressionPacket* GetPacketWrite(bool block = true);
 	RegressionPacket* GetPacketRead(bool block = false);
@@ -43,4 +52,4 @@ void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int
 void EndRegressionTest();
 RegressionPacket* GetRegressionPacketWrite();
 
-float RegressionCompareImages(const RegressionPacket& p1, const RegressionPacket& p2, int threshold);
+float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket* p2, int threshold);
