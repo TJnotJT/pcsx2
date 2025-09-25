@@ -106,12 +106,7 @@ static RegressionPacketBuffer regression_buffer[2];
 static std::string regression_runner[2];
 static std::string regression_shared_file[2];
 static std::string regression_dump_dir;
-#ifdef __WIN32__
-STARTUPINFO regression_runner_si[2];
-PROCESS_INFORMATION regression_runner_pi[2];
-#else
-// Not implemented
-#endif
+static Process regression_runner_proc[2];
 
 // For both tester/runner
 constexpr int regression_num_packets_default = 10;
@@ -1053,41 +1048,6 @@ int main_runner(int argc, char* argv[])
 	return EXIT_SUCCESS;
 }
 
-bool StartRunnerProcess(const std::string& command, STARTUPINFO* si, PROCESS_INFORMATION* pi)
-{
-#ifdef __WIN32__
-	memset(si, 0, sizeof(STARTUPINFO));
-	si->cb = sizeof(STARTUPINFO);
-	memset(pi, 0, sizeof(PROCESS_INFORMATION));
-
-	std::wstring wcommand = StringUtil::UTF8StringToWideString(command);
-	std::vector<wchar_t> wcommand_buf(wcommand.begin(), wcommand.end());
-	wcommand_buf.push_back(L'\0');
-
-	if (!CreateProcess(
-		NULL,
-		wcommand_buf.data(),
-		NULL,
-		NULL,
-		FALSE,
-		0,
-		NULL,
-		NULL,
-		si,
-		pi))
-	{
-		Console.Error("Unable to create runner process with command: \"{}\"", command);
-		return false;
-	}
-
-	Console.WriteLnFmt("Created runner process (PID: {}) with command: \"{}\"", pi->dwProcessId, command);
-
-	return true;
-#else
-	// Not implemented
-#endif
-}
-
 int main_tester(int argc, char* argv[])
 {
 	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
@@ -1159,16 +1119,15 @@ int main_tester(int argc, char* argv[])
 				std::string(" -npackets ") + std::to_string(regression_num_packets) +
 				" " + regression_runner_args;
 
-			if (!StartRunnerProcess(command, &regression_runner_si[i], &regression_runner_pi[i]))
+			if (!regression_runner_proc[i].Start(command))
 			{
-				Console.ErrorFmt("Unable to start runner: {}", i);
+				Console.ErrorFmt("Unable to start runner: {}", i + 1);
 				return EXIT_FAILURE;
 			}
 		}
 
 		bool exited[2] = {false, false};
 		bool done[2] = {false, false};
-		DWORD status[2] = {0, 0};
 		std::deque<RegressionPacket*> packets[2];
 		std::map<std::string, float> image_diffs;
 		std::vector<std::string> mismatched[2];
@@ -1177,9 +1136,7 @@ int main_tester(int argc, char* argv[])
 		{
 			for (int i = 0; i < 2; i++)
 			{
-				status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
-				if (status[i] != WAIT_TIMEOUT)
-					exited[i] = true;
+				exited[i] = !regression_runner_proc[i].IsRunning();
 			}
 
 			for (int i = 0; i < 2; i++)
@@ -1243,17 +1200,15 @@ int main_tester(int argc, char* argv[])
 
 		for (int i = 0; i < 2; i++)
 		{
-			status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, INFINITE);
-			if (status[i] != 0)
+			if (regression_runner_proc[i].WaitForExit() != 0)
 			{
-				Console.WarningFmt("Runner {} exited abnormally", i + 1);
+				Console.WarningFmt("Runner {} exited abnormally.", i + 1);
 			}
 		}
 
 		for (int i = 0; i < 2; i++)
 		{
-			CloseHandle(regression_runner_pi[i].hProcess);
-			CloseHandle(regression_runner_pi[i].hThread);
+			regression_runner_proc[i].Close();
 		}
 
 		// Write results to directory.
