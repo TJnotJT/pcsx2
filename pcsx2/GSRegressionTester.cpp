@@ -13,30 +13,32 @@ static RegressionPacketBuffer* regression_buffer; // Used by GS runner processes
 
 RegressionPacket* RegressionPacketBuffer::GetPacketWrite(bool block)
 {
-	write %= num_packets;
+	if (write == read + num_packets)
+		return nullptr; // Full.
 
-	while (packets[write].ready.load(std::memory_order_acquire))
+	while (packets[write % num_packets].ready.load(std::memory_order_acquire))
 	{
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[write++];
+	return &packets[(write++ % num_packets)];
 }
 
 RegressionPacket* RegressionPacketBuffer::GetPacketRead(bool block)
 {
-	read %= num_packets;
+	if (read == write)
+		return nullptr; // Empty.
 
-	while (!packets[read].ready.load(std::memory_order_acquire))
+	while (!packets[read % num_packets].ready.load(std::memory_order_acquire))
 	{
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[read++];
+	return &packets[(read++ % num_packets)];
 }
 
 void RegressionPacket::SetFilename(const char* fn)
@@ -190,6 +192,11 @@ bool RegressionPacketBuffer::CloseFile()
 #endif
 }
 
+void RegressionPacketBuffer::ResetFile()
+{
+	memset(packets, 0, num_packets * sizeof(RegressionPacket));
+}
+
 bool IsRegressionTesting()
 {
 	return regression_buffer != nullptr;
@@ -230,18 +237,18 @@ RegressionPacket* GetRegressionPacketWrite()
 }
 
 template<int bytes_per_pixel>
-static float RegressionCompareImagesImpl(const RegressionPacket& p1, const RegressionPacket& p2, int threshold)
+static float RegressionCompareImagesImpl(const RegressionPacket* p1, const RegressionPacket* p2, int threshold)
 {
-	const u8* data1 = p1.data;
-	const u8* data2 = p2.data;
+	const u8* data1 = p1->data;
+	const u8* data2 = p2->data;
 
 	int num_diff_pixels = 0;
 
-	for (int y = 0; y < p1.h; y++, data1 += p1.pitch, data2 += p2.pitch)
+	for (int y = 0; y < p1->h; y++, data1 += p1->pitch, data2 += p2->pitch)
 	{
 		const u8* data1_row = data1;
 		const u8* data2_row = data2;
-		for (int x = 0; x < p1.w; x++, data1_row += bytes_per_pixel, data2_row += bytes_per_pixel)
+		for (int x = 0; x < p1->w; x++, data1_row += bytes_per_pixel, data2_row += bytes_per_pixel)
 		{
 			if constexpr (bytes_per_pixel == 4)
 			{
@@ -279,25 +286,25 @@ static float RegressionCompareImagesImpl(const RegressionPacket& p1, const Regre
 			}
 		}
 
-		data1_row += p1.pitch;
-		data2_row += p2.pitch;
+		data1_row += p1->pitch;
+		data2_row += p2->pitch;
 	}
 
-	int total_pixels = p1.w * p2.h;
+	int total_pixels = p1->w * p2->h;
 
 	return static_cast<float>(num_diff_pixels) / total_pixels;
 }
 
-float RegressionCompareImages(const RegressionPacket& p1, const RegressionPacket& p2, int threshold)
+float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket* p2, int threshold)
 {
-	if (p1.w != p2.w || p1.h != p2.h || p1.bytes_per_pixel != p2.bytes_per_pixel)
+	if (p1->w != p2->w || p1->h != p2->h || p1->bytes_per_pixel != p2->bytes_per_pixel)
 		return 1.0f; // Formats are different.
 
-	if (p1.bytes_per_pixel == 4)
+	if (p1->bytes_per_pixel == 4)
 	{
 		return RegressionCompareImagesImpl<4>(p1, p2, threshold);
 	}
-	else if (p1.bytes_per_pixel == 2)
+	else if (p1->bytes_per_pixel == 2)
 	{
 		return RegressionCompareImagesImpl<2>(p1, p2, threshold);
 	}

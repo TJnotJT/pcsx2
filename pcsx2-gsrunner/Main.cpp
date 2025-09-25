@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <filesystem>
+#include <fstream>
 
 #ifdef _WIN32
 #include "common/RedtapeWindows.h"
@@ -99,9 +101,11 @@ static u32 s_total_drawn_frames = 0;
 
 // For the tester
 static std::string regression_output_dir;
+static std::string regression_runner_args;
 static RegressionPacketBuffer regression_buffer[2];
 static std::string regression_runner[2];
 static std::string regression_shared_file[2];
+static std::string regression_dump_dir;
 #ifdef __WIN32__
 STARTUPINFO regression_runner_si[2];
 PROCESS_INFORMATION regression_runner_pi[2];
@@ -871,6 +875,23 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 				PrintCommandLineVersion();
 				return false;
 			}
+			else if (CHECK_ARG("-input"))
+			{
+				regression_dump_dir = StringUtil::StripWhitespace(argv[++i]);
+				if (regression_dump_dir.empty())
+				{
+					Console.Error("Invalid input directory/file specified.");
+					return false;
+				}
+
+				if (!FileSystem::DirectoryExists(regression_dump_dir.c_str()) && !FileSystem::FileExists(regression_dump_dir.c_str()))
+				{
+					Console.Error("Input directory/file does not exist.");
+					return false;
+				}
+
+				continue;
+			}
 			else if (CHECK_ARG_PARAM("-output"))
 			{
 				regression_output_dir = StringUtil::StripWhitespace(argv[++i]);
@@ -880,9 +901,10 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 					return false;
 				}
 
-				if (!FileSystem::DirectoryExists(regression_output_dir.c_str()) && !FileSystem::CreateDirectoryPath(regression_output_dir.c_str(), false))
+				Error e;
+				if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
 				{
-					Console.Error("Failed to create output directory");
+					Console.ErrorFmt("Error creating/checking directory: {}", e.GetDescription());
 					return false;
 				}
 
@@ -899,22 +921,28 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
 				continue;
 			}
+			else
+			{
+				regression_runner_args.append(argv[i]);
+				regression_runner_args.append(" ");
+				continue;
+			}
+			
 #undef CHECK_ARG
 #undef CHECK_ARG_PARAM
 #undef CHECK_ARG_PARAM_2
 		}
 	}
 
-	if (regression_output_dir.empty())
+	if (regression_dump_dir.empty())
 	{
-		Console.ErrorFmt("Output directory not provided.");
+		Console.Error("Dump directory/file not provided.");
 		return false;
 	}
 
-	Error e;
-	if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
+	if (regression_output_dir.empty())
 	{
-		Console.ErrorFmt("Error creating/checking directory: {}", e.GetDescription());
+		Console.Error("Output directory not provided.");
 		return false;
 	}
 
@@ -947,6 +975,17 @@ void GSRunner::DumpStats()
 	Console.WriteLn(fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn("============================================");
+
+	if (IsRegressionTesting())
+	{
+		s_regression_buffer.frames = s_total_drawn_frames;
+		s_regression_buffer.draws = s_total_draws;
+		s_regression_buffer.render_passes = s_total_render_passes;
+		s_regression_buffer.barriers = s_total_barriers;
+		s_regression_buffer.copies = s_total_copies;
+		s_regression_buffer.uploads = s_total_uploads;
+		s_regression_buffer.readbacks = s_total_readbacks;
+	}
 }
 
 #ifdef _WIN32
@@ -1054,6 +1093,40 @@ int main_tester(int argc, char* argv[])
 	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
 		return EXIT_FAILURE;
 
+	std::vector<std::string> dump_files;
+
+	if (VMManager::IsGSDumpFileName(regression_dump_dir))
+	{
+		dump_files.push_back(regression_dump_dir);
+	}
+	else if (FileSystem::DirectoryExists(regression_dump_dir.c_str()))
+	{
+		FileSystem::FindResultsArray files;
+		FileSystem::FindFiles(
+			regression_dump_dir.c_str(),
+			"*",
+			FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES,
+			&files);
+		for (const auto& file : files)
+		{
+			if (VMManager::IsGSDumpFileName(file.FileName))
+				dump_files.push_back(file.FileName);
+		}
+		
+		if (dump_files.empty())
+		{
+			Console.ErrorFmt("Could not find any dumps in \"{}\"", regression_dump_dir.c_str());
+			return EXIT_FAILURE;
+		}
+	}
+	else
+	{
+		Console.WarningFmt("Provided file is neither a dump or a directory: \"{}\"", regression_dump_dir);
+		return EXIT_FAILURE;
+	}
+
+	Console.WriteLnFmt("Found {} dumps in \"{}\"", dump_files.size(), regression_dump_dir);
+
 	for (int i = 0; i < 2; i++)
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
@@ -1063,114 +1136,169 @@ int main_tester(int argc, char* argv[])
 			Console.ErrorFmt("Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
 		}
-
-		std::string command =
-			regression_runner[i] +
-			std::string(" runner ") +
-			std::string(" C:\\tmp\\toto_aa.gs.xz ") +
-			std::string(" -renderer sw ") +
-			std::string(" -surfaceless ") +
-			std::string(" -loop 1 ") +
-			std::string(" -dump f ") +
-			std::string(" -regression-test ") + regression_shared_file[i] +
-			std::string(" -npackets ") + std::to_string(regression_num_packets);
-		
-		if (!StartRunnerProcess(command, &regression_runner_si[i], &regression_runner_pi[i]))
-		{
-			Console.ErrorFmt("Unable to start runner: {}", i);
-			return EXIT_FAILURE;
-		}
 	}
 
-	bool exited[2] = {false, false};
-	bool done[2] = {false, false};
-	DWORD status[2] = {0, 0};
-	std::deque<RegressionPacket*> packets[2];
-
-	while (1)
+	for (const std::string& dump_file : dump_files)
 	{
 		for (int i = 0; i < 2; i++)
-		{
-			status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
-			if (status[i] != WAIT_TIMEOUT)
-				exited[i] = true;
-		}
+			regression_buffer[i].ResetFile();
+
+		std::string dump_name = std::filesystem::path(dump_file).filename().string();
 
 		for (int i = 0; i < 2; i++)
 		{
-			while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
+			// TODO: Parse other runner arguments.
+			std::string command =
+				regression_runner[i] +
+				std::string(" runner ") +
+				" " + dump_file + " " +
+				std::string(" -surfaceless ") +
+				std::string(" -loop 1 ") +
+				std::string(" -dump f ") +
+				std::string(" -regression-test ") + regression_shared_file[i] +
+				std::string(" -npackets ") + std::to_string(regression_num_packets) +
+				" " + regression_runner_args;
+
+			if (!StartRunnerProcess(command, &regression_runner_si[i], &regression_runner_pi[i]))
 			{
-				//Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
-				packets[i].push_back(packet);
+				Console.ErrorFmt("Unable to start runner: {}", i);
+				return EXIT_FAILURE;
 			}
 		}
 
-		bool fail = false;
+		bool exited[2] = {false, false};
+		bool done[2] = {false, false};
+		DWORD status[2] = {0, 0};
+		std::deque<RegressionPacket*> packets[2];
+		std::map<std::string, float> image_diffs;
+		std::vector<std::string> mismatched[2];
 
-		while (!packets[0].empty() && !packets[1].empty())
+		while (1)
 		{
-			RegressionPacket* p[2];
 			for (int i = 0; i < 2; i++)
-				p[i] = packets[0].front();
-
-			if (strncmp(p[0]->name, p[1]->name, sizeof(RegressionPacket::name)) == 0)
 			{
-				Console.WriteLnFmt("Comparing results for {}", p[0]->name);
+				status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
+				if (status[i] != WAIT_TIMEOUT)
+					exited[i] = true;
 			}
-			else
+
+			for (int i = 0; i < 2; i++)
 			{
-				Console.WarningFmt("Runner 1 and 2 out of sync on names: \"{}\", \"{}\". Exiting test.", p[0]->name, p[1]->name);
-				fail = true;
+				while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
+				{
+					//Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
+					packets[i].push_back(packet);
+				}
+			}
+
+			while (!packets[0].empty() && !packets[1].empty())
+			{
+				RegressionPacket* p[2];
+				for (int i = 0; i < 2; i++)
+					p[i] = packets[0].front();
+
+				if (strncmp(p[0]->name, p[1]->name, sizeof(RegressionPacket::name)) == 0)
+				{
+					Console.WriteLnFmt("Comparing results for {}", p[0]->name);
+
+					RegressionCompareImages(p[0], p[1], 0);
+				}
+				else
+				{
+					Console.WarningFmt("Runner 1 and 2 out of sync on names: \"{}\", \"{}\"", p[0]->name, p[1]->name);
+					for (int i = 0; i < 2; i++)
+						mismatched[i].push_back(std::string(p[i]->name));
+				}
+
+				for (int i = 0; i < 2; i++)
+					packets[i].pop_front();
+			}
+
+			for (int i = 0; i < 2; i++)
+				done[i] = exited[i] && packets[i].empty();
+
+			for (int i = 0; i < 2; i++)
+			{
+				int j = 1 - i;
+				if (done[i] && !done[j])
+				{
+					while (!packets[j].empty())
+					{
+						const char* name = packets[j].front()->name;
+						Console.WarningFmt("Runner {} has extra packet: \"{}\"", j + 1, name);
+						mismatched[j].push_back(name);
+						packets[j].pop_front();
+					}
+				}
+			}
+
+			if (done[0] && done[1])
+			{
+				Console.WriteLn("Runners 1 and 2 both exited. Finishing test.");
 				break;
 			}
 
-			for (int i = 0; i < 2; i++)
-				packets[i].pop_front();
+			std::this_thread::yield();
 		}
-
-		if (fail)
-			break;
-
-		for (int i = 0; i < 2; i++)
-			done[i] = exited[i] && packets[i].empty();
 
 		for (int i = 0; i < 2; i++)
 		{
-			int j = 1 - i;
-			if (done[i] && !done[j])
+			status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, INFINITE);
+			if (status[i] != 0)
 			{
-				// FIXME: Instead just consume the packets from other runner and say mismatched.
-				Console.WarningFmt("Runner {} done but not runner {}. Exiting test.", i + 1, j + 1);
-				fail = true;
+				Console.WarningFmt("Runner {} exited abnormally", i + 1);
 			}
 		}
 
-		if (fail)
-			break;
-
-		if (done[0] && done[1])
+		for (int i = 0; i < 2; i++)
 		{
-			Console.WriteLn("Runners 1 and 2 both exited. Finishing test.");
+			CloseHandle(regression_runner_pi[i].hProcess);
+			CloseHandle(regression_runner_pi[i].hThread);
 		}
-	}
-	
-	for (int i = 0; i < 2; i++)
-	{
-		status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, INFINITE);
-		if (status[i] != 0)
+
+		// Write results to directory.
+		std::filesystem::path out_dir = std::filesystem::path(regression_output_dir);
+		std::filesystem::path out_path = out_dir / (dump_name + ".txt");
+
+		std::ofstream oss(out_path);
+
+		constexpr const char* INDENT = "    ";
+		constexpr const char* OPEN_MAP = "{";
+		constexpr const char* CLOSE_MAP = "}";
+		constexpr const char* QUOTE = "\"";
+		constexpr const char* KEY_VAL_DEL = ": ";
+		constexpr const char* LIST_ITEM = "- ";
+
+		if (!image_diffs.empty())
 		{
-			Console.WarningFmt("Runner {} exited abnormally", i + 1);
+			oss << "diffs: " << std::endl;
+
+			for (const auto& [name, diff_frac] : image_diffs)
+			{
+				oss << INDENT << QUOTE << name << QUOTE << KEY_VAL_DEL << diff_frac << CLOSE_MAP << std::endl;
+			}
+
+			oss << std::endl;
 		}
+
+		for (int i = 0; i < 2; i++)
+		{
+			if (!mismatched[i].empty())
+			{
+				oss << "mismatched_" << (i + 1) << KEY_VAL_DEL << std::endl;
+				for (const std::string& s : mismatched[i])
+				{
+					oss << INDENT << LIST_ITEM << QUOTE << s << QUOTE << std::endl;
+				}
+				oss << std::endl;
+			}
+		}
+
+		oss.close();
 	}
 
 	for (int i = 0; i < 2; i++)
-	{
-		CloseHandle(regression_runner_pi[i].hProcess);
-		CloseHandle(regression_runner_pi[i].hThread);
-		
 		regression_buffer[i].CloseFile();
-	}
-
 
 	return EXIT_SUCCESS;
 }
