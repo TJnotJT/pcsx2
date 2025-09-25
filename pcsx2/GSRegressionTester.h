@@ -42,3 +42,5 @@ bool IsRegressionTesting();
 void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int num_packets);
 void EndRegressionTest();
 RegressionPacket* GetRegressionPacketWrite();
+
+float RegressionCompareImages(const RegressionPacket& p1, const RegressionPacket& p2, int threshold);

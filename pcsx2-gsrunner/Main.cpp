@@ -109,6 +109,10 @@ PROCESS_INFORMATION regression_runner_pi[2];
 // Not implemented
 #endif
 
+// For both tester/runner
+constexpr int regression_num_packets_default = 10;
+static int regression_num_packets = regression_num_packets_default;
+
 bool GSRunner::InitializeConfig()
 {
 	EmuFolders::SetAppRoot();
@@ -763,6 +767,11 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 				s_regression_file = std::string(argv[++i]);
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-npackets"))
+			{
+				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+				continue;
+			}
 			else if (CHECK_ARG("-noshadercache"))
 			{
 				Console.WriteLn("Disabling shader cache");
@@ -843,6 +852,7 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 {
 	bool no_more_args = false;
+
 	for (int i = 1; i < argc; i++)
 	{
 		if (!no_more_args)
@@ -882,6 +892,12 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 			{
 				regression_runner[0] = std::string(argv[++i]);
 				regression_runner[1] = std::string(argv[++i]);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-npackets"))
+			{
+				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+				continue;
 			}
 #undef CHECK_ARG
 #undef CHECK_ARG_PARAM
@@ -891,14 +907,14 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 
 	if (regression_output_dir.empty())
 	{
-		Console.Error("Output directory not provided.");
+		Console.ErrorFmt("Output directory not provided.");
 		return false;
 	}
 
 	Error e;
 	if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
 	{
-		Console.Error("Error creating/checking directory: {}", e.GetDescription());
+		Console.ErrorFmt("Error creating/checking directory: {}", e.GetDescription());
 		return false;
 	}
 
@@ -906,13 +922,13 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 	{
 		if (regression_runner[i].empty())
 		{
-			Console.Error("Runner {} paths not provided.", i + 1);
+			Console.ErrorFmt("Runner {} paths not provided.", i + 1);
 			return false;
 		}
 
 		if (!FileSystem::FileExists(regression_runner[i].c_str()))
 		{
-			Console.Error("Runner {} does not exist: {}", i + 1, regression_runner[i]);
+			Console.ErrorFmt("Runner {} does not exist: {}", i + 1, regression_runner[i]);
 			return false;
 		}
 	}
@@ -979,7 +995,7 @@ int main_runner(int argc, char* argv[])
 	// or it might complain that there is no dumping directory
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
-		StartRegressionTest(&s_regression_buffer, s_regression_file, 10);
+		StartRegressionTest(&s_regression_buffer, s_regression_file, regression_num_packets);
 
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
@@ -1042,7 +1058,7 @@ int main_tester(int argc, char* argv[])
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
 
-		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], 10))
+		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets))
 		{
 			Console.ErrorFmt("Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
@@ -1056,8 +1072,8 @@ int main_tester(int argc, char* argv[])
 			std::string(" -surfaceless ") +
 			std::string(" -loop 1 ") +
 			std::string(" -dump f ") +
-			std::string(" -regression-test ") +
-			regression_shared_file[i];
+			std::string(" -regression-test ") + regression_shared_file[i] +
+			std::string(" -npackets ") + std::to_string(regression_num_packets);
 		
 		if (!StartRunnerProcess(command, &regression_runner_si[i], &regression_runner_pi[i]))
 		{
@@ -1066,26 +1082,85 @@ int main_tester(int argc, char* argv[])
 		}
 	}
 
+	bool exited[2] = {false, false};
+	bool done[2] = {false, false};
+	DWORD status[2] = {0, 0};
+	std::deque<RegressionPacket*> packets[2];
+
 	while (1)
 	{
-		int num_exited = 0;
 		for (int i = 0; i < 2; i++)
 		{
-			DWORD status = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
-			if (status != WAIT_TIMEOUT)
-				num_exited++;
+			status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, 0);
+			if (status[i] != WAIT_TIMEOUT)
+				exited[i] = true;
 		}
 
 		for (int i = 0; i < 2; i++)
 		{
 			while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
 			{
-				Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
+				//Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
+				packets[i].push_back(packet);
 			}
 		}
 
-		if (num_exited == 2)
+		bool fail = false;
+
+		while (!packets[0].empty() && !packets[1].empty())
+		{
+			RegressionPacket* p[2];
+			for (int i = 0; i < 2; i++)
+				p[i] = packets[0].front();
+
+			if (strncmp(p[0]->name, p[1]->name, sizeof(RegressionPacket::name)) == 0)
+			{
+				Console.WriteLnFmt("Comparing results for {}", p[0]->name);
+			}
+			else
+			{
+				Console.WarningFmt("Runner 1 and 2 out of sync on names: \"{}\", \"{}\". Exiting test.", p[0]->name, p[1]->name);
+				fail = true;
+				break;
+			}
+
+			for (int i = 0; i < 2; i++)
+				packets[i].pop_front();
+		}
+
+		if (fail)
 			break;
+
+		for (int i = 0; i < 2; i++)
+			done[i] = exited[i] && packets[i].empty();
+
+		for (int i = 0; i < 2; i++)
+		{
+			int j = 1 - i;
+			if (done[i] && !done[j])
+			{
+				// FIXME: Instead just consume the packets from other runner and say mismatched.
+				Console.WarningFmt("Runner {} done but not runner {}. Exiting test.", i + 1, j + 1);
+				fail = true;
+			}
+		}
+
+		if (fail)
+			break;
+
+		if (done[0] && done[1])
+		{
+			Console.WriteLn("Runners 1 and 2 both exited. Finishing test.");
+		}
+	}
+	
+	for (int i = 0; i < 2; i++)
+	{
+		status[i] = WaitForSingleObject(regression_runner_pi[i].hProcess, INFINITE);
+		if (status[i] != 0)
+		{
+			Console.WarningFmt("Runner {} exited abnormally", i + 1);
+		}
 	}
 
 	for (int i = 0; i < 2; i++)
@@ -1123,7 +1198,7 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		Console.Error("First argument should be [runner|tester] not \"{}\"", mode.c_str());
+		Console.ErrorFmt("First argument should be [runner|tester] not \"{}\"", mode);
 		return EXIT_FAILURE;
 	}
 }
