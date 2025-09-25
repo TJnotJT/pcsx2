@@ -52,6 +52,14 @@ void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int
 void EndRegressionTest();
 RegressionPacket* GetRegressionPacketWrite();
 
+enum ImageCompare
+{
+	BINARY,
+	BINARY_THRESHOLD,
+	FRACTIONAL,
+	FRACTIONAL_THRESHOLD
+};
+
 float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket* p2, int threshold);
 
 struct Process

@@ -300,6 +300,11 @@ float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket
 	if (p1->w != p2->w || p1->h != p2->h || p1->bytes_per_pixel != p2->bytes_per_pixel)
 		return 1.0f; // Formats are different.
 
+	if (memcmp(p1->data, p2->data, p1->bytes_per_pixel * p1->h * p1->pitch) != 0)
+		return 1.0f;
+	else
+		return 0.0f;
+
 	if (p1->bytes_per_pixel == 4)
 	{
 		return RegressionCompareImagesImpl<4>(p1, p2, threshold);

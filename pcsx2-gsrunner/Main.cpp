@@ -103,7 +103,8 @@ static u32 s_total_drawn_frames = 0;
 static std::string regression_output_dir;
 static std::string regression_runner_args;
 static RegressionPacketBuffer regression_buffer[2];
-static std::string regression_runner[2];
+static std::string regression_runner_path[2];
+static std::string regression_runner_name[2];
 static std::string regression_shared_file[2];
 static std::string regression_dump_dir;
 static Process regression_runner_proc[2];
@@ -850,83 +851,101 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 
 bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 {
-	bool no_more_args = false;
-
 	for (int i = 1; i < argc; i++)
 	{
-		if (!no_more_args)
-		{
 #define CHECK_ARG(str) !std::strcmp(argv[i], str)
-#define CHECK_ARG_PARAM(str) (!std::strcmp(argv[i], str) && ((i + 1) < argc))
-#define CHECK_ARG_PARAM_2(str) (!std::strcmp(argv[i], str) && ((i + 2) < argc))
-
-			if (CHECK_ARG("-help"))
-			{
-				PrintCommandLineHelpTester(argv[0]);
-				return false;
-			}
-			else if (CHECK_ARG("-version"))
-			{
-				PrintCommandLineVersion();
-				return false;
-			}
-			else if (CHECK_ARG("-input"))
-			{
-				regression_dump_dir = StringUtil::StripWhitespace(argv[++i]);
-				if (regression_dump_dir.empty())
-				{
-					Console.Error("Invalid input directory/file specified.");
-					return false;
-				}
-
-				if (!FileSystem::DirectoryExists(regression_dump_dir.c_str()) && !FileSystem::FileExists(regression_dump_dir.c_str()))
-				{
-					Console.Error("Input directory/file does not exist.");
-					return false;
-				}
-
-				continue;
-			}
-			else if (CHECK_ARG_PARAM("-output"))
-			{
-				regression_output_dir = StringUtil::StripWhitespace(argv[++i]);
-				if (regression_output_dir.empty())
-				{
-					Console.Error("Invalid output directory specified.");
-					return false;
-				}
-
-				Error e;
-				if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
-				{
-					Console.ErrorFmt("Error creating/checking directory: {}", e.GetDescription());
-					return false;
-				}
-
-				continue;
-			}
-			else if (CHECK_ARG_PARAM_2("-path"))
-			{
-				regression_runner[0] = std::string(argv[++i]);
-				regression_runner[1] = std::string(argv[++i]);
-				continue;
-			}
-			else if (CHECK_ARG_PARAM("-npackets"))
-			{
-				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
-				continue;
-			}
-			else
-			{
-				regression_runner_args.append(argv[i]);
-				regression_runner_args.append(" ");
-				continue;
-			}
+#define ENSURE_ARG_COUNT(str, n) \
+	do { \
+		if (i + n >= argc) \
+		{ \
+			Console.Error("Not enough arguments for " str " (need " #n ")"); \
+			return false; \
+		} \
+	} while (0)
 			
-#undef CHECK_ARG
-#undef CHECK_ARG_PARAM
-#undef CHECK_ARG_PARAM_2
+		if (CHECK_ARG("-help"))
+		{
+			PrintCommandLineHelpTester(argv[0]);
+			return false;
 		}
+		else if (CHECK_ARG("-version"))
+		{
+			PrintCommandLineVersion();
+			return false;
+		}
+		else if (CHECK_ARG("-input"))
+		{
+			ENSURE_ARG_COUNT("-input", 1);
+
+			regression_dump_dir = StringUtil::StripWhitespace(argv[++i]);
+			if (regression_dump_dir.empty())
+			{
+				Console.Error("Invalid input directory/file specified.");
+				return false;
+			}
+
+			if (!FileSystem::DirectoryExists(regression_dump_dir.c_str()) && !FileSystem::FileExists(regression_dump_dir.c_str()))
+			{
+				Console.Error("Input directory/file does not exist.");
+				return false;
+			}
+
+			continue;
+		}
+		else if (CHECK_ARG("-output"))
+		{
+			ENSURE_ARG_COUNT("-output", 1);
+
+			regression_output_dir = StringUtil::StripWhitespace(argv[++i]);
+			if (regression_output_dir.empty())
+			{
+				Console.Error("Invalid output directory specified.");
+				return false;
+			}
+
+			Error e;
+			if (!FileSystem::EnsureDirectoryExists(regression_output_dir.c_str(), true, &e))
+			{
+				Console.ErrorFmt("Error creating/checking directory: {}", e.GetDescription());
+				return false;
+			}
+
+			continue;
+		}
+		else if (CHECK_ARG("-path"))
+		{
+			ENSURE_ARG_COUNT("-path", 2);
+
+			regression_runner_path[0] = StringUtil::StripWhitespace(std::string(argv[++i]));
+			regression_runner_path[1] = StringUtil::StripWhitespace(std::string(argv[++i]));
+
+			continue;
+		}
+		else if (CHECK_ARG("-name"))
+		{
+			ENSURE_ARG_COUNT("-name", 2);
+
+			regression_runner_name[0] = StringUtil::StripWhitespace(std::string(argv[++i]));
+			regression_runner_name[1] = StringUtil::StripWhitespace(std::string(argv[++i]));
+
+			continue;
+		}
+		else if (CHECK_ARG("-npackets"))
+		{
+			ENSURE_ARG_COUNT("-npackets", 2);
+
+			regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+
+			continue;
+		}
+		else
+		{
+			regression_runner_args.append(argv[i]);
+			regression_runner_args.append(" ");
+			continue;
+		}
+
+#undef CHECK_ARG
 	}
 
 	if (regression_dump_dir.empty())
@@ -943,16 +962,21 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 
 	for (int i = 0; i < 2; i++)
 	{
-		if (regression_runner[i].empty())
+		if (regression_runner_path[i].empty())
 		{
 			Console.ErrorFmt("Runner {} paths not provided.", i + 1);
 			return false;
 		}
 
-		if (!FileSystem::FileExists(regression_runner[i].c_str()))
+		if (!FileSystem::FileExists(regression_runner_path[i].c_str()))
 		{
-			Console.ErrorFmt("Runner {} does not exist: {}", i + 1, regression_runner[i]);
+			Console.ErrorFmt("Runner {} does not exist: {}", i + 1, regression_runner_path[i]);
 			return false;
+		}
+
+		if (regression_runner_name[i].empty())
+		{
+			regression_runner_name[i] = std::filesystem::path(regression_runner_path[i]).filename().string();
 		}
 	}
 
@@ -1107,9 +1131,8 @@ int main_tester(int argc, char* argv[])
 
 		for (int i = 0; i < 2; i++)
 		{
-			// TODO: Parse other runner arguments.
 			std::string command =
-				regression_runner[i] +
+				regression_runner_path[i] +
 				std::string(" runner ") +
 				" " + dump_file + " " +
 				std::string(" -surfaceless ") +
@@ -1121,7 +1144,7 @@ int main_tester(int argc, char* argv[])
 
 			if (!regression_runner_proc[i].Start(command))
 			{
-				Console.ErrorFmt("Unable to start runner: {}", i + 1);
+				Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
 				return EXIT_FAILURE;
 			}
 		}
@@ -1143,7 +1166,6 @@ int main_tester(int argc, char* argv[])
 			{
 				while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
 				{
-					//Console.WriteLnFmt("Runner {}: {}", i + 1, packet->name);
 					packets[i].push_back(packet);
 				}
 			}
@@ -1162,7 +1184,8 @@ int main_tester(int argc, char* argv[])
 				}
 				else
 				{
-					Console.WarningFmt("Runner 1 and 2 out of sync on names: \"{}\", \"{}\"", p[0]->name, p[1]->name);
+					Console.WarningFmt("Runners out of sync on dumps: {}: \"{}\", {}: \"{}\"",
+						regression_runner_name[0], p[0]->name, regression_runner_name[1], p[1]->name);
 					for (int i = 0; i < 2; i++)
 						mismatched[i].push_back(std::string(p[i]->name));
 				}
@@ -1182,7 +1205,7 @@ int main_tester(int argc, char* argv[])
 					while (!packets[j].empty())
 					{
 						const char* name = packets[j].front()->name;
-						Console.WarningFmt("Runner {} has extra packet: \"{}\"", j + 1, name);
+						Console.WarningFmt("Runner {} has extra packet: \"{}\"", regression_runner_name[j], name);
 						mismatched[j].push_back(name);
 						packets[j].pop_front();
 					}
@@ -1191,7 +1214,7 @@ int main_tester(int argc, char* argv[])
 
 			if (done[0] && done[1])
 			{
-				Console.WriteLn("Runners 1 and 2 both exited. Finishing test.");
+				Console.WriteLn("Runners both exited. Finishing test.");
 				break;
 			}
 
@@ -1202,7 +1225,7 @@ int main_tester(int argc, char* argv[])
 		{
 			if (regression_runner_proc[i].WaitForExit() != 0)
 			{
-				Console.WarningFmt("Runner {} exited abnormally.", i + 1);
+				Console.WarningFmt("Runner {} exited abnormally.", regression_runner_name[i]);
 			}
 		}
 
