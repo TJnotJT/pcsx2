@@ -1,12 +1,20 @@
 #pragma once
 
+#include <mutex>
+
 #ifdef __WIN32__
 #include <windows.h>
 #endif
 
 struct alignas(32) RegressionPacket
 {
-	std::atomic<bool> ready; // Contains data to be consumed.
+	enum State
+	{
+		Empty,
+		Writing,
+		Ready
+	};
+	std::atomic<State> state; // Contains data to be consumed.
 	char name[4096];
 	int size, w, h, pitch, bytes_per_pixel;
 	u8 data[1024 * 1024 * 4];
@@ -25,9 +33,10 @@ struct alignas(32) RegressionPacketBuffer
 	// Not implemented.
 #endif
 	RegressionPacket* packets = nullptr;
+	std::atomic<bool>* state = nullptr;
 	int num_packets = 0;
-	int read = 0;  // read index.
-	int write = 0; // write index;
+	std::atomic<std::size_t> read = 0;  // read index.
+	std::atomic<std::size_t> write = 0; // write index;
 
 	int frames = 0;
 	int draws = 0;
@@ -37,6 +46,9 @@ struct alignas(32) RegressionPacketBuffer
 	int uploads = 0;
 	int readbacks = 0;
 
+	static int GetReadyOffset(int num_packets);
+	static int GetSize(int num_packets);
+
 	// Windows defines CreateFile as a macro so use CreateFile_.
 	bool CreateFile_(const std::string& name, int num_packets);
 	bool OpenFile(const std::string& name, int num_packets);
@@ -45,12 +57,14 @@ struct alignas(32) RegressionPacketBuffer
 
 	RegressionPacket* GetPacketWrite(bool block = true);
 	RegressionPacket* GetPacketRead(bool block = false);
+	void DoneWrite();
+	void DoneRead();
 };
 
 bool IsRegressionTesting();
 void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int num_packets);
 void EndRegressionTest();
-RegressionPacket* GetRegressionPacketWrite();
+RegressionPacketBuffer* GetRegressionPacketBuffer();
 
 enum ImageCompare
 {

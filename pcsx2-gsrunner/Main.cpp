@@ -49,6 +49,7 @@
 #include "pcsx2/VMManager.h"
 
 #include "pcsx2/GSRegressionTester.h"
+#include "pcsx2/GS/GSPng.h"
 
 #include "svnrev.h"
 
@@ -101,6 +102,7 @@ static u32 s_total_drawn_frames = 0;
 
 // For the tester
 static std::string regression_output_dir;
+static std::string regression_output_image_dir[2];
 static std::string regression_runner_args;
 static RegressionPacketBuffer regression_buffer[2];
 static std::string regression_runner_path[2];
@@ -962,15 +964,27 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 
 	for (int i = 0; i < 2; i++)
 	{
+		regression_output_image_dir[i] = (std::filesystem::path(regression_output_dir) / regression_runner_name[i]).string();
+
+		Error e;
+		if (!FileSystem::EnsureDirectoryExists(regression_output_image_dir[i].c_str(), false, &e))
+		{
+			Console.ErrorFmt("Unable to create output directory \"{}\" (error: {})", regression_output_image_dir[i], e.GetDescription());
+			return false;
+		}
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
 		if (regression_runner_path[i].empty())
 		{
-			Console.ErrorFmt("Runner {} paths not provided.", i + 1);
+			Console.ErrorFmt("Runner {} path not provided.", i + 1);
 			return false;
 		}
 
 		if (!FileSystem::FileExists(regression_runner_path[i].c_str()))
 		{
-			Console.ErrorFmt("Runner {} does not exist: {}", i + 1, regression_runner_path[i]);
+			Console.ErrorFmt("Runner {} path does not exist: \"{}\"", i + 1, regression_runner_path[i]);
 			return false;
 		}
 
@@ -1099,7 +1113,7 @@ int main_tester(int argc, char* argv[])
 		
 		if (dump_files.empty())
 		{
-			Console.ErrorFmt("Could not find any dumps in \"{}\"", regression_dump_dir.c_str());
+			Console.ErrorFmt("Could not find any dumps in \"{}\"", regression_dump_dir);
 			return EXIT_FAILURE;
 		}
 	}
@@ -1151,7 +1165,7 @@ int main_tester(int argc, char* argv[])
 
 		bool exited[2] = {false, false};
 		bool done[2] = {false, false};
-		std::deque<RegressionPacket*> packets[2];
+		RegressionPacket* packets[2];
 		std::map<std::string, float> image_diffs;
 		std::vector<std::string> mismatched[2];
 
@@ -1164,50 +1178,58 @@ int main_tester(int argc, char* argv[])
 
 			for (int i = 0; i < 2; i++)
 			{
-				while (RegressionPacket* packet = regression_buffer[i].GetPacketRead())
-				{
-					packets[i].push_back(packet);
-				}
+				packets[i] = regression_buffer[i].GetPacketRead();
 			}
 
-			while (!packets[0].empty() && !packets[1].empty())
+			if (packets[0] && packets[1])
 			{
-				RegressionPacket* p[2];
-				for (int i = 0; i < 2; i++)
-					p[i] = packets[0].front();
-
-				if (strncmp(p[0]->name, p[1]->name, sizeof(RegressionPacket::name)) == 0)
+				if (strncmp(packets[0]->name, packets[1]->name, sizeof(RegressionPacket::name)) == 0)
 				{
-					Console.WriteLnFmt("Comparing results for {}", p[0]->name);
+					const std::string& image_name = packets[0]->name;
 
-					RegressionCompareImages(p[0], p[1], 0);
+					Console.WriteLnFmt("Comparing results for {}.", image_name);
+
+					if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
+					{
+						for (int i = 0; i < 2; i++)
+						{
+							std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name + "_" + image_name + ".png")).string();
+
+							if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+							{
+								Console.WarningFmt("Unable to save image file: \"{}\"", dump_image_path);
+							}
+						}
+					}
 				}
 				else
 				{
 					Console.WarningFmt("Runners out of sync on dumps: {}: \"{}\", {}: \"{}\"",
-						regression_runner_name[0], p[0]->name, regression_runner_name[1], p[1]->name);
+						regression_runner_name[0], packets[0]->name, regression_runner_name[1], packets[1]->name);
 					for (int i = 0; i < 2; i++)
-						mismatched[i].push_back(std::string(p[i]->name));
+						mismatched[i].push_back(std::string(packets[i]->name));
 				}
 
 				for (int i = 0; i < 2; i++)
-					packets[i].pop_front();
+				{
+					regression_buffer[i].DoneRead();
+				}
 			}
 
 			for (int i = 0; i < 2; i++)
-				done[i] = exited[i] && packets[i].empty();
+				done[i] = exited[i] && packets[i] == nullptr;
 
 			for (int i = 0; i < 2; i++)
 			{
 				int j = 1 - i;
 				if (done[i] && !done[j])
 				{
-					while (!packets[j].empty())
+					if (packets[j])
 					{
-						const char* name = packets[j].front()->name;
+						std::string name = packets[j]->name;
 						Console.WarningFmt("Runner {} has extra packet: \"{}\"", regression_runner_name[j], name);
 						mismatched[j].push_back(name);
-						packets[j].pop_front();
+						packets[j] = nullptr;
 					}
 				}
 			}

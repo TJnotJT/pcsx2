@@ -13,32 +13,46 @@ static RegressionPacketBuffer* regression_buffer; // Used by GS runner processes
 
 RegressionPacket* RegressionPacketBuffer::GetPacketWrite(bool block)
 {
-	if (write == read + num_packets)
-		return nullptr; // Full.
-
-	while (packets[write % num_packets].ready.load(std::memory_order_acquire))
+	while (1)
 	{
+		RegressionPacket::State expected = RegressionPacket::Empty;
+		if (packets[write % num_packets].state.compare_exchange_strong(expected, RegressionPacket::Writing,
+				std::memory_order_acquire, std::memory_order_relaxed))
+			break;
+
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[(write++ % num_packets)];
+	return &packets[write % num_packets];
 }
 
 RegressionPacket* RegressionPacketBuffer::GetPacketRead(bool block)
 {
-	if (read == write)
-		return nullptr; // Empty.
-
-	while (!packets[read % num_packets].ready.load(std::memory_order_acquire))
+	while (true)
 	{
+		if (packets[read % num_packets].state.load(std::memory_order_acquire) == RegressionPacket::Ready)
+			break;
+
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[(read++ % num_packets)];
+	return &packets[read % num_packets];
+}
+
+void RegressionPacketBuffer::DoneWrite()
+{
+	packets[write % num_packets].state.store(RegressionPacket::Ready, std::memory_order_release);
+	write++;
+}
+
+void RegressionPacketBuffer::DoneRead()
+{
+	packets[read % num_packets].state.store(RegressionPacket::Empty, std::memory_order_release);
+	read++;
 }
 
 void RegressionPacket::SetFilename(const char* fn)
@@ -76,8 +90,16 @@ void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, in
 	this->h = h;
 	this->pitch = pitch;
 	this->bytes_per_pixel = bytes_per_pixel;
+}
 
-	this->ready.store(true, std::memory_order_release);
+int RegressionPacketBuffer::GetSize(int num_packets)
+{
+	return num_packets * (sizeof(RegressionPacket) + sizeof(int));
+}
+
+int RegressionPacketBuffer::GetReadyOffset(int num_packets)
+{
+	return num_packets * sizeof(RegressionPacket);
 }
 
 bool RegressionPacketBuffer::CreateFile_(const std::string& name, int num_packets)
@@ -231,9 +253,9 @@ void EndRegressionTest()
 	}
 }
 
-RegressionPacket* GetRegressionPacketWrite()
+RegressionPacketBuffer* GetRegressionPacketBuffer()
 {
-	return IsRegressionTesting() ? regression_buffer->GetPacketWrite() : nullptr;
+	return IsRegressionTesting() ? regression_buffer : nullptr;
 }
 
 template<int bytes_per_pixel>
@@ -254,16 +276,6 @@ static float RegressionCompareImagesImpl(const RegressionPacket* p1, const Regre
 			{
 				u32 d1 = *(u32*)data1;
 				u32 d2 = *(u32*)data2;
-
-				int r1 = (d1 >> 0) & 0xFF;
-				int g1 = (d1 >> 8) & 0xFF;
-				int b1 = (d1 >> 16) & 0xFF;
-				int a1 = (d1 >> 24) & 0xFF;
-
-				int r2 = (d1 >> 0) & 0xFF;
-				int g2 = (d1 >> 8) & 0xFF;
-				int b2 = (d1 >> 16) & 0xFF;
-				int a2 = (d1 >> 24) & 0xFF;
 
 				if (d1 != d2)
 				{

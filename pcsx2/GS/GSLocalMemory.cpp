@@ -652,10 +652,13 @@ void GSLocalMemory::ReadTexture(const GSOffset& off, const GSVector4i& r, u8* ds
 //
 
 void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x, int y,
-	RegressionPacket* packet)
+	RegressionPacketBuffer* rbp)
 {
 	int pitch = w * 4;
 	int size = pitch * h;
+
+	RegressionPacket* packet = rbp ? rbp->GetPacketWrite() : nullptr;
+
 	void* bits = packet ? _aligned_malloc(size, VECTOR_ALIGNMENT) : packet->data;
 
 	GIFRegTEX0 TEX0;
@@ -680,6 +683,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	{
 		packet->SetFilename(fn.c_str());
 		packet->SetImageData(nullptr, w, h, pitch, 4);
+		rbp->DoneWrite();
 	}
 	else
 	{
