@@ -9,9 +9,9 @@
 #include "common/StringUtil.h"
 #endif
 
-static RegressionPacketBuffer* regression_buffer; // Used by GS runner processes.
+static RegressionBuffer* regression_buffer; // Used by GS runner processes.
 
-RegressionPacket* RegressionPacketBuffer::GetPacketWrite(bool block)
+RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
 {
 	while (1)
 	{
@@ -28,7 +28,7 @@ RegressionPacket* RegressionPacketBuffer::GetPacketWrite(bool block)
 	return &packets[write % num_packets];
 }
 
-RegressionPacket* RegressionPacketBuffer::GetPacketRead(bool block)
+RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 {
 	while (true)
 	{
@@ -43,13 +43,13 @@ RegressionPacket* RegressionPacketBuffer::GetPacketRead(bool block)
 	return &packets[read % num_packets];
 }
 
-void RegressionPacketBuffer::DoneWrite()
+void RegressionBuffer::DoneWrite()
 {
 	packets[write % num_packets].state.store(RegressionPacket::Ready, std::memory_order_release);
 	write++;
 }
 
-void RegressionPacketBuffer::DoneRead()
+void RegressionBuffer::DoneRead()
 {
 	packets[read % num_packets].state.store(RegressionPacket::Empty, std::memory_order_release);
 	read++;
@@ -92,131 +92,64 @@ void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, in
 	this->bytes_per_pixel = bytes_per_pixel;
 }
 
-int RegressionPacketBuffer::GetSize(int num_packets)
+std::size_t RegressionBuffer::GetSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
-	return num_packets * (sizeof(RegressionPacket) + sizeof(int));
+	return num_packets * sizeof(RegressionPacket) + 2 * dump_size + status_size;
 }
 
-int RegressionPacketBuffer::GetReadyOffset(int num_packets)
+bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets,
+	std::size_t dump_size, std::size_t status_size)
 {
-	return num_packets * sizeof(RegressionPacket);
-}
-
-bool RegressionPacketBuffer::CreateFile_(const std::string& name, int num_packets)
-{
-#ifdef __WIN32__
-	packets_h = CreateFileMappingA(
-		INVALID_HANDLE_VALUE,
-		NULL,
-		PAGE_READWRITE,
-		0,
-		num_packets * sizeof(RegressionPacket),
-		name.c_str());
-
-	if (!packets_h)
-	{
-		Console.ErrorFmt("Failed to create regression packets file: {}", name);
+	if (!shm.CreateFile_(name, GetSize(num_packets, dump_size, status_size)))
 		return false;
-	}
 
-	packets = static_cast<RegressionPacket*>(
-		MapViewOfFile(
-			packets_h,
-			FILE_MAP_WRITE,
-			0,
-			0,
-			num_packets * sizeof(RegressionPacket)));
-
-	if (!packets)
-	{
-		Console.ErrorFmt("Failed to map view of regressions packet file: {}", name);
-		CloseHandle(packets_h);
-		return false;
-	}
-
-	Console.WriteLnFmt("Successfully created regression packets file: {}", name);
-
-	this->name = name;
-	this->num_packets = num_packets;
+	SetSizesPointers(num_packets, dump_size, status_size);
 
 	return true;
-#else
-	// Not implemented.
-#endif
 }
 
-bool RegressionPacketBuffer::OpenFile(const std::string& name, int num_packets)
+void RegressionBuffer::SetSizesPointers(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
-	// Note: num_packets must match the value used in creation!
-#ifdef __WIN32__
-	packets_h = OpenFileMappingA(FILE_MAP_WRITE, FALSE, name.c_str());
-	if (!packets_h)
-	{
-		Console.ErrorFmt("Not able to open file for regression packets: {}", name);
-		return false;
-	}
-	
-	packets = static_cast<RegressionPacket*>(MapViewOfFile(packets_h, FILE_MAP_WRITE, 0, 0, num_packets * sizeof(RegressionPacket)));
-	if (!packets)
-	{
-		Console.ErrorFmt("Unable to map regression packet file to memory: {}", name);
-		CloseHandle(packets_h);
-		return false;
-	}
-
-	Console.WriteLnFmt("Successfully opened/mapped regression packet file: {}", name);
-
-	this->name = name;
 	this->num_packets = num_packets;
+	this->dump_size = dump_size;
+	this->status_size = status_size;
+
+	this->packets = static_cast<RegressionPacket*>(shm.data);
+	this->dump_file[0] = static_cast<u8*>(shm.data) + num_packets * sizeof(this->packets[0]);
+	this->dump_file[1] = static_cast<char*>(this->dump_file[0]) + dump_size;
+	this->status = static_cast<char*>(this->dump_file[1]) + dump_size;
+}
+
+bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
+	std::size_t status_size)
+{
+	if (!shm.OpenFile(name, num_packets * sizeof(RegressionPacket)))
+		return false;
+
+	SetSizesPointers(num_packets, dump_size, status_size);
 
 	return true;
-#else
-	return false; // Not implemented.
-#endif
 }
 
-bool RegressionPacketBuffer::CloseFile()
+bool RegressionBuffer::CloseFile()
 {
-#ifdef __WIN32__
-	if (!packets_h)
-	{
-		Console.Error("There is no regression packet handle to close.");
-		return false;
-	}
-
-	if (!CloseHandle(packets_h))
-	{
-		Console.Error("Failed to close regression packet handle.");
-		return false;
-	}
-
-	if (!packets)
-	{
-		Console.Error("There is no regression packets view to unmap.");
-		return false;
-	}
-
-	if (!UnmapViewOfFile(packets))
-	{
-		Console.Error("Failed to unmap regression packets view.");
-		return false;
-	}
-
-	Console.WriteLnFmt("Successfully closed/unmapped regression packets file: {}", name);
-
-	name = "";
-	packets_h = 0;
 	packets = nullptr;
+	dump_file[0] = nullptr;
+	dump_file[1] = nullptr;
+	status = nullptr;
+	num_packets = 0;
+	dump_size = 0;
+	status_size = 0;
+
+	if (!shm.CloseFile())
+		return false;
 
 	return true;
-#else
-	return false; // Not implemented.
-#endif
 }
 
-void RegressionPacketBuffer::ResetFile()
+void RegressionBuffer::ResetFile()
 {
-	memset(packets, 0, num_packets * sizeof(RegressionPacket));
+	//memset(packets, 0, num_packets * sizeof(RegressionPacket));
 }
 
 bool IsRegressionTesting()
@@ -225,9 +158,10 @@ bool IsRegressionTesting()
 }
 
 /// Start regression testing within the producer/GS runner process.
-void StartRegressionTest(RegressionPacketBuffer* rpb, const std::string& fn, int num_packets)
+void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets,
+	std::size_t dump_size, std::size_t status_size)
 {
-	if (!rpb->OpenFile(fn, num_packets))
+	if (!rpb->OpenFile(fn, num_packets, dump_size, status_size))
 	{
 		pxFail("Unable to start regression test.");
 		return;
@@ -253,7 +187,7 @@ void EndRegressionTest()
 	}
 }
 
-RegressionPacketBuffer* GetRegressionPacketBuffer()
+RegressionBuffer* GetRegressionBuffer()
 {
 	return IsRegressionTesting() ? regression_buffer : nullptr;
 }
@@ -398,4 +332,121 @@ bool Process::Close()
 	// Not implemented
 	return false;
 #endif
+}
+
+// Windows defines CreateFile as a macro so use CreateFile_.
+bool SharedMemoryFile::CreateFile_(const std::string& name, std::size_t size)
+{
+#ifdef __WIN32__
+	handle = CreateFileMappingA(
+		INVALID_HANDLE_VALUE,
+		NULL,
+		PAGE_READWRITE,
+		0,
+		size,
+		name.c_str());
+
+	if (!handle)
+	{
+		Console.ErrorFmt("Failed to create regression packets file: {}", name);
+		return false;
+	}
+
+	data = static_cast<RegressionPacket*>(
+		MapViewOfFile(
+			handle,
+			FILE_MAP_WRITE,
+			0,
+			0,
+			size));
+
+	if (!data)
+	{
+		Console.ErrorFmt("Failed to map view of regressions packet file: {}", name);
+		CloseHandle(handle);
+		return false;
+	}
+
+	Console.WriteLnFmt("Successfully created regression packets file: {}", name);
+
+	this->name = name;
+	this->size = size;
+
+	return true;
+#else
+	// Not implemented.
+#endif
+}
+
+bool SharedMemoryFile::OpenFile(const std::string& name, std::size_t size)
+{
+	// Note: num_packets must match the value used in creation!
+#ifdef __WIN32__
+	handle = OpenFileMappingA(FILE_MAP_WRITE, FALSE, name.c_str());
+	if (!handle)
+	{
+		Console.ErrorFmt("Not able to open file for regression packets: {}", name);
+		return false;
+	}
+
+	data = static_cast<RegressionPacket*>(MapViewOfFile(handle, FILE_MAP_WRITE, 0, 0, size));
+	if (!data)
+	{
+		Console.ErrorFmt("Unable to map regression packet file to memory: {}", name);
+		CloseHandle(handle);
+		return false;
+	}
+
+	Console.WriteLnFmt("Successfully opened/mapped regression packet file: {}", name);
+
+	this->name = name;
+	this->size = size;
+
+	return true;
+#else
+	return false; // Not implemented.
+#endif
+}
+
+bool SharedMemoryFile::CloseFile()
+{
+#ifdef __WIN32__
+	if (!handle)
+	{
+		Console.Error("There is no handle to close.");
+		return false;
+	}
+
+	if (!CloseHandle(handle))
+	{
+		Console.Error("Failed to close file handle.");
+		return false;
+	}
+
+	if (!data)
+	{
+		Console.Error("There is no file view to unmap.");
+		return false;
+	}
+
+	if (!UnmapViewOfFile(data))
+	{
+		Console.Error("Failed to unmap file view.");
+		return false;
+	}
+
+	Console.WriteLnFmt("Successfully closed/unmapped shared memory file: {}", name);
+
+	name = "";
+	handle = 0;
+	data = nullptr;
+
+	return true;
+#else
+	return false; // Not implemented.
+#endif
+}
+
+void SharedMemoryFile::ResetFile()
+{
 }

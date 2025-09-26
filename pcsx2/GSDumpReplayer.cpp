@@ -14,6 +14,7 @@
 #include "R5900.h"
 #include "VMManager.h"
 #include "VUmicro.h"
+#include "GSRegressionTester.h"
 
 #include "imgui.h"
 
@@ -271,6 +272,10 @@ void GSDumpReplayerCpuStep()
 			s_dump_loop_count--;
 		else if (s_dump_loop_count == 0)
 		{
+			if (IsRegressionTesting())
+			{
+
+			}
 			Host::RequestVMShutdown(false, false, false);
 			s_dump_running = false;
 		}
