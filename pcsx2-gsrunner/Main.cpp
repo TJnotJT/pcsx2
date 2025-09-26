@@ -50,6 +50,7 @@
 
 #include "pcsx2/GSRegressionTester.h"
 #include "pcsx2/GS/GSPng.h"
+#include "pcsx2/GS/GSLzma.h"
 
 #include "svnrev.h"
 
@@ -1142,6 +1143,8 @@ int main_tester(int argc, char* argv[])
 			regression_buffer[i].ResetFile();
 
 		std::string dump_name = std::filesystem::path(dump_file).filename().string();
+
+
 
 		for (int i = 0; i < 2; i++)
 		{

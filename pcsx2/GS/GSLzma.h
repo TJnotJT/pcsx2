@@ -304,6 +304,9 @@ public:
 
 	bool ReadFile(Error* error);
 
+	bool Serialize(void* ptr, std::size_t size);
+	bool Deserialize(void* ptr, std::size_t size);
+
 protected:
 	GSDumpFile();
 
