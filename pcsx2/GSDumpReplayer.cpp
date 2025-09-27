@@ -274,8 +274,29 @@ void GSDumpReplayerCpuStep()
 		{
 			if (IsRegressionTesting())
 			{
+				DumpFileSharedMemory* dump = nullptr;
+				while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
+				{
+					if (GetRegressionBuffer()->GetStatus() == "Done")
+					{
+						break;
+					}
+					
+					std::this_thread::yield();
 
+					Console.WriteLnFmt("Waiting for new dump.");
+				}
+
+				if (dump)
+				{
+					s_dump_file->Deserialize(dump->GetDump(), dump->dump_size);
+					Console.WriteLnFmt("Loaded new dump: {}", dump->GetName());
+					return;
+				}
+
+				// No new dump; initiate shutdown.
 			}
+
 			Host::RequestVMShutdown(false, false, false);
 			s_dump_running = false;
 		}
