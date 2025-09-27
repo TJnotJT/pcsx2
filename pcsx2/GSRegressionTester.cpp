@@ -13,67 +13,108 @@ static RegressionBuffer* regression_buffer; // Used by GS runner processes.
 
 RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
 {
-	while (1)
+	while (packets[packet_index % num_packets].ready.load(std::memory_order_acquire))
 	{
-		RegressionPacket::State expected = RegressionPacket::Empty;
-		if (packets[write % num_packets].state.compare_exchange_strong(expected, RegressionPacket::Writing,
-				std::memory_order_acquire, std::memory_order_relaxed))
-			break;
-
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[write % num_packets];
+	return &packets[packet_index % num_packets];
 }
 
 RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 {
-	while (true)
+	while (!packets[packet_index % num_packets].ready.load(std::memory_order_acquire))
 	{
-		if (packets[read % num_packets].state.load(std::memory_order_acquire) == RegressionPacket::Ready)
-			break;
-
 		if (!block)
 			return nullptr;
 		std::this_thread::yield();
 	}
 
-	return &packets[read % num_packets];
+	return &packets[packet_index % num_packets];
 }
 
-void RegressionBuffer::DoneWrite()
+void RegressionBuffer::DonePacketWrite()
 {
-	packets[write % num_packets].state.store(RegressionPacket::Ready, std::memory_order_release);
-	write++;
+	packets[packet_index % num_packets].ready.store(true, std::memory_order_release);
+	packet_index++;
 }
 
-void RegressionBuffer::DoneRead()
+void RegressionBuffer::DonePacketRead()
 {
-	packets[read % num_packets].state.store(RegressionPacket::Empty, std::memory_order_release);
-	read++;
+	packets[packet_index % num_packets].ready.store(false, std::memory_order_release);
+	packet_index++;
 }
 
-void RegressionPacket::SetFilename(const char* fn)
+DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
 {
-	if (strnlen_s(fn, std::size(name)) >= std::size(name))
+	while (dumps[dump_index % num_dumps]->ready.load(std::memory_order_acquire))
 	{
-		Console.Warning("File name is too large for regression packet.");
+		if (!block)
+			return nullptr;
+		std::this_thread::yield();
 	}
 
-	std::filesystem::path p = std::filesystem::path(fn).filename();
-#ifdef __WIN32__
-	std::u8string pstr = p.u8string();
-	strncpy_s(name, reinterpret_cast<const char*>(pstr.c_str()), std::size(name));
-#else
-	strncpy_s(name, p.c_str(), std::size(name));
-#endif
-	Console.WriteLnFmt("New regression packet: {}", name);
+	return dumps[dump_index % num_dumps];
+}
+
+DumpFileSharedMemory* RegressionBuffer::GetDumpRead(bool block)
+{
+	while (!dumps[dump_index % 2]->ready.load(std::memory_order_acquire))
+	{
+		if (!block)
+			return nullptr;
+		std::this_thread::yield();
+	}
+
+	return dumps[dump_index % 2];
+}
+
+void RegressionBuffer::DoneDumpWrite()
+{
+	dumps[dump_index % num_dumps]->ready.store(true, std::memory_order_release);
+	dump_index++;
+}
+
+void RegressionBuffer::DoneDumpRead()
+{
+	dumps[dump_index % num_dumps]->ready.store(false, std::memory_order_release);
+	dump_index++;
+}
+
+void RegressionPacket::SetNamePacket(const char* n)
+{
+	pxAssertRel(!ready.load(std::memory_order_acquire), "Attempting to write to non-empty packet.");
+
+	if (strnlen_s(n, std::size(name_packet)) >= std::size(name_packet))
+	{
+		Console.Warning("Packet name is too large for regression packet.");
+	}
+
+	std::string pstr = std::filesystem::path(n).filename().string();
+	strncpy_s(name_packet, pstr.c_str(), std::size(name_packet));
+	Console.WriteLnFmt("New regression packet: {}", name_packet);
+}
+
+void RegressionPacket::SetNameDump(const char* n)
+{
+	pxAssertRel(!ready.load(std::memory_order_acquire), "Attempting to write to non-empty packet.");
+
+	if (strnlen_s(n, std::size(name_dump)) >= std::size(name_dump))
+	{
+		Console.Warning("Dump name is too large for regression packet.");
+	}
+
+	std::string pstr = std::filesystem::path(n).filename().string();
+	strncpy_s(name_dump, pstr.c_str(), std::size(name_dump));
+	Console.WriteLnFmt("New regression packet: {}", name_dump);
 }
 
 void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel)
 {
+	pxAssertRel(!ready.load(std::memory_order_acquire), "Attempting to write to non-empty packet.");
+
 	if (src)
 	{
 		const std::size_t src_size = h * pitch;
@@ -92,9 +133,109 @@ void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, in
 	this->bytes_per_pixel = bytes_per_pixel;
 }
 
+void RegressionPacket::Init()
+{
+	memset(this, 0, sizeof(this));
+};
+
+std::size_t RegressionPacket::GetSize()
+{
+	return sizeof(RegressionPacket);
+}
+
+std::string RegressionPacket::GetNameDump()
+{
+	pxAssertRel(ready.load(std::memory_order_acquire), "Attempting to read non-ready packet.");
+
+	name_dump[std::size(name_dump) - 1] = '\0';
+
+	return std::string(name_dump);
+}
+
+std::string RegressionPacket::GetNamePacket()
+{
+	pxAssertRel(ready.load(std::memory_order_acquire), "Attempting to read non-ready packet.");
+
+	name_packet[std::size(name_packet) - 1] = '\0';
+
+	return std::string(name_packet);
+}
+
+u8* RegressionPacket::GetImageData()
+{
+	pxAssertRel(ready.load(std::memory_order_acquire), "Attempting to read non-ready packet.");
+
+	return data;
+}
+
+// Only once before sharing. Not thread safe.
+void DumpFileSharedMemory::Init(std::size_t dump_size)
+{
+	ready = false;
+	this->dump_size = dump_size;
+}
+
+static std::size_t GetSize(std::size_t dump_size)
+{
+	return sizeof(DumpFileSharedMemory) + dump_size;
+}
+
+void* DumpFileSharedMemory::GetDump()
+{
+	return reinterpret_cast<u8*>(this) + sizeof(*this);
+}
+
+std::size_t DumpFileSharedMemory::GetDumpSize()
+{
+	return dump_size;
+}
+
+std::string DumpFileSharedMemory::GetName()
+{
+	name[std::size(name) - 1] = '\0';
+
+	return std::string(name);
+}
+
+void StatusSharedMemory::Init(std::size_t size)
+{
+	this->size = size;
+	memset(GetStatusRaw(), 0, size);
+}
+
+std::string StatusSharedMemory::GetStatus()
+{
+	std::scoped_lock lock(status_lock);
+
+	GetStatusRaw()[size - 1] = '\0';
+
+	return std::string(GetStatusRaw());
+}
+
+void StatusSharedMemory::SetStatus(const std::string& status)
+{
+	std::scoped_lock lock(status_lock);
+
+	memcpy(GetStatusRaw(), status.c_str(), std::min(size - 1, status.length()));
+}
+
+// Not thread safe.
+char* StatusSharedMemory::GetStatusRaw()
+{
+	return reinterpret_cast<char*>(this) + sizeof(DumpFileSharedMemory);
+}
+
+std::size_t StatusSharedMemory::GetSize(std::size_t size)
+{
+	return sizeof(StatusSharedMemory) + size;
+}
+
 std::size_t RegressionBuffer::GetSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
-	return num_packets * sizeof(RegressionPacket) + 2 * dump_size + status_size;
+	return
+		num_packets * RegressionPacket::GetSize() +
+		num_dumps * DumpFileSharedMemory::GetSize(dump_size) +
+		StatusSharedMemory::GetSize(status_size);
 }
 
 bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets,
@@ -105,19 +246,30 @@ bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_pack
 
 	SetSizesPointers(num_packets, dump_size, status_size);
 
+	for (int i = 0; i < num_packets; i++)
+		packets[i].Init();
+	dumps[0]->Init(dump_size);
+	dumps[1]->Init(dump_size);
+	status->Init(status_size);
+
 	return true;
 }
 
 void RegressionBuffer::SetSizesPointers(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
-	this->num_packets = num_packets;
-	this->dump_size = dump_size;
-	this->status_size = status_size;
+	std::size_t packet_offset;
+	std::size_t dump_file_offset[2];
+	std::size_t status_offset;
 
-	this->packets = static_cast<RegressionPacket*>(shm.data);
-	this->dump_file[0] = static_cast<u8*>(shm.data) + num_packets * sizeof(this->packets[0]);
-	this->dump_file[1] = static_cast<char*>(this->dump_file[0]) + dump_size;
-	this->status = static_cast<char*>(this->dump_file[1]) + dump_size;
+	packet_offset = reinterpret_cast<std::size_t>(shm.data);
+	dump_file_offset[0] = num_packets * RegressionPacket::GetSize();
+	dump_file_offset[1] = dump_file_offset[0] + DumpFileSharedMemory::GetSize(dump_size);
+	status_offset = dump_file_offset[1] + DumpFileSharedMemory::GetSize(dump_size);
+
+	packets = reinterpret_cast<RegressionPacket*>(packet_offset);
+	dumps[0] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[0]);
+	dumps[1] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[1]);
+	status = reinterpret_cast<StatusSharedMemory*>(status_offset);
 }
 
 bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
@@ -134,12 +286,10 @@ bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets
 bool RegressionBuffer::CloseFile()
 {
 	packets = nullptr;
-	dump_file[0] = nullptr;
-	dump_file[1] = nullptr;
+	dumps[0] = nullptr;
+	dumps[1] = nullptr;
 	status = nullptr;
 	num_packets = 0;
-	dump_size = 0;
-	status_size = 0;
 
 	if (!shm.CloseFile())
 		return false;
@@ -147,10 +297,15 @@ bool RegressionBuffer::CloseFile()
 	return true;
 }
 
-void RegressionBuffer::ResetFile()
+std::string RegressionBuffer::GetStatus()
 {
-	//memset(packets, 0, num_packets * sizeof(RegressionPacket));
-}
+	return status->GetStatus();
+};
+
+void RegressionBuffer::SetStatus(const std::string& str)
+{
+	status->SetStatus(str);
+};
 
 bool IsRegressionTesting()
 {

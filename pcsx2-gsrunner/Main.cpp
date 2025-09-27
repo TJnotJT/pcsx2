@@ -76,7 +76,7 @@ static MemorySettingsInterface s_settings_interface;
 
 static std::string s_output_prefix;
 static std::string s_regression_file;
-RegressionPacketBuffer s_regression_buffer;
+RegressionBuffer s_regression_buffer;
 static s32 s_loop_count = 1;
 static std::optional<bool> s_use_window;
 static bool s_no_console = false;
@@ -105,16 +105,19 @@ static u32 s_total_drawn_frames = 0;
 static std::string regression_output_dir;
 static std::string regression_output_image_dir[2];
 static std::string regression_runner_args;
-static RegressionPacketBuffer regression_buffer[2];
+static RegressionBuffer regression_buffer[2];
 static std::string regression_runner_path[2];
 static std::string regression_runner_name[2];
 static std::string regression_shared_file[2];
 static std::string regression_dump_dir;
 static Process regression_runner_proc[2];
 
+static constexpr std::size_t regression_status_size = 4096;
+static constexpr std::size_t regression_dump_size = 64 * 1024 * 1024;
+static constexpr std::size_t regression_num_packets_default = 10;
+static std::size_t regression_num_packets = regression_num_packets_default;
+
 // For both tester/runner
-constexpr int regression_num_packets_default = 10;
-static int regression_num_packets = regression_num_packets_default;
 
 bool GSRunner::InitializeConfig()
 {
@@ -1010,16 +1013,16 @@ void GSRunner::DumpStats()
 	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn("============================================");
 
-	if (IsRegressionTesting())
-	{
-		s_regression_buffer.frames = s_total_drawn_frames;
-		s_regression_buffer.draws = s_total_draws;
-		s_regression_buffer.render_passes = s_total_render_passes;
-		s_regression_buffer.barriers = s_total_barriers;
-		s_regression_buffer.copies = s_total_copies;
-		s_regression_buffer.uploads = s_total_uploads;
-		s_regression_buffer.readbacks = s_total_readbacks;
-	}
+	//if (IsRegressionTesting())
+	//{
+	//	s_regression_buffer.frames = s_total_drawn_frames;
+	//	s_regression_buffer.draws = s_total_draws;
+	//	s_regression_buffer.render_passes = s_total_render_passes;
+	//	s_regression_buffer.barriers = s_total_barriers;
+	//	s_regression_buffer.copies = s_total_copies;
+	//	s_regression_buffer.uploads = s_total_uploads;
+	//	s_regression_buffer.readbacks = s_total_readbacks;
+	//}
 }
 
 #ifdef _WIN32
@@ -1130,7 +1133,8 @@ int main_tester(int argc, char* argv[])
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
 
-		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets))
+		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets,
+			regression_dump_size, regression_status_size))
 		{
 			Console.ErrorFmt("Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
@@ -1143,8 +1147,6 @@ int main_tester(int argc, char* argv[])
 			regression_buffer[i].ResetFile();
 
 		std::string dump_name = std::filesystem::path(dump_file).filename().string();
-
-
 
 		for (int i = 0; i < 2; i++)
 		{
