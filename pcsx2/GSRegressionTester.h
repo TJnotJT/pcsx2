@@ -99,10 +99,16 @@ struct DumpFileSharedMemory
 	// Call only once before sharing. Not thread safe.
 	void Init(std::size_t dump_size);
 
-	// Call only by owner.
+	// Call by owner.
 	void* GetDump();
+
+	// Call by reader when owned.
 	std::size_t GetDumpSize();
 	std::string GetName();
+
+	// Call by writer when owned.
+	void SetDumpSize(std::size_t size);
+	void SetName(const std::string& str);
 
 	// Static.
 	static std::size_t GetSize(std::size_t dump_size);
@@ -134,11 +140,13 @@ struct RegressionBuffer
 
 	RegressionPacket* packets = nullptr;
 	std::size_t num_packets = 0;
-	std::size_t packet_index = 0;
+	std::size_t packet_write = 0;
+	std::size_t packet_read = 0;
 
 	static constexpr std::size_t num_dumps = 2;
 	DumpFileSharedMemory* dumps[num_dumps];
-	std::size_t dump_index = 0;
+	std::size_t dump_write = 0;
+	std::size_t dump_read = 0;
 
 	StatusSharedMemory* status;
 
