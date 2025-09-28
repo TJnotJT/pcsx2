@@ -304,7 +304,7 @@ public:
 	__fi const GSDataArray& GetPackets() const { return m_dump_packets; }
 
 	bool ReadFile(Error* error);
-	bool ReadFile(void* dst, size_t size, Error* error);
+	bool ReadFile(void* dst, size_t max_size, size_t* size, Error* error);
 
 	//static bool Serialize(const GSDumpFile& dump, void* ptr, std::size_t size);
 	//static std::unique_ptr<GSDumpFile> Deserialize(void* ptr, std::size_t size);

@@ -86,43 +86,6 @@ int GSDumpReplayer::GetLoopCount()
 	return s_dump_loop_count;
 }
 
-bool GSDumpReplayer::Initialize(const char* filename)
-{
-	Common::Timer timer;
-	Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
-
-	Error error;
-	if (IsRegressionTesting())
-	{
-
-		s_dump_file = GSDumpFile::OpenGSDumpMemory(filename, &error);
-	}
-	else
-	{
-		s_dump_file = GSDumpFile::OpenGSDump(filename, &error);
-	}
-	if (!s_dump_file || !s_dump_file->ReadFile(&error))
-	{
-		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
-														Path::GetFileName(filename), error.GetDescription()));
-		s_dump_file.reset();
-		return false;
-	}
-
-	Console.WriteLn("(GSDumpReplayer) Read file in %.2f ms.", timer.GetTimeMilliseconds());
-
-	// We replace all CPUs.
-	Cpu = &GSDumpReplayerCpu;
-	psxCpu = &psxInt;
-	CpuVU0 = &gsDumpVU0;
-	CpuVU1 = &gsDumpVU1;
-
-	// loop infinitely by default
-	s_dump_loop_count = -1;
-
-	return true;
-}
-
 bool GSDumpReplayer::NextRegressionTestDump()
 {
 	DumpFileSharedMemory* dump = nullptr;
@@ -147,8 +110,53 @@ bool GSDumpReplayer::NextRegressionTestDump()
 
 	//s_dump_file = GSDumpFile::Deserialize(dump->GetDump(), dump->GetDumpSize());
 	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetDump(), dump->GetDumpSize());
-	s_dump_file->ReadFile(
+
+	Error error;
+	if (!s_dump_file->ReadFile(&error))
+	{
+		Host::ReportErrorAsync("(GSDumpReplayer) Failed to open GS dump from memory: {}", error.GetDescription());
+		return false;
+	}
+
 	Console.WriteLnFmt("Loaded new dump: {}", dump->GetName());
+	return true;
+}
+
+bool GSDumpReplayer::Initialize(const char* filename)
+{
+	if (IsRegressionTesting())
+	{
+		if (!NextRegressionTestDump())
+			return false;
+	}
+	else
+	{
+		Common::Timer timer;
+		Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
+
+		Error error;
+		s_dump_file = GSDumpFile::OpenGSDump(filename, &error);
+
+		if (!s_dump_file || !s_dump_file->ReadFile(&error))
+		{
+			Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
+														 Path::GetFileName(filename), error.GetDescription()));
+			s_dump_file.reset();
+			return false;
+		}
+
+		Console.WriteLn("(GSDumpReplayer) Read file in %.2f ms.", timer.GetTimeMilliseconds());
+	}
+
+	// We replace all CPUs.
+	Cpu = &GSDumpReplayerCpu;
+	psxCpu = &psxInt;
+	CpuVU0 = &gsDumpVU0;
+	CpuVU1 = &gsDumpVU1;
+
+	// loop infinitely by default
+	s_dump_loop_count = -1;
+
 	return true;
 }
 
@@ -389,7 +397,7 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	if (s_dump_loop_count == 0)
+	if (s_current_packet == 0 && s_dump_loop_count == 0 && IsRegressionTesting())
 	{
 		if (GSDumpReplayer::NextRegressionTestDump())
 		{

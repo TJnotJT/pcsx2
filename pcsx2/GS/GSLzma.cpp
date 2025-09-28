@@ -229,21 +229,26 @@ bool GSDumpFile::ReadFile(Error* error)
 	return true;
 }
 
-bool GSDumpFile::ReadFile(void* dst, size_t size, Error* error)
+bool GSDumpFile::ReadFile(void* dst, size_t max_size, size_t* size, Error* error)
 {
 	u8* curr = static_cast<u8*>(dst);
-	u8* end = curr + size;
+	u8* end = curr + max_size;
 
 	while (!IsEof() && curr < end)
 	{
 		size_t read_size = std::min(static_cast<size_t>(end - curr), static_cast<size_t>(1024 * 1024));
-		Read(curr, read_size);
-		curr += read_size;
+		curr += Read(curr, read_size);
 	}
+
+	size_t s = curr - static_cast<u8*>(dst);
+
+	if (size)
+		*size = s;
 
 	if (!IsEof())
 	{
-		Console.Error("(GSDump) Failed to read the whole dump ({} bytes only)", curr - dst);
+		//Error::SetString(error, fmt::format("Unknown packet type {}", static_cast<u32>(packet.id)));
+		Error::SetString(error, fmt::format("(GSDump) Failed to read the whole dump ({} bytes only)", s));
 		return false;
 	}
 

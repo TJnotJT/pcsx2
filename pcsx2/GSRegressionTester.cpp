@@ -88,52 +88,52 @@ bool SpinlockSharedMemory::Unlock()
 
 RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
 {	
-	if (!packets[packet_index % num_packets].lock.LockWrite(block))
+	if (!packets[packet_write % num_packets].lock.LockWrite(block))
 		return nullptr;
 
-	return &packets[packet_index % num_packets];
+	return &packets[packet_write % num_packets];
 }
 
 RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 {
-	if (!packets[packet_index % num_packets].lock.LockRead(block))
+	if (!packets[packet_read % num_packets].lock.LockRead(block))
 		return nullptr;
 
-	return &packets[packet_index % num_packets];
+	return &packets[packet_read % num_packets];
 }
 
 bool RegressionBuffer::DoneWritePacket()
 {
-	if (!packets[packet_index % num_packets].lock.UnlockWrite())
+	if (!packets[packet_write % num_packets].lock.UnlockWrite())
 		return false;
 
-	packet_index++;
+	packet_write++;
 	return true;
 }
 
 bool RegressionBuffer::DoneReadPacket()
 {
-	if (!packets[packet_index % num_packets].lock.UnlockRead())
+	if (!packets[packet_read % num_packets].lock.UnlockRead())
 		return false;
 
-	packet_index++;
+	packet_read++;
 	return true;
 }
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
 {
-	if (!dumps[dump_index % num_dumps]->lock.LockWrite(block))
+	if (!dumps[dump_write % num_dumps]->lock.LockWrite(block))
 		return nullptr;
 
-	return dumps[dump_index % num_dumps];
+	return dumps[dump_write % num_dumps];
 }
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpRead(bool block)
 {	
-	if (!dumps[dump_index % num_dumps]->lock.LockRead(block))
+	if (!dumps[dump_read % num_dumps]->lock.LockRead(block))
 		return nullptr;
 
-	return dumps[dump_index % num_dumps];
+	return dumps[dump_read % num_dumps];
 }
 
 std::size_t DumpFileSharedMemory::GetSize(std::size_t dump_size)
@@ -143,19 +143,19 @@ std::size_t DumpFileSharedMemory::GetSize(std::size_t dump_size)
 
 bool RegressionBuffer::DoneDumpWrite()
 {
-	if (!dumps[dump_index % num_dumps]->lock.UnlockWrite())
+	if (!dumps[dump_write % num_dumps]->lock.UnlockWrite())
 		return false;
 
-	dump_index++;
+	dump_write++;
 	return true;
 }
 
 bool RegressionBuffer::DoneDumpRead()
 {
-	if (!dumps[dump_index % num_dumps]->lock.UnlockRead())
+	if (!dumps[dump_read % num_dumps]->lock.UnlockRead())
 		return false;
 
-	dump_index++;
+	dump_read++;
 	return true;
 }
 
@@ -263,15 +263,36 @@ void* DumpFileSharedMemory::GetDump()
 
 std::size_t DumpFileSharedMemory::GetDumpSize()
 {
+	pxAssertRel(lock.Readable(), "Reading without holding the lock.");
+
 	return dump_size;
+}
+
+void DumpFileSharedMemory::SetDumpSize(std::size_t size)
+{
+	pxAssertRel(lock.Writeable(), "Writing without holding the lock.");
+
+	dump_size = size;
 }
 
 std::string DumpFileSharedMemory::GetName()
 {
+	pxAssertRel(lock.Readable(), "Reading without holding the lock.");
+
 	name[std::size(name) - 1] = '\0';
 
 	return std::string(name);
 }
+
+void DumpFileSharedMemory::SetName(const std::string& str)
+{
+	pxAssertRel(lock.Writeable(), "Writing without holding the lock.");
+
+	memcpy(name, str.c_str(), std::min(name_size - 1, str.length()));
+
+	name[std::min(name_size - 1, str.length())] = '\0';
+}
+
 
 void StatusSharedMemory::Init(std::size_t size)
 {

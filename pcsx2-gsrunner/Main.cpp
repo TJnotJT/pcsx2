@@ -1095,7 +1095,10 @@ int main_runner(int argc, char* argv[])
 
 	DumpFileSharedMemory* ds = GetRegressionBuffer()->GetDumpWrite();
 
-	dump->ReadFile(ds->GetDump(), regression_dump_size, nullptr);
+	size_t size;
+	dump->ReadFile(ds->GetDump(), regression_dump_size, &size, nullptr);
+	ds->SetName("Amagami_transparency.gs.xz");
+	ds->SetDumpSize(size);
 
 	//GSDumpFile::Serialize(*dump, ds->GetDump(), ds->GetDumpSize());
 
@@ -1211,15 +1214,37 @@ int main_tester(int argc, char* argv[])
 
 		// Serialize dump files to shared memory.
 		bool fail = false;
+		void* dump_ptr = nullptr;
+		std::size_t dump_size;
 		for (int i = 0; i < 2; i++)
 		{
-			void* dump_shared = regression_buffer[i].GetDumpWrite();
-			if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
+			DumpFileSharedMemory* dump_shared = regression_buffer[i].GetDumpWrite(true);
+
+			if (i == 0)
 			{
-				Console.Error("Failed to serialize dump \"{}\" for runner {}. Skipping.", dump_file, regression_runner_name[i]);
-				fail = true;
-				break;
+				dump_ptr = dump_shared->GetDump();
+				if (!dump->ReadFile(dump_shared->GetDump(), regression_dump_size, &dump_size, &e))
+				{
+					Console.Error("Failed to read GS dump from memory: {}. Skipping.", e.GetDescription());
+					fail = true;
+					break;
+				}
 			}
+			else
+			{
+				memcpy(dump_shared->GetDump(), dump_ptr, dump_size);
+			}
+
+			dump_shared->SetDumpSize(dump_size);
+			dump_shared->SetName(dump_name);
+
+			////if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
+			//if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
+			//{
+			//	Console.Error("Failed to serialize dump \"{}\" for runner {}. Skipping.", dump_file, regression_runner_name[i]);
+			//	fail = true;
+			//	break;
+			//}
 		}
 
 		if (fail)
