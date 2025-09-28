@@ -28,6 +28,7 @@
 #include "common/ProgressCallback.h"
 #include "common/SettingsWrapper.h"
 #include "common/StringUtil.h"
+#include "common/ScopedGuard.h"
 
 #include "pcsx2/PrecompiledHeader.h"
 
@@ -83,7 +84,7 @@ static std::optional<bool> s_use_window;
 static bool s_no_console = false;
 static bool s_batch_mode = false;
 
-	// Owned by the GS thread.
+// Owned by the GS thread.
 static u32 s_dump_frame_number = 0;
 static u32 s_loop_number = s_loop_count;
 static double s_last_internal_draws = 0;
@@ -1074,6 +1075,88 @@ static void CPUThreadMain(VMBootParameters* params) {
 	GSRunner::StopPlatformMessagePump();
 }
 
+bool CopyDumpToSharedMemory(const std::string& fn, bool block)
+{
+	Error error;
+	std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(fn.c_str(), &error);
+
+	if (!dump)
+	{
+		Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to open file '{}' (error: {}).", fn, error.GetDescription());
+		return false;
+	}
+
+	DumpFileSharedMemory* dump_shared[2]{};
+
+	std::string dump_name = std::filesystem::path(fn).filename().string();
+	std::size_t dump_size;
+
+	//for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+	{
+		dump_shared[i] = regression_buffer[i].GetDumpWrite(block);
+		if (!dump_shared[i])
+			return false;
+	}
+
+	//for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+	{
+		if (i == 0)
+		{
+			if (!dump->ReadFile(dump_shared[0]->GetDumpPtr(), regression_dump_size, &dump_size, &error))
+			{
+				Host::ReportErrorAsync("(GSDumpRunner/RegressionTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error.GetDescription()));
+				return false;
+			}
+		}
+		else
+		{
+			memcpy(dump_shared[1]->GetDumpPtr(), dump_shared[0]->GetDumpPtr(), dump_size);
+		}
+
+		dump_shared[i]->SetDumpSize(dump_size);
+		dump_shared[i]->SetName(dump_name);
+	}
+
+	//for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+		regression_buffer[i].DoneDumpWrite(); // Only commit on successful write; otherwise leave empty.
+
+	return true;
+}
+
+int __dump_files_i__ = 0;
+std::vector<std::string> __dump_files_debug__ = {
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\airranger.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Booting PS2 BIOS... _20220901235528.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Final Fantasy XII preload frame data texture isses.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\football_aa_shirtsthingy.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\God of War_SCUS-97399_20230611151951.gs.zst",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\golf.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\golf.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Largo Winch - Empire Under Threat_SLES-51093_20250601214727.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Monopoly Party_SLES-51145_In_Game.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\monopoly.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\ps2-bios.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Ridge Racer V_SLUS-20002_20240613085131.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\ridge-racer.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\sh3-60hz.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\toto_aa.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\toto_aa.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Valkyrie Profile 2 - Silmeria_SLUS-21452_20250517200921.gs.xz",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs",
+	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs.xz",
+};
+
+bool getnextfile(std::string& str)
+{
+	if (__dump_files_i__ == __dump_files_debug__.size())
+		return false;
+	str =__dump_files_debug__[__dump_files_i__++];
+	return true;
+}
+
 int main_runner(int argc, char* argv[])
 {
 	if (!GSRunner::InitializeConfig())
@@ -1094,10 +1177,11 @@ int main_runner(int argc, char* argv[])
 		Console.Error("Failed to create window.");
 		return EXIT_FAILURE;
 	}
-	#if 0
-	SharedMemoryFile shm;
-	shm.CreateFile_(s_regression_file, RegressionBuffer::GetSize(regression_num_packets, regression_dump_size, regression_status_size));
-	shm.ResetFile(); // TODO: MAKE SURE FILE IS REST ALWAYS!
+
+	for (int i = 0; i < 2; i++)
+	{
+		regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), regression_num_packets, regression_dump_size, regression_status_size);
+	}
 
 	// Regression testing needs to be started before applying settings
 	// or it might complain that there is no dumping directory
@@ -1110,20 +1194,22 @@ int main_runner(int argc, char* argv[])
 
 	Console.WriteLn(GetRegressionBuffer()->GetStatus());
 
-	auto dump = GSDumpFile::OpenGSDump("C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\multidraw\\Amagami_transparency.gs.xz", nullptr);
-	//dump->ReadFile(nullptr);
+	CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
 
-	DumpFileSharedMemory* ds = GetRegressionBuffer()->GetDumpWrite();
+	//std::vector<std::string> dump_files;
+	//GSDumpReplayer::ReadDumpFileList(params.filename, __dump_files_debug__);
 
-	size_t size;
+	//DumpFileSharedMemory* ds = GetRegressionBuffer()->GetDumpWrite();
+
+	/*size_t size;
 	dump->ReadFile(ds->GetDump(), regression_dump_size, &size, nullptr);
 	ds->SetName("Amagami_transparency.gs.xz");
-	ds->SetDumpSize(size);
+	ds->SetDumpSize(size);*/
 
 	//GSDumpFile::Serialize(*dump, ds->GetDump(), ds->GetDumpSize());
 
-	GetRegressionBuffer()->DoneDumpWrite();
-	#endif
+	//GetRegressionBuffer()->DoneDumpWrite();
+	
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
 	GSDumpReplayer::SetIsDumpRunner(true);
@@ -1144,10 +1230,8 @@ int main_runner(int argc, char* argv[])
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::DestroyPlatformWindow();
-	#if 0
 	if (!s_regression_file.empty())
 		EndRegressionTest();
-	#endif 
 	return EXIT_SUCCESS;
 }
 
@@ -1164,23 +1248,7 @@ int main_tester(int argc, char* argv[])
 	}
 	else if (FileSystem::DirectoryExists(regression_dump_dir.c_str()))
 	{
-		FileSystem::FindResultsArray files;
-		FileSystem::FindFiles(
-			regression_dump_dir.c_str(),
-			"*",
-			FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES,
-			&files);
-		for (const auto& file : files)
-		{
-			if (VMManager::IsGSDumpFileName(file.FileName))
-				dump_files.push_back(file.FileName);
-		}
-		
-		if (dump_files.empty())
-		{
-			Console.ErrorFmt("Could not find any dumps in \"{}\"", regression_dump_dir);
-			return EXIT_FAILURE;
-		}
+		GSDumpReplayer::ReadDumpFileList(regression_dump_dir, dump_files);
 	}
 	else
 	{
@@ -1230,61 +1298,11 @@ int main_tester(int argc, char* argv[])
 
 		std::string dump_name = std::filesystem::path(dump_file).filename().string();
 
-		Error e;
-		std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(dump_name.c_str(), &e);
-
-		if (!dump || !dump->ReadFile(&e))
+		if (!CopyDumpToSharedMemory(dump_file, true))
 		{
-			Console.Error("Failed to open file \"{}\", skipping.", dump_file);
-			Console.Error("Error message: {}", e.GetDescription());
+			Console.ErrorFmt("(GSDumpRunner/RegressionTester) Skipping dump '{}'", dump_file);
 			continue;
 		}
-
-		Console.WriteLn("Processing dump file: \"{}\"", dump_file);
-
-		// Serialize dump files to shared memory.
-		bool fail = false;
-		void* dump_ptr = nullptr;
-		std::size_t dump_size;
-		for (int i = 0; i < 2; i++)
-		{
-			DumpFileSharedMemory* dump_shared = regression_buffer[i].GetDumpWrite(true);
-
-			if (i == 0)
-			{
-				dump_ptr = dump_shared->GetDump();
-				if (!dump->ReadFile(dump_shared->GetDump(), regression_dump_size, &dump_size, &e))
-				{
-					Console.Error("Failed to read GS dump from memory: {}. Skipping.", e.GetDescription());
-					fail = true;
-					break;
-				}
-			}
-			else
-			{
-				memcpy(dump_shared->GetDump(), dump_ptr, dump_size);
-			}
-
-			dump_shared->SetDumpSize(dump_size);
-			dump_shared->SetName(dump_name);
-
-			////if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
-			//if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
-			//{
-			//	Console.Error("Failed to serialize dump \"{}\" for runner {}. Skipping.", dump_file, regression_runner_name[i]);
-			//	fail = true;
-			//	break;
-			//}
-		}
-
-		if (fail)
-		{
-			continue; // Skip the dump.
-		}
-
-		// Commit the write to the shared dump files.
-		for (int i = 0; i < 2; i++)
-			regression_buffer[i].DoneDumpWrite();
 
 		bool exited[2] = {false, false};
 		bool done[2] = {false, false};

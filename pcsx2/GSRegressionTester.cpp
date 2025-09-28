@@ -136,7 +136,7 @@ DumpFileSharedMemory* RegressionBuffer::GetDumpRead(bool block)
 	return dumps[dump_read % num_dumps];
 }
 
-std::size_t DumpFileSharedMemory::GetSize(std::size_t dump_size)
+std::size_t DumpFileSharedMemory::GetTotalSize(std::size_t dump_size)
 {
 	return sizeof(DumpFileSharedMemory) + dump_size;
 }
@@ -203,10 +203,10 @@ void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, in
 
 void RegressionPacket::Init()
 {
-	memset(this, 0, sizeof(this));
+	memset(this, 0, sizeof(RegressionPacket));
 };
 
-std::size_t RegressionPacket::GetSize()
+std::size_t RegressionPacket::GetTotalSize()
 {
 	return sizeof(RegressionPacket);
 }
@@ -235,14 +235,15 @@ void DumpFileSharedMemory::Init(std::size_t dump_size)
 {
 	lock = {SpinlockSharedMemory::WRITEABLE};
 	this->dump_size = dump_size;
+	memset(GetDumpPtr(), 0, dump_size);
 }
 
-static std::size_t GetSize(std::size_t dump_size)
+static std::size_t GetTotalSize(std::size_t dump_size)
 {
 	return sizeof(DumpFileSharedMemory) + dump_size;
 }
 
-void* DumpFileSharedMemory::GetDump()
+void* DumpFileSharedMemory::GetDumpPtr()
 {
 	return reinterpret_cast<u8*>(this) + sizeof(DumpFileSharedMemory);
 }
@@ -276,7 +277,7 @@ void StatusSharedMemory::Init(std::size_t size)
 {
 	this->size = size;
 
-	memset(GetStatusRaw(), 0, size);
+	memset(GetStatusPtr(), 0, size);
 }
 
 std::string StatusSharedMemory::GetStatus()
@@ -285,9 +286,9 @@ std::string StatusSharedMemory::GetStatus()
 
 	ScopedGuard sg([&]() { lock.Unlock(); });
 
-	GetStatusRaw()[size - 1] = '\0';
+	GetStatusPtr()[size - 1] = '\0';
 
-	std::string str(GetStatusRaw());
+	std::string str(GetStatusPtr());
 
 	return str;
 }
@@ -298,34 +299,34 @@ void StatusSharedMemory::SetStatus(const std::string& status)
 
 	ScopedGuard sg([&]() { lock.Unlock(); });
 
-	memcpy(GetStatusRaw(), status.c_str(), std::min(size - 1, status.length()));
+	memcpy(GetStatusPtr(), status.c_str(), std::min(size - 1, status.length()));
 
-	GetStatusRaw()[std::min(size - 1, status.length())] = '\0';
+	GetStatusPtr()[std::min(size - 1, status.length())] = '\0';
 }
 
 // Not thread safe.
-char* StatusSharedMemory::GetStatusRaw()
+char* StatusSharedMemory::GetStatusPtr()
 {
 	return reinterpret_cast<char*>(this) + sizeof(StatusSharedMemory);
 }
 
-std::size_t StatusSharedMemory::GetSize(std::size_t size)
+std::size_t StatusSharedMemory::GetTotalSize(std::size_t size)
 {
 	return sizeof(StatusSharedMemory) + size;
 }
 
-std::size_t RegressionBuffer::GetSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
+std::size_t RegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
 	return
-		num_packets * RegressionPacket::GetSize() +
-		num_dumps * DumpFileSharedMemory::GetSize(dump_size) +
-		StatusSharedMemory::GetSize(status_size);
+		num_packets * RegressionPacket::GetTotalSize() +
+		num_dumps * DumpFileSharedMemory::GetTotalSize(dump_size) +
+		StatusSharedMemory::GetTotalSize(status_size);
 }
 
 bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets,
 	std::size_t dump_size, std::size_t status_size)
 {
-	if (!shm.CreateFile_(name, GetSize(num_packets, dump_size, status_size)))
+	if (!shm.CreateFile_(name, GetTotalSize(num_packets, dump_size, status_size)))
 		return false;
 
 	// Non-shared memory initialization.
@@ -348,9 +349,9 @@ void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std:
 	std::size_t status_offset;
 
 	packet_offset = reinterpret_cast<std::size_t>(shm.data);
-	dump_file_offset[0] = packet_offset + num_packets * RegressionPacket::GetSize();
-	dump_file_offset[1] = dump_file_offset[0] + DumpFileSharedMemory::GetSize(dump_size);
-	status_offset = dump_file_offset[1] + DumpFileSharedMemory::GetSize(dump_size);
+	dump_file_offset[0] = packet_offset + num_packets * RegressionPacket::GetTotalSize();
+	dump_file_offset[1] = dump_file_offset[0] + DumpFileSharedMemory::GetTotalSize(dump_size);
+	status_offset = dump_file_offset[1] + DumpFileSharedMemory::GetTotalSize(dump_size);
 
 	packets = reinterpret_cast<RegressionPacket*>(packet_offset);
 	for (int i = 0; i < num_dumps; i++)
@@ -363,7 +364,7 @@ void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std:
 bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
 	std::size_t status_size)
 {
-	if (!shm.OpenFile(name, GetSize(num_packets, dump_size, status_size)))
+	if (!shm.OpenFile(name, GetTotalSize(num_packets, dump_size, status_size)))
 		return false;
 
 	Init(num_packets, dump_size, status_size);

@@ -247,8 +247,7 @@ bool GSDumpFile::ReadFile(void* dst, size_t max_size, size_t* size, Error* error
 
 	if (!IsEof())
 	{
-		//Error::SetString(error, fmt::format("Unknown packet type {}", static_cast<u32>(packet.id)));
-		Error::SetString(error, fmt::format("(GSDump) Failed to read the whole dump ({} bytes only)", s));
+		Error::SetString(error, fmt::format("Buffer out of memory (read {} bytes)", s));
 		return false;
 	}
 
