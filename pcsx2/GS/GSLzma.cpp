@@ -229,6 +229,27 @@ bool GSDumpFile::ReadFile(Error* error)
 	return true;
 }
 
+bool GSDumpFile::ReadFile(void* dst, size_t size, Error* error)
+{
+	u8* curr = static_cast<u8*>(dst);
+	u8* end = curr + size;
+
+	while (!IsEof() && curr < end)
+	{
+		size_t read_size = std::min(static_cast<size_t>(end - curr), static_cast<size_t>(1024 * 1024));
+		Read(curr, read_size);
+		curr += read_size;
+	}
+
+	if (!IsEof())
+	{
+		Console.Error("(GSDump) Failed to read the whole dump ({} bytes only)", curr - dst);
+		return false;
+	}
+
+	return true;
+}
+
 /******************************************************************/
 
 static std::once_flag s_lzma_crc_table_init;
@@ -616,8 +637,12 @@ namespace
 
 	class GSDumpMemory final : public GSDumpFile
 	{
+	private:
+		const u8* begin;
+		const u8* end;
+		const u8* curr;
 	public:
-		GSDumpMemory();
+		GSDumpMemory(const u8* begin, const u8* end);
 		~GSDumpMemory() override;
 
 		bool Open(FileSystem::ManagedCFilePtr fp, Error* error) override;
@@ -625,7 +650,12 @@ namespace
 		size_t Read(void* ptr, size_t size) override;
 	};
 
-	GSDumpMemory::GSDumpMemory() = default;
+	GSDumpMemory::GSDumpMemory(const u8* begin, const u8* end)
+		: begin(begin)
+		, end(end)
+		, curr(begin)
+	{
+	}
 
 	GSDumpMemory::~GSDumpMemory() = default;
 
@@ -637,14 +667,18 @@ namespace
 
 	bool GSDumpMemory::IsEof()
 	{
-		pxFail("Not implemented.");
-		return true;
+		return curr >= end;
 	}
 
 	size_t GSDumpMemory::Read(void* ptr, size_t size)
 	{
-		pxFail("Not implemented.");
-		return 0;
+		if (curr >= end)
+			size = 0;
+		else
+			size = std::min(size, static_cast<size_t>(end - curr));
+		memcpy(ptr, curr, size);
+		curr += size;
+		return size;
 	}
 } // namespace
 
@@ -670,6 +704,12 @@ std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDump(const char* filename, Error* 
 	return file;
 }
 
+std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDumpMemory(const void* ptr, const size_t size)
+{
+	return std::make_unique<GSDumpMemory>(static_cast<const u8*>(ptr), static_cast<const u8*>(ptr) + size);
+}
+
+#if 0
 bool GSDumpFile::Serialize(const GSDumpFile& dump, void* ptr, std::size_t max_size)
 {
 	std::size_t regs_size = dump.m_regs_data.size() * sizeof(dump.m_regs_data[0]);
@@ -764,3 +804,4 @@ std::unique_ptr<GSDumpFile> GSDumpFile::Deserialize(void* ptr, std::size_t size)
 #undef READ_DATA
 #undef FAIL_TOO_LARGE
 }
+#endif

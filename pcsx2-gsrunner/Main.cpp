@@ -1077,6 +1077,7 @@ int main_runner(int argc, char* argv[])
 
 	SharedMemoryFile shm;
 	shm.CreateFile_(s_regression_file, RegressionBuffer::GetSize(regression_num_packets, regression_dump_size, regression_status_size));
+	shm.ResetFile(); // TODO: MAKE SURE FILE IS REST ALWAYS!
 
 	// Regression testing needs to be started before applying settings
 	// or it might complain that there is no dumping directory
@@ -1086,6 +1087,19 @@ int main_runner(int argc, char* argv[])
 			regression_num_packets, regression_dump_size, regression_status_size);
 
 	GetRegressionBuffer()->SetStatus("hello world");
+
+	Console.WriteLn(GetRegressionBuffer()->GetStatus());
+
+	auto dump = GSDumpFile::OpenGSDump("C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\multidraw\\Amagami_transparency.gs.xz", nullptr);
+	//dump->ReadFile(nullptr);
+
+	DumpFileSharedMemory* ds = GetRegressionBuffer()->GetDumpWrite();
+
+	dump->ReadFile(ds->GetDump(), regression_dump_size, nullptr);
+
+	//GSDumpFile::Serialize(*dump, ds->GetDump(), ds->GetDumpSize());
+
+	GetRegressionBuffer()->DoneDumpWrite();
 
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();

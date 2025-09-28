@@ -88,29 +88,28 @@ int GSDumpReplayer::GetLoopCount()
 
 bool GSDumpReplayer::Initialize(const char* filename)
 {
+	Common::Timer timer;
+	Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
+
+	Error error;
 	if (IsRegressionTesting())
 	{
-		if (!NextRegressionTestDump())
-			return false;
+
+		s_dump_file = GSDumpFile::OpenGSDumpMemory(filename, &error);
 	}
 	else
 	{
-
-		Common::Timer timer;
-		Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
-
-		Error error;
 		s_dump_file = GSDumpFile::OpenGSDump(filename, &error);
-		if (!s_dump_file || !s_dump_file->ReadFile(&error))
-		{
-			Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
-														 Path::GetFileName(filename), error.GetDescription()));
-			s_dump_file.reset();
-			return false;
-		}
-
-		Console.WriteLn("(GSDumpReplayer) Read file in %.2f ms.", timer.GetTimeMilliseconds());
 	}
+	if (!s_dump_file || !s_dump_file->ReadFile(&error))
+	{
+		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
+														Path::GetFileName(filename), error.GetDescription()));
+		s_dump_file.reset();
+		return false;
+	}
+
+	Console.WriteLn("(GSDumpReplayer) Read file in %.2f ms.", timer.GetTimeMilliseconds());
 
 	// We replace all CPUs.
 	Cpu = &GSDumpReplayerCpu;
@@ -129,7 +128,7 @@ bool GSDumpReplayer::NextRegressionTestDump()
 	DumpFileSharedMemory* dump = nullptr;
 	while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
 	{
-		// Fixme: maybe we should put a time limit...
+		// FIXME: maybe we should put a time limit...
 		if (GetRegressionBuffer()->GetStatus() == "Done")
 		{
 			break;
@@ -146,11 +145,14 @@ bool GSDumpReplayer::NextRegressionTestDump()
 		return false;
 	}
 
-	s_dump_file = GSDumpFile::Deserialize(dump->GetDump(), dump->GetDumpSize());
+	//s_dump_file = GSDumpFile::Deserialize(dump->GetDump(), dump->GetDumpSize());
+	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetDump(), dump->GetDumpSize());
+	s_dump_file->ReadFile(
 	Console.WriteLnFmt("Loaded new dump: {}", dump->GetName());
 	return true;
 }
 
+// NEed to figure this out
 bool GSDumpReplayer::ChangeDump(const char* filename)
 {
 	Console.WriteLn("(GSDumpReplayer) Switching to '%s'...", filename);
