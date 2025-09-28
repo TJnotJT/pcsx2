@@ -1198,10 +1198,10 @@ bool VMManager::HasBootedELF()
 
 bool VMManager::AutoDetectSource(const std::string& filename)
 {
-	if (IsRegressionTesting())
+	if (GSDumpReplayer::IsRunner())
 	{
 		CDVDsys_ChangeSource(CDVD_SourceType::NoDisc);
-		return GSDumpReplayer::Initialize(nullptr);
+		return true; // Initialize the actual GS dump runner later after GS settings are loaded.
 	}
 
 	if (!filename.empty())
@@ -1354,7 +1354,7 @@ bool VMManager::Initialize(VMBootParameters boot_params)
 	ScopedGuard close_cdvd_files(&CDVDsys_ClearFiles);
 
 	// Playing GS dumps don't need a BIOS.
-	if (!GSDumpReplayer::IsReplayingDump())
+	if (!(GSDumpReplayer::IsReplayingDump() || GSDumpReplayer::IsRunner()))
 	{
 		Console.WriteLn("Loading BIOS...");
 		if (!LoadBIOS())
@@ -1482,6 +1482,12 @@ bool VMManager::Initialize(VMBootParameters boot_params)
 		// we assume GS is going to report its own error
 		Console.WriteLn("Failed to open GS.");
 		return false;
+	}
+
+	if (GSDumpReplayer::IsRunner())
+	{
+		if (!GSDumpReplayer::Initialize(IsRegressionTesting() ? nullptr : boot_params.filename.c_str()))
+			return false;
 	}
 
 	ScopedGuard close_gs = []() {
@@ -2662,7 +2668,6 @@ void VMManager::Internal::ClearCPUExecutionCaches()
 
 void VMManager::Execute()
 {
-	printf("VMManager::Execute\n");
 	// Check for interpreter<->recompiler switches.
 	if (std::exchange(s_cpu_implementation_changed, false))
 	{
@@ -2674,10 +2679,8 @@ void VMManager::Execute()
 
 	void GSDumpReplayerCpuExecute();
 
-	printf("VMManager::Before CPU Execute %p %p %p\n", Cpu, Cpu->Execute, GSDumpReplayerCpuExecute);
 	// Execute until we're asked to stop.
 	Cpu->Execute();
-	printf("VMManager::After CPU Execute %p %p\n", Cpu, Cpu->Execute);
 }
 
 void VMManager::IdlePollUpdate()

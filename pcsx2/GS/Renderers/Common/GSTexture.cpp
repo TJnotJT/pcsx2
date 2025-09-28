@@ -8,6 +8,7 @@
 #include "common/Console.h"
 #include "common/BitUtils.h"
 #include "common/StringUtil.h"
+#include "common/ScopedGuard.h"
 
 #include <bit>
 #include <bitset>
@@ -61,10 +62,16 @@ bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 
 	if (rbp)
 	{
-		RegressionPacket* packet = rbp->GetPacketWrite();
-		packet->SetNamePacket(fn.c_str());
+		RegressionPacket* packet = nullptr;
+		ScopedGuard sg([&]() {
+			if (packet)
+				rbp->DonePacketWrite();
+		});
+		packet = rbp->GetPacketWrite(true); // Blocking
+		packet->SetNameDump(rbp->GetNameDump());
+		packet->SetNamePacket(fn);
 		packet->SetImageData(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
-		rbp->DoneWritePacket();
+		Console.WriteLnFmt("New regression packet: {} / {}", packet->GetNameDump(), packet->GetNamePacket());
 		return true;
 	}
 

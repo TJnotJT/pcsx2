@@ -102,7 +102,7 @@ RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 	return &packets[packet_read % num_packets];
 }
 
-bool RegressionBuffer::DoneWritePacket()
+bool RegressionBuffer::DonePacketWrite()
 {
 	if (!packets[packet_write % num_packets].lock.UnlockWrite())
 		return false;
@@ -111,7 +111,7 @@ bool RegressionBuffer::DoneWritePacket()
 	return true;
 }
 
-bool RegressionBuffer::DoneReadPacket()
+bool RegressionBuffer::DonePacketRead()
 {
 	if (!packets[packet_read % num_packets].lock.UnlockRead())
 		return false;
@@ -159,38 +159,30 @@ bool RegressionBuffer::DoneDumpRead()
 	return true;
 }
 
-void RegressionPacket::SetNamePacket(const char* n)
+void RegressionPacket::SetNamePacket(const std::string& path)
 {
-	pxAssertRel(lock.Writeable(), "Attempting to write to non-empty packet.");
-
-	if (strnlen_s(n, std::size(name_packet)) >= std::size(name_packet))
-	{
-		Console.Warning("Packet name is too large for regression packet.");
-	}
-
-	std::string pstr = std::filesystem::path(n).filename().string();
-	strncpy_s(name_packet, pstr.c_str(), std::size(name_packet));
-	Console.WriteLnFmt("New regression packet: {}", name_packet);
+	SetName(name_packet, path);
 }
 
-void RegressionPacket::SetNameDump(const char* n)
+void RegressionPacket::SetNameDump(const std::string& path)
 {
-	pxAssertRel(lock.Writeable(), "Attempting to write to non-empty packet.");
+	SetName(name_dump, path);
+}
 
-	if (strnlen_s(n, std::size(name_dump)) >= std::size(name_dump))
+void RegressionPacket::SetName(char* dst, const std::string& path)
+{
+	if (path.length() + 1 >= name_size)
 	{
-		Console.Warning("Dump name is too large for regression packet.");
+		Console.Warning("Name is too large for buffer.");
 	}
 
-	std::string pstr = std::filesystem::path(n).filename().string();
-	strncpy_s(name_dump, pstr.c_str(), std::size(name_dump));
-	Console.WriteLnFmt("New regression packet: {}", name_dump);
+	std::string pstr = std::filesystem::path(path).filename().string();
+	strncpy_s(dst, name_size, pstr.c_str(), pstr.length() + 1);
+	dst[name_size - 1] = '\0';
 }
 
 void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel)
 {
-	pxAssertRel(!lock.Writeable(), "Attempting to write to non-empty packet.");
-
 	if (src)
 	{
 		const std::size_t src_size = h * pitch;
@@ -221,8 +213,6 @@ std::size_t RegressionPacket::GetSize()
 
 std::string RegressionPacket::GetNameDump()
 {
-	pxAssertRel(lock.Readable(), "Attempting to read non-ready packet.");
-
 	name_dump[std::size(name_dump) - 1] = '\0';
 
 	return std::string(name_dump);
@@ -230,8 +220,6 @@ std::string RegressionPacket::GetNameDump()
 
 std::string RegressionPacket::GetNamePacket()
 {
-	pxAssertRel(lock.Readable(), "Attempting to read non-ready packet.");
-
 	name_packet[std::size(name_packet) - 1] = '\0';
 
 	return std::string(name_packet);
@@ -239,8 +227,6 @@ std::string RegressionPacket::GetNamePacket()
 
 u8* RegressionPacket::GetImageData()
 {
-	pxAssertRel(lock.Readable(), "Attempting to read non-ready packet.");
-
 	return data;
 }
 
@@ -263,22 +249,16 @@ void* DumpFileSharedMemory::GetDump()
 
 std::size_t DumpFileSharedMemory::GetDumpSize()
 {
-	pxAssertRel(lock.Readable(), "Reading without holding the lock.");
-
 	return dump_size;
 }
 
 void DumpFileSharedMemory::SetDumpSize(std::size_t size)
 {
-	pxAssertRel(lock.Writeable(), "Writing without holding the lock.");
-
 	dump_size = size;
 }
 
 std::string DumpFileSharedMemory::GetName()
 {
-	pxAssertRel(lock.Readable(), "Reading without holding the lock.");
-
 	name[std::size(name) - 1] = '\0';
 
 	return std::string(name);
@@ -286,8 +266,6 @@ std::string DumpFileSharedMemory::GetName()
 
 void DumpFileSharedMemory::SetName(const std::string& str)
 {
-	pxAssertRel(lock.Writeable(), "Writing without holding the lock.");
-
 	memcpy(name, str.c_str(), std::min(name_size - 1, str.length()));
 
 	name[std::min(name_size - 1, str.length())] = '\0';
@@ -350,18 +328,20 @@ bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_pack
 	if (!shm.CreateFile_(name, GetSize(num_packets, dump_size, status_size)))
 		return false;
 
-	SetSizesPointers(num_packets, dump_size, status_size);
+	// Non-shared memory initialization.
+	Init(num_packets, dump_size, status_size);
 
+	// All of these live in shared memory and should be initialized only once.
 	for (int i = 0; i < num_packets; i++)
 		packets[i].Init();
-	dumps[0]->Init(dump_size);
-	dumps[1]->Init(dump_size);
+	for (int i = 0; i < num_dumps; i++)
+		dumps[i]->Init(dump_size);
 	status->Init(status_size);
 
 	return true;
 }
 
-void RegressionBuffer::SetSizesPointers(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
+void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
 	std::size_t packet_offset;
 	std::size_t dump_file_offset[2];
@@ -373,9 +353,11 @@ void RegressionBuffer::SetSizesPointers(std::size_t num_packets, std::size_t dum
 	status_offset = dump_file_offset[1] + DumpFileSharedMemory::GetSize(dump_size);
 
 	packets = reinterpret_cast<RegressionPacket*>(packet_offset);
-	dumps[0] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[0]);
-	dumps[1] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[1]);
+	for (int i = 0; i < num_dumps; i++)
+		dumps[i] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[i]);
 	status = reinterpret_cast<StatusSharedMemory*>(status_offset);
+	
+	this->num_packets = num_packets;
 }
 
 bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
@@ -384,7 +366,7 @@ bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets
 	if (!shm.OpenFile(name, GetSize(num_packets, dump_size, status_size)))
 		return false;
 
-	SetSizesPointers(num_packets, dump_size, status_size);
+	Init(num_packets, dump_size, status_size);
 
 	return true;
 }
@@ -392,8 +374,8 @@ bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets
 bool RegressionBuffer::CloseFile()
 {
 	packets = nullptr;
-	dumps[0] = nullptr;
-	dumps[1] = nullptr;
+	for (int i = 0; i < num_dumps; i++)
+		dumps[i] = nullptr;
 	status = nullptr;
 	num_packets = 0;
 
@@ -412,6 +394,16 @@ void RegressionBuffer::SetStatus(const std::string& str)
 {
 	status->SetStatus(str);
 };
+
+void RegressionBuffer::SetNameDump(const std::string& name)
+{
+	dump_name = name;
+}
+
+std::string RegressionBuffer::GetNameDump()
+{
+	return dump_name;
+}
 
 bool IsRegressionTesting()
 {

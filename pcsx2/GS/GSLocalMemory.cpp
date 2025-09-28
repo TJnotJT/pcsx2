@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2002-2025 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "common/Console.h"
+#include "common/ScopedGuard.h"
+
 #include "GS/GS.h"
 #include "GS/GSLocalMemory.h"
 #include "GS/GSExtra.h"
@@ -657,9 +660,17 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	int pitch = w * 4;
 	int size = pitch * h;
 
-	RegressionPacket* packet = rbp ? rbp->GetPacketWrite() : nullptr;
+	RegressionPacket* packet = nullptr;
 
-	void* bits = packet ? _aligned_malloc(size, VECTOR_ALIGNMENT) : packet->data;
+	ScopedGuard sg([&]() {
+		if (packet)
+			rbp->DonePacketWrite();
+	});
+	
+	if (rbp)
+		packet = rbp->GetPacketWrite(true); // Block
+
+	void* bits = rbp ? packet->data : _aligned_malloc(size, VECTOR_ALIGNMENT);
 
 	GIFRegTEX0 TEX0;
 
@@ -681,9 +692,10 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 
 	if (packet)
 	{
+		packet->SetNameDump(rbp->GetNameDump());
 		packet->SetNamePacket(fn.c_str());
 		packet->SetImageData(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
-		rbp->DoneWritePacket();
+		Console.WriteLnFmt("New regression packet: {} / {}", packet->GetNameDump(), packet->GetNamePacket());
 	}
 	else
 	{

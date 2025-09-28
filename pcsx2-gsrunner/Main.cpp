@@ -81,8 +81,9 @@ RegressionBuffer s_regression_buffer;
 static s32 s_loop_count = 1;
 static std::optional<bool> s_use_window;
 static bool s_no_console = false;
+static bool s_batch_mode = false;
 
-// Owned by the GS thread.
+	// Owned by the GS thread.
 static u32 s_dump_frame_number = 0;
 static u32 s_loop_number = s_loop_count;
 static double s_last_internal_draws = 0;
@@ -101,6 +102,8 @@ static u64 s_total_uploads = 0;
 static u64 s_total_readbacks = 0;
 static u32 s_total_frames = 0;
 static u32 s_total_drawn_frames = 0;
+static std::string s_dump_gs_data_dir_hw;
+static std::string s_dump_gs_data_dir_sw;
 
 // For the tester
 static std::string regression_output_dir;
@@ -655,12 +658,14 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 			}
 			else if (CHECK_ARG_PARAM("-dumpdirhw"))
 			{
-				s_settings_interface.SetStringValue("EmuCore/GS", "HWDumpDirectory", argv[++i]);
+				s_dump_gs_data_dir_hw = argv[++i];
+				s_settings_interface.SetStringValue("EmuCore/GS", "HWDumpDirectory", argv[i]);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-dumpdirsw"))
 			{
-				s_settings_interface.SetStringValue("EmuCore/GS", "SWDumpDirectory", argv[++i]);
+				s_dump_gs_data_dir_sw = argv[++i];
+				s_settings_interface.SetStringValue("EmuCore/GS", "SWDumpDirectory", argv[i]);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-loop"))
@@ -772,11 +777,17 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 			else if (CHECK_ARG_PARAM("-regression-test"))
 			{
 				s_regression_file = std::string(argv[++i]);
+				s_batch_mode = true;
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-npackets"))
 			{
 				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+				continue;
+			}
+			else if (CHECK_ARG("-batch"))
+			{
+				s_batch_mode = true;
 				continue;
 			}
 			else if (CHECK_ARG("-noshadercache"))
@@ -826,14 +837,27 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 		return false;
 	}
 
-	if (VMManager::IsGSDumpFileName(params.filename))
+	if (s_batch_mode)
 	{
-		Console.Error("Provided filename is not a GS dump.");
-		return false;
+		if (!FileSystem::DirectoryExists(params.filename.c_str()))
+		{
+			Console.Error("Provided directory does not exist.");
+			return false;
+		}
+	}
+	else
+	{
+		if (VMManager::IsGSDumpFileName(params.filename))
+		{
+			Console.Error("Provided filename is not a GS dump.");
+			return false;
+		}
 	}
 
 	if (s_settings_interface.GetBoolValue("EmuCore/GS", "DumpGSData") && !dumpdir.empty())
 	{
+		s_dump_gs_data_dir_hw = dumpdir;
+		s_dump_gs_data_dir_sw = dumpdir;
 		if (s_settings_interface.GetStringValue("EmuCore/GS", "HWDumpDirectory").empty())
 			s_settings_interface.SetStringValue("EmuCore/GS", "HWDumpDirectory", dumpdir.c_str());
 		if (s_settings_interface.GetStringValue("EmuCore/GS", "SWDumpDirectory").empty())
@@ -1035,20 +1059,16 @@ void GSRunner::DumpStats()
 #endif
 
 static void CPUThreadMain(VMBootParameters* params) {
-	printf("CPUThreadMain\n");
 	if (VMManager::Initialize(*params))
 	{
-		printf("CPUThreadMainInit\n");
 		// run until end
 		GSDumpReplayer::SetLoopCount(s_loop_count);
 		VMManager::SetState(VMState::Running);
-		printf("CPUThreadMain: %s\n", VMManager::GetState() == VMState::Running ? "Running" : "not RUnning");
 		while (VMManager::GetState() == VMState::Running)
 			VMManager::Execute();
 		VMManager::Shutdown(false);
 		GSRunner::DumpStats();
 	}
-	printf("CPUThreadMainDone\n");
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::StopPlatformMessagePump();
@@ -1074,7 +1094,7 @@ int main_runner(int argc, char* argv[])
 		Console.Error("Failed to create window.");
 		return EXIT_FAILURE;
 	}
-
+	#if 0
 	SharedMemoryFile shm;
 	shm.CreateFile_(s_regression_file, RegressionBuffer::GetSize(regression_num_packets, regression_dump_size, regression_status_size));
 	shm.ResetFile(); // TODO: MAKE SURE FILE IS REST ALWAYS!
@@ -1103,10 +1123,20 @@ int main_runner(int argc, char* argv[])
 	//GSDumpFile::Serialize(*dump, ds->GetDump(), ds->GetDumpSize());
 
 	GetRegressionBuffer()->DoneDumpWrite();
-
+	#endif
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
 	GSDumpReplayer::SetIsDumpRunner(true);
+	if (s_batch_mode)
+	{
+		GSDumpReplayer::SetIsBatchMode(true);
+		if (s_settings_interface.GetBoolValue("EmuCore/GS", "DumpGSData", false))
+		{
+			GSDumpReplayer::SetLoopCountStart(s_loop_count);
+			GSDumpReplayer::SetDumpGSDataDirHW(s_dump_gs_data_dir_hw);
+			GSDumpReplayer::SetDumpGSDataDirSW(s_dump_gs_data_dir_sw);
+		}
+	}
 
 	std::thread cputhread(CPUThreadMain, &params);
 	GSRunner::PumpPlatformMessages(/*forever=*/true);
@@ -1114,10 +1144,10 @@ int main_runner(int argc, char* argv[])
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::DestroyPlatformWindow();
-
+	#if 0
 	if (!s_regression_file.empty())
 		EndRegressionTest();
-
+	#endif 
 	return EXIT_SUCCESS;
 }
 
@@ -1316,7 +1346,7 @@ int main_tester(int argc, char* argv[])
 
 				for (int i = 0; i < 2; i++)
 				{
-					regression_buffer[i].DoneReadPacket();
+					regression_buffer[i].DonePacketRead();
 				}
 			}
 
