@@ -293,6 +293,7 @@ public:
 	virtual ~GSDumpFile();
 
 	static std::unique_ptr<GSDumpFile> OpenGSDump(const char* filename, Error* error = nullptr);
+	static std::unique_ptr<GSDumpFile> OpenGSDumpMemory(const void* ptr, const size_t size);
 	static bool GetPreviewImageFromDump(const char* filename, u32* width, u32* height, std::vector<u32>* pixels);
 
 	__fi const std::string& GetSerial() const { return m_serial; }
@@ -303,9 +304,10 @@ public:
 	__fi const GSDataArray& GetPackets() const { return m_dump_packets; }
 
 	bool ReadFile(Error* error);
+	bool ReadFile(void* dst, size_t size, Error* error);
 
-	static bool Serialize(const GSDumpFile& dump, void* ptr, std::size_t size);
-	static std::unique_ptr<GSDumpFile> Deserialize(void* ptr, std::size_t size);
+	//static bool Serialize(const GSDumpFile& dump, void* ptr, std::size_t size);
+	//static std::unique_ptr<GSDumpFile> Deserialize(void* ptr, std::size_t size);
 
 protected:
 	GSDumpFile();

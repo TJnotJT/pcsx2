@@ -9,16 +9,31 @@
 #ifdef __WIN32__
 struct SpinlockSharedMemory
 {
+	volatile LONG lock = WRITEABLE;
+
+	// For producer/consumer.
 	enum : LONG
 	{
 		WRITEABLE = 0,
 		READABLE = 1
 	};
-	volatile LONG lock = WRITEABLE;
-	void LockWrite();
-	void LockRead();
-	void UnlockWrite();
-	void UnlockRead();
+
+	bool LockWrite(bool block = true);
+	bool LockRead(bool block = false);
+	bool UnlockWrite();
+	bool UnlockRead();
+	bool Writeable();
+	bool Readable();
+
+	// For lock/unlock.
+	enum : LONG
+	{
+		UNLOCKED = 0,
+		LOCKED = 1
+	};
+
+	bool Lock(bool block = false);
+	bool Unlock();
 };
 #else
 // Not implemented
@@ -29,7 +44,7 @@ struct RegressionPacket
 	static constexpr std::size_t name_size = 4096;
 	static constexpr std::size_t data_size = 4 * 1024 * 1024;
 
-	std::atomic<bool> ready; // Contains data to be consumed.
+	SpinlockSharedMemory lock;
 	char name_dump[name_size];
 	char name_packet[name_size];
 	int size, w, h, pitch, bytes_per_pixel;
@@ -74,7 +89,7 @@ struct DumpFileSharedMemory
 {
 	static constexpr std::size_t name_size = 4096;
 
-	std::atomic<bool> ready;
+	SpinlockSharedMemory lock;
 	char name[name_size];
 
 	// Note: not the true dump size; just size of buffer.
@@ -95,7 +110,7 @@ struct DumpFileSharedMemory
 
 struct StatusSharedMemory
 {
-	std::atomic<bool> lock;
+	SpinlockSharedMemory lock;
 	std::size_t size;
 
 	// Call only once before sharing. Not thread safe.
@@ -146,16 +161,16 @@ struct RegressionBuffer
 	RegressionPacket* GetPacketRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	void DoneWritePacket();
-	void DoneReadPacket();
+	bool DoneWritePacket();
+	bool DoneReadPacket();
 
 	// Thread safe; acquire ownership.
 	DumpFileSharedMemory* GetDumpWrite(bool block = true);
 	DumpFileSharedMemory* GetDumpRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	void DoneDumpWrite();
-	void DoneDumpRead();
+	bool DoneDumpWrite();
+	bool DoneDumpRead();
 
 	// Thread safe.
 	std::string GetStatus();
