@@ -1198,6 +1198,12 @@ bool VMManager::HasBootedELF()
 
 bool VMManager::AutoDetectSource(const std::string& filename)
 {
+	if (IsRegressionTesting())
+	{
+		CDVDsys_ChangeSource(CDVD_SourceType::NoDisc);
+		return GSDumpReplayer::Initialize(nullptr);
+	}
+
 	if (!filename.empty())
 	{
 		if (!FileSystem::FileExists(filename.c_str()))
@@ -2656,6 +2662,7 @@ void VMManager::Internal::ClearCPUExecutionCaches()
 
 void VMManager::Execute()
 {
+	printf("VMManager::Execute\n");
 	// Check for interpreter<->recompiler switches.
 	if (std::exchange(s_cpu_implementation_changed, false))
 	{
@@ -2665,8 +2672,12 @@ void VMManager::Execute()
 		vtlb_ResetFastmem();
 	}
 
+	void GSDumpReplayerCpuExecute();
+
+	printf("VMManager::Before CPU Execute %p %p %p\n", Cpu, Cpu->Execute, GSDumpReplayerCpuExecute);
 	// Execute until we're asked to stop.
 	Cpu->Execute();
+	printf("VMManager::After CPU Execute %p %p\n", Cpu, Cpu->Execute);
 }
 
 void VMManager::IdlePollUpdate()

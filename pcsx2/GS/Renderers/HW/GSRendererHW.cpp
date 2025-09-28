@@ -181,7 +181,7 @@ GSTexture* GSRendererHW::GetOutput(int i, float& scale, int& y_offset)
 
 		if (GSConfig.SaveFrame && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 		{
-			t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), i, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)), GetRegressionPacketBuffer());
+			t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), i, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)), GetRegressionBuffer());
 		}
 	}
 
@@ -207,7 +207,7 @@ GSTexture* GSRendererHW::GetFeedbackOutput(float& scale)
 	scale = rt->m_scale;
 
 	if (GSConfig.SaveFrame && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
-		t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), 3, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)), GetRegressionPacketBuffer());
+		t->Save(GetDrawDumpPath("%05d_f%05lld_fr%d_%05x_%s.bmp", s_n, g_perfmon.GetFrame(), 3, static_cast<int>(TEX0.TBP0), GSUtil::GetPSMName(TEX0.PSM)), GetRegressionBuffer());
 
 	return t;
 }
@@ -2404,7 +2404,7 @@ void GSRendererHW::Draw()
 
 							std::string s = GetDrawDumpPath("%05d_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n - 1, frame, m_last_channel_shuffle_fbp, m_last_rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
 
-							m_last_rt->m_texture->Save(s, GetRegressionPacketBuffer());
+							m_last_rt->m_texture->Save(s, GetRegressionBuffer());
 						}
 					}
 				}
@@ -4615,7 +4615,7 @@ void GSRendererHW::Draw()
 			s = GetDrawDumpPath("%05d_f%05lld_rt0_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
 
 			if (rt->m_texture)
-				rt->m_texture->Save(s, GetRegressionPacketBuffer());
+				rt->m_texture->Save(s, GetRegressionBuffer());
 		}
 
 		if (ds && GSConfig.SaveDepth)
@@ -4813,7 +4813,7 @@ void GSRendererHW::Draw()
 		{
 			s = GetDrawDumpPath("%05d_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n, frame, m_cached_ctx.FRAME.Block(), rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
 
-			rt->m_texture->Save(s, GetRegressionPacketBuffer());
+			rt->m_texture->Save(s, GetRegressionBuffer());
 		}
 
 		if (ds && GSConfig.SaveDepth)

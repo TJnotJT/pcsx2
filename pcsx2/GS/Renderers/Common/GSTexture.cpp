@@ -16,7 +16,7 @@ GSTexture::GSTexture() = default;
 
 GSTexture::~GSTexture() = default;
 
-bool GSTexture::Save(const std::string& fn, RegressionPacketBuffer* rbp)
+bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 {
 	// Depth textures need special treatment - we have a stencil component.
 	// Just re-use the existing conversion shader instead.
@@ -62,9 +62,9 @@ bool GSTexture::Save(const std::string& fn, RegressionPacketBuffer* rbp)
 	if (rbp)
 	{
 		RegressionPacket* packet = rbp->GetPacketWrite();
-		packet->SetFilename(fn.c_str());
+		packet->SetNamePacket(fn.c_str());
 		packet->SetImageData(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
-		rbp->DoneWrite();
+		rbp->DoneWritePacket();
 		return true;
 	}
 

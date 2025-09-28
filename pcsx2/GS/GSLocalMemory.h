@@ -1123,7 +1123,7 @@ public:
 	//
 
 	void SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x = 0, int y = 0,
-		RegressionPacketBuffer* rbp = nullptr);
+		RegressionBuffer* rbp = nullptr);
 };
 
 constexpr inline GSOffset GSOffset::fromKnownPSM(u32 bp, u32 bw, GS_PSM psm)
