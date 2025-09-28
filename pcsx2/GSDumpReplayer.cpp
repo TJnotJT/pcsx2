@@ -26,7 +26,9 @@
 #include "common/StringUtil.h"
 #include "common/Threading.h"
 #include "common/Timer.h"
+#include "common/ScopedGuard.h"
 
+#include <filesystem>
 #include <atomic>
 
 void GSDumpReplayerCpuReserve();
@@ -39,14 +41,21 @@ void GSDumpReplayerCancelInstruction();
 void GSDumpReplayerCpuClear(u32 addr, u32 size);
 
 static std::unique_ptr<GSDumpFile> s_dump_file;
+static std::string s_dump_dir;
+static std::string s_dump_gs_data_dir_hw;
+static std::string s_dump_gs_data_dir_sw;
+static std::vector<std::string> s_dump_file_list;
+static std::size_t s_curr_dump = 0;
 static u32 s_current_packet = 0;
 static u32 s_dump_frame_number = 0;
+static s32 s_dump_loop_count_start = 0;
 static s32 s_dump_loop_count = 0;
 static bool s_dump_running = false;
 static bool s_needs_state_loaded = false;
 static u64 s_frame_ticks = 0;
 static u64 s_next_frame_time = 0;
 static bool s_is_dump_runner = false;
+static bool s_batch_mode = false;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -71,9 +80,29 @@ bool GSDumpReplayer::IsRunner()
 	return s_is_dump_runner;
 }
 
+bool GSDumpReplayer::IsBatchMode()
+{
+	return s_batch_mode;
+}
+
 void GSDumpReplayer::SetIsDumpRunner(bool is_runner)
 {
 	s_is_dump_runner = is_runner;
+}
+
+void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
+{
+	s_batch_mode = batch_mode;
+}
+
+void GSDumpReplayer::SetDumpGSDataDirHW(const std::string& dir)
+{
+	s_dump_gs_data_dir_hw = dir;
+}
+
+void GSDumpReplayer::SetDumpGSDataDirSW(const std::string& dir)
+{
+	s_dump_gs_data_dir_sw = dir;
 }
 
 void GSDumpReplayer::SetLoopCount(s32 loop_count)
@@ -81,44 +110,109 @@ void GSDumpReplayer::SetLoopCount(s32 loop_count)
 	s_dump_loop_count = loop_count - 1;
 }
 
+void GSDumpReplayer::SetLoopCountStart(s32 loop_count)
+{
+	s_dump_loop_count_start = loop_count - 1;
+}
+
 int GSDumpReplayer::GetLoopCount()
 {
 	return s_dump_loop_count;
 }
 
-bool GSDumpReplayer::NextRegressionTestDump()
+bool GSDumpReplayer::NextDump()
 {
-	DumpFileSharedMemory* dump = nullptr;
-	while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
-	{
-		// FIXME: maybe we should put a time limit...
-		if (GetRegressionBuffer()->GetStatus() == "Done")
-		{
-			break;
-		}
-
-		std::this_thread::yield();
-
-		Console.WriteLnFmt("Waiting for new dump.");
-	}
-
-	if (!dump)
-	{
-		s_dump_running = false;
+	if (!IsBatchMode())
 		return false;
-	}
-
-	//s_dump_file = GSDumpFile::Deserialize(dump->GetDump(), dump->GetDumpSize());
-	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetDump(), dump->GetDumpSize());
 
 	Error error;
-	if (!s_dump_file->ReadFile(&error))
+
+	if (IsRegressionTesting())
 	{
-		Host::ReportErrorAsync("(GSDumpReplayer) Failed to open GS dump from memory: {}", error.GetDescription());
+		DumpFileSharedMemory* dump = nullptr;
+
+		ScopedGuard sg([&]() {
+			if (dump)
+				GetRegressionBuffer()->DoneDumpRead();
+		});
+
+		while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
+		{
+			// FIXME: maybe we should put a time limit...
+			if (GetRegressionBuffer()->GetStatus() == "Done")
+			{
+				break;
+			}
+
+			std::this_thread::yield();
+
+			Console.WriteLnFmt("Waiting for new dump.");
+		}
+
+		if (!dump)
+		{
+			s_dump_running = false;
+			return false;
+		}
+
+		//s_dump_file = GSDumpFile::Deserialize(dump->GetDump(), dump->GetDumpSize());
+		s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetDump(), dump->GetDumpSize());
+
+		if (!s_dump_file->ReadFile(&error))
+		{
+			Host::ReportErrorAsync("GSDumpreplayer", fmt::format("Failed to open GS dump from memory: {}", error.GetDescription()));
+			return false;
+		}
+
+		const std::string dump_name = dump->GetName();
+
+		Console.WriteLnFmt("Loaded new dump: {}", dump_name);
+
+		GetRegressionBuffer()->SetNameDump(dump_name);
+		return true;
+	}
+	else
+	{
+		if (s_curr_dump >= s_dump_file_list.size())
+			return false;
+
+		if (!ChangeDump(s_dump_file_list[s_curr_dump++].c_str()))
+			return false;
+
+		return true;
+	}
+}
+
+bool GSDumpReplayer::ReadDumpFileList(const std::string& dir, std::vector<std::string>& file_list)
+{
+	file_list.clear();
+
+	if (!FileSystem::DirectoryExists(dir.c_str()))
+	{
+		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Directory does not exist: {}", dir));
 		return false;
 	}
 
-	Console.WriteLnFmt("Loaded new dump: {}", dump->GetName());
+	FileSystem::FindResultsArray files;
+	FileSystem::FindFiles(
+		dir.c_str(),
+		"*",
+		FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES,
+		&files);
+	for (const auto& file : files)
+	{
+		if (VMManager::IsGSDumpFileName(file.FileName))
+			file_list.push_back(file.FileName);
+	}
+
+	if (file_list.empty())
+	{
+		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Could not find any dumps in '{}'", dir));
+		return false;
+	}
+
+	Console.WriteLnFmt("(GSDumpReplayer) Read a dump file list with {} dumps", file_list.size());
+
 	return true;
 }
 
@@ -126,26 +220,20 @@ bool GSDumpReplayer::Initialize(const char* filename)
 {
 	if (IsRegressionTesting())
 	{
-		if (!NextRegressionTestDump())
+		if (!NextDump())
+			return false;
+	}
+	else if (IsBatchMode())
+	{
+		if (!ReadDumpFileList(filename, s_dump_file_list))
+			return false;
+
+		if (!NextDump())
 			return false;
 	}
 	else
 	{
-		Common::Timer timer;
-		Console.WriteLn("(GSDumpReplayer) Reading file '%s'...", filename);
-
-		Error error;
-		s_dump_file = GSDumpFile::OpenGSDump(filename, &error);
-
-		if (!s_dump_file || !s_dump_file->ReadFile(&error))
-		{
-			Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
-														 Path::GetFileName(filename), error.GetDescription()));
-			s_dump_file.reset();
-			return false;
-		}
-
-		Console.WriteLn("(GSDumpReplayer) Read file in %.2f ms.", timer.GetTimeMilliseconds());
+		return ChangeDump(filename);
 	}
 
 	// We replace all CPUs.
@@ -176,7 +264,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 	if (!new_dump || !new_dump->ReadFile(&error))
 	{
 		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("Failed to open or read '{}': {}",
-													 Path::GetFileName(filename), error.GetDescription()));
+			Path::GetFileName(filename), error.GetDescription()));
 		return false;
 	}
 
@@ -185,6 +273,29 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 	// Don't forget to reset the GS!
 	GSDumpReplayerCpuReset();
+
+	if (GSConfig.DumpGSData)
+	{
+		// In case we are saving GS data in batch mode, make sure to update the directories.
+		const std::filesystem::path dump_name = std::filesystem::path(filename).filename();
+
+		std::string* src_dir[] = {&s_dump_gs_data_dir_hw, &s_dump_gs_data_dir_sw};
+		std::string* dst_dir[] = {&GSConfig.HWDumpDirectory, &GSConfig.SWDumpDirectory};
+
+		for (int i = 0; i < 2; i++)
+		{
+			*dst_dir[i] = (std::filesystem::path(*src_dir[i]) / dump_name).string();
+			if (!FileSystem::EnsureDirectoryExists(dst_dir[i]->c_str(), false, &error))
+			{
+				Host::ReportErrorAsync("GSDumpReplayer", fmt::format("(GSDumpReplayer) Could not create output directory: {} ({})", *dst_dir[i], error.GetDescription()));
+			}
+			else
+			{
+				Console.WriteLnFmt("(GSDumpReplayer) Dumping GS data to '{}'", *dst_dir[i]);
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -247,8 +358,6 @@ void GSDumpReplayerCpuReset()
 
 static void GSDumpReplayerLoadInitialState()
 {
-	printf("GSDumpReplayerLoadInitialState\n");
-
 	// reset GS registers to initial dump values
 	std::memcpy(PS2MEM_GS, s_dump_file->GetRegsData().data(),
 		std::min(Ps2MemSize::GSregs, static_cast<u32>(s_dump_file->GetRegsData().size())));
@@ -305,18 +414,10 @@ static void GSDumpReplayerFrameLimit()
 
 void GSDumpReplayerCpuStep()
 {
-	printf("GSDumpReplayerCpuStep\n");
-
 	if (s_needs_state_loaded)
 	{
 		GSDumpReplayerLoadInitialState();
 		s_needs_state_loaded = false;
-	}
-
-	if (!s_dump_running) // Might have ended regression testing.
-	{
-		Host::RequestVMShutdown(false, false, false);
-		return;
 	}
 
 	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
@@ -326,13 +427,10 @@ void GSDumpReplayerCpuStep()
 		s_dump_frame_number = 0;
 		if (s_dump_loop_count > 0)
 			s_dump_loop_count--;
-		else if (s_dump_loop_count == 0)
+		else if (s_dump_loop_count == 0 && !GSDumpReplayer::IsBatchMode())
 		{
-			if (!IsRegressionTesting())
-			{
-				Host::RequestVMShutdown(false, false, false);
-				s_dump_running = false;
-			}
+			Host::RequestVMShutdown(false, false, false);
+			s_dump_running = false;
 		}
 	}
 
@@ -397,11 +495,25 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	if (s_current_packet == 0 && s_dump_loop_count == 0 && IsRegressionTesting())
+	// FIXME: REMOVE DEBUGGING CODE
+	if (IsRegressionTesting())
 	{
-		if (GSDumpReplayer::NextRegressionTestDump())
+		RegressionBuffer* buf = GetRegressionBuffer();
+
+		while (RegressionPacket* packet = buf->GetPacketRead(false))
 		{
-			s_dump_loop_count = 1; // FIXME: Make this settable.
+			Console.WriteLn(packet->GetNameDump() + " " + packet->GetNamePacket());
+			buf->DonePacketRead();
+		}
+	}
+
+	if (s_current_packet == 0 && s_dump_loop_count == 0 && GSDumpReplayer::IsBatchMode())
+	{
+		//GetRegressionBuffer()->SetStatus("Done");
+		MTGS::WaitGS(false, false, false);
+		if (GSDumpReplayer::NextDump())
+		{
+			s_dump_loop_count = s_dump_loop_count_start;
 			GSDumpReplayerCpuReset();
 		}
 		else
@@ -414,8 +526,6 @@ void GSDumpReplayerCpuStep()
 
 void GSDumpReplayerCpuExecute()
 {
-	printf("GSDumpReplayerCpuExecute\n");
-
 	s_dump_running = true;
 	s_next_frame_time = GetCPUTicks();
 

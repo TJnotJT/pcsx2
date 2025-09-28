@@ -50,12 +50,11 @@ struct RegressionPacket
 	int size, w, h, pitch, bytes_per_pixel;
 	u8 data[data_size];
 
-	// Must only be called when owned by consumer.
-	void SetNameDump(const char* name);
-	void SetNamePacket(const char* name);
+	// Call by owner.
+	void SetNameDump(const std::string& name);
+	void SetNamePacket(const std::string& name);
+	void SetName(char* dst, const std::string& name); // Helper (private)
 	void SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel);
-
-	// Must only be called when owned by producer.
 	std::string GetNameDump();
 	std::string GetNamePacket();
 	u8* GetImageData();
@@ -101,12 +100,8 @@ struct DumpFileSharedMemory
 
 	// Call by owner.
 	void* GetDump();
-
-	// Call by reader when owned.
 	std::size_t GetDumpSize();
 	std::string GetName();
-
-	// Call by writer when owned.
 	void SetDumpSize(std::size_t size);
 	void SetName(const std::string& str);
 
@@ -150,6 +145,8 @@ struct RegressionBuffer
 
 	StatusSharedMemory* status;
 
+	std::string dump_name; // Local copy.
+
 	// Call only once before sharing.
 	bool CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size,
 		std::size_t status_size);
@@ -162,15 +159,15 @@ struct RegressionBuffer
 	bool CloseFile();
 
 	// Call only once to initialize.
-	void SetSizesPointers(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
+	void Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
 
 	// Thread safe; acquire ownership.
 	RegressionPacket* GetPacketWrite(bool block = true);
 	RegressionPacket* GetPacketRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	bool DoneWritePacket();
-	bool DoneReadPacket();
+	bool DonePacketWrite();
+	bool DonePacketRead();
 
 	// Thread safe; acquire ownership.
 	DumpFileSharedMemory* GetDumpWrite(bool block = true);
@@ -183,6 +180,10 @@ struct RegressionBuffer
 	// Thread safe.
 	std::string GetStatus();
 	void SetStatus(const std::string& str);
+
+	// Access only local data.
+	void SetNameDump(const std::string& name);
+	std::string GetNameDump();
 
 	// Static.
 	static std::size_t GetSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
