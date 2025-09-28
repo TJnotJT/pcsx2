@@ -63,7 +63,7 @@ struct RegressionPacket
 	void Init();
 
 	// Static
-	static std::size_t GetSize();
+	static std::size_t GetTotalSize();
 };
 
 struct SharedMemoryFile
@@ -99,14 +99,14 @@ struct DumpFileSharedMemory
 	void Init(std::size_t dump_size);
 
 	// Call by owner.
-	void* GetDump();
+	void* GetDumpPtr();
 	std::size_t GetDumpSize();
 	std::string GetName();
 	void SetDumpSize(std::size_t size);
 	void SetName(const std::string& str);
 
 	// Static.
-	static std::size_t GetSize(std::size_t dump_size);
+	static std::size_t GetTotalSize(std::size_t dump_size);
 };
 
 struct StatusSharedMemory
@@ -122,10 +122,10 @@ struct StatusSharedMemory
 	void SetStatus(const std::string& status);
 
 	// Not thread safe.
-	char* GetStatusRaw();
+	char* GetStatusPtr();
 
 	// Static.
-	static std::size_t GetSize(std::size_t size);
+	static std::size_t GetTotalSize(std::size_t size);
 };
 
 /// Ring buffer of regression packets, dump files, and status.
@@ -186,7 +186,7 @@ struct RegressionBuffer
 	std::string GetNameDump();
 
 	// Static.
-	static std::size_t GetSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
+	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
 };
 
 bool IsRegressionTesting();

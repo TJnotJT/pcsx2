@@ -23,6 +23,7 @@ namespace GSDumpReplayer
 
 	bool Initialize(const char* filename);
 	bool NextDump(); // For batch mode.
+	bool ChangeDumpRegressionTest();
 	bool ChangeDump(const char* filename);
 	void Shutdown();
 
@@ -33,5 +34,5 @@ namespace GSDumpReplayer
 
 	void RenderUI();
 
-	static bool ReadDumpFileList(const std::string& dir, std::vector<std::string>& file_list);
+	bool ReadDumpFileList(const std::string& dir, std::vector<std::string>& file_list);
 } // namespace GSDumpReplayer
