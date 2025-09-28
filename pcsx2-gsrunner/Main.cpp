@@ -34,6 +34,7 @@
 #include "pcsx2/Achievements.h"
 #include "pcsx2/CDVD/CDVD.h"
 #include "pcsx2/GS.h"
+#include "pcsx2/GS/GSLzma.h"
 #include "pcsx2/GS/GSPerfMon.h"
 #include "pcsx2/GSDumpReplayer.h"
 #include "pcsx2/GameList.h"
@@ -816,13 +817,16 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 		params.filename += argv[i];
 	}
 
+	if (!s_regression_file.empty())
+		return true; // Remaining arguments/checks are not needed if doing regression testing.
+
 	if (params.filename.empty())
 	{
-		Console.Error("No dump filename provided.");
+		Console.Error("No dump filename provided and not in regression testing mode..");
 		return false;
 	}
 
-	if (!VMManager::IsGSDumpFileName(params.filename))
+	if (VMManager::IsGSDumpFileName(params.filename))
 	{
 		Console.Error("Provided filename is not a GS dump.");
 		return false;
@@ -1031,16 +1035,20 @@ void GSRunner::DumpStats()
 #endif
 
 static void CPUThreadMain(VMBootParameters* params) {
+	printf("CPUThreadMain\n");
 	if (VMManager::Initialize(*params))
 	{
+		printf("CPUThreadMainInit\n");
 		// run until end
 		GSDumpReplayer::SetLoopCount(s_loop_count);
 		VMManager::SetState(VMState::Running);
+		printf("CPUThreadMain: %s\n", VMManager::GetState() == VMState::Running ? "Running" : "not RUnning");
 		while (VMManager::GetState() == VMState::Running)
 			VMManager::Execute();
 		VMManager::Shutdown(false);
 		GSRunner::DumpStats();
 	}
+	printf("CPUThreadMainDone\n");
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::StopPlatformMessagePump();
@@ -1067,11 +1075,17 @@ int main_runner(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
+	SharedMemoryFile shm;
+	shm.CreateFile_(s_regression_file, RegressionBuffer::GetSize(regression_num_packets, regression_dump_size, regression_status_size));
+
 	// Regression testing needs to be started before applying settings
 	// or it might complain that there is no dumping directory
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
-		StartRegressionTest(&s_regression_buffer, s_regression_file, regression_num_packets);
+		StartRegressionTest(&s_regression_buffer, s_regression_file,
+			regression_num_packets, regression_dump_size, regression_status_size);
+
+	GetRegressionBuffer()->SetStatus("hello world");
 
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
@@ -1141,38 +1155,73 @@ int main_tester(int argc, char* argv[])
 		}
 	}
 
+	// Start the runner processes in regression testing mode.
+	// FIXME: Make sure the runners don't expect the dump name in regression testing mode.
+	for (int i = 0; i < 2; i++)
+	{
+		std::string command =
+			regression_runner_path[i] +
+			std::string(" runner ") +
+			std::string(" -surfaceless ") +
+			std::string(" -loop 1 ") +
+			std::string(" -dump f ") +
+			std::string(" -regression-test ") + regression_shared_file[i] +
+			std::string(" -npackets ") + std::to_string(regression_num_packets) +
+			" " + regression_runner_args;
+
+		if (!regression_runner_proc[i].Start(command))
+		{
+			Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
+			return EXIT_FAILURE;
+		}
+	}
+
 	for (const std::string& dump_file : dump_files)
 	{
-		for (int i = 0; i < 2; i++)
-			regression_buffer[i].ResetFile();
+		/*for (int i = 0; i < 2; i++)
+			regression_buffer[i].ResetFile();*/
 
 		std::string dump_name = std::filesystem::path(dump_file).filename().string();
 
+		Error e;
+		std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(dump_name.c_str(), &e);
+
+		if (!dump || !dump->ReadFile(&e))
+		{
+			Console.Error("Failed to open file \"{}\", skipping.", dump_file);
+			Console.Error("Error message: {}", e.GetDescription());
+			continue;
+		}
+
+		Console.WriteLn("Processing dump file: \"{}\"", dump_file);
+
+		// Serialize dump files to shared memory.
+		bool fail = false;
 		for (int i = 0; i < 2; i++)
 		{
-			std::string command =
-				regression_runner_path[i] +
-				std::string(" runner ") +
-				" " + dump_file + " " +
-				std::string(" -surfaceless ") +
-				std::string(" -loop 1 ") +
-				std::string(" -dump f ") +
-				std::string(" -regression-test ") + regression_shared_file[i] +
-				std::string(" -npackets ") + std::to_string(regression_num_packets) +
-				" " + regression_runner_args;
-
-			if (!regression_runner_proc[i].Start(command))
+			void* dump_shared = regression_buffer[i].GetDumpWrite();
+			if (!GSDumpFile::Serialize(*dump, dump_shared, regression_dump_size))
 			{
-				Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
-				return EXIT_FAILURE;
+				Console.Error("Failed to serialize dump \"{}\" for runner {}. Skipping.", dump_file, regression_runner_name[i]);
+				fail = true;
+				break;
 			}
 		}
+
+		if (fail)
+		{
+			continue; // Skip the dump.
+		}
+
+		// Commit the write to the shared dump files.
+		for (int i = 0; i < 2; i++)
+			regression_buffer[i].DoneDumpWrite();
 
 		bool exited[2] = {false, false};
 		bool done[2] = {false, false};
 		RegressionPacket* packets[2];
 		std::map<std::string, float> image_diffs;
-		std::vector<std::string> mismatched[2];
+		std::vector<std::pair<std::string, std::string>> mismatched[2];
 
 		while (1)
 		{
@@ -1188,17 +1237,24 @@ int main_tester(int argc, char* argv[])
 
 			if (packets[0] && packets[1])
 			{
-				if (strncmp(packets[0]->name, packets[1]->name, sizeof(RegressionPacket::name)) == 0)
-				{
-					const std::string& image_name = packets[0]->name;
+				std::string name_dump[2];
+				std::string name_packet[2];
 
-					Console.WriteLnFmt("Comparing results for {}.", image_name);
+				for (int i = 0; i < 2; i++)
+				{
+					name_dump[i] = packets[i]->GetNameDump();
+					name_packet[i] = packets[i]->GetNamePacket();
+				}
+
+				if (name_packet[0] == name_packet[1] && name_dump[0] == name_dump[1])
+				{
+					Console.WriteLnFmt("Comparing results for {} / {}.", name_dump[0], name_packet[1]);
 
 					if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 					{
 						for (int i = 0; i < 2; i++)
 						{
-							std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name + "_" + image_name + ".png")).string();
+							std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name + "_" + name_packet[1] + ".png")).string();
 
 							if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
 							{
@@ -1209,15 +1265,19 @@ int main_tester(int argc, char* argv[])
 				}
 				else
 				{
-					Console.WarningFmt("Runners out of sync on dumps: {}: \"{}\", {}: \"{}\"",
-						regression_runner_name[0], packets[0]->name, regression_runner_name[1], packets[1]->name);
+					Console.Warning("Runners out of sync on dumps:");
 					for (int i = 0; i < 2; i++)
-						mismatched[i].push_back(std::string(packets[i]->name));
+					{
+						Console.WarningFmt("\n    {}: {} / {}\n", regression_runner_name[i], name_dump[i], name_packet[i]);
+					}
+					
+					for (int i = 0; i < 2; i++)
+						mismatched[i].emplace_back(name_dump[i], name_packet[i]);
 				}
 
 				for (int i = 0; i < 2; i++)
 				{
-					regression_buffer[i].DoneRead();
+					regression_buffer[i].DoneReadPacket();
 				}
 			}
 
@@ -1231,9 +1291,10 @@ int main_tester(int argc, char* argv[])
 				{
 					if (packets[j])
 					{
-						std::string name = packets[j]->name;
-						Console.WarningFmt("Runner {} has extra packet: \"{}\"", regression_runner_name[j], name);
-						mismatched[j].push_back(name);
+						std::string name_dump = packets[j]->GetNameDump();
+						std::string name_packet = packets[j]->GetNamePacket();
+						Console.WarningFmt("Runner {} extra packet: {} / {}", regression_runner_name[j], name_dump, name_packet);
+						mismatched[j].emplace_back(name_dump, name_packet);
 						packets[j] = nullptr;
 					}
 				}
@@ -1248,19 +1309,6 @@ int main_tester(int argc, char* argv[])
 			std::this_thread::yield();
 		}
 
-		for (int i = 0; i < 2; i++)
-		{
-			if (regression_runner_proc[i].WaitForExit() != 0)
-			{
-				Console.WarningFmt("Runner {} exited abnormally.", regression_runner_name[i]);
-			}
-		}
-
-		for (int i = 0; i < 2; i++)
-		{
-			regression_runner_proc[i].Close();
-		}
-
 		// Write results to directory.
 		std::filesystem::path out_dir = std::filesystem::path(regression_output_dir);
 		std::filesystem::path out_path = out_dir / (dump_name + ".txt");
@@ -1272,7 +1320,10 @@ int main_tester(int argc, char* argv[])
 		constexpr const char* CLOSE_MAP = "}";
 		constexpr const char* QUOTE = "\"";
 		constexpr const char* KEY_VAL_DEL = ": ";
+		constexpr const char* LIST_DEL = ", ";
 		constexpr const char* LIST_ITEM = "- ";
+		constexpr const char* OPEN_LIST = "[";
+		constexpr const char* CLOSE_LIST = "]";
 
 		if (!image_diffs.empty())
 		{
@@ -1291,15 +1342,29 @@ int main_tester(int argc, char* argv[])
 			if (!mismatched[i].empty())
 			{
 				oss << "mismatched_" << (i + 1) << KEY_VAL_DEL << std::endl;
-				for (const std::string& s : mismatched[i])
+				for (const auto& [name_dump, name_packet] : mismatched[i])
 				{
-					oss << INDENT << LIST_ITEM << QUOTE << s << QUOTE << std::endl;
+					oss << INDENT << LIST_ITEM << OPEN_LIST << QUOTE << name_dump << QUOTE <<
+						LIST_DEL << QUOTE << name_packet << QUOTE << CLOSE_LIST << std::endl;
 				}
 				oss << std::endl;
 			}
 		}
 
 		oss.close();
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		if (regression_runner_proc[i].WaitForExit() != 0)
+		{
+			Console.WarningFmt("Runner {} exited abnormally.", regression_runner_name[i]);
+		}
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		regression_runner_proc[i].Close();
 	}
 
 	for (int i = 0; i < 2; i++)

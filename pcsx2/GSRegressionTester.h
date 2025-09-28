@@ -6,13 +6,34 @@
 #include <windows.h>
 #endif
 
+#ifdef __WIN32__
+struct SpinlockSharedMemory
+{
+	enum : LONG
+	{
+		WRITEABLE = 0,
+		READABLE = 1
+	};
+	volatile LONG lock = WRITEABLE;
+	void LockWrite();
+	void LockRead();
+	void UnlockWrite();
+	void UnlockRead();
+};
+#else
+// Not implemented
+#endif
+
 struct RegressionPacket
 {
+	static constexpr std::size_t name_size = 4096;
+	static constexpr std::size_t data_size = 4 * 1024 * 1024;
+
 	std::atomic<bool> ready; // Contains data to be consumed.
-	char name_dump[4096];
-	char name_packet[4096];
+	char name_dump[name_size];
+	char name_packet[name_size];
 	int size, w, h, pitch, bytes_per_pixel;
-	u8 data[1024 * 1024 * 4];
+	u8 data[data_size];
 
 	// Must only be called when owned by consumer.
 	void SetNameDump(const char* name);
@@ -51,8 +72,10 @@ struct SharedMemoryFile
 
 struct DumpFileSharedMemory
 {
+	static constexpr std::size_t name_size = 4096;
+
 	std::atomic<bool> ready;
-	char name[4096];
+	char name[name_size];
 
 	// Note: not the true dump size; just size of buffer.
 	// The actual dump size is serialized in the buffer.
@@ -72,7 +95,7 @@ struct DumpFileSharedMemory
 
 struct StatusSharedMemory
 {
-	std::mutex status_lock;
+	std::atomic<bool> lock;
 	std::size_t size;
 
 	// Call only once before sharing. Not thread safe.
@@ -123,8 +146,8 @@ struct RegressionBuffer
 	RegressionPacket* GetPacketRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	void DonePacketWrite();
-	void DonePacketRead();
+	void DoneWritePacket();
+	void DoneReadPacket();
 
 	// Thread safe; acquire ownership.
 	DumpFileSharedMemory* GetDumpWrite(bool block = true);
@@ -143,7 +166,8 @@ struct RegressionBuffer
 };
 
 bool IsRegressionTesting();
-void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, int num_packets);
+void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets,
+	std::size_t dump_size, std::size_t status_size);
 void EndRegressionTest();
 RegressionBuffer* GetRegressionBuffer();
 
@@ -171,3 +195,18 @@ struct Process
 	int WaitForExit();
 	bool Close();
 };
+
+#ifdef __WIN32__
+struct Mutex
+{
+	HANDLE handle;
+	// Not implemented
+	Mutex();
+	~Mutex();
+
+	void Lock();
+	void Unlock();
+};
+#else
+// Not implemented
+#endif

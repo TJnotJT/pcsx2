@@ -17,6 +17,7 @@ namespace GSDumpReplayer
 	void SetIsDumpRunner(bool is_runner);
 
 	bool Initialize(const char* filename);
+	bool NextRegressionTestDump();
 	bool ChangeDump(const char* filename);
 	void Shutdown();
 

@@ -652,7 +652,7 @@ void GSLocalMemory::ReadTexture(const GSOffset& off, const GSVector4i& r, u8* ds
 //
 
 void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x, int y,
-	RegressionPacketBuffer* rbp)
+	RegressionBuffer* rbp)
 {
 	int pitch = w * 4;
 	int size = pitch * h;
@@ -681,9 +681,9 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 
 	if (packet)
 	{
-		packet->SetFilename(fn.c_str());
-		packet->SetImageData(nullptr, w, h, pitch, 4);
-		rbp->DoneWrite();
+		packet->SetNamePacket(fn.c_str());
+		packet->SetImageData(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
+		rbp->DoneWritePacket();
 	}
 	else
 	{

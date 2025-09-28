@@ -229,99 +229,6 @@ bool GSDumpFile::ReadFile(Error* error)
 	return true;
 }
 
-bool GSDumpFile::Serialize(void* ptr, std::size_t max_size)
-{
-	std::size_t regs_size = m_regs_data.size() * sizeof(m_regs_data[0]);
-	std::size_t state_size = m_state_data.size() * sizeof(m_state_data[0]);
-	std::size_t packets_size = m_dump_packets.size() * sizeof(m_dump_packets[0]);
-	std::size_t total_size = regs_size + state_size + packets_size + 4 * sizeof(std::size_t);
-
-	if (total_size > max_size)
-	{
-		Console.Error("Dump too large to serialize. Total: {}, Max: {}", total_size, max_size);
-		return false;
-	}
-
-	void* p = ptr;
-
-#define WRITE_SIZE(x)   \
-	*(u64*)p = (u64)x;  \
-	p = *((u64**)p + 1);
-#define WRITE_DATA(x, size)  \
-	std::memcpy(p, x, size); \
-	p = *((u8**)p + size);
-
-	WRITE_SIZE(0x12345678); // magic number
-
-	WRITE_SIZE(regs_size);
-	WRITE_DATA(m_regs_data.data(), m_regs_data.size());
-	
-	WRITE_SIZE(state_size);
-	WRITE_DATA(m_state_data.data(), state_size);
-
-	WRITE_SIZE(packets_size);
-	WRITE_DATA(m_dump_packets.data(), packets_size);
-
-	return true;
-
-#undef WRITE_SIZE
-#undef WRITE_DATA
-}
-
-bool GSDumpFile::Deserialize(void* ptr, std::size_t size)
-{
-	void* end = (u8*)ptr + size;
-	void* p = ptr;
-
-#define READ_SIZE(x) \
-	x = *(u64*)p;    \
-	p = *((u64**)p + 1);
-#define READ_DATA(x, size)   \
-	std::memcpy(x, p, size); \
-	p = *((u8**)p + size);
-#define FAIL_TOO_LARGE(size) \
-	if ((u8*)p + size > end) \
-	{                        \
-		Console.Error("Overran buffer while reading dump file."); \
-		return false; \
-	} \
-
-	std::size_t magic;
-	READ_SIZE(magic);
-	if (magic != 0x12345678)
-	{
-		Console.Error("Incorrect magic number for dump.");
-		return false;
-	}
-
-	std::size_t regs_size;
-	READ_SIZE(regs_size);
-	FAIL_TOO_LARGE(regs_size);
-
-	m_regs_data.resize(regs_size / sizeof(m_regs_data[0]));
-	READ_DATA(m_regs_data.data(), regs_size);
-
-	std::size_t state_size;
-	READ_SIZE(state_size);
-	FAIL_TOO_LARGE(state_size);
-
-	m_state_data.resize(state_size / sizeof(m_state_data[0]));
-	READ_DATA(m_state_data.data(), state_size);
-
-	std::size_t packets_size;
-	READ_SIZE(packets_size);
-	FAIL_TOO_LARGE(packets_size);
-
-	m_packet_data.resize(packets_size / sizeof(m_packet_data[0]));
-	READ_DATA(m_packet_data.data(), packets_size);
-
-	return true;
-
-#undef READ_SIZE
-#undef READ_DATA
-#undef FAIL_TOO_LARGE
-}
-
 /******************************************************************/
 
 static std::once_flag s_lzma_crc_table_init;
@@ -706,6 +613,39 @@ namespace
 
 		return ret;
 	}
+
+	class GSDumpMemory final : public GSDumpFile
+	{
+	public:
+		GSDumpMemory();
+		~GSDumpMemory() override;
+
+		bool Open(FileSystem::ManagedCFilePtr fp, Error* error) override;
+		bool IsEof() override;
+		size_t Read(void* ptr, size_t size) override;
+	};
+
+	GSDumpMemory::GSDumpMemory() = default;
+
+	GSDumpMemory::~GSDumpMemory() = default;
+
+	bool GSDumpMemory::Open(FileSystem::ManagedCFilePtr fp, Error* error)
+	{
+		pxFail("Not implemented.");
+		return false;
+	}
+
+	bool GSDumpMemory::IsEof()
+	{
+		pxFail("Not implemented.");
+		return true;
+	}
+
+	size_t GSDumpMemory::Read(void* ptr, size_t size)
+	{
+		pxFail("Not implemented.");
+		return 0;
+	}
 } // namespace
 
 /******************************************************************/
@@ -728,4 +668,99 @@ std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDump(const char* filename, Error* 
 		file = {};
 
 	return file;
+}
+
+bool GSDumpFile::Serialize(const GSDumpFile& dump, void* ptr, std::size_t max_size)
+{
+	std::size_t regs_size = dump.m_regs_data.size() * sizeof(dump.m_regs_data[0]);
+	std::size_t state_size = dump.m_state_data.size() * sizeof(dump.m_state_data[0]);
+	std::size_t packets_size = dump.m_dump_packets.size() * sizeof(dump.m_dump_packets[0]);
+	std::size_t total_size = regs_size + state_size + packets_size + 4 * sizeof(std::size_t);
+
+	if (total_size > max_size)
+	{
+		Console.Error("Dump too large to serialize. Total: {}, Max: {}", total_size, max_size);
+		return false;
+	}
+
+	void* p = ptr;
+
+#define WRITE_SIZE(x) \
+	*(u64*)p = (u64)x; \
+	p = *((u64**)p + 1);
+#define WRITE_DATA(x, size) \
+	std::memcpy(p, x, size); \
+	p = *((u8**)p + size);
+
+	WRITE_SIZE(0x12345678); // magic number
+
+	WRITE_SIZE(regs_size);
+	WRITE_DATA(dump.m_regs_data.data(), regs_size);
+
+	WRITE_SIZE(state_size);
+	WRITE_DATA(dump.m_state_data.data(), state_size);
+
+	WRITE_SIZE(packets_size);
+	WRITE_DATA(dump.m_dump_packets.data(), packets_size);
+
+	return true;
+
+#undef WRITE_SIZE
+#undef WRITE_DATA
+}
+
+std::unique_ptr<GSDumpFile> GSDumpFile::Deserialize(void* ptr, std::size_t size)
+{
+	std::unique_ptr<GSDumpMemory> dump = std::make_unique<GSDumpMemory>();
+
+	void* end = (u8*)ptr + size;
+	void* p = ptr;
+
+#define READ_SIZE(x) \
+	x = *(u64*)p; \
+	p = *((u64**)p + 1);
+#define READ_DATA(x, size) \
+	std::memcpy(x, p, size); \
+	p = *((u8**)p + size);
+#define FAIL_TOO_LARGE(size) \
+	if ((u8*)p + size > end) \
+	{ \
+		Console.Error("Overran buffer while reading dump file."); \
+		return nullptr; \
+	}
+
+	std::size_t magic;
+	READ_SIZE(magic);
+	if (magic != 0x12345678)
+	{
+		Console.Error("Incorrect magic number for dump.");
+		return nullptr;
+	}
+
+	std::size_t regs_size;
+	READ_SIZE(regs_size);
+	FAIL_TOO_LARGE(regs_size);
+
+	dump->m_regs_data.resize(regs_size / sizeof(dump->m_regs_data[0]));
+	READ_DATA(dump->m_regs_data.data(), regs_size);
+
+	std::size_t state_size;
+	READ_SIZE(state_size);
+	FAIL_TOO_LARGE(state_size);
+
+	dump->m_state_data.resize(state_size / sizeof(m_state_data[0]));
+	READ_DATA(dump->m_state_data.data(), state_size);
+
+	std::size_t packets_size;
+	READ_SIZE(packets_size);
+	FAIL_TOO_LARGE(packets_size);
+
+	dump->m_packet_data.resize(packets_size / sizeof(dump->m_packet_data[0]));
+	READ_DATA(dump->m_packet_data.data(), packets_size);
+
+	return dump;
+
+#undef READ_SIZE
+#undef READ_DATA
+#undef FAIL_TOO_LARGE
 }
