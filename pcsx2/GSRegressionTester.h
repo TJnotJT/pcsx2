@@ -99,11 +99,11 @@ struct DumpFileSharedMemory
 	void Init(std::size_t dump_size);
 
 	// Call by owner.
-	void* GetDumpPtr();
-	std::size_t GetDumpSize();
-	std::string GetName();
-	void SetDumpSize(std::size_t size);
-	void SetName(const std::string& str);
+	void* GetPtrDump();
+	std::size_t GetSizeDump();
+	std::string GetNameDump();
+	void SetSizeDump(std::size_t size);
+	void SetNameDump(const std::string& str);
 
 	// Static.
 	static std::size_t GetTotalSize(std::size_t dump_size);
@@ -131,6 +131,17 @@ struct StatusSharedMemory
 /// Ring buffer of regression packets, dump files, and status.
 struct RegressionBuffer
 {
+	static constexpr const char* WAIT_DUMP = "WAIT_DUMP";
+	static constexpr const char* WRITING_DATA = "WRITING_DATA";
+	//static constexpr const char* ERROR_STATUS = "ERROR";
+	static constexpr const char* DONE = "DONE";
+
+	enum StatusType : u32
+	{
+		STATUS_RUNNER = 0,
+		STATUS_TESTER,
+		STATUS_N
+	};
 	SharedMemoryFile shm;
 
 	RegressionPacket* packets = nullptr;
@@ -143,7 +154,7 @@ struct RegressionBuffer
 	std::size_t dump_write = 0;
 	std::size_t dump_read = 0;
 
-	StatusSharedMemory* status;
+	StatusSharedMemory* status[STATUS_N];
 
 	std::string dump_name; // Local copy.
 
@@ -166,20 +177,24 @@ struct RegressionBuffer
 	RegressionPacket* GetPacketRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	bool DonePacketWrite();
-	bool DonePacketRead();
+	void DonePacketWrite();
+	void DonePacketRead();
 
 	// Thread safe; acquire ownership.
 	DumpFileSharedMemory* GetDumpWrite(bool block = true);
 	DumpFileSharedMemory* GetDumpRead(bool block = false);
 
 	// Call only by owner to release ownership.
-	bool DoneDumpWrite();
-	bool DoneDumpRead();
+	void DoneDumpWrite();
+	void DoneDumpRead();
 
 	// Thread safe.
-	std::string GetStatus();
-	void SetStatus(const std::string& str);
+	std::string GetStatus(StatusType type);
+	void SetStatus(const std::string& str, StatusType type);
+	std::string GetStatusRunner();
+	std::string GetStatusTester();
+	void SetStatusRunner(const std::string& str);
+	void SetStatusTester(const std::string& str);
 
 	// Access only local data.
 	void SetNameDump(const std::string& name);

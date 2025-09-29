@@ -16,7 +16,8 @@ namespace GSDumpReplayer
 	int GetLoopCount();
 	bool IsRunner();
 	bool IsBatchMode();
-	void SetIsDumpRunner(bool is_runner);
+	void SetIsDumpRunner(bool is_runner, const std::string& name = "");
+	std::string GetRunnerName();
 	void SetIsBatchMode(bool batch_mode);
 	void SetDumpGSDataDirHW(const std::string& dir);
 	void SetDumpGSDataDirSW(const std::string& dir);
