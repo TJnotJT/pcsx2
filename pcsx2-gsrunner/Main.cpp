@@ -1256,6 +1256,29 @@ void CachedDump::Reset()
 	name = "";
 }
 
+bool StartRunnersRegressionTest()
+{
+	// Start the runner processes in regression testing mode.
+	for (int i = 0; i < 2; i++)
+	{
+		std::string command =
+			regression_runner_path[i] +
+			std::string(" runner ") +
+			std::string(" -surfaceless ") +
+			std::string(" -loop 1 ") +
+			std::string(" -dump f ") +
+			std::string(" -regression-test ") + regression_shared_file[i] +
+			std::string(" -npackets ") + std::to_string(regression_num_packets) +
+			" " + regression_runner_args;
+
+		if (!regression_runner_proc[i].Start(command))
+		{
+			Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
+			return false;
+		}
+	}
+}
+
 int main_tester(int argc, char* argv[])
 {
 	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
@@ -1291,25 +1314,8 @@ int main_tester(int argc, char* argv[])
 		}
 	}
 
-	// Start the runner processes in regression testing mode.
-	for (int i = 0; i < 2; i++)
-	{
-		std::string command =
-			regression_runner_path[i] +
-			std::string(" runner ") +
-			std::string(" -surfaceless ") +
-			std::string(" -loop 1 ") +
-			std::string(" -dump f ") +
-			std::string(" -regression-test ") + regression_shared_file[i] +
-			std::string(" -npackets ") + std::to_string(regression_num_packets) +
-			" " + regression_runner_args;
-
-		if (!regression_runner_proc[i].Start(command))
-		{
-			Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
-			return EXIT_FAILURE;
-		}
-	}
+	if (!StartRunnersRegressionTest())
+		return EXIT_FAILURE;
 
 	std::string status[2];
 	bool exited[2] = {false, false};
@@ -1320,9 +1326,20 @@ int main_tester(int argc, char* argv[])
 	CachedDump dump;
 	std::size_t dump_index = 0;
 	Error error;
+	std::size_t deadlock_count = 0;
+	std::size_t failure_restarts = 0;
 
 	while (1)
 	{
+		if (deadlock_count++ >= regression_deadlock_timeout)
+		{
+			if (failure_restarts++ >= regression_failure_restarts)
+			{
+				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Restarted {} times due to failures. Exiting.", failure_restarts);
+
+			}
+		}
+
 		if (dump_index < dump_files.size())
 		{
 			if (dump.HasCached())
@@ -1339,7 +1356,10 @@ int main_tester(int argc, char* argv[])
 					dump.Reset();
 					dump_index++; // Skip
 				}
-				// Else the copy failed because the buffer is full. Try again next iteration.
+				else
+				{
+					// The copy failed because the buffer is full. Try again next iteration.
+				}
 			}
 			else if (!dump.Load(dump_files[dump_index], &error))
 			{

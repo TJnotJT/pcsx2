@@ -2,6 +2,7 @@
 #include "common/Assertions.h"
 #include "common/Console.h"
 #include "common/ScopedGuard.h"
+#include "common/Timer.h"
 
 #include <filesystem>
 #include <thread>
@@ -12,9 +13,10 @@
 
 static RegressionBuffer* regression_buffer; // Used by GS runner processes.
 
-bool SpinlockSharedMemory::LockWrite(bool block)
+bool SpinlockSharedMemory::LockWrite(bool block, double sec)
 {
-	while (true)
+	Common::Timer timer; // HERE!!!
+	while (sec <= 0.0 || timer.GetTimeInSeconds() <= sec)
 	{
 		if (InterlockedCompareExchange(&lock, WRITEABLE, WRITEABLE) == WRITEABLE)
 		{
@@ -26,9 +28,11 @@ bool SpinlockSharedMemory::LockWrite(bool block)
 
 		std::this_thread::yield();
 	}
+
+	return false; // timeout
 }
 
-bool SpinlockSharedMemory::LockRead(bool block)
+bool SpinlockSharedMemory::LockRead(bool block, double sec)
 {
 	while (true)
 	{
@@ -86,7 +90,7 @@ bool SpinlockSharedMemory::Unlock()
 	return InterlockedCompareExchange(&lock, UNLOCKED, LOCKED) == LOCKED;
 }
 
-RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
+RegressionPacket* RegressionBuffer::GetPacketWrite(bool block, std::size_t timeous_usec)
 {	
 	if (!packets[packet_write % num_packets].lock.LockWrite(block))
 		return nullptr;
