@@ -116,6 +116,8 @@ static std::string regression_runner_name[2];
 static std::string regression_shared_file[2];
 static std::string regression_dump_dir;
 static Process regression_runner_proc[2];
+static constexpr std::size_t regression_deadlock_timeout = 1000;
+static constexpr std::size_t regression_failure_restarts = 10;
 
 static constexpr std::size_t regression_status_size = 4096;
 static constexpr std::size_t regression_dump_size = 64 * 1024 * 1024;
@@ -558,7 +560,11 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 #define CHECK_ARG(str) !std::strcmp(argv[i], str)
 #define CHECK_ARG_PARAM(str) (!std::strcmp(argv[i], str) && ((i + 1) < argc))
 
-			if (CHECK_ARG("-help"))
+			if (i == 1 && CHECK_ARG("runner"))
+			{
+				continue;
+			}
+			else if (CHECK_ARG("-help"))
 			{
 				PrintCommandLineHelpRunner(argv[0]);
 				return false;
@@ -897,8 +903,12 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 			return false; \
 		} \
 	} while (0)
-			
-		if (CHECK_ARG("-help"))
+		
+		if (i == 1 && CHECK_ARG("tester"))
+		{
+			continue;
+		}
+		else if (CHECK_ARG("-help"))
 		{
 			PrintCommandLineHelpTester(argv[0]);
 			return false;
@@ -1075,53 +1085,46 @@ static void CPUThreadMain(VMBootParameters* params) {
 	GSRunner::StopPlatformMessagePump();
 }
 
-bool CopyDumpToSharedMemory(const std::string& fn, bool block)
+bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error)
 {
-	Error error;
-	std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(fn.c_str(), &error);
-
-	if (!dump)
-	{
-		Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to open file '{}' (error: {}).", fn, error.GetDescription());
-		return false;
-	}
+	error->SetString("");
 
 	DumpFileSharedMemory* dump_shared[2]{};
 
-	std::string dump_name = std::filesystem::path(fn).filename().string();
-	std::size_t dump_size;
+	std::size_t size;
 
-	//for (int i = 0; i < 2; i++)
-	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+	for (int i = 0; i < 2; i++)
 	{
-		dump_shared[i] = regression_buffer[i].GetDumpWrite(block);
+		dump_shared[i] = regression_buffer[i].GetDumpWrite(false); // Don't block
 		if (!dump_shared[i])
+		{
 			return false;
+		}
 	}
 
-	//for (int i = 0; i < 2; i++)
-	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+	for (int i = 0; i < 2; i++)
 	{
 		if (i == 0)
 		{
-			if (!dump->ReadFile(dump_shared[0]->GetDumpPtr(), regression_dump_size, &dump_size, &error))
+			if (!dump->ReadFile(dump_shared[0]->GetPtrDump(), regression_dump_size, &size, error))
 			{
-				Host::ReportErrorAsync("(GSDumpRunner/RegressionTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error.GetDescription()));
+				Host::ReportErrorAsync("(GSDumpRunner/RegressionTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
 				return false;
 			}
 		}
 		else
 		{
-			memcpy(dump_shared[1]->GetDumpPtr(), dump_shared[0]->GetDumpPtr(), dump_size);
+			memcpy(dump_shared[1]->GetPtrDump(), dump_shared[0]->GetPtrDump(), size);
 		}
 
-		dump_shared[i]->SetDumpSize(dump_size);
-		dump_shared[i]->SetName(dump_name);
+		dump_shared[i]->SetSizeDump(size);
+		dump_shared[i]->SetNameDump(name);
 	}
 
-	//for (int i = 0; i < 2; i++)
-	for (int i = 0; i < 1; i++) // FIXME: TEMP FOR TESTING!!!
+	for (int i = 0; i < 2; i++)
 		regression_buffer[i].DoneDumpWrite(); // Only commit on successful write; otherwise leave empty.
+
+	error->SetString("");
 
 	return true;
 }
@@ -1148,14 +1151,6 @@ std::vector<std::string> __dump_files_debug__ = {
 	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs",
 	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs.xz",
 };
-
-bool getnextfile(std::string& str)
-{
-	if (__dump_files_i__ == __dump_files_debug__.size())
-		return false;
-	str =__dump_files_debug__[__dump_files_i__++];
-	return true;
-}
 
 int main_runner(int argc, char* argv[])
 {
@@ -1190,11 +1185,7 @@ int main_runner(int argc, char* argv[])
 		StartRegressionTest(&s_regression_buffer, s_regression_file,
 			regression_num_packets, regression_dump_size, regression_status_size);
 
-	GetRegressionBuffer()->SetStatus("hello world");
-
-	Console.WriteLn(GetRegressionBuffer()->GetStatus());
-
-	CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
+	//CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
 
 	//std::vector<std::string> dump_files;
 	//GSDumpReplayer::ReadDumpFileList(params.filename, __dump_files_debug__);
@@ -1212,7 +1203,7 @@ int main_runner(int argc, char* argv[])
 	
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
-	GSDumpReplayer::SetIsDumpRunner(true);
+	GSDumpReplayer::SetIsDumpRunner(true, std::filesystem::path(argv[0]).filename().string());
 	if (s_batch_mode)
 	{
 		GSDumpReplayer::SetIsBatchMode(true);
@@ -1233,6 +1224,36 @@ int main_runner(int argc, char* argv[])
 	if (!s_regression_file.empty())
 		EndRegressionTest();
 	return EXIT_SUCCESS;
+}
+
+struct CachedDump
+{
+	std::unique_ptr<GSDumpFile> ptr;
+	std::string name;
+
+	bool Load(const std::string& file, Error* error);
+	bool HasCached();
+	void Reset();
+};
+
+bool CachedDump::Load(const std::string& file, Error* error)
+{
+	ptr = GSDumpFile::OpenGSDump(file.c_str(), error);
+	if (!ptr)
+		return false;
+	name = std::filesystem::path(file).filename().string();
+	return true;
+}
+
+bool CachedDump::HasCached()
+{
+	return static_cast<bool>(ptr);
+}
+
+void CachedDump::Reset()
+{
+	ptr.reset();
+	name = "";
 }
 
 int main_tester(int argc, char* argv[])
@@ -1271,7 +1292,6 @@ int main_tester(int argc, char* argv[])
 	}
 
 	// Start the runner processes in regression testing mode.
-	// FIXME: Make sure the runners don't expect the dump name in regression testing mode.
 	for (int i = 0; i < 2; i++)
 	{
 		std::string command =
@@ -1291,154 +1311,179 @@ int main_tester(int argc, char* argv[])
 		}
 	}
 
-	for (const std::string& dump_file : dump_files)
+	std::string status[2];
+	bool exited[2] = {false, false};
+	bool done[2] = {false, false};
+	RegressionPacket* packets[2];
+	std::map<std::string, float> image_diffs;
+	std::vector<std::pair<std::string, std::string>> mismatched[2];
+	CachedDump dump;
+	std::size_t dump_index = 0;
+	Error error;
+
+	while (1)
 	{
-		/*for (int i = 0; i < 2; i++)
-			regression_buffer[i].ResetFile();*/
-
-		std::string dump_name = std::filesystem::path(dump_file).filename().string();
-
-		if (!CopyDumpToSharedMemory(dump_file, true))
+		if (dump_index < dump_files.size())
 		{
-			Console.ErrorFmt("(GSDumpRunner/RegressionTester) Skipping dump '{}'", dump_file);
-			continue;
-		}
-
-		bool exited[2] = {false, false};
-		bool done[2] = {false, false};
-		RegressionPacket* packets[2];
-		std::map<std::string, float> image_diffs;
-		std::vector<std::pair<std::string, std::string>> mismatched[2];
-
-		while (1)
-		{
-			for (int i = 0; i < 2; i++)
+			if (dump.HasCached())
 			{
-				exited[i] = !regression_runner_proc[i].IsRunning();
-			}
-
-			for (int i = 0; i < 2; i++)
-			{
-				packets[i] = regression_buffer[i].GetPacketRead();
-			}
-
-			if (packets[0] && packets[1])
-			{
-				std::string name_dump[2];
-				std::string name_packet[2];
-
-				for (int i = 0; i < 2; i++)
+				if (CopyDumpToSharedMemory(dump.ptr, dump.name, &error))
 				{
-					name_dump[i] = packets[i]->GetNameDump();
-					name_packet[i] = packets[i]->GetNamePacket();
+					Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Copied '{}' to shared memory", dump.name);
+					dump.Reset();
+					dump_index++;
 				}
-
-				if (name_packet[0] == name_packet[1] && name_dump[0] == name_dump[1])
+				else if (!error.GetDescription().empty())
 				{
-					Console.WriteLnFmt("Comparing results for {} / {}.", name_dump[0], name_packet[1]);
-
-					if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
-					{
-						for (int i = 0; i < 2; i++)
-						{
-							std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name + "_" + name_packet[1] + ".png")).string();
-
-							if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
-							{
-								Console.WarningFmt("Unable to save image file: \"{}\"", dump_image_path);
-							}
-						}
-					}
+					Console.ErrorFmt("(GSDumpRunner/RegressionTester) Error copying '{}' to shared memory.", dump_files[dump_index]);
+					dump.Reset();
+					dump_index++; // Skip
 				}
-				else
-				{
-					Console.Warning("Runners out of sync on dumps:");
-					for (int i = 0; i < 2; i++)
-					{
-						Console.WarningFmt("\n    {}: {} / {}\n", regression_runner_name[i], name_dump[i], name_packet[i]);
-					}
-					
-					for (int i = 0; i < 2; i++)
-						mismatched[i].emplace_back(name_dump[i], name_packet[i]);
-				}
-
-				for (int i = 0; i < 2; i++)
-				{
-					regression_buffer[i].DonePacketRead();
-				}
+				// Else the copy failed because the buffer is full. Try again next iteration.
 			}
-
-			for (int i = 0; i < 2; i++)
-				done[i] = exited[i] && packets[i] == nullptr;
-
-			for (int i = 0; i < 2; i++)
+			else if (!dump.Load(dump_files[dump_index], &error))
 			{
-				int j = 1 - i;
-				if (done[i] && !done[j])
-				{
-					if (packets[j])
-					{
-						std::string name_dump = packets[j]->GetNameDump();
-						std::string name_packet = packets[j]->GetNamePacket();
-						Console.WarningFmt("Runner {} extra packet: {} / {}", regression_runner_name[j], name_dump, name_packet);
-						mismatched[j].emplace_back(name_dump, name_packet);
-						packets[j] = nullptr;
-					}
-				}
+				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to load dump '{}' (error: {}).",
+					dump_files[dump_index], error.GetDescription());
+				dump_index++; // Skip
 			}
-
-			if (done[0] && done[1])
-			{
-				Console.WriteLn("Runners both exited. Finishing test.");
-				break;
-			}
-
-			std::this_thread::yield();
-		}
-
-		// Write results to directory.
-		std::filesystem::path out_dir = std::filesystem::path(regression_output_dir);
-		std::filesystem::path out_path = out_dir / (dump_name + ".txt");
-
-		std::ofstream oss(out_path);
-
-		constexpr const char* INDENT = "    ";
-		constexpr const char* OPEN_MAP = "{";
-		constexpr const char* CLOSE_MAP = "}";
-		constexpr const char* QUOTE = "\"";
-		constexpr const char* KEY_VAL_DEL = ": ";
-		constexpr const char* LIST_DEL = ", ";
-		constexpr const char* LIST_ITEM = "- ";
-		constexpr const char* OPEN_LIST = "[";
-		constexpr const char* CLOSE_LIST = "]";
-
-		if (!image_diffs.empty())
-		{
-			oss << "diffs: " << std::endl;
-
-			for (const auto& [name, diff_frac] : image_diffs)
-			{
-				oss << INDENT << QUOTE << name << QUOTE << KEY_VAL_DEL << diff_frac << CLOSE_MAP << std::endl;
-			}
-
-			oss << std::endl;
 		}
 
 		for (int i = 0; i < 2; i++)
 		{
-			if (!mismatched[i].empty())
+			exited[i] = !regression_runner_proc[i].IsRunning();
+			status[i] = status[i] = regression_buffer[i].GetStatusRunner();
+		}
+
+		for (int i = 0; i < 2; i++)
+		{
+			packets[i] = regression_buffer[i].GetPacketRead();
+		}
+
+		if (packets[0] && packets[1])
+		{
+			std::string name_dump[2];
+			std::string name_packet[2];
+
+			for (int i = 0; i < 2; i++)
 			{
-				oss << "mismatched_" << (i + 1) << KEY_VAL_DEL << std::endl;
-				for (const auto& [name_dump, name_packet] : mismatched[i])
+				name_dump[i] = packets[i]->GetNameDump();
+				name_packet[i] = packets[i]->GetNamePacket();
+			}
+
+			if (name_packet[0] == name_packet[1] && name_dump[0] == name_dump[1])
+			{
+				Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Comparing results for {} / {}.", name_dump[0], name_packet[0]);
+
+				if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 				{
-					oss << INDENT << LIST_ITEM << OPEN_LIST << QUOTE << name_dump << QUOTE <<
-						LIST_DEL << QUOTE << name_packet << QUOTE << CLOSE_LIST << std::endl;
+					for (int i = 0; i < 2; i++)
+					{
+						std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (name_dump[0] + "_" + name_packet[0] + ".png")).string();
+
+						if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+						{
+							Console.WarningFmt("(GSDumpRunner/RegressionTester) Unable to save image file: '{}'", dump_image_path);
+						}
+					}
 				}
-				oss << std::endl;
+			}
+			else
+			{
+				Console.Warning("(GSDumpRunner/RegressionTester) Runners out of sync on dumps:");
+				for (int i = 0; i < 2; i++)
+				{
+					Console.WarningFmt("\n    {}: {} / {}\n", regression_runner_name[i], name_dump[i], name_packet[i]);
+				}
+					
+				for (int i = 0; i < 2; i++)
+					mismatched[i].emplace_back(name_dump[i], name_packet[i]);
+			}
+
+			for (int i = 0; i < 2; i++)
+			{
+				regression_buffer[i].DonePacketRead();
 			}
 		}
 
-		oss.close();
+		for (int i = 0; i < 2; i++)
+		{
+			status[i] = regression_buffer[i].GetStatusRunner();
+			done[i] = exited[i] || (packets[i] == nullptr && status[i] == RegressionBuffer::WAIT_DUMP);
+		}
+
+		//for (int i = 0; i < 2; i++)
+		//{
+		//	int j = 1 - i;
+		//	if (done[i] && !done[j])
+		//	{
+		//		if (packets[j])
+		//		{
+		//			std::string name_dump = packets[j]->GetNameDump();
+		//			std::string name_packet = packets[j]->GetNamePacket();
+		//			Console.WarningFmt("Runner {} extra packet: {} / {}", regression_runner_name[j], name_dump, name_packet);
+		//			mismatched[j].emplace_back(name_dump, name_packet);
+		//			packets[j] = nullptr;
+		//		}
+		//	}
+		//}
+
+		if (done[0] && done[1] && dump_index >= dump_files.size())
+		{
+			Console.WriteLn("(GSDumpRunner/Tester) All dumps/packets finished.");
+			break;
+		}
+
+		std::this_thread::yield();
+
+		//// Write results to directory.
+		//std::filesystem::path out_dir = std::filesystem::path(regression_output_dir);
+		//std::filesystem::path out_path = out_dir / (dump_name + ".txt");
+
+		//std::ofstream oss(out_path);
+
+		//constexpr const char* INDENT = "    ";
+		//constexpr const char* OPEN_MAP = "{";
+		//constexpr const char* CLOSE_MAP = "}";
+		//constexpr const char* QUOTE = "\"";
+		//constexpr const char* KEY_VAL_DEL = ": ";
+		//constexpr const char* LIST_DEL = ", ";
+		//constexpr const char* LIST_ITEM = "- ";
+		//constexpr const char* OPEN_LIST = "[";
+		//constexpr const char* CLOSE_LIST = "]";
+
+		//if (!image_diffs.empty())
+		//{
+		//	oss << "diffs: " << std::endl;
+
+		//	for (const auto& [name, diff_frac] : image_diffs)
+		//	{
+		//		oss << INDENT << QUOTE << name << QUOTE << KEY_VAL_DEL << diff_frac << CLOSE_MAP << std::endl;
+		//	}
+
+		//	oss << std::endl;
+		//}
+
+		//for (int i = 0; i < 2; i++)
+		//{
+		//	if (!mismatched[i].empty())
+		//	{
+		//		oss << "mismatched_" << (i + 1) << KEY_VAL_DEL << std::endl;
+		//		for (const auto& [name_dump, name_packet] : mismatched[i])
+		//		{
+		//			oss << INDENT << LIST_ITEM << OPEN_LIST << QUOTE << name_dump << QUOTE <<
+		//				LIST_DEL << QUOTE << name_packet << QUOTE << CLOSE_LIST << std::endl;
+		//		}
+		//		oss << std::endl;
+		//	}
+		//}
+
+		//oss.close();
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		regression_buffer[i].SetStatusTester(RegressionBuffer::DONE);
 	}
 
 	for (int i = 0; i < 2; i++)
@@ -1473,18 +1518,13 @@ int main(int argc, char* argv[])
 
 	std::string mode(argv[1]);
 
-	if (mode == "runner")
+	if (mode == "tester")
 	{
-		return main_runner(argc - 1, &argv[1]);
-	}
-	else if (mode == "tester")
-	{
-		return main_tester(argc - 1, &argv[1]);
+		return main_tester(argc, argv);
 	}
 	else
 	{
-		Console.ErrorFmt("First argument should be [runner|tester] not \"{}\"", mode);
-		return EXIT_FAILURE;
+		return main_runner(argc, argv);
 	}
 }
 

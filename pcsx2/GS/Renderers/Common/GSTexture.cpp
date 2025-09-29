@@ -4,6 +4,7 @@
 #include "GS/Renderers/Common/GSTexture.h"
 #include "GS/Renderers/Common/GSDevice.h"
 #include "GS/GSPng.h"
+#include "GSDumpReplayer.h"
 
 #include "common/Console.h"
 #include "common/BitUtils.h"
@@ -62,16 +63,18 @@ bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 
 	if (rbp)
 	{
+		rbp->SetStatusRunner(RegressionBuffer::WRITING_DATA);
 		RegressionPacket* packet = nullptr;
 		ScopedGuard sg([&]() {
 			if (packet)
 				rbp->DonePacketWrite();
 		});
-		packet = rbp->GetPacketWrite(true); // Blocking
+		packet = rbp->GetPacketWrite(true); // Blocks
 		packet->SetNameDump(rbp->GetNameDump());
 		packet->SetNamePacket(fn);
 		packet->SetImageData(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
-		Console.WriteLnFmt("New regression packet: {} / {}", packet->GetNameDump(), packet->GetNamePacket());
+		Console.WriteLnFmt("(GSDumpReplayer: {}) New regression packet: {} / {}",
+			GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
 		return true;
 	}
 

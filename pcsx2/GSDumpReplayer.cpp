@@ -41,6 +41,7 @@ void GSDumpReplayerCancelInstruction();
 void GSDumpReplayerCpuClear(u32 addr, u32 size);
 
 static std::unique_ptr<GSDumpFile> s_dump_file;
+static std::string s_runner_name;
 static std::string s_dump_dir;
 static std::string s_dump_gs_data_dir_hw;
 static std::string s_dump_gs_data_dir_sw;
@@ -85,9 +86,16 @@ bool GSDumpReplayer::IsBatchMode()
 	return s_batch_mode;
 }
 
-void GSDumpReplayer::SetIsDumpRunner(bool is_runner)
+void GSDumpReplayer::SetIsDumpRunner(bool is_runner, const std::string& runner_name)
 {
 	s_is_dump_runner = is_runner;
+	if (is_runner)
+		s_runner_name = runner_name;
+}
+
+std::string GSDumpReplayer::GetRunnerName()
+{
+	return s_runner_name;
 }
 
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
@@ -210,6 +218,8 @@ bool GSDumpReplayer::Initialize(const char* filename)
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
 {
+	GetRegressionBuffer()->SetStatusRunner(RegressionBuffer::WAIT_DUMP);
+
 	DumpFileSharedMemory* dump = nullptr;
 
 	ScopedGuard sg([&]() {
@@ -217,17 +227,22 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 			GetRegressionBuffer()->DoneDumpRead();
 	});
 
+	Common::Timer timer;
 	while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
 	{
 		// FIXME: maybe we should put a time limit...
-		if (GetRegressionBuffer()->GetStatus() == "Done")
+		if (GetRegressionBuffer()->GetStatusTester() == RegressionBuffer::DONE)
 		{
 			break;
 		}
 
 		std::this_thread::yield();
 
-		Console.WriteLnFmt("Waiting for new dump.");
+		if (timer.GetTimeSeconds() >= 1.0)
+		{
+			Console.WriteLnFmt("(GSDumpReplayer: {}) Waiting for new dump.", s_runner_name);
+			timer.Reset();
+		}
 	}
 
 	if (!dump)
@@ -238,11 +253,11 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 
 	RegressionBuffer* r = GetRegressionBuffer();
 
-	const std::string dump_name = dump->GetName();
+	const std::string dump_name = dump->GetNameDump();
 
 	GetRegressionBuffer()->SetNameDump(dump_name);
 
-	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetDumpPtr(), dump->GetDumpSize());
+	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
 
 	Error error;
 	if (!s_dump_file->ReadFile(&error))
@@ -441,6 +456,9 @@ void GSDumpReplayerCpuStep()
 		}
 	}
 
+	if (IsRegressionTesting())
+		GetRegressionBuffer()->SetStatus("Writing packet", RegressionBuffer::STATUS_RUNNER);
+
 	switch (packet.id)
 	{
 		case GSDumpTypes::GSType::Transfer:
@@ -502,36 +520,35 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	if (IsRegressionTesting())
-	{
-		RegressionBuffer* buf = GetRegressionBuffer();
+	/////////////////////// TEMP DEBUGGING ///////////////////////
+	//if (IsRegressionTesting())
+	//{
+	//	RegressionBuffer* buf = GetRegressionBuffer();
 
-		/////////////////////// TEMP DEBUGGING ///////////////////////
-		// Discard all the written packets.
-		while (RegressionPacket* packet = buf->GetPacketRead(false))
-		{
-			Console.WriteLn(packet->GetNameDump() + " " + packet->GetNamePacket());
-			buf->DonePacketRead();
-		}
-		/////////////////////// TEMP DEBUGGING ///////////////////////
-	}
+	//	// Discard all the written packets.
+	//	while (RegressionPacket* packet = buf->GetPacketRead(false))
+	//	{
+	//		Console.WriteLn(packet->GetNameDump() + " " + packet->GetNamePacket());
+	//		buf->DonePacketRead();
+	//	}
+	//}
+	///////////////////////// TEMP DEBUGGING ///////////////////////
 
 	if (s_current_packet == 0 && s_dump_loop_count == 0 && GSDumpReplayer::IsBatchMode())
 	{
-		//GetRegressionBuffer()->SetStatus("Done");
 		MTGS::WaitGS(false, false, false);
-		/////////////////////// TEMP DEBUGGING ///////////////////////
-		extern int __dump_files_i__;
-		extern std::vector<std::string> __dump_files_debug__;
-		extern bool CopyDumpToSharedMemory(const std::string& fn, bool block);
-		while (__dump_files_i__ < __dump_files_debug__.size() && !CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true))
-			{
-			}
-		if (__dump_files_i__ == __dump_files_debug__.size())
-		{
-			GetRegressionBuffer()->SetStatus("Done");
-		}
-		/////////////////////// TEMP DEBUGGING ///////////////////////
+		///////////////////////// TEMP DEBUGGING ///////////////////////
+		//extern int __dump_files_i__;
+		//extern std::vector<std::string> __dump_files_debug__;
+		//extern bool CopyDumpToSharedMemory(const std::string& fn, bool block);
+		//while (__dump_files_i__ < __dump_files_debug__.size() && !CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true))
+		//	{
+		//	}
+		//if (__dump_files_i__ == __dump_files_debug__.size())
+		//{
+		//	GetRegressionBuffer()->SetStatus("Done");
+		//}
+		///////////////////////// TEMP DEBUGGING ///////////////////////
 		if (GSDumpReplayer::NextDump())
 		{
 			s_dump_loop_count = s_dump_loop_count_start;

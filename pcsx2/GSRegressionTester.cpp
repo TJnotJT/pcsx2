@@ -102,22 +102,20 @@ RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 	return &packets[packet_read % num_packets];
 }
 
-bool RegressionBuffer::DonePacketWrite()
+void RegressionBuffer::DonePacketWrite()
 {
 	if (!packets[packet_write % num_packets].lock.UnlockWrite())
-		return false;
+		pxFail("Unlock packet write is broken.");
 
 	packet_write++;
-	return true;
 }
 
-bool RegressionBuffer::DonePacketRead()
+void RegressionBuffer::DonePacketRead()
 {
 	if (!packets[packet_read % num_packets].lock.UnlockRead())
-		return false;
+		pxFail("Unlock packet read is broken.");
 
 	packet_read++;
-	return true;
 }
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
@@ -129,7 +127,7 @@ DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
 }
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpRead(bool block)
-{	
+{
 	if (!dumps[dump_read % num_dumps]->lock.LockRead(block))
 		return nullptr;
 
@@ -141,22 +139,20 @@ std::size_t DumpFileSharedMemory::GetTotalSize(std::size_t dump_size)
 	return sizeof(DumpFileSharedMemory) + dump_size;
 }
 
-bool RegressionBuffer::DoneDumpWrite()
+void RegressionBuffer::DoneDumpWrite()
 {
 	if (!dumps[dump_write % num_dumps]->lock.UnlockWrite())
-		return false;
+		pxFail("Unlock dump write is broken.");
 
 	dump_write++;
-	return true;
 }
 
-bool RegressionBuffer::DoneDumpRead()
+void RegressionBuffer::DoneDumpRead()
 {
 	if (!dumps[dump_read % num_dumps]->lock.UnlockRead())
-		return false;
+		pxFail("Unlock dump read is broken.");
 
 	dump_read++;
-	return true;
 }
 
 void RegressionPacket::SetNamePacket(const std::string& path)
@@ -235,7 +231,7 @@ void DumpFileSharedMemory::Init(std::size_t dump_size)
 {
 	lock = {SpinlockSharedMemory::WRITEABLE};
 	this->dump_size = dump_size;
-	memset(GetDumpPtr(), 0, dump_size);
+	memset(GetPtrDump(), 0, dump_size);
 }
 
 static std::size_t GetTotalSize(std::size_t dump_size)
@@ -243,29 +239,29 @@ static std::size_t GetTotalSize(std::size_t dump_size)
 	return sizeof(DumpFileSharedMemory) + dump_size;
 }
 
-void* DumpFileSharedMemory::GetDumpPtr()
+void* DumpFileSharedMemory::GetPtrDump()
 {
 	return reinterpret_cast<u8*>(this) + sizeof(DumpFileSharedMemory);
 }
 
-std::size_t DumpFileSharedMemory::GetDumpSize()
+std::size_t DumpFileSharedMemory::GetSizeDump()
 {
 	return dump_size;
 }
 
-void DumpFileSharedMemory::SetDumpSize(std::size_t size)
+void DumpFileSharedMemory::SetSizeDump(std::size_t size)
 {
 	dump_size = size;
 }
 
-std::string DumpFileSharedMemory::GetName()
+std::string DumpFileSharedMemory::GetNameDump()
 {
 	name[std::size(name) - 1] = '\0';
 
 	return std::string(name);
 }
 
-void DumpFileSharedMemory::SetName(const std::string& str)
+void DumpFileSharedMemory::SetNameDump(const std::string& str)
 {
 	memcpy(name, str.c_str(), std::min(name_size - 1, str.length()));
 
@@ -320,7 +316,7 @@ std::size_t RegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_t 
 	return
 		num_packets * RegressionPacket::GetTotalSize() +
 		num_dumps * DumpFileSharedMemory::GetTotalSize(dump_size) +
-		StatusSharedMemory::GetTotalSize(status_size);
+		STATUS_N * StatusSharedMemory::GetTotalSize(status_size);
 }
 
 bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets,
@@ -337,7 +333,8 @@ bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_pack
 		packets[i].Init();
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i]->Init(dump_size);
-	status->Init(status_size);
+	for (int i = 0; i < STATUS_N; i++)
+		status[i]->Init(status_size);
 
 	return true;
 }
@@ -345,18 +342,34 @@ bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_pack
 void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
 {
 	std::size_t packet_offset;
-	std::size_t dump_file_offset[2];
-	std::size_t status_offset;
+	std::size_t dump_file_offset[num_dumps];
+	std::size_t status_offset[STATUS_N];
 
-	packet_offset = reinterpret_cast<std::size_t>(shm.data);
-	dump_file_offset[0] = packet_offset + num_packets * RegressionPacket::GetTotalSize();
-	dump_file_offset[1] = dump_file_offset[0] + DumpFileSharedMemory::GetTotalSize(dump_size);
-	status_offset = dump_file_offset[1] + DumpFileSharedMemory::GetTotalSize(dump_size);
+	const std::size_t start_offset = reinterpret_cast<std::size_t>(shm.data);
+	std::size_t curr_offset = start_offset;
+
+	packet_offset = curr_offset;
+	curr_offset += num_packets * RegressionPacket::GetTotalSize();
+
+	for (int i = 0; i < num_dumps; i++)
+	{
+		dump_file_offset[i] = curr_offset;
+		curr_offset += DumpFileSharedMemory::GetTotalSize(dump_size);
+	}
+
+	for (int i = 0; i < STATUS_N; i++)
+	{
+		status_offset[i] = curr_offset;
+		curr_offset += StatusSharedMemory::GetTotalSize(status_size);
+	}
+
+	pxAssert(curr_offset - start_offset == GetTotalSize(num_packets, dump_size, status_size));
 
 	packets = reinterpret_cast<RegressionPacket*>(packet_offset);
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[i]);
-	status = reinterpret_cast<StatusSharedMemory*>(status_offset);
+	for (int i = 0; i < STATUS_N; i++)
+		status[i] = reinterpret_cast<StatusSharedMemory*>(status_offset[i]);
 	
 	this->num_packets = num_packets;
 }
@@ -377,7 +390,8 @@ bool RegressionBuffer::CloseFile()
 	packets = nullptr;
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i] = nullptr;
-	status = nullptr;
+	for (int i = 0; i < STATUS_N; i++)
+		status[i] = nullptr;
 	num_packets = 0;
 
 	if (!shm.CloseFile())
@@ -386,14 +400,34 @@ bool RegressionBuffer::CloseFile()
 	return true;
 }
 
-std::string RegressionBuffer::GetStatus()
+std::string RegressionBuffer::GetStatus(StatusType type)
 {
-	return status->GetStatus();
+	return status[type]->GetStatus();
 };
 
-void RegressionBuffer::SetStatus(const std::string& str)
+std::string RegressionBuffer::GetStatusRunner()
 {
-	status->SetStatus(str);
+	return GetStatus(STATUS_RUNNER);
+};
+
+std::string RegressionBuffer::GetStatusTester()
+{
+	return GetStatus(STATUS_TESTER);
+};
+
+void RegressionBuffer::SetStatus(const std::string& str, StatusType type)
+{
+	status[type]->SetStatus(str);
+};
+
+void RegressionBuffer::SetStatusRunner(const std::string& str)
+{
+	SetStatus(str, STATUS_RUNNER);
+};
+
+void RegressionBuffer::SetStatusTester(const std::string& str)
+{
+	SetStatus(str, STATUS_TESTER);
 };
 
 void RegressionBuffer::SetNameDump(const std::string& name)
