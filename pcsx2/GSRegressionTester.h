@@ -18,8 +18,8 @@ struct SpinlockSharedMemory
 		READABLE = 1
 	};
 
-	bool LockWrite(bool block = true);
-	bool LockRead(bool block = false);
+	bool LockWrite(bool block = true, double sec);
+	bool LockRead(bool block = false, double sec);
 	bool UnlockWrite();
 	bool UnlockRead();
 	bool Writeable();
