@@ -1643,8 +1643,6 @@ int GSTester::main_tester(int argc, char* argv[])
 					restart = true;
 				}
 
-				restart = true;
-
 				if (restart)
 					continue;
 
