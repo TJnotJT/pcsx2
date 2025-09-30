@@ -61,8 +61,8 @@ namespace GSRunner
 {
 	static void InitializeConsole();
 	static bool InitializeConfig();
-	static bool ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParameters& params);
-	static bool ParseCommandLineArgsTester(int argc, char* argv[]);
+	static bool ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params);
+	static void PrintCommandLineHelp(const char* progname);
 	static void DumpStats();
 
 	static bool CreatePlatformWindow();
@@ -70,62 +70,86 @@ namespace GSRunner
 	static std::optional<WindowInfo> GetPlatformWindowInfo();
 	static void PumpPlatformMessages(bool forever = false);
 	static void StopPlatformMessagePump();
+
+	int main_runner(int argc, char* argv[]);
+
+	static constexpr u32 WINDOW_WIDTH = 640;
+	static constexpr u32 WINDOW_HEIGHT = 480;
+
+	static MemorySettingsInterface s_settings_interface;
+
+	static std::string s_output_prefix;
+	static std::string s_regression_file;
+	RegressionBuffer s_regression_buffer;
+	static s32 s_loop_count = 1;
+	static std::optional<bool> s_use_window;
+	static bool s_no_console = false;
+	static bool s_batch_mode = false;
+
+	// Owned by the GS thread.
+	static u32 s_dump_frame_number = 0;
+	static u32 s_loop_number = s_loop_count;
+	static double s_last_internal_draws = 0;
+	static double s_last_draws = 0;
+	static double s_last_render_passes = 0;
+	static double s_last_barriers = 0;
+	static double s_last_copies = 0;
+	static double s_last_uploads = 0;
+	static double s_last_readbacks = 0;
+	static u64 s_total_internal_draws = 0;
+	static u64 s_total_draws = 0;
+	static u64 s_total_render_passes = 0;
+	static u64 s_total_barriers = 0;
+	static u64 s_total_copies = 0;
+	static u64 s_total_uploads = 0;
+	static u64 s_total_readbacks = 0;
+	static u32 s_total_frames = 0;
+	static u32 s_total_drawn_frames = 0;
+	static std::string s_dump_gs_data_dir_hw;
+	static std::string s_dump_gs_data_dir_sw;
 } // namespace GSRunner
 
-static constexpr u32 WINDOW_WIDTH = 640;
-static constexpr u32 WINDOW_HEIGHT = 480;
+namespace GSTester
+{
+	static bool ParseCommandLineArgs(int argc, char* argv[]);
+	static void PrintCommandLineHelp(const char* progname);
+	bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error);
+	bool StartRunners();
+	bool EndRunners();
+	bool RestartRunners();
 
-static MemorySettingsInterface s_settings_interface;
+	int main_tester(int argc, char* argv[]);
 
-static std::string s_output_prefix;
-static std::string s_regression_file;
-RegressionBuffer s_regression_buffer;
-static s32 s_loop_count = 1;
-static std::optional<bool> s_use_window;
-static bool s_no_console = false;
-static bool s_batch_mode = false;
+	struct CachedDump
+	{
+		std::unique_ptr<GSDumpFile> ptr;
+		std::string name;
 
-// Owned by the GS thread.
-static u32 s_dump_frame_number = 0;
-static u32 s_loop_number = s_loop_count;
-static double s_last_internal_draws = 0;
-static double s_last_draws = 0;
-static double s_last_render_passes = 0;
-static double s_last_barriers = 0;
-static double s_last_copies = 0;
-static double s_last_uploads = 0;
-static double s_last_readbacks = 0;
-static u64 s_total_internal_draws = 0;
-static u64 s_total_draws = 0;
-static u64 s_total_render_passes = 0;
-static u64 s_total_barriers = 0;
-static u64 s_total_copies = 0;
-static u64 s_total_uploads = 0;
-static u64 s_total_readbacks = 0;
-static u32 s_total_frames = 0;
-static u32 s_total_drawn_frames = 0;
-static std::string s_dump_gs_data_dir_hw;
-static std::string s_dump_gs_data_dir_sw;
+		bool Load(const std::string& file, Error* error);
+		bool HasCached();
+		void Reset();
+	};
 
-// For the tester
-static std::string regression_output_dir;
-static std::string regression_output_image_dir[2];
-static std::string regression_output_hwstat_dir[2];
-static std::string regression_runner_args;
-static RegressionBuffer regression_buffer[2];
-static std::string regression_runner_path[2];
-static std::string regression_runner_command[2];
-static std::string regression_runner_name[2];
-static std::string regression_shared_file[2];
-static std::string regression_dump_dir;
-static Process regression_runner_proc[2];
-static constexpr std::size_t regression_deadlock_timeout = 1000;
-static constexpr std::size_t regression_failure_restarts = 10;
+	// For the tester
+	static std::string regression_output_dir;
+	static std::string regression_output_image_dir[2];
+	static std::string regression_output_hwstat_dir[2];
+	static std::string regression_runner_args;
+	static RegressionBuffer regression_buffer[2];
+	static std::string regression_runner_path[2];
+	static std::string regression_runner_command[2];
+	static std::string regression_runner_name[2];
+	static std::string regression_shared_file[2];
+	static std::string regression_dump_dir;
+	static Process regression_runner_proc[2];
+	static constexpr std::size_t regression_deadlock_timeout = 1000;
+	static constexpr std::size_t regression_failure_restarts = 10;
 
-static constexpr std::size_t regression_status_size = 4096;
-static constexpr std::size_t regression_dump_size = 64 * 1024 * 1024;
-static constexpr std::size_t regression_num_packets_default = 10;
-static std::size_t regression_num_packets = regression_num_packets_default;
+	static constexpr std::size_t regression_status_size = 4096;
+	static constexpr std::size_t regression_dump_size = 64 * 1024 * 1024;
+	static constexpr std::size_t regression_num_packets_default = 10;
+	static std::size_t regression_num_packets = regression_num_packets_default;
+} // namespace GSTester
 
 // For both tester/runner
 
@@ -298,20 +322,20 @@ void Host::ReleaseRenderWindow()
 
 void Host::BeginPresentFrame()
 {
-	if (s_loop_number == 0 && !s_output_prefix.empty())
+	if (GSRunner::s_loop_number == 0 && !GSRunner::s_output_prefix.empty())
 	{
 		// when we wrap around, don't race other files
 		GSJoinSnapshotThreads();
 
 		// queue dumping of this frame
-		std::string dump_path(fmt::format("{}_frame{:05}.png", s_output_prefix, s_dump_frame_number));
+		std::string dump_path(fmt::format("{}_frame{:05}.png", GSRunner::s_output_prefix, GSRunner::s_dump_frame_number));
 		GSQueueSnapshot(dump_path);
 	}
 
 	if (GSIsHardwareRenderer())
 	{
-		const u32 last_draws = s_total_internal_draws;
-		const u32 last_uploads = s_total_uploads;
+		const u32 last_draws = GSRunner::s_total_internal_draws;
+		const u32 last_uploads = GSRunner::s_total_uploads;
 
 		static constexpr auto update_stat = [](GSPerfMon::counter_t counter, u64& dst, double& last) {
 			// perfmon resets every 30 frames to zero
@@ -320,20 +344,20 @@ void Host::BeginPresentFrame()
 			last = val;
 		};
 
-		update_stat(GSPerfMon::Draw, s_total_internal_draws, s_last_internal_draws);
-		update_stat(GSPerfMon::DrawCalls, s_total_draws, s_last_draws);
-		update_stat(GSPerfMon::RenderPasses, s_total_render_passes, s_last_render_passes);
-		update_stat(GSPerfMon::Barriers, s_total_barriers, s_last_barriers);
-		update_stat(GSPerfMon::TextureCopies, s_total_copies, s_last_copies);
-		update_stat(GSPerfMon::TextureUploads, s_total_uploads, s_last_uploads);
-		update_stat(GSPerfMon::Readbacks, s_total_readbacks, s_last_readbacks);
+		update_stat(GSPerfMon::Draw, GSRunner::s_total_internal_draws, GSRunner::s_last_internal_draws);
+		update_stat(GSPerfMon::DrawCalls, GSRunner::s_total_draws, GSRunner::s_last_draws);
+		update_stat(GSPerfMon::RenderPasses, GSRunner::s_total_render_passes, GSRunner::s_last_render_passes);
+		update_stat(GSPerfMon::Barriers, GSRunner::s_total_barriers, GSRunner::s_last_barriers);
+		update_stat(GSPerfMon::TextureCopies, GSRunner::s_total_copies, GSRunner::s_last_copies);
+		update_stat(GSPerfMon::TextureUploads, GSRunner::s_total_uploads, GSRunner::s_last_uploads);
+		update_stat(GSPerfMon::Readbacks, GSRunner::s_total_readbacks, GSRunner::s_last_readbacks);
 
-		const bool idle_frame = s_total_frames && (last_draws == s_total_internal_draws && last_uploads == s_total_uploads);
+		const bool idle_frame = GSRunner::s_total_frames && (last_draws == GSRunner::s_total_internal_draws && last_uploads == GSRunner::s_total_uploads);
 
 		if (!idle_frame)
-			s_total_drawn_frames++;
+			GSRunner::s_total_drawn_frames++;
 
-		s_total_frames++;
+		GSRunner::s_total_frames++;
 
 		std::atomic_thread_fence(std::memory_order_release);
 	}
@@ -506,7 +530,7 @@ static void PrintCommandLineVersion()
 	std::fprintf(stderr, "\n");
 }
 
-static void PrintCommandLineHelpRunner(const char* progname)
+static void GSRunner::PrintCommandLineHelp(const char* progname)
 {
 	PrintCommandLineVersion();
 	std::fprintf(stderr, "Usage: %s [parameters] [--] [filename]\n", progname);
@@ -535,7 +559,7 @@ static void PrintCommandLineHelpRunner(const char* progname)
 	std::fprintf(stderr, "\n");
 }
 
-static void PrintCommandLineHelpTester(const char* progname)
+static void GSTester::PrintCommandLineHelp(const char* progname)
 {
 	PrintCommandLineVersion();
 	std::fprintf(stderr, "Usage: %s [parameters] [--] [filename]\n", progname);
@@ -552,7 +576,7 @@ void GSRunner::InitializeConsole()
 		Log::SetConsoleOutputLevel(LOGLEVEL_DEBUG);
 }
 
-bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParameters& params)
+bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
 {
 	std::string dumpdir; // Save from argument -dumpdir for creating sub-directories
 	bool no_more_args = false;
@@ -569,7 +593,7 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 			}
 			else if (CHECK_ARG("-help"))
 			{
-				PrintCommandLineHelpRunner(argv[0]);
+				PrintCommandLineHelp(argv[0]);
 				return false;
 			}
 			else if (CHECK_ARG("-version"))
@@ -792,7 +816,7 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 			}
 			else if (CHECK_ARG_PARAM("-npackets"))
 			{
-				regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+				GSTester::regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(GSTester::regression_num_packets_default);
 				continue;
 			}
 			else if (CHECK_ARG("-batch"))
@@ -893,7 +917,7 @@ bool GSRunner::ParseCommandLineArgsRunner(int argc, char* argv[], VMBootParamete
 	return true;
 }
 
-bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
+bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
 {
 	for (int i = 1; i < argc; i++)
 	{
@@ -913,7 +937,7 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 		}
 		else if (CHECK_ARG("-help"))
 		{
-			PrintCommandLineHelpTester(argv[0]);
+			PrintCommandLineHelp(argv[0]);
 			return false;
 		}
 		else if (CHECK_ARG("-version"))
@@ -1078,7 +1102,7 @@ static void CPUThreadMain(VMBootParameters* params) {
 	if (VMManager::Initialize(*params))
 	{
 		// run until end
-		GSDumpReplayer::SetLoopCount(s_loop_count);
+		GSDumpReplayer::SetLoopCount(GSRunner::s_loop_count);
 		VMManager::SetState(VMState::Running);
 		while (VMManager::GetState() == VMState::Running)
 			VMManager::Execute();
@@ -1090,7 +1114,7 @@ static void CPUThreadMain(VMBootParameters* params) {
 	GSRunner::StopPlatformMessagePump();
 }
 
-bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error)
+bool GSTester::CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error)
 {
 	error->SetString("");
 
@@ -1113,7 +1137,7 @@ bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::
 		{
 			if (!dump->ReadFile(dump_shared[0]->GetPtrDump(), regression_dump_size, &size, error))
 			{
-				Host::ReportErrorAsync("(GSDumpRunner/Tester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
+				Host::ReportErrorAsync("(GSTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
 				return false;
 			}
 		}
@@ -1134,22 +1158,22 @@ bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::
 	return true;
 }
 
-int main_runner(int argc, char* argv[])
+int GSRunner::main_runner(int argc, char* argv[])
 {
-	if (!GSRunner::InitializeConfig())
+	if (!InitializeConfig())
 	{
 		Console.Error("Failed to initialize config.");
 		return EXIT_FAILURE;
 	}
 
 	VMBootParameters params;
-	if (!GSRunner::ParseCommandLineArgsRunner(argc, argv, params))
+	if (!ParseCommandLineArgs(argc, argv, params))
 		return EXIT_FAILURE;
 
 	if (!VMManager::Internal::CPUThreadInitialize())
 		return EXIT_FAILURE;
 
-	if (s_use_window.value_or(true) && !GSRunner::CreatePlatformWindow())
+	if (s_use_window.value_or(true) && !CreatePlatformWindow())
 	{
 		Console.Error("Failed to create window.");
 		return EXIT_FAILURE;
@@ -1157,7 +1181,7 @@ int main_runner(int argc, char* argv[])
 
 	for (int i = 0; i < 2; i++)
 	{
-		regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), regression_num_packets, regression_dump_size);
+		GSTester::regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), GSTester::regression_num_packets, GSTester::regression_dump_size);
 	}
 
 	// Regression testing needs to be started before applying settings
@@ -1166,7 +1190,7 @@ int main_runner(int argc, char* argv[])
 	if (!s_regression_file.empty())
 	{
 		StartRegressionTest(&s_regression_buffer, s_regression_file,
-			regression_num_packets, regression_dump_size);
+			GSTester::regression_num_packets, GSTester::regression_dump_size);
 	}
 	
 	// apply new settings (e.g. pick up renderer change)
@@ -1184,27 +1208,17 @@ int main_runner(int argc, char* argv[])
 	}
 
 	std::thread cputhread(CPUThreadMain, &params);
-	GSRunner::PumpPlatformMessages(/*forever=*/true);
+	PumpPlatformMessages(/*forever=*/true);
 	cputhread.join();
 
 	VMManager::Internal::CPUThreadShutdown();
-	GSRunner::DestroyPlatformWindow();
+	DestroyPlatformWindow();
 	if (IsRegressionTesting())
 		EndRegressionTest();
 	return EXIT_SUCCESS;
 }
 
-struct CachedDump
-{
-	std::unique_ptr<GSDumpFile> ptr;
-	std::string name;
-
-	bool Load(const std::string& file, Error* error);
-	bool HasCached();
-	void Reset();
-};
-
-bool CachedDump::Load(const std::string& file, Error* error)
+bool GSTester::CachedDump::Load(const std::string& file, Error* error)
 {
 	ptr = GSDumpFile::OpenGSDump(file.c_str(), error);
 	if (!ptr)
@@ -1213,18 +1227,18 @@ bool CachedDump::Load(const std::string& file, Error* error)
 	return true;
 }
 
-bool CachedDump::HasCached()
+bool GSTester::CachedDump::HasCached()
 {
 	return static_cast<bool>(ptr);
 }
 
-void CachedDump::Reset()
+void GSTester::CachedDump::Reset()
 {
 	ptr.reset();
 	name = "";
 }
 
-bool StartRunnersRegressionTest()
+bool GSTester::StartRunners()
 {
 	// Start the runner processes in regression testing mode.
 	for (int i = 0; i < 2; i++)
@@ -1257,14 +1271,14 @@ bool StartRunnersRegressionTest()
 	{
 		if (timer.GetTimeSeconds() > static_cast<double>(timeout))
 		{
-			Console.WriteLn("(GSDumpRunner/Tester) Both runners not initialized after {} seconds.", timeout);
+			Console.WriteLn("(GSTester) Both runners not initialized after {} seconds.", timeout);
 			return false;
 		}
 
 		if (regression_buffer[0].GetStateRunner() == RegressionBuffer::WAIT_DUMP &&
 			regression_buffer[1].GetStateRunner() == RegressionBuffer::WAIT_DUMP)
 		{
-			Console.WriteLn("(GSDumpRunner/Tester) Both runners are initialized.");
+			Console.WriteLn("(GSTester) Both runners are initialized.");
 			return true;
 		}
 	}
@@ -1272,7 +1286,8 @@ bool StartRunnersRegressionTest()
 	return true; // Unreachable
 }
 
-bool EndRunnersRegressionTest()
+// Try to end the runner processes gracefully and otherwise terminate them.
+bool GSTester::EndRunners()
 {
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].SetStateTester(RegressionBuffer::DONE);
@@ -1295,7 +1310,7 @@ bool EndRunnersRegressionTest()
 
 	if (!ended)
 	{
-		Console.ErrorFmt("(GSDumpRunner/Tester) Unable to safely end runner processes...terminating.");
+		Console.ErrorFmt("(GSTester) Unable to safely end runner processes...terminating.");
 		for (int i = 0; i < 2; i++)
 			regression_runner_proc[i].Terminate();
 		return false;
@@ -1304,31 +1319,31 @@ bool EndRunnersRegressionTest()
 	return true;
 }
 
-bool RestartRunnersRegressionTest()
+bool GSTester::RestartRunners()
 {
-	if (!EndRunnersRegressionTest())
+	if (!EndRunners())
 		return false;
 
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].Reset();
 
-	return StartRunnersRegressionTest();
+	return StartRunners();
 }
 
 // For writing YAML files.
-constexpr const char* INDENT = "    ";
-constexpr const char* OPEN_MAP = "{";
-constexpr const char* CLOSE_MAP = "}";
-constexpr const char* QUOTE = "\"";
-constexpr const char* KEY_VAL_DEL = ": ";
-constexpr const char* LIST_DEL = ", ";
-constexpr const char* LIST_ITEM = "- ";
-constexpr const char* OPEN_LIST = "[";
-constexpr const char* CLOSE_LIST = "]";
+static constexpr const char* INDENT = "    ";
+static constexpr const char* OPEN_MAP = "{";
+static constexpr const char* CLOSE_MAP = "}";
+static constexpr const char* QUOTE = "\"";
+static constexpr const char* KEY_VAL_DEL = ": ";
+static constexpr const char* LIST_DEL = ", ";
+static constexpr const char* LIST_ITEM = "- ";
+static constexpr const char* OPEN_LIST = "[";
+static constexpr const char* CLOSE_LIST = "]";
 
-int main_tester(int argc, char* argv[])
+int GSTester::main_tester(int argc, char* argv[])
 {
-	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
+	if (!ParseCommandLineArgs(argc, argv))
 		return EXIT_FAILURE;
 
 	std::vector<std::string> dump_files;
@@ -1343,11 +1358,11 @@ int main_tester(int argc, char* argv[])
 	}
 	else
 	{
-		Console.WarningFmt("Provided file is neither a dump or a directory: \"{}\"", regression_dump_dir);
+		Console.WarningFmt("(GSTester) Provided file is neither a dump or a directory: '{}'", regression_dump_dir);
 		return EXIT_FAILURE;
 	}
 
-	Console.WriteLnFmt("Found {} dumps in \"{}\"", dump_files.size(), regression_dump_dir);
+	Console.WriteLnFmt("(GSTester) Found {} dumps in '{}'", dump_files.size(), regression_dump_dir);
 
 	for (int i = 0; i < 2; i++)
 	{
@@ -1355,14 +1370,14 @@ int main_tester(int argc, char* argv[])
 
 		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets, regression_dump_size))
 		{
-			Console.ErrorFmt("(GSDumpRunner/Tester) Unable to create regression shared file: {}", regression_shared_file[i]);
+			Console.ErrorFmt("(GSTester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
 		}
 	}
 
-	if (!StartRunnersRegressionTest())
+	if (!StartRunners())
 	{
-		Console.Error("(GSDumpRunner/Tester) Unable to start runner processes. Exiting.");
+		Console.Error("(GSTester) Unable to start runner processes. Exiting.");
 		return EXIT_FAILURE;
 	}
 
@@ -1393,8 +1408,8 @@ int main_tester(int argc, char* argv[])
 
 			if (failure_restarts++ >= regression_failure_restarts)
 			{
-				Console.ErrorFmt("(GSDumpRunner/Tester) Restarted {} times due to failures. Exiting.", failure_restarts);
-				EndRunnersRegressionTest();
+				Console.ErrorFmt("(GSTester) Restarted {} times due to failures. Exiting.", failure_restarts);
+				EndRunners();
 				break;
 			}
 			else
@@ -1412,9 +1427,9 @@ int main_tester(int argc, char* argv[])
 				}
 
 				// Restart the runner processes
-				if (!RestartRunnersRegressionTest())
+				if (!RestartRunners())
 				{
-					Console.ErrorFmt("(GSDumpRunner/Tester) Failed to restart.");
+					Console.ErrorFmt("(GSTester) Failed to restart.");
 					break;
 				}
 			}
@@ -1426,13 +1441,13 @@ int main_tester(int argc, char* argv[])
 			{
 				if (CopyDumpToSharedMemory(dump.ptr, dump.name, &error))
 				{
-					Console.WriteLnFmt("(GSDumpRunner/Tester) Copied '{}' to shared memory", dump.name);
+					Console.WriteLnFmt("(GSTester) Copied '{}' to shared memory", dump.name);
 					dump.Reset();
 					dump_index++;
 				}
 				else if (!error.GetDescription().empty())
 				{
-					Console.ErrorFmt("(GSDumpRunner/Tester) Error copying '{}' to shared memory.", dump_files[dump_index]);
+					Console.ErrorFmt("(GSTester) Error copying '{}' to shared memory.", dump_files[dump_index]);
 					dump.Reset();
 					dump_index++; // Skip
 				}
@@ -1443,7 +1458,7 @@ int main_tester(int argc, char* argv[])
 			}
 			else if (!dump.Load(dump_files[dump_index], &error))
 			{
-				Console.ErrorFmt("(GSDumpRunner/Tester) Failed to load dump '{}' (error: {}).",
+				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).",
 					dump_files[dump_index], error.GetDescription());
 				dump_index++; // Skip
 			}
@@ -1484,7 +1499,7 @@ int main_tester(int argc, char* argv[])
 				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
 				packet_name_curr = name_packet[0];
 				packet_type_curr = type_packet[0];
-				Console.WriteLnFmt("(GSDumpRunner/Tester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
+				Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
 				if (packet_type_curr == RegressionPacket::IMAGE)
 				{
@@ -1496,7 +1511,7 @@ int main_tester(int argc, char* argv[])
 
 							if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
 							{
-								Console.WarningFmt("(GSDumpRunner/Tester) Unable to create directory: '{}'", image_dir);
+								Console.WarningFmt("(GSTester) Unable to create directory: '{}'", image_dir);
 								restart = true;
 								break;
 							}
@@ -1505,7 +1520,7 @@ int main_tester(int argc, char* argv[])
 
 							if (!GSPng::Save(GSPng::RGB_A_PNG, image_file, packets[i]->image.data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
 							{
-								Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", image_file);
+								Console.WarningFmt("(GSTester) Unable to save image file: '{}'", image_file);
 								restart = true;
 								break;
 							}
@@ -1524,7 +1539,7 @@ int main_tester(int argc, char* argv[])
 
 							if (!oss.is_open())
 							{
-								Console.ErrorFmt("(GSDumpRunner/Tester) Unable to open HW stat file: '{}'", hwstat_file);
+								Console.ErrorFmt("(GSTester) Unable to open HW stat file: '{}'", hwstat_file);
 								restart = true;
 								break;
 							}
@@ -1547,7 +1562,7 @@ int main_tester(int argc, char* argv[])
 			}
 			else
 			{
-				Console.Error("(GSDumpRunner/Tester) Runners out of sync on following dumps:");
+				Console.Error("(GSTester) Runners out of sync on following dumps:");
 				for (int i = 0; i < 2; i++)
 				{
 					Console.ErrorFmt("    {}: {} / {}", regression_runner_name[i], name_dump[i], name_packet[i]);
@@ -1570,14 +1585,14 @@ int main_tester(int argc, char* argv[])
 
 		if (done[0] && done[1] && dump_index >= dump_files.size())
 		{
-			Console.WriteLn("(GSDumpRunner/Tester) All dumps/packets finished.");
+			Console.WriteLn("(GSTester) All dumps/packets finished.");
 			break;
 		}
 
 		// Handle possible deadlock.
 		if (deadlock_timer.GetTimeSeconds() >= deadlock_timeout)
 		{
-			Console.ErrorFmt("(GSDumpRunner/Tester) Possible deadlock detected at dump {}.", dump_name_curr);
+			Console.ErrorFmt("(GSTester) Possible deadlock detected at dump {}.", dump_name_curr);
 			deadlock_timer.Reset();
 			restart = true;
 			continue;
@@ -1587,13 +1602,13 @@ int main_tester(int argc, char* argv[])
 		std::this_thread::yield();
 	}
 
-	EndRunnersRegressionTest();
+	EndRunners();
 
 	for (int i = 0; i < 2; i++)
 	{
 		if (regression_runner_proc[i].WaitForExit() != 0)
 		{
-			Console.WarningFmt("(GSDumpRunner/Tester) Runner {} exited abnormally.", regression_runner_name[i]);
+			Console.WarningFmt("(GSTester) Runner {} exited abnormally.", regression_runner_name[i]);
 		}
 	}
 
@@ -1623,19 +1638,19 @@ int main(int argc, char* argv[])
 
 	if (mode == "tester")
 	{
-		return main_tester(argc, argv);
+		return GSTester::main_tester(argc, argv);
 	}
 	else
 	{
-		return main_runner(argc, argv);
+		return GSRunner::main_runner(argc, argv);
 	}
 }
 
 void Host::PumpMessagesOnCPUThread()
 {
 	// update GS thread copy of frame number
-	MTGS::RunOnGSThread([frame_number = GSDumpReplayer::GetFrameNumber()]() { s_dump_frame_number = frame_number; });
-	MTGS::RunOnGSThread([loop_number = GSDumpReplayer::GetLoopCount()]() { s_loop_number = loop_number; });
+	MTGS::RunOnGSThread([frame_number = GSDumpReplayer::GetFrameNumber()]() { GSRunner::s_dump_frame_number = frame_number; });
+	MTGS::RunOnGSThread([loop_number = GSDumpReplayer::GetLoopCount()]() { GSRunner::s_loop_number = loop_number; });
 }
 
 s32 Host::Internal::GetTranslatedStringImpl(
