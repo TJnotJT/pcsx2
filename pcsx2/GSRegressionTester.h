@@ -58,22 +58,64 @@ struct SpinlockSharedMemory
 struct RegressionPacket
 {
 	static constexpr std::size_t name_size = 4096;
-	static constexpr std::size_t data_size = 4 * 1024 * 1024;
+	static constexpr std::size_t image_size = 4 * 1024 * 1024;
+
+	enum : u32
+	{
+		IMAGE,
+		HWSTAT
+	};
+
+	struct alignas(32) HWStat
+	{
+		std::size_t frames;
+		std::size_t draws;
+		std::size_t render_passes;
+		std::size_t barriers;
+		std::size_t copies;
+		std::size_t uploads;
+		std::size_t readbacks;
+
+		bool operator==(const HWStat& other)
+		{
+			return memcmp(this, &other, sizeof(HWStat)) == 0;
+		};
+
+		bool operator!=(const HWStat& other)
+		{
+			return !operator==(other);
+		};
+	};
+
+	struct alignas(32) Image
+	{
+		std::size_t size;
+		std::size_t w;
+		std::size_t h;
+		std::size_t pitch;
+		std::size_t bytes_per_pixel;
+		u8 data[image_size];
+	};
 
 	SpinlockSharedMemory lock;
+	u32 type;
 	char name_dump[name_size];
 	char name_packet[name_size];
 	int size, w, h, pitch, bytes_per_pixel;
-	u8 data[data_size];
+	union
+	{
+		Image image;
+		HWStat hwstat;
+	};
 
 	// Call by owner.
 	void SetNameDump(const std::string& name);
 	void SetNamePacket(const std::string& name);
 	void SetName(char* dst, const std::string& name); // Helper (private)
-	void SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel);
+	void SetImage(const void* src, int w, int h, int pitch, int bytes_per_pixel);
+	void SetHWStat(const HWStat& hwstat);
 	std::string GetNameDump();
 	std::string GetNamePacket();
-	u8* GetImageData();
 
 	// Call only once before sharing. Not thread safe.
 	void Init();

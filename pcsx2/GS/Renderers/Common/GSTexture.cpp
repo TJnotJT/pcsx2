@@ -74,14 +74,14 @@ bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 		{
 			packet->SetNameDump(rbp->GetNameDump());
 			packet->SetNamePacket(fn);
-			packet->SetImageData(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
+			packet->SetImage(dl->GetMapPointer(), m_size.x, m_size.y, dl->GetMapPitch(), GSPng::pixel[format].bytes_per_pixel_in);
 			Console.WriteLnFmt("(GSDumpReplayer: {}) New regression packet: {} / {}",
 				GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
 			return true;
 		}
 		else
 		{
-			Console.ErrorFmt("(GSDumpReplayer {}) Failed to get regression packet.", GSDumpReplayer::GetRunnerName());
+			Console.ErrorFmt("(GSDumpReplayer {}) Failed to get regression packet for image.", GSDumpReplayer::GetRunnerName());
 		}
 	}
 
