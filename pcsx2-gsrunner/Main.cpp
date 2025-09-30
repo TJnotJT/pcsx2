@@ -18,6 +18,7 @@
 #include "fmt/format.h"
 
 #include "common/Error.h"
+#include "common/Timer.h"
 #include "common/Assertions.h"
 #include "common/CocoaTools.h"
 #include "common/Console.h"
@@ -112,6 +113,7 @@ static std::string regression_output_image_dir[2];
 static std::string regression_runner_args;
 static RegressionBuffer regression_buffer[2];
 static std::string regression_runner_path[2];
+static std::string regression_runner_command[2];
 static std::string regression_runner_name[2];
 static std::string regression_shared_file[2];
 static std::string regression_dump_dir;
@@ -1182,8 +1184,10 @@ int main_runner(int argc, char* argv[])
 	// or it might complain that there is no dumping directory
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
+	{
 		StartRegressionTest(&s_regression_buffer, s_regression_file,
 			regression_num_packets, regression_dump_size, regression_status_size);
+	}
 
 	//CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
 
@@ -1221,7 +1225,7 @@ int main_runner(int argc, char* argv[])
 
 	VMManager::Internal::CPUThreadShutdown();
 	GSRunner::DestroyPlatformWindow();
-	if (!s_regression_file.empty())
+	if (IsRegressionTesting())
 		EndRegressionTest();
 	return EXIT_SUCCESS;
 }
@@ -1261,22 +1265,90 @@ bool StartRunnersRegressionTest()
 	// Start the runner processes in regression testing mode.
 	for (int i = 0; i < 2; i++)
 	{
-		std::string command =
-			regression_runner_path[i] +
-			std::string(" runner ") +
-			std::string(" -surfaceless ") +
-			std::string(" -loop 1 ") +
-			std::string(" -dump f ") +
-			std::string(" -regression-test ") + regression_shared_file[i] +
-			std::string(" -npackets ") + std::to_string(regression_num_packets) +
-			" " + regression_runner_args;
-
-		if (!regression_runner_proc[i].Start(command))
+		if (regression_runner_command[i].empty())
 		{
-			Console.ErrorFmt("Unable to start runner: {}", regression_runner_name[i]);
+			regression_runner_command[i] =
+				regression_runner_path[i] +
+				std::string(" runner ") +
+				std::string(" -surfaceless ") +
+				std::string(" -loop 1 ") +
+				std::string(" -dump f ") +
+				std::string(" -regression-test ") + regression_shared_file[i] +
+				std::string(" -npackets ") + std::to_string(regression_num_packets) +
+				" " + regression_runner_args;
+		}
+
+		if (!regression_runner_proc[i].Start(regression_runner_command[i]))
+		{
+			Console.ErrorFmt("Unable to start runner: {} (command: {})", regression_runner_name[i],
+				regression_runner_command[i]);
 			return false;
 		}
 	}
+
+	// Wait until the runners initialize and hit the dump waiting loop.
+	Common::Timer timer;
+	constexpr int timeout = 10;
+	while (1)
+	{
+		if (timer.GetTimeSeconds() > static_cast<double>(timeout))
+		{
+			Console.WriteLn("(GSDumpRunner/RegressionTester) Both runners not initialized after {} seconds.", timeout);
+			return false;
+		}
+
+		if (regression_buffer[0].GetStatusRunner() == RegressionBuffer::WAIT_DUMP &&
+			regression_buffer[1].GetStatusRunner() == RegressionBuffer::WAIT_DUMP)
+		{
+			Console.WriteLn("(GSDumpRunner/RegressionTester) Both runners are initialized.");
+			return true;
+		}
+	}
+
+	return true; // Unreachable
+}
+
+bool EndRunnersRegressionTest()
+{
+	for (int i = 0; i < 2; i++)
+		regression_buffer[i].SetDoneRunner(true);
+
+	bool ended = false;
+	Common::Timer timer;
+	while (1)
+	{
+		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning())
+		{
+			ended = true;
+			break;
+		}
+
+		if (timer.GetTimeSeconds() >= 5.0)
+			break;
+
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+	}
+
+	if (!ended)
+	{
+		Console.ErrorFmt("(GSDumpRunner/RegressionTester) Unable to safely end runner processes...terminating.");
+		for (int i = 0; i < 2; i++)
+			regression_runner_proc[i].Terminate();
+		return false;
+	}
+
+	return true;
+}
+
+bool RestartRunnersRegressionTest()
+{
+	if (!EndRunnersRegressionTest())
+		return false;
+
+	for (int i = 0; i < 2; i++)
+		regression_buffer[i].Reset();
+
+	return StartRunnersRegressionTest();
 }
 
 int main_tester(int argc, char* argv[])
@@ -1309,13 +1381,16 @@ int main_tester(int argc, char* argv[])
 		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets,
 			regression_dump_size, regression_status_size))
 		{
-			Console.ErrorFmt("Unable to create regression shared file: {}", regression_shared_file[i]);
+			Console.ErrorFmt("(GSDumpRunner/RegressionTester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
 		}
 	}
 
 	if (!StartRunnersRegressionTest())
+	{
+		Console.Error("(GSDumpRunner/RegressionTester) Unable to start runner processes. Exiting.");
 		return EXIT_FAILURE;
+	}
 
 	std::string status[2];
 	bool exited[2] = {false, false};
@@ -1326,17 +1401,46 @@ int main_tester(int argc, char* argv[])
 	CachedDump dump;
 	std::size_t dump_index = 0;
 	Error error;
-	std::size_t deadlock_count = 0;
+	Common::Timer deadlock_timer;
 	std::size_t failure_restarts = 0;
+	bool restart = false;
+	std::string dump_name_curr;
+	std::string dump_file_curr;
+	std::string packet_name_curr;
 
 	while (1)
 	{
-		if (deadlock_count++ >= regression_deadlock_timeout)
+		if (deadlock_timer.GetTimeSeconds() >= 5.0)
 		{
 			if (failure_restarts++ >= regression_failure_restarts)
 			{
 				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Restarted {} times due to failures. Exiting.", failure_restarts);
+				EndRunnersRegressionTest();
+				break;
+			}
+			else
+			{
+				if (dump_file_curr.empty())
+				{
+					dump_index = 0;
+				}
+				else
+				{
+					const auto it = std::find(dump_files.begin(), dump_files.end(), dump_file_curr);
+					pxAssert(it != dump_files.end());
+					dump_index = (it - dump_files.begin());
+				}
 
+				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Possible deadlock detected at dump {}. Attempting restart.", dump_name_curr);
+
+				if (!RestartRunnersRegressionTest())
+				{
+					Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to restart.");
+					break;
+				}
+
+
+				deadlock_timer.Reset();
 			}
 		}
 
@@ -1377,11 +1481,14 @@ int main_tester(int argc, char* argv[])
 
 		for (int i = 0; i < 2; i++)
 		{
-			packets[i] = regression_buffer[i].GetPacketRead();
+			packets[i] = regression_buffer[i].GetPacketRead(false);
 		}
 
 		if (packets[0] && packets[1])
 		{
+			//deadlock_count = 0;
+			deadlock_timer.Reset();
+
 			std::string name_dump[2];
 			std::string name_packet[2];
 
@@ -1393,17 +1500,21 @@ int main_tester(int argc, char* argv[])
 
 			if (name_packet[0] == name_packet[1] && name_dump[0] == name_dump[1])
 			{
-				Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Comparing results for {} / {}.", name_dump[0], name_packet[0]);
+				dump_name_curr = name_dump[0];
+				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
+				packet_name_curr = name_packet[0];
+				Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
 				if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 				{
 					for (int i = 0; i < 2; i++)
 					{
-						std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (name_dump[0] + "_" + name_packet[0] + ".png")).string();
+						std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name_curr + "_" + packet_name_curr + ".png")).string();
 
 						if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
 						{
 							Console.WarningFmt("(GSDumpRunner/RegressionTester) Unable to save image file: '{}'", dump_image_path);
+							restart = true;
 						}
 					}
 				}
@@ -1426,10 +1537,16 @@ int main_tester(int argc, char* argv[])
 			}
 		}
 
+		// BOTH EXITED: MUST EXIT!!!
+
 		for (int i = 0; i < 2; i++)
 		{
 			status[i] = regression_buffer[i].GetStatusRunner();
-			done[i] = exited[i] || (packets[i] == nullptr && status[i] == RegressionBuffer::WAIT_DUMP);
+			if (status[i] == RegressionBuffer::WAIT_DUMP)
+			{
+				printf("");
+			}
+			done[i] = exited[i] || (status[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
 		}
 
 		//for (int i = 0; i < 2; i++)
@@ -1501,16 +1618,13 @@ int main_tester(int argc, char* argv[])
 		//oss.close();
 	}
 
-	for (int i = 0; i < 2; i++)
-	{
-		regression_buffer[i].SetStatusTester(RegressionBuffer::DONE);
-	}
+	EndRunnersRegressionTest();
 
 	for (int i = 0; i < 2; i++)
 	{
 		if (regression_runner_proc[i].WaitForExit() != 0)
 		{
-			Console.WarningFmt("Runner {} exited abnormally.", regression_runner_name[i]);
+			Console.WarningFmt("(GSDumpRunner/Tester) Runner {} exited abnormally.", regression_runner_name[i]);
 		}
 	}
 
