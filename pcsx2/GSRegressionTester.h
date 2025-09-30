@@ -279,7 +279,7 @@ struct GSProcess
 #else
 	// Not implemented.
 #endif
-	bool Start(const std::string& command);
+	bool Start(const std::string& command, bool detached);
 	bool IsRunning();
 	int WaitForExit();
 	bool Close();

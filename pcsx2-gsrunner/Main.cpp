@@ -131,7 +131,20 @@ namespace GSTester
 		void Reset();
 	};
 
+	enum
+	{
+		VERBOSE_LOW,
+		VERBOSE_TESTER,
+		VERBOSE_TESTER_AND_RUNNER
+	};
+
 	// For the tester
+	static constexpr std::size_t regression_deadlock_timeout = 1000;
+	static constexpr std::size_t regression_failure_restarts = 10;
+	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
+	static constexpr std::size_t regression_num_packets_default = 10;
+	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
+
 	static std::string regression_output_dir;
 	static std::string regression_output_image_dir[2];
 	static std::string regression_output_hwstat_dir[2];
@@ -143,13 +156,9 @@ namespace GSTester
 	static std::string regression_shared_file[2];
 	static std::string regression_dump_dir;
 	static GSProcess regression_runner_proc[2];
-	static constexpr std::size_t regression_deadlock_timeout = 1000;
-	static constexpr std::size_t regression_failure_restarts = 10;
-
-	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
-	static constexpr std::size_t regression_num_packets_default = 10;
 	static std::size_t regression_num_packets = regression_num_packets_default;
 	static std::size_t regression_dump_size = regression_dump_size_default;
+	static u32 regression_verbose_level = regression_verbose_level_default;
 } // namespace GSTester
 
 // For both tester/runner
@@ -1038,6 +1047,14 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
 
 			continue;
 		}
+		else if (CHECK_ARG("-verbose-level"))
+		{
+			ENSURE_ARG_COUNT("-verbose-level", 1);
+
+			regression_verbose_level = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_verbose_level_default);
+
+			continue;
+		}
 		else
 		{
 			regression_runner_args.append(argv[i]);
@@ -1165,7 +1182,7 @@ bool GSTester::CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, c
 		{
 			if (!dump->ReadFile(dump_shared[0]->GetPtrDump(), regression_dump_size, &size, error))
 			{
-				Host::ReportErrorAsync("(GSTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
+				Console.ErrorFmt("(GSTester) Failed to read GS dump from memory (error: {}).", error->GetDescription());
 				return false;
 			}
 		}
@@ -1301,7 +1318,7 @@ bool GSTester::StartRunners()
 				" " + regression_runner_args;
 		}
 
-		if (!regression_runner_proc[i].Start(regression_runner_command[i]))
+		if (!regression_runner_proc[i].Start(regression_runner_command[i], regression_verbose_level < VERBOSE_TESTER_AND_RUNNER))
 		{
 			Console.ErrorFmt("(GSTester) Unable to start runner: {} (command: {})", regression_runner_name[i],
 				regression_runner_command[i]);
@@ -1545,7 +1562,9 @@ int GSTester::main_tester(int argc, char* argv[])
 				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
 				packet_name_curr = name_packet[0];
 				packet_type_curr = type_packet[0];
-				Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
+
+				if (regression_verbose_level >= VERBOSE_TESTER)
+					Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
 				if (packet_type_curr == GSRegressionPacket::IMAGE)
 				{
@@ -1557,7 +1576,7 @@ int GSTester::main_tester(int argc, char* argv[])
 
 							if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
 							{
-								Console.WarningFmt("(GSTester) Unable to create directory: '{}'", image_dir);
+								Console.ErrorFmt("(GSTester) Unable to create directory: '{}'", image_dir);
 								restart = true;
 								break;
 							}
@@ -1566,7 +1585,7 @@ int GSTester::main_tester(int argc, char* argv[])
 
 							if (!GSPng::Save(GSPng::RGB_A_PNG, image_file, packets[i]->image.data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
 							{
-								Console.WarningFmt("(GSTester) Unable to save image file: '{}'", image_file);
+								Console.ErrorFmt("(GSTester) Unable to save image file: '{}'", image_file);
 								restart = true;
 								break;
 							}

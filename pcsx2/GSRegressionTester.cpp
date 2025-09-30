@@ -470,7 +470,7 @@ void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::
 		return;
 	}
 
-	Console.WriteLnFmt("Successfully opened {} for regression testing.", fn);
+	Console.WriteLnFmt("Opened {} for regression testing.", fn);
 
 	regression_buffer = rpb;
 }
@@ -568,7 +568,7 @@ float RegressionCompareImages(const GSRegressionPacket* p1, const GSRegressionPa
 	}
 }
 
-bool GSProcess::Start(const std::string& command)
+bool GSProcess::Start(const std::string& command, bool detached)
 {
 #ifdef __WIN32__
 	memset(&si, 0, sizeof(STARTUPINFO));
@@ -579,22 +579,83 @@ bool GSProcess::Start(const std::string& command)
 	std::vector<wchar_t> wcommand_buf(wcommand.begin(), wcommand.end());
 	wcommand_buf.push_back(L'\0');
 
+	HANDLE hNull = INVALID_HANDLE_VALUE; // For redirecting child's stdout/err.
+
+	ScopedGuard close_null([&]() {
+		if (hNull != INVALID_HANDLE_VALUE)
+			CloseHandle(hNull);
+	});
+
+	if (detached)
+	{
+		// Redirect stdout/err/in to null.
+
+		hNull = CreateFileA(
+			"NUL",
+			GENERIC_READ | GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			NULL);
+
+		if (hNull == INVALID_HANDLE_VALUE)
+		{
+			Console.Error("Unable to open null handle");
+			return false;
+		}
+
+		si.dwFlags = STARTF_USESTDHANDLES;
+		si.hStdError = hNull;
+		si.hStdOutput = hNull;
+		si.hStdInput = hNull;
+	}
+
 	if (!CreateProcess(
 			NULL,
 			wcommand_buf.data(),
 			NULL,
 			NULL,
-			FALSE,
-			0,
+			TRUE,
+			(DWORD)0,
 			NULL,
 			NULL,
 			&si,
 			&pi))
-	{		Console.Error("Unable to create runner process with command: \"{}\"", command);
+	{
+		Console.ErrorFmt("Unable to create runner process with command: '{}'", command);
 		return false;
 	}
 
-	Console.WriteLnFmt("Created runner process (PID: {}) with command: \"{}\"", pi.dwProcessId, command);
+		
+	if (detached)
+	{
+		// Redirect stdout/err to null.
+
+		HANDLE null = INVALID_HANDLE_VALUE;
+
+		ScopedGuard close_null([&]() {
+			if (null != INVALID_HANDLE_VALUE)
+				CloseHandle(null);
+		});
+
+		null = CreateFileA(
+			"NUL",
+			GENERIC_WRITE,
+			FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			NULL);
+
+		if (null == INVALID_HANDLE_VALUE)
+		{
+			Console.Error("Unable to open null handle");
+			return false;
+		}
+	}
+
+	Console.WriteLnFmt("Created runner process (PID: {}) with command: '{}'", pi.dwProcessId, command);
 
 	this->command = command;
 
@@ -678,7 +739,7 @@ bool GSSharedMemoryFile::CreateFile_(const std::string& name, std::size_t size)
 		return false;
 	}
 
-	Console.WriteLnFmt("Successfully created regression packets file: {}", name);
+	Console.WriteLnFmt("Created regression packets file: {}", name);
 
 	this->name = name;
 	this->size = size;
@@ -708,7 +769,7 @@ bool GSSharedMemoryFile::OpenFile(const std::string& name, std::size_t size)
 		return false;
 	}
 
-	Console.WriteLnFmt("Successfully opened/mapped regression packet file: {}", name);
+	Console.WriteLnFmt("Opened/mapped regression packet file: {}", name);
 
 	this->name = name;
 	this->size = size;
@@ -746,7 +807,7 @@ bool GSSharedMemoryFile::CloseFile()
 		return false;
 	}
 
-	Console.WriteLnFmt("Successfully closed/unmapped shared memory file: {}", name);
+	Console.WriteLnFmt("Closed/unmapped shared memory file: {}", name);
 
 	name = "";
 	handle = 0;
