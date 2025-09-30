@@ -1274,7 +1274,7 @@ bool GSTester::CachedDump::Load(const std::string& file, Error* error)
 
 	// Check the disk size before trying to decompress to fail quickly.
 	// The decompressed size is usually more than 4x the disk size.
-	if (4 * size > regression_dump_size)
+	if (static_cast<std::size_t>(4 * size) > regression_dump_size)
 	{
 		Error::SetStringFmt(error, "Disk size too large '{}' ({} bytes)", file, size);
 		return false;
@@ -1453,7 +1453,8 @@ int GSTester::main_tester(int argc, char* argv[])
 	Common::Timer deadlock_timer; // Time since seeing a packet from a runner.
 	constexpr std::size_t max_failure_restarts = 10; // Max times to attempt restarting before giving up.
 	std::size_t failure_restarts = 0; // Current number of failure restarts.
-	
+	std::string last_dump_completed;
+
 	// Temporary loop variables.
 	CachedDump dump; // Cache the dump from disk to shared with runner processes.
 	GSRegressionPacket* packets[2]; // Packet read from each .
@@ -1487,15 +1488,17 @@ int GSTester::main_tester(int argc, char* argv[])
 				Console.ErrorFmt("(GSTester) Attempting to restart due to failure (attempt {}).", failure_restarts);
 
 				// Reset dump to the last one we got packets for.
-				if (dump_file_curr.empty())
+				if (last_dump_completed.empty())
 				{
+					Console.ErrorFmt("(GSTester) No dumps completed; starting from beginning.");
 					dump_index = 0;
 				}
 				else
 				{
-					const auto it = std::find(dump_files.begin(), dump_files.end(), dump_file_curr);
+					Console.WriteLnFmt("(GSTester) Restarting from {}.", last_dump_completed);
+					const auto it = std::find(dump_files.begin(), dump_files.end(), last_dump_completed);
 					pxAssert(it != dump_files.end());
-					dump_index = (it - dump_files.begin());
+					dump_index = (it + 1 - dump_files.begin());
 				}
 
 				// Restart the runner processes
@@ -1637,11 +1640,19 @@ int GSTester::main_tester(int argc, char* argv[])
 						}
 					}
 				}
+				else if (packet_type_curr == GSRegressionPacket::DONE_DUMP)
+				{
+					Console.ErrorFmt("(GSTester) Done with '{}'", dump_name_curr);
+					last_dump_completed = dump_name_curr;
+					restart = true;
+				}
 				else
 				{
 					Console.ErrorFmt("(GSTester) Unknown packet type '{}'", packet_type_curr);
 					restart = true;
 				}
+
+				restart = true;
 
 				if (restart)
 					continue;

@@ -268,6 +268,11 @@ void GSRegressionPacket::SetHWStat(const HWStat& hwstat)
 	this->hwstat = hwstat;
 }
 
+void GSRegressionPacket::SetDoneDump()
+{
+	this->type = DONE_DUMP;
+}
+
 void GSRegressionPacket::Init()
 {
 	memset(this, 0, GetTotalSize());

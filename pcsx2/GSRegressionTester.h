@@ -24,11 +24,10 @@ struct GSIntSharedMemory
 };
 
 // Spinlock using the inter-process atomic.
-#ifdef __WIN32__
 struct GSSpinlockSharedMemory
 {
 	// For producer/consumer semantics.
-	enum : LONG
+	enum : GSIntSharedMemory::ValType
 	{
 		WRITEABLE = 0,
 		READABLE = 1
@@ -44,7 +43,7 @@ struct GSSpinlockSharedMemory
 	bool Readable();
 
 	// For lock/unlock.
-	enum : LONG
+	enum : GSIntSharedMemory::ValType
 	{
 		UNLOCKED = 0,
 		LOCKED = 1
@@ -53,9 +52,6 @@ struct GSSpinlockSharedMemory
 	bool Lock(bool block = false, GSIntSharedMemory* done = nullptr);
 	bool Unlock();
 };
-#else
-// Not implemented
-#endif
 
 // Packet holding data uploaded by runners for tester to consume and diff.
 // Lives in shared memory.
@@ -67,7 +63,8 @@ struct GSRegressionPacket
 	enum : u32
 	{
 		IMAGE,
-		HWSTAT
+		HWSTAT,
+		DONE_DUMP
 	};
 
 	struct alignas(32) HWStat
@@ -118,6 +115,7 @@ struct GSRegressionPacket
 	void SetName(char* dst, const std::string& name); // Helper (private)
 	void SetImage(const void* src, int w, int h, int pitch, int bytes_per_pixel);
 	void SetHWStat(const HWStat& hwstat);
+	void SetDoneDump();
 	std::string GetNameDump();
 	std::string GetNamePacket();
 

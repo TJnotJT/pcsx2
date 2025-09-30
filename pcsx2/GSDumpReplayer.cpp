@@ -438,6 +438,8 @@ static void GSDumpReplayerFrameLimit()
 
 void GSDumpReplayerCpuStep()
 {
+	bool start_shutdown = false;
+
 	if (s_needs_state_loaded)
 	{
 		GSDumpReplayerLoadInitialState();
@@ -451,11 +453,6 @@ void GSDumpReplayerCpuStep()
 		s_dump_frame_number = 0;
 		if (s_dump_loop_count > 0)
 			s_dump_loop_count--;
-		else if (s_dump_loop_count == 0 && !GSDumpReplayer::IsBatchMode())
-		{
-			Host::RequestVMShutdown(false, false, false);
-			s_dump_running = false;
-		}
 	}
 
 	switch (packet.id)
@@ -519,28 +516,41 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	if (s_current_packet == 0 && s_dump_loop_count == 0 && GSDumpReplayer::IsBatchMode())
+	if (s_dump_loop_count == 0 && !GSDumpReplayer::IsBatchMode())
 	{
-		MTGS::WaitGS(false, false, false);
-		GSState::s_n = 0; // Needed for proper file naming.
+		start_shutdown = true;
+	}
 
-		// Send HW stats if needed.
+	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
+	{
+		start_shutdown = true;
+	}
+
+	if (GSDumpReplayer::IsBatchMode() && s_current_packet == 0 && s_dump_loop_count == 0)
+	{
+		MTGS::WaitGS(false, false, false); // Let GS thread finish.
+		GSState::s_n = 0; // Needed for proper packet naming for next dump.
+
+		// Send HW stats and done packet if needed.
 		if (GSIsHardwareRenderer() && GSIsRegressionTesting())
 		{
 			GSRegressionBuffer* rbp = GSGetRegressionBuffer();
 			rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
-			GSRegressionPacket* packet = nullptr;
+			GSRegressionPacket* packet_hwstat = nullptr;
+			GSRegressionPacket* packet_done_dump = nullptr;
 			ScopedGuard sg([&]() {
 				rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
-				if (packet)
+				if (packet_hwstat)
+					rbp->DonePacketWrite();
+				if (packet_done_dump)
 					rbp->DonePacketWrite();
 			});
 
-			if (packet = rbp->GetPacketWrite(true))
+			if (packet_hwstat = rbp->GetPacketWrite(true))
 			{
 				const std::string name_dump = rbp->GetNameDump();
-				packet->SetNameDump(name_dump);
-				packet->SetNamePacket(name_dump + " HWStat");
+				packet_hwstat->SetNameDump(name_dump);
+				packet_hwstat->SetNamePacket(name_dump + " HWStat");
 
 				GSRegressionPacket::HWStat hwstat;
 				hwstat.frames = 0; // FIXME
@@ -550,19 +560,35 @@ void GSDumpReplayerCpuStep()
 				hwstat.copies = g_perfmon.GetCounter(GSPerfMon::TextureCopies);
 				hwstat.uploads = g_perfmon.GetCounter(GSPerfMon::TextureUploads);
 				hwstat.readbacks = g_perfmon.GetCounter(GSPerfMon::Readbacks);
-				packet->SetHWStat(hwstat);
+				packet_hwstat->SetHWStat(hwstat);
 
 				Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
-					GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
+					GSDumpReplayer::GetRunnerName(), packet_hwstat->GetNameDump(), packet_hwstat->GetNamePacket());
 			}
 			else
 			{
 				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for HW stats.", GSDumpReplayer::GetRunnerName());
 			}
 
-			g_perfmon.Reset();
+			if (packet_done_dump = rbp->GetPacketWrite(true))
+			{
+				const std::string name_dump = rbp->GetNameDump();
+				packet_done_dump->SetNameDump(name_dump);
+				packet_done_dump->SetNamePacket(name_dump + " Done");
+				packet_done_dump->SetDoneDump();
+
+				Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
+					GSDumpReplayer::GetRunnerName(), packet_done_dump->GetNameDump(), packet_done_dump->GetNamePacket());
+			}
+			else
+			{
+				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for done dump signal.",
+					GSDumpReplayer::GetRunnerName());
+			}
+
+			g_perfmon.Reset(); // Make sure stats are reset for new dump.
 		}
-		
+
 		if (GSDumpReplayer::NextDump())
 		{
 			s_dump_loop_count = s_dump_loop_count_start;
@@ -570,10 +596,15 @@ void GSDumpReplayerCpuStep()
 		}
 		else
 		{
-			Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode no more dumps.", GSDumpReplayer::GetRunnerName());
-			Host::RequestVMShutdown(false, false, false);
-			s_dump_running = false;
+			Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode has no more dumps.", GSDumpReplayer::GetRunnerName());
+			start_shutdown = true;
 		}
+	}
+
+	if (start_shutdown)
+	{
+		Host::RequestVMShutdown(false, false, false);
+		s_dump_running = false;
 	}
 }
 
