@@ -6,20 +6,36 @@
 #include <windows.h>
 #endif
 
+struct IntSharedMemory
+{
+
+#ifdef __WIN32__
+	using ValType = LONG;
+#else
+	using ValType = long;
+#endif
+	ValType val;
+	ValType CompareExchange(ValType expected, ValType desired);
+	ValType Get();
+	void Set(ValType i);
+	void Init();
+	static std::size_t GetTotalSize();
+};
+
 #ifdef __WIN32__
 struct SpinlockSharedMemory
 {
-	volatile LONG lock = WRITEABLE;
-
-	// For producer/consumer.
+	// For producer/consumer semantics.
 	enum : LONG
 	{
 		WRITEABLE = 0,
 		READABLE = 1
 	};
 
-	bool LockWrite(bool block = true, double sec);
-	bool LockRead(bool block = false, double sec);
+	IntSharedMemory lock;
+
+	bool LockWrite(bool block = true, IntSharedMemory* done = nullptr);
+	bool LockRead(bool block = false, IntSharedMemory* done = nullptr);
 	bool UnlockWrite();
 	bool UnlockRead();
 	bool Writeable();
@@ -32,7 +48,7 @@ struct SpinlockSharedMemory
 		LOCKED = 1
 	};
 
-	bool Lock(bool block = false);
+	bool Lock(bool block = false, IntSharedMemory* done = nullptr);
 	bool Unlock();
 };
 #else
@@ -131,17 +147,17 @@ struct StatusSharedMemory
 /// Ring buffer of regression packets, dump files, and status.
 struct RegressionBuffer
 {
+	static constexpr const char* RUNNING = "RUNNING";
 	static constexpr const char* WAIT_DUMP = "WAIT_DUMP";
 	static constexpr const char* WRITING_DATA = "WRITING_DATA";
-	//static constexpr const char* ERROR_STATUS = "ERROR";
 	static constexpr const char* DONE = "DONE";
 
-	enum StatusType : u32
+	enum
 	{
-		STATUS_RUNNER = 0,
-		STATUS_TESTER,
-		STATUS_N
+		RUNNER = 0,
+		TESTER
 	};
+
 	SharedMemoryFile shm;
 
 	RegressionPacket* packets = nullptr;
@@ -153,10 +169,13 @@ struct RegressionBuffer
 	DumpFileSharedMemory* dumps[num_dumps];
 	std::size_t dump_write = 0;
 	std::size_t dump_read = 0;
+	std::size_t dump_size = 0;
+	std::string dump_name;
 
-	StatusSharedMemory* status[STATUS_N];
+	StatusSharedMemory* status[2];
+	std::size_t status_size;
 
-	std::string dump_name; // Local copy.
+	IntSharedMemory* done[2];
 
 	// Call only once before sharing.
 	bool CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size,
@@ -171,6 +190,7 @@ struct RegressionBuffer
 
 	// Call only once to initialize.
 	void Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
+	void Reset();
 
 	// Thread safe; acquire ownership.
 	RegressionPacket* GetPacketWrite(bool block = true);
@@ -189,8 +209,12 @@ struct RegressionBuffer
 	void DoneDumpRead();
 
 	// Thread safe.
-	std::string GetStatus(StatusType type);
-	void SetStatus(const std::string& str, StatusType type);
+	bool IsDoneRunner();
+	bool IsDoneTester();
+	void SetDoneRunner(bool done);
+	void SetDoneTester(bool done);
+	std::string GetStatus(u32 type);
+	void SetStatus(const std::string& str, u32 type);
 	std::string GetStatusRunner();
 	std::string GetStatusTester();
 	void SetStatusRunner(const std::string& str);
@@ -233,6 +257,7 @@ struct Process
 	bool IsRunning();
 	int WaitForExit();
 	bool Close();
+	void Terminate();
 };
 
 #ifdef __WIN32__

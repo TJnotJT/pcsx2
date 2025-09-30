@@ -8,6 +8,7 @@
 #include "GS/GSLocalMemory.h"
 #include "GS/GSExtra.h"
 #include "GS/GSPng.h"
+#include "GSDumpReplayer.h"
 #include <unordered_set>
 
 template <typename Fn>
@@ -668,7 +669,14 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	});
 	
 	if (rbp)
-		packet = rbp->GetPacketWrite(true); // Block
+	{
+		packet = rbp->GetPacketWrite(true);
+		if (!packet)
+		{
+			Console.ErrorFmt("(GSDumpReplayer {}) Failed to get regression packet.", GSDumpReplayer::GetRunnerName());
+			return;
+		}
+	}
 
 	void* bits = rbp ? packet->data : _aligned_malloc(size, VECTOR_ALIGNMENT);
 
@@ -695,7 +703,8 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 		packet->SetNameDump(rbp->GetNameDump());
 		packet->SetNamePacket(fn.c_str());
 		packet->SetImageData(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
-		Console.WriteLnFmt("New regression packet: {} / {}", packet->GetNameDump(), packet->GetNamePacket());
+		Console.WriteLnFmt("(GSDumpReplayer {}) New regression packet: {} / {}",
+			GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
 	}
 	else
 	{

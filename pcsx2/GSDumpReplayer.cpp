@@ -231,7 +231,7 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 	while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
 	{
 		// FIXME: maybe we should put a time limit...
-		if (GetRegressionBuffer()->GetStatusTester() == RegressionBuffer::DONE)
+		if (GetRegressionBuffer()->IsDoneRunner())
 		{
 			break;
 		}
@@ -255,6 +255,7 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 
 	const std::string dump_name = dump->GetNameDump();
 
+	GetRegressionBuffer()->SetStatusRunner(RegressionBuffer::RUNNING);
 	GetRegressionBuffer()->SetNameDump(dump_name);
 
 	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
@@ -457,7 +458,7 @@ void GSDumpReplayerCpuStep()
 	}
 
 	if (IsRegressionTesting())
-		GetRegressionBuffer()->SetStatus("Writing packet", RegressionBuffer::STATUS_RUNNER);
+		GetRegressionBuffer()->SetStatusRunner("Writing packet");
 
 	switch (packet.id)
 	{
