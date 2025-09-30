@@ -1039,6 +1039,13 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 		}
 	}
 
+	if (regression_runner_name[0] == regression_runner_name[1])
+	{
+		// Need unique names for output directories.
+		regression_runner_name[0] += "-1";
+		regression_runner_name[1] += "-2";
+	}
+
 	return true;
 }
 
@@ -1510,11 +1517,23 @@ int main_tester(int argc, char* argv[])
 				{
 					for (int i = 0; i < 2; i++)
 					{
-						std::string dump_image_path = (std::filesystem::path(regression_output_image_dir[i]) / (dump_name_curr + "_" + packet_name_curr + ".png")).string();
+						std::string image_dir = (
+							std::filesystem::path(regression_output_image_dir[i]) /
+							regression_runner_name[i] /
+							dump_name_curr).string();
 
-						if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+						if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
 						{
-							Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", dump_image_path);
+							Console.WarningFmt("(GSDumpRunner/Tester) Unable to create directory: '{}'", image_dir);
+							restart = true;
+							break;
+						}
+
+						std::string image_path = (std::filesystem::path(image_dir) / packet_name_curr).string();
+
+						if (!GSPng::Save(GSPng::RGB_A_PNG, image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+						{
+							Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", image_path);
 							restart = true;
 							break;
 						}
