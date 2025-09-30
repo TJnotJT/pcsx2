@@ -1110,7 +1110,7 @@ bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::
 		{
 			if (!dump->ReadFile(dump_shared[0]->GetPtrDump(), regression_dump_size, &size, error))
 			{
-				Host::ReportErrorAsync("(GSDumpRunner/RegressionTester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
+				Host::ReportErrorAsync("(GSDumpRunner/Tester)", fmt::format("Failed to read GS dump from memory (error: {}).", error->GetDescription()));
 				return false;
 			}
 		}
@@ -1293,14 +1293,14 @@ bool StartRunnersRegressionTest()
 	{
 		if (timer.GetTimeSeconds() > static_cast<double>(timeout))
 		{
-			Console.WriteLn("(GSDumpRunner/RegressionTester) Both runners not initialized after {} seconds.", timeout);
+			Console.WriteLn("(GSDumpRunner/Tester) Both runners not initialized after {} seconds.", timeout);
 			return false;
 		}
 
 		if (regression_buffer[0].GetStateRunner() == RegressionBuffer::WAIT_DUMP &&
 			regression_buffer[1].GetStateRunner() == RegressionBuffer::WAIT_DUMP)
 		{
-			Console.WriteLn("(GSDumpRunner/RegressionTester) Both runners are initialized.");
+			Console.WriteLn("(GSDumpRunner/Tester) Both runners are initialized.");
 			return true;
 		}
 	}
@@ -1331,7 +1331,7 @@ bool EndRunnersRegressionTest()
 
 	if (!ended)
 	{
-		Console.ErrorFmt("(GSDumpRunner/RegressionTester) Unable to safely end runner processes...terminating.");
+		Console.ErrorFmt("(GSDumpRunner/Tester) Unable to safely end runner processes...terminating.");
 		for (int i = 0; i < 2; i++)
 			regression_runner_proc[i].Terminate();
 		return false;
@@ -1380,45 +1380,50 @@ int main_tester(int argc, char* argv[])
 
 		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets, regression_dump_size))
 		{
-			Console.ErrorFmt("(GSDumpRunner/RegressionTester) Unable to create regression shared file: {}", regression_shared_file[i]);
+			Console.ErrorFmt("(GSDumpRunner/Tester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
 		}
 	}
 
 	if (!StartRunnersRegressionTest())
 	{
-		Console.Error("(GSDumpRunner/RegressionTester) Unable to start runner processes. Exiting.");
+		Console.Error("(GSDumpRunner/Tester) Unable to start runner processes. Exiting.");
 		return EXIT_FAILURE;
 	}
 
-	u32 state[2];
-	bool exited[2] = {false, false};
-	bool done[2] = {false, false};
-	RegressionPacket* packets[2];
-	std::map<std::string, float> image_diffs;
-	std::vector<std::pair<std::string, std::string>> mismatched[2];
-	CachedDump dump;
-	std::size_t dump_index = 0;
-	Error error;
-	Common::Timer deadlock_timer;
-	std::size_t failure_restarts = 0;
-	bool restart = false;
-	std::string dump_name_curr;
-	std::string dump_file_curr;
-	std::string packet_name_curr;
+	std::size_t dump_index = 0; // Current dump that should be written to dump buffer.
+	constexpr double deadlock_timeout = 5.0; // Seconds before determining a deadlock.
+	Common::Timer deadlock_timer; // Time since seeing a packet from a runner.
+	constexpr std::size_t max_failure_restarts = 10; // Max times to attempt restarting before giving up.
+	std::size_t failure_restarts = 0; // Current number of failure restarts.
+	
+	// Temporary loop variables.
+	CachedDump dump; // Cache the dump from disk to shared with runner processes.
+	RegressionPacket* packets[2]; // Packet read from each .
+	Error error; // Current error.
+	u32 state[2]; // Runner state.
+	bool exited[2]; // Runner process exited.
+	bool done[2]; // Runner process done
+	bool restart = false; // Whether to attempt a restart on next iteration.
+	std::string dump_name_curr; // Current dump name.
+	std::string dump_file_curr; // Current dump file.
+	std::string packet_name_curr; // Current packet name.
 
 	while (1)
 	{
-		if (deadlock_timer.GetTimeSeconds() >= 5.0)
+		if (restart)
 		{
+			restart = false;
+
 			if (failure_restarts++ >= regression_failure_restarts)
 			{
-				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Restarted {} times due to failures. Exiting.", failure_restarts);
+				Console.ErrorFmt("(GSDumpRunner/Tester) Restarted {} times due to failures. Exiting.", failure_restarts);
 				EndRunnersRegressionTest();
 				break;
 			}
 			else
 			{
+				// Reset dump to the last one we got packets for.
 				if (dump_file_curr.empty())
 				{
 					dump_index = 0;
@@ -1430,16 +1435,12 @@ int main_tester(int argc, char* argv[])
 					dump_index = (it - dump_files.begin());
 				}
 
-				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Possible deadlock detected at dump {}. Attempting restart.", dump_name_curr);
-
+				// Restart the runner processes
 				if (!RestartRunnersRegressionTest())
 				{
-					Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to restart.");
+					Console.ErrorFmt("(GSDumpRunner/Tester) Failed to restart.");
 					break;
 				}
-
-
-				deadlock_timer.Reset();
 			}
 		}
 
@@ -1449,13 +1450,13 @@ int main_tester(int argc, char* argv[])
 			{
 				if (CopyDumpToSharedMemory(dump.ptr, dump.name, &error))
 				{
-					Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Copied '{}' to shared memory", dump.name);
+					Console.WriteLnFmt("(GSDumpRunner/Tester) Copied '{}' to shared memory", dump.name);
 					dump.Reset();
 					dump_index++;
 				}
 				else if (!error.GetDescription().empty())
 				{
-					Console.ErrorFmt("(GSDumpRunner/RegressionTester) Error copying '{}' to shared memory.", dump_files[dump_index]);
+					Console.ErrorFmt("(GSDumpRunner/Tester) Error copying '{}' to shared memory.", dump_files[dump_index]);
 					dump.Reset();
 					dump_index++; // Skip
 				}
@@ -1466,12 +1467,14 @@ int main_tester(int argc, char* argv[])
 			}
 			else if (!dump.Load(dump_files[dump_index], &error))
 			{
-				Console.ErrorFmt("(GSDumpRunner/RegressionTester) Failed to load dump '{}' (error: {}).",
+				Console.ErrorFmt("(GSDumpRunner/Tester) Failed to load dump '{}' (error: {}).",
 					dump_files[dump_index], error.GetDescription());
 				dump_index++; // Skip
 			}
 		}
 
+		// Get state and runner process exit. Note: state must be polled before reading the packets
+		// to correctly determine whether the packet ring buffer is empty.
 		for (int i = 0; i < 2; i++)
 		{
 			exited[i] = !regression_runner_proc[i].IsRunning();
@@ -1501,7 +1504,7 @@ int main_tester(int argc, char* argv[])
 				dump_name_curr = name_dump[0];
 				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
 				packet_name_curr = name_packet[0];
-				Console.WriteLnFmt("(GSDumpRunner/RegressionTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
+				Console.WriteLnFmt("(GSDumpRunner/Tester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
 				if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 				{
@@ -1511,22 +1514,25 @@ int main_tester(int argc, char* argv[])
 
 						if (!GSPng::Save(GSPng::RGB_A_PNG, dump_image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
 						{
-							Console.WarningFmt("(GSDumpRunner/RegressionTester) Unable to save image file: '{}'", dump_image_path);
+							Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", dump_image_path);
 							restart = true;
+							break;
 						}
 					}
 				}
+
+				if (restart)
+					continue;
 			}
 			else
 			{
-				Console.Warning("(GSDumpRunner/RegressionTester) Runners out of sync on dumps:");
+				Console.Error("(GSDumpRunner/Tester) Runners out of sync on following dumps:");
 				for (int i = 0; i < 2; i++)
 				{
-					Console.WarningFmt("\n    {}: {} / {}\n", regression_runner_name[i], name_dump[i], name_packet[i]);
+					Console.ErrorFmt("    {}: {} / {}", regression_runner_name[i], name_dump[i], name_packet[i]);
 				}
-					
-				for (int i = 0; i < 2; i++)
-					mismatched[i].emplace_back(name_dump[i], name_packet[i]);
+				restart = true;
+				continue;
 			}
 
 			for (int i = 0; i < 2; i++)
@@ -1540,26 +1546,18 @@ int main_tester(int argc, char* argv[])
 			done[i] = exited[i] || (state[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
 		}
 
-		//for (int i = 0; i < 2; i++)
-		//{
-		//	int j = 1 - i;
-		//	if (done[i] && !done[j])
-		//	{
-		//		if (packets[j])
-		//		{
-		//			std::string name_dump = packets[j]->GetNameDump();
-		//			std::string name_packet = packets[j]->GetNamePacket();
-		//			Console.WarningFmt("Runner {} extra packet: {} / {}", regression_runner_name[j], name_dump, name_packet);
-		//			mismatched[j].emplace_back(name_dump, name_packet);
-		//			packets[j] = nullptr;
-		//		}
-		//	}
-		//}
-
 		if (done[0] && done[1] && dump_index >= dump_files.size())
 		{
 			Console.WriteLn("(GSDumpRunner/Tester) All dumps/packets finished.");
 			break;
+		}
+
+		if (deadlock_timer.GetTimeSeconds() >= deadlock_timeout)
+		{
+			Console.ErrorFmt("(GSDumpRunner/Tester) Possible deadlock detected at dump {}.", dump_name_curr);
+			deadlock_timer.Reset();
+			restart = true;
+			continue;
 		}
 
 		std::this_thread::yield();
