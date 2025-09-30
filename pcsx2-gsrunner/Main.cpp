@@ -80,7 +80,7 @@ namespace GSRunner
 
 	static std::string s_output_prefix;
 	static std::string s_regression_file;
-	RegressionBuffer s_regression_buffer;
+	GSRegressionBuffer s_regression_buffer;
 	static s32 s_loop_count = 1;
 	static std::optional<bool> s_use_window;
 	static bool s_no_console = false;
@@ -135,13 +135,13 @@ namespace GSTester
 	static std::string regression_output_image_dir[2];
 	static std::string regression_output_hwstat_dir[2];
 	static std::string regression_runner_args;
-	static RegressionBuffer regression_buffer[2];
+	static GSRegressionBuffer regression_buffer[2];
 	static std::string regression_runner_path[2];
 	static std::string regression_runner_command[2];
 	static std::string regression_runner_name[2];
 	static std::string regression_shared_file[2];
 	static std::string regression_dump_dir;
-	static Process regression_runner_proc[2];
+	static GSProcess regression_runner_proc[2];
 	static constexpr std::size_t regression_deadlock_timeout = 1000;
 	static constexpr std::size_t regression_failure_restarts = 10;
 
@@ -1118,7 +1118,7 @@ bool GSTester::CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, c
 {
 	error->SetString("");
 
-	DumpFileSharedMemory* dump_shared[2]{};
+	GSDumpFileSharedMemory* dump_shared[2]{};
 
 	std::size_t size;
 
@@ -1189,7 +1189,7 @@ int GSRunner::main_runner(int argc, char* argv[])
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
 	{
-		StartRegressionTest(&s_regression_buffer, s_regression_file,
+		GSStartRegressionTest(&s_regression_buffer, s_regression_file,
 			GSTester::regression_num_packets, GSTester::regression_dump_size);
 	}
 	
@@ -1213,8 +1213,8 @@ int GSRunner::main_runner(int argc, char* argv[])
 
 	VMManager::Internal::CPUThreadShutdown();
 	DestroyPlatformWindow();
-	if (IsRegressionTesting())
-		EndRegressionTest();
+	if (GSIsRegressionTesting())
+		GSEndRegressionTest();
 	return EXIT_SUCCESS;
 }
 
@@ -1275,8 +1275,8 @@ bool GSTester::StartRunners()
 			return false;
 		}
 
-		if (regression_buffer[0].GetStateRunner() == RegressionBuffer::WAIT_DUMP &&
-			regression_buffer[1].GetStateRunner() == RegressionBuffer::WAIT_DUMP)
+		if (regression_buffer[0].GetStateRunner() == GSRegressionBuffer::WAIT_DUMP &&
+			regression_buffer[1].GetStateRunner() == GSRegressionBuffer::WAIT_DUMP)
 		{
 			Console.WriteLn("(GSTester) Both runners are initialized.");
 			return true;
@@ -1290,7 +1290,7 @@ bool GSTester::StartRunners()
 bool GSTester::EndRunners()
 {
 	for (int i = 0; i < 2; i++)
-		regression_buffer[i].SetStateTester(RegressionBuffer::DONE);
+		regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE);
 
 	bool ended = false;
 	Common::Timer timer;
@@ -1389,7 +1389,7 @@ int GSTester::main_tester(int argc, char* argv[])
 	
 	// Temporary loop variables.
 	CachedDump dump; // Cache the dump from disk to shared with runner processes.
-	RegressionPacket* packets[2]; // Packet read from each .
+	GSRegressionPacket* packets[2]; // Packet read from each .
 	Error error; // Current error.
 	u32 state[2]; // Runner state.
 	bool exited[2]; // Runner process exited.
@@ -1501,7 +1501,7 @@ int GSTester::main_tester(int argc, char* argv[])
 				packet_type_curr = type_packet[0];
 				Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
-				if (packet_type_curr == RegressionPacket::IMAGE)
+				if (packet_type_curr == GSRegressionPacket::IMAGE)
 				{
 					if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 					{
@@ -1527,7 +1527,7 @@ int GSTester::main_tester(int argc, char* argv[])
 						}
 					}
 				}
-				else if (packet_type_curr == RegressionPacket::HWSTAT)
+				else if (packet_type_curr == GSRegressionPacket::HWSTAT)
 				{
 					if (packets[0]->hwstat != packets[1]->hwstat)
 					{
@@ -1580,7 +1580,7 @@ int GSTester::main_tester(int argc, char* argv[])
 		// Check state of runner processes.
 		for (int i = 0; i < 2; i++)
 		{
-			done[i] = exited[i] || (state[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
+			done[i] = exited[i] || (state[i] == GSRegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
 		}
 
 		if (done[0] && done[1] && dump_index >= dump_files.size())

@@ -18,7 +18,7 @@ GSTexture::GSTexture() = default;
 
 GSTexture::~GSTexture() = default;
 
-bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
+bool GSTexture::Save(const std::string& fn, GSRegressionBuffer* rbp)
 {
 	// Depth textures need special treatment - we have a stencil component.
 	// Just re-use the existing conversion shader instead.
@@ -63,10 +63,10 @@ bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 
 	if (rbp)
 	{
-		rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
-		RegressionPacket* packet = nullptr;
+		rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
+		GSRegressionPacket* packet = nullptr;
 		ScopedGuard sg([&]() {
-			rbp->SetStateRunner(RegressionBuffer::DEFAULT);
+			rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 			if (packet)
 				rbp->DonePacketWrite();
 		});
