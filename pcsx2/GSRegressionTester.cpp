@@ -696,10 +696,10 @@ bool GSProcess::IsRunning()
 #endif
 }
 
-int GSProcess::WaitForExit()
+int GSProcess::WaitForExit(u32 msec)
 {
 #ifdef __WIN32__
-	return WaitForSingleObject(pi.hProcess, INFINITE);
+	return WaitForSingleObject(pi.hProcess, msec);
 #else
 	// Not implemented
 	return false;

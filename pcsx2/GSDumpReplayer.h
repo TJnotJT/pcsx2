@@ -31,6 +31,7 @@ namespace GSDumpReplayer
 	std::string GetDumpSerial();
 	u32 GetDumpCRC();
 
+	void SetFrameNumberMax(u32 frame_number_max);
 	u32 GetFrameNumber();
 
 	void RenderUI();

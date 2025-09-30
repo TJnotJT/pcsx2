@@ -678,7 +678,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 		packet = rbp->GetPacketWrite(true);
 		if (!packet)
 		{
-			Console.ErrorFmt("(GSDumpReplayer {}) Failed to get regression packet.", GSDumpReplayer::GetRunnerName());
+			Console.ErrorFmt("(GSRunner/{}) Failed to get regression packet.", GSDumpReplayer::GetRunnerName());
 			return;
 		}
 	}
@@ -708,7 +708,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 		packet->SetNameDump(rbp->GetNameDump());
 		packet->SetNamePacket(fn.c_str());
 		packet->SetImage(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
-		Console.WriteLnFmt("(GSDumpReplayer {}) New regression packet: {} / {}",
+		Console.WriteLnFmt("(GSRunner/{}) New regression packet: {} / {}",
 			GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
 	}
 	else

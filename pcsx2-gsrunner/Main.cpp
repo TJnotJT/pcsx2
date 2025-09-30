@@ -86,6 +86,7 @@ namespace GSRunner
 	static std::optional<bool> s_use_window;
 	static bool s_no_console = false;
 	static bool s_batch_mode = false;
+	static u32 s_frames_max = 0;
 
 	// Owned by the GS thread.
 	static u32 s_dump_frame_number = 0;
@@ -112,24 +113,33 @@ namespace GSRunner
 
 namespace GSTester
 {
+	struct DumpInfo
+	{
+		std::string file = "";
+		std::string name = "";
+		std::size_t packets = 0;
+		bool completed = false;
+	};
+
+	struct DumpCached
+	{
+		std::unique_ptr<GSDumpFile> ptr;
+		std::string name;
+
+		bool Load(DumpInfo& d, Error* error);
+		bool HasCached();
+		void Reset();
+	};
+
 	static bool ParseCommandLineArgs(int argc, char* argv[]);
 	static void PrintCommandLineHelp(const char* progname);
+	bool GetDumpInfo(std::vector<DumpInfo>& dump_infos, std::map<std::string, std::size_t>& dumps_map);
 	bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error);
 	bool StartRunners();
 	bool EndRunners();
 	bool RestartRunners();
 
 	int main_tester(int argc, char* argv[]);
-
-	struct CachedDump
-	{
-		std::unique_ptr<GSDumpFile> ptr;
-		std::string name;
-
-		bool Load(const std::string& file, Error* error);
-		bool HasCached();
-		void Reset();
-	};
 
 	enum
 	{
@@ -841,6 +851,11 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 					GSTester::regression_dump_size = size_mb.value() * _1mb;
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-frames-max"))
+			{
+				s_frames_max = StringUtil::FromChars<u32>(argv[++i]).value_or(0);
+				continue;
+			}
 			else if (CHECK_ARG("-batch"))
 			{
 				s_batch_mode = true;
@@ -1241,6 +1256,7 @@ int GSRunner::main_runner(int argc, char* argv[])
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
 	GSDumpReplayer::SetIsDumpRunner(true, s_runner_name);
+	GSDumpReplayer::SetFrameNumberMax(s_frames_max);
 	if (s_batch_mode)
 	{
 		GSDumpReplayer::SetIsBatchMode(true);
@@ -1263,12 +1279,12 @@ int GSRunner::main_runner(int argc, char* argv[])
 	return EXIT_SUCCESS;
 }
 
-bool GSTester::CachedDump::Load(const std::string& file, Error* error)
+bool GSTester::DumpCached::Load(DumpInfo& d, Error* error)
 {
-	s64 size = FileSystem::GetPathFileSize(file.c_str());
+	s64 size = FileSystem::GetPathFileSize(d.file.c_str());
 	if (size < 0)
 	{
-		Error::SetStringFmt(error, "Unable to stat file '{}'", file);
+		Error::SetStringFmt(error, "Unable to stat file '{}'", d.file);
 		return false;
 	}
 
@@ -1276,23 +1292,23 @@ bool GSTester::CachedDump::Load(const std::string& file, Error* error)
 	// The decompressed size is usually more than 4x the disk size.
 	if (static_cast<std::size_t>(4 * size) > regression_dump_size)
 	{
-		Error::SetStringFmt(error, "Disk size too large '{}' ({} bytes)", file, size);
+		Error::SetStringFmt(error, "Disk size too large '{}' ({} bytes)", d.file, size);
 		return false;
 	}
 
-	ptr = GSDumpFile::OpenGSDump(file.c_str(), error);
+	ptr = GSDumpFile::OpenGSDump(d.file.c_str(), error);
 	if (!ptr)
 		return false;
-	name = std::filesystem::path(file).filename().string();
+	name = d.name;
 	return true;
 }
 
-bool GSTester::CachedDump::HasCached()
+bool GSTester::DumpCached::HasCached()
 {
 	return static_cast<bool>(ptr);
 }
 
-void GSTester::CachedDump::Reset()
+void GSTester::DumpCached::Reset()
 {
 	ptr.reset();
 	name = "";
@@ -1300,19 +1316,21 @@ void GSTester::CachedDump::Reset()
 
 bool GSTester::StartRunners()
 {
+	const auto quote = [](std::string x) { return "\"" + x + "\""; };
+
 	// Start the runner processes in regression testing mode.
 	for (int i = 0; i < 2; i++)
 	{
 		if (regression_runner_command[i].empty())
 		{
 			regression_runner_command[i] =
-				regression_runner_path[i] +
+				quote(regression_runner_path[i]) +
 				std::string(" runner ") +
 				std::string(" -surfaceless ") +
 				std::string(" -loop 1 ") +
 				std::string(" -dump f ") +
-				std::string(" -regression-test ") + regression_shared_file[i] +
-				std::string(" -name ") + regression_runner_name[i] +
+				std::string(" -regression-test ") + quote(regression_shared_file[i]) +
+				std::string(" -name ") + quote(regression_runner_name[i]) +
 				std::string(" -npackets ") + std::to_string(regression_num_packets) +
 				std::string(" -regression-dump-size ") + std::to_string(regression_dump_size / _1mb) +
 				" " + regression_runner_args;
@@ -1355,6 +1373,7 @@ bool GSTester::EndRunners()
 
 	constexpr double terminate_timeout = 10.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
+	double sec;
 	while (1)
 	{
 		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning())
@@ -1362,7 +1381,7 @@ bool GSTester::EndRunners()
 			break;
 		}
 
-		if (timer.GetTimeSeconds() >= terminate_timeout)
+		if ((sec = timer.GetTimeSeconds()) >= terminate_timeout)
 			break;
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -1400,13 +1419,8 @@ static constexpr const char* LIST_ITEM = "- ";
 static constexpr const char* OPEN_LIST = "[";
 static constexpr const char* CLOSE_LIST = "]";
 
-int GSTester::main_tester(int argc, char* argv[])
+bool GSTester::GetDumpInfo(std::vector<DumpInfo>& dumps, std::map<std::string, std::size_t>& dumps_map)
 {
-	Common::Timer timer_total;
-
-	if (!ParseCommandLineArgs(argc, argv))
-		return EXIT_FAILURE;
-
 	std::vector<std::string> dump_files;
 
 	if (VMManager::IsGSDumpFileName(regression_dump_dir))
@@ -1420,10 +1434,36 @@ int GSTester::main_tester(int argc, char* argv[])
 	else
 	{
 		Console.WarningFmt("(GSTester) Provided file is neither a dump or a directory: '{}'", regression_dump_dir);
-		return EXIT_FAILURE;
+		return false;
 	}
 
-	Console.WriteLnFmt("(GSTester) Found {} dumps in '{}'", dump_files.size(), regression_dump_dir);
+	for (const std::string& file : dump_files)
+	{
+		std::string name = std::filesystem::path(file).filename().string();
+		dumps.emplace_back(file, name, 0, false);
+	}
+
+	for (std::size_t i = 0; i < dumps.size(); i++)
+	{
+		dumps_map.insert({dumps[i].name, i});
+	}
+
+	return true;
+}
+
+int GSTester::main_tester(int argc, char* argv[])
+{
+	Common::Timer timer_total;
+	std::vector<DumpInfo> dumps;
+	std::map<std::string, std::size_t> dumps_map; // Name to index.
+
+	if (!ParseCommandLineArgs(argc, argv))
+		return EXIT_FAILURE;
+
+	if (!GetDumpInfo(dumps, dumps_map))
+		return EXIT_FAILURE;
+
+	Console.WriteLnFmt("(GSTester) Found {} dumps in '{}'", dumps.size(), regression_dump_dir);
 
 	Console.WriteLn("(GSTester) Opening shared memory files.");
 	for (int i = 0; i < 2; i++)
@@ -1445,26 +1485,22 @@ int GSTester::main_tester(int argc, char* argv[])
 	}
 	Console.WriteLn("(GSTester) Runners processes are initialized.");
 
-	std::size_t dumps_processed = 0; // Number of dumps processed.
-	std::size_t dumps_skipped = 0; // Number of dumps skipped.
-	std::size_t packets_processed = 0; // Number of packets processed.
 	std::size_t dump_index = 0; // Current dump that should be written to dump buffer.
-	constexpr double deadlock_timeout = 5.0; // Seconds before determining a deadlock.
+	std::string last_dump_completed;
+	constexpr double deadlock_timeout = 5.0; // Seconds before determining a deadlock in runner.
 	Common::Timer deadlock_timer; // Time since seeing a packet from a runner.
 	constexpr std::size_t max_failure_restarts = 10; // Max times to attempt restarting before giving up.
 	std::size_t failure_restarts = 0; // Current number of failure restarts.
-	std::string last_dump_completed;
 
 	// Temporary loop variables.
-	CachedDump dump; // Cache the dump from disk to shared with runner processes.
+	DumpCached dump; // Cache the dump from disk to shared with runner processes.
 	GSRegressionPacket* packets[2]; // Packet read from each .
 	Error error; // Current error.
 	u32 state[2]; // Runner state.
 	bool exited[2]; // Runner process exited.
 	bool done[2]; // Runner process done
 	bool restart = false; // Whether to attempt a restart on next iteration.
-	std::string dump_name_curr; // Current dump name.
-	std::string dump_file_curr; // Current dump file.
+	DumpInfo* dump_curr; // Pointer into dumps vector of current dump.
 	std::string packet_name_curr; // Current packet name.
 	u32 packet_type_curr; // Current packet type.
 
@@ -1496,9 +1532,14 @@ int GSTester::main_tester(int argc, char* argv[])
 				else
 				{
 					Console.WriteLnFmt("(GSTester) Restarting from {}.", last_dump_completed);
-					const auto it = std::find(dump_files.begin(), dump_files.end(), last_dump_completed);
-					pxAssert(it != dump_files.end());
-					dump_index = (it + 1 - dump_files.begin());
+					dump_index = dumps_map.at(last_dump_completed) + 1;
+				}
+
+				// Reset stats of subsequent dumps.
+				for (std::size_t i = dump_index; i < dumps.size(); i++)
+				{
+					dumps[i].packets = 0;
+					dumps[i].completed = false;
 				}
 
 				// Restart the runner processes
@@ -1510,7 +1551,7 @@ int GSTester::main_tester(int argc, char* argv[])
 			}
 		}
 
-		if (dump_index < dump_files.size())
+		if (dump_index < dumps.size())
 		{
 			if (dump.HasCached())
 			{
@@ -1519,27 +1560,23 @@ int GSTester::main_tester(int argc, char* argv[])
 					Console.WriteLnFmt("(GSTester) Copied '{}' to shared memory", dump.name);
 					dump.Reset();
 					dump_index++;
-					dumps_processed++;
 					deadlock_timer.Reset(); // Decompressing the dump can take time. Don't want false positives.
 				}
 				else if (!error.GetDescription().empty())
 				{
-					Console.ErrorFmt("(GSTester) Error copying '{}' to shared memory.", dump_files[dump_index]);
+					Console.ErrorFmt("(GSTester) Error copying '{}' to shared memory.", dumps[dump_index].file);
 					dump.Reset();
 					dump_index++; // Skip
-					dumps_skipped++;
 				}
 				else
 				{
 					// The copy failed because the buffer is full. Try again next iteration.
 				}
 			}
-			else if (!dump.Load(dump_files[dump_index], &error))
+			else if (!dump.Load(dumps[dump_index], &error))
 			{
-				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).",
-					dump_files[dump_index], error.GetDescription());
+				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).", dumps[dump_index].file, error.GetDescription());
 				dump_index++; // Skip
-				dumps_skipped++;
 			}
 		}
 
@@ -1574,13 +1611,12 @@ int GSTester::main_tester(int argc, char* argv[])
 
 			if (name_dump[0] == name_dump[1] && name_packet[0] == name_packet[1] && type_packet[0] == type_packet[1])
 			{
-				dump_name_curr = name_dump[0];
-				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
+				dump_curr = &dumps[dumps_map.at(name_dump[0])];
 				packet_name_curr = name_packet[0];
 				packet_type_curr = type_packet[0];
 
 				if (regression_verbose_level >= VERBOSE_TESTER)
-					Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
+					Console.WriteLnFmt("(GSTester) Comparing results for {} / {}.", dump_curr->name, packet_name_curr);
 
 				if (packet_type_curr == GSRegressionPacket::IMAGE)
 				{
@@ -1588,7 +1624,7 @@ int GSTester::main_tester(int argc, char* argv[])
 					{
 						for (int i = 0; i < 2; i++)
 						{
-							std::string image_dir = (std::filesystem::path(regression_output_image_dir[i]) / dump_name_curr).string();
+							std::string image_dir = (std::filesystem::path(regression_output_image_dir[i]) / dump_curr->name).string();
 
 							if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
 							{
@@ -1607,9 +1643,6 @@ int GSTester::main_tester(int argc, char* argv[])
 							}
 						}
 					}
-
-					if (!restart)
-						packets_processed++;
 				}
 				else if (packet_type_curr == GSRegressionPacket::HWSTAT)
 				{
@@ -1642,9 +1675,9 @@ int GSTester::main_tester(int argc, char* argv[])
 				}
 				else if (packet_type_curr == GSRegressionPacket::DONE_DUMP)
 				{
-					Console.ErrorFmt("(GSTester) Done with '{}'", dump_name_curr);
-					last_dump_completed = dump_name_curr;
-					restart = true;
+					Console.WriteLnFmt("(GSTester) Completed dump '{}'", dump_curr->name);
+					last_dump_completed = dump_curr->name;
+					dump_curr->completed = true;
 				}
 				else
 				{
@@ -1652,12 +1685,13 @@ int GSTester::main_tester(int argc, char* argv[])
 					restart = true;
 				}
 
-				restart = true;
-
 				if (restart)
 					continue;
 
-				packets_processed++; // Packet processed successfully.
+				if (!restart)
+				{
+					dump_curr->packets++; // Packet processed successfully.
+				}
 			}
 			else
 			{
@@ -1682,7 +1716,7 @@ int GSTester::main_tester(int argc, char* argv[])
 			done[i] = exited[i] || (state[i] == GSRegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
 		}
 
-		if (done[0] && done[1] && dump_index >= dump_files.size())
+		if (done[0] && done[1] && dump_index >= dumps.size())
 		{
 			Console.WriteLn("(GSTester) All dumps/packets finished.");
 			break;
@@ -1691,7 +1725,8 @@ int GSTester::main_tester(int argc, char* argv[])
 		// Handle possible deadlock.
 		if (deadlock_timer.GetTimeSeconds() >= deadlock_timeout)
 		{
-			Console.ErrorFmt("(GSTester) Possible deadlock detected at dump {}.", dump_name_curr);
+			Console.ErrorFmt("(GSTester) Possible deadlock detected after dump {}.",
+				last_dump_completed.empty() ? "?" : last_dump_completed);
 			deadlock_timer.Reset();
 			restart = true;
 			continue;
@@ -1719,12 +1754,22 @@ int GSTester::main_tester(int argc, char* argv[])
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].CloseFile();
 
+	// Get stats and print stats.
+	std::size_t packets_completed = 0;
+	std::size_t dumps_completed = 0;
+	std::size_t dumps_skipped = 0;
+	for (std::size_t i = 0; i < dumps.size(); i++)
+	{
+		packets_completed += dumps[i].packets;
+		dumps_completed += dumps[i].completed;
+		dumps_skipped += !dumps[i].completed;
+	}
 	Console.WriteLnFmt("GSTester Stats:");
 	Console.WriteLnFmt("    Run time: {:.2} minutes", timer_total.GetTimeSeconds() / 60.0);
-	Console.WriteLnFmt("    Dumps processed: {} / {}", dumps_processed, dump_files.size());
-	Console.WriteLnFmt("    Dumps skipped: {} / {}", dumps_skipped, dump_files.size());
+	Console.WriteLnFmt("    Dumps completed: {} / {}", dumps_completed, dumps.size());
+	Console.WriteLnFmt("    Dumps skipped: {} / {}", dumps_skipped, dumps.size());
 	Console.WriteLnFmt("    Packets processed: {} (Avg {})",
-		packets_processed, dumps_processed == 0 ? -1 : (packets_processed / dumps_processed));
+		packets_completed, dumps_completed == 0 ? -1 : packets_completed / dumps_completed);
 	Console.WriteLnFmt("    Failure restarts: {}", failure_restarts);
 
 	return EXIT_SUCCESS;

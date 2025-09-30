@@ -270,6 +270,8 @@ float RegressionCompareImages(const GSRegressionPacket* p1, const GSRegressionPa
 // Cross-platform process.
 struct GSProcess
 {
+	static constexpr u32 infinite = 0xFFFFFFFF;
+
 	std::string command;
 #ifdef __WIN32__
 	STARTUPINFO si;
@@ -279,7 +281,7 @@ struct GSProcess
 #endif
 	bool Start(const std::string& command, bool detached);
 	bool IsRunning();
-	int WaitForExit();
+	int WaitForExit(u32 msec = infinite);
 	bool Close();
 	void Terminate();
 };
