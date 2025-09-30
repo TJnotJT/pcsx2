@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "GS.h"
+#include "GS/GSPerfMon.h"
+#include "GS/GSState.h"
 #include "GS/GSLzma.h"
 #include "GSDumpReplayer.h"
 #include "GameList.h"
@@ -517,43 +519,56 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	/////////////////////// TEMP DEBUGGING ///////////////////////
-	//if (IsRegressionTesting())
-	//{
-	//	RegressionBuffer* buf = GetRegressionBuffer();
-
-	//	// Discard all the written packets.
-	//	while (RegressionPacket* packet = buf->GetPacketRead(false))
-	//	{
-	//		Console.WriteLn(packet->GetNameDump() + " " + packet->GetNamePacket());
-	//		buf->DonePacketRead();
-	//	}
-	//}
-	///////////////////////// TEMP DEBUGGING ///////////////////////
-
 	if (s_current_packet == 0 && s_dump_loop_count == 0 && GSDumpReplayer::IsBatchMode())
 	{
 		MTGS::WaitGS(false, false, false);
-		///////////////////////// TEMP DEBUGGING ///////////////////////
-		//extern int __dump_files_i__;
-		//extern std::vector<std::string> __dump_files_debug__;
-		//extern bool CopyDumpToSharedMemory(const std::string& fn, bool block);
-		//while (__dump_files_i__ < __dump_files_debug__.size() && !CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true))
-		//	{
-		//	}
-		//if (__dump_files_i__ == __dump_files_debug__.size())
-		//{
-		//	GetRegressionBuffer()->SetStatus("Done");
-		//}
-		///////////////////////// TEMP DEBUGGING ///////////////////////
+		GSState::s_n = 0; // Needed for proper file naming.
+
+		// Send HW stats if needed.
+		if (GSIsHardwareRenderer() && IsRegressionTesting())
+		{
+			RegressionBuffer* rbp = GetRegressionBuffer();
+			rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
+			RegressionPacket* packet = nullptr;
+			ScopedGuard sg([&]() {
+				rbp->SetStateRunner(RegressionBuffer::DEFAULT);
+				if (packet)
+					rbp->DonePacketWrite();
+			});
+
+			if (packet = rbp->GetPacketWrite(true))
+			{
+				const std::string name_dump = rbp->GetNameDump();
+				packet->SetNameDump(name_dump);
+				packet->SetNamePacket(name_dump + " HWStat");
+
+				RegressionPacket::HWStat hwstat;
+				hwstat.frames = 0; // FIXME
+				hwstat.draws = g_perfmon.GetCounter(GSPerfMon::DrawCalls);
+				hwstat.render_passes = g_perfmon.GetCounter(GSPerfMon::RenderPasses);
+				hwstat.barriers = g_perfmon.GetCounter(GSPerfMon::Barriers);
+				hwstat.copies = g_perfmon.GetCounter(GSPerfMon::TextureCopies);
+				hwstat.uploads = g_perfmon.GetCounter(GSPerfMon::TextureUploads);
+				hwstat.readbacks = g_perfmon.GetCounter(GSPerfMon::Readbacks);
+				packet->SetHWStat(hwstat);
+
+				Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
+					GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
+			}
+			else
+			{
+				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for HW stats.", GSDumpReplayer::GetRunnerName());
+			}
+		}
+		
 		if (GSDumpReplayer::NextDump())
 		{
 			s_dump_loop_count = s_dump_loop_count_start;
 			GSDumpReplayerCpuReset();
-
 		}
 		else
 		{
+			Console.ErrorFmt("(GSDumpReplayer/{}) Batch mode no more dumps.", GSDumpReplayer::GetRunnerName());
 			Host::RequestVMShutdown(false, false, false);
 			s_dump_running = false;
 		}

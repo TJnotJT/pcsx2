@@ -226,24 +226,31 @@ void RegressionPacket::SetName(char* dst, const std::string& path)
 	dst[name_size - 1] = '\0';
 }
 
-void RegressionPacket::SetImageData(const void* src, int w, int h, int pitch, int bytes_per_pixel)
+void RegressionPacket::SetImage(const void* src, int w, int h, int pitch, int bytes_per_pixel)
 {
 	if (src)
 	{
 		const std::size_t src_size = h * pitch;
 
-		if (src_size > std::size(data))
+		if (src_size > std::size(image.data))
 		{
 			Console.Warning("Image data is too large for regression packet.");
 		}
 
-		memcpy_s(data, std::size(data), src, src_size);
+		memcpy_s(image.data, std::size(image.data), src, src_size);
 	}
 
+	this->type = IMAGE;
 	this->w = w;
 	this->h = h;
 	this->pitch = pitch;
 	this->bytes_per_pixel = bytes_per_pixel;
+}
+
+void RegressionPacket::SetHWStat(const HWStat& hwstat)
+{
+	this->type = HWSTAT;
+	this->hwstat = hwstat;
 }
 
 void RegressionPacket::Init()
@@ -268,11 +275,6 @@ std::string RegressionPacket::GetNamePacket()
 	name_packet[std::size(name_packet) - 1] = '\0';
 
 	return std::string(name_packet);
-}
-
-u8* RegressionPacket::GetImageData()
-{
-	return data;
 }
 
 // Only once before sharing. Not thread safe.
@@ -496,8 +498,8 @@ RegressionBuffer* GetRegressionBuffer()
 template<int bytes_per_pixel>
 static float RegressionCompareImagesImpl(const RegressionPacket* p1, const RegressionPacket* p2, int threshold)
 {
-	const u8* data1 = p1->data;
-	const u8* data2 = p2->data;
+	const u8* data1 = p1->image.data;
+	const u8* data2 = p2->image.data;
 
 	int num_diff_pixels = 0;
 
@@ -546,7 +548,7 @@ float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket
 	if (p1->w != p2->w || p1->h != p2->h || p1->bytes_per_pixel != p2->bytes_per_pixel)
 		return 1.0f; // Formats are different.
 
-	if (memcmp(p1->data, p2->data, p1->bytes_per_pixel * p1->h * p1->pitch) != 0)
+	if (memcmp(p1->image.data, p2->image.data, p1->bytes_per_pixel * p1->h * p1->pitch) != 0)
 		return 1.0f;
 	else
 		return 0.0f;

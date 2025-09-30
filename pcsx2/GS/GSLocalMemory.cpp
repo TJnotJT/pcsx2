@@ -683,7 +683,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 		}
 	}
 
-	void* bits = rbp ? packet->data : _aligned_malloc(size, VECTOR_ALIGNMENT);
+	void* bits = rbp ? packet->image.data : _aligned_malloc(size, VECTOR_ALIGNMENT);
 
 	GIFRegTEX0 TEX0;
 
@@ -707,7 +707,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	{
 		packet->SetNameDump(rbp->GetNameDump());
 		packet->SetNamePacket(fn.c_str());
-		packet->SetImageData(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
+		packet->SetImage(nullptr, w, h, pitch, 4); // Image data is already written so pass null.
 		Console.WriteLnFmt("(GSDumpReplayer {}) New regression packet: {} / {}",
 			GSDumpReplayer::GetRunnerName(), packet->GetNameDump(), packet->GetNamePacket());
 	}

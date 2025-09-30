@@ -110,6 +110,7 @@ static std::string s_dump_gs_data_dir_sw;
 // For the tester
 static std::string regression_output_dir;
 static std::string regression_output_image_dir[2];
+static std::string regression_output_hwstat_dir[2];
 static std::string regression_runner_args;
 static RegressionBuffer regression_buffer[2];
 static std::string regression_runner_path[2];
@@ -1007,19 +1008,7 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 		return false;
 	}
 
-	for (int i = 0; i < 2; i++)
-	{
-		regression_output_image_dir[i] = (std::filesystem::path(regression_output_dir) / regression_runner_name[i]).string();
-
-		Error e;
-		if (!FileSystem::EnsureDirectoryExists(regression_output_image_dir[i].c_str(), false, &e))
-		{
-			Console.ErrorFmt("Unable to create output directory \"{}\" (error: {})", regression_output_image_dir[i], e.GetDescription());
-			return false;
-		}
-	}
-
-	for (int i = 0; i < 2; i++)
+		for (int i = 0; i < 2; i++)
 	{
 		if (regression_runner_path[i].empty())
 		{
@@ -1046,6 +1035,24 @@ bool GSRunner::ParseCommandLineArgsTester(int argc, char* argv[])
 		regression_runner_name[1] += "-2";
 	}
 
+	for (int i = 0; i < 2; i++)
+	{
+		regression_output_image_dir[i] = (std::filesystem::path(regression_output_dir) / "image" / regression_runner_name[i]).string();
+		regression_output_hwstat_dir[i] = (std::filesystem::path(regression_output_dir) / "hwstat" / regression_runner_name[i]).string();
+
+		Error e;
+		if (!FileSystem::EnsureDirectoryExists(regression_output_image_dir[i].c_str(), true, &e))
+		{
+			Console.ErrorFmt("Unable to create output directory '{}' (error: {})", regression_output_image_dir[i], e.GetDescription());
+			return false;
+		}
+		if (!FileSystem::EnsureDirectoryExists(regression_output_hwstat_dir[i].c_str(), true, &e))
+		{
+			Console.ErrorFmt("Unable to create output directory '{}' (error: {})", regression_output_hwstat_dir[i], e.GetDescription());
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -1060,17 +1067,6 @@ void GSRunner::DumpStats()
 	Console.WriteLn(fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn("============================================");
-
-	//if (IsRegressionTesting())
-	//{
-	//	s_regression_buffer.frames = s_total_drawn_frames;
-	//	s_regression_buffer.draws = s_total_draws;
-	//	s_regression_buffer.render_passes = s_total_render_passes;
-	//	s_regression_buffer.barriers = s_total_barriers;
-	//	s_regression_buffer.copies = s_total_copies;
-	//	s_regression_buffer.uploads = s_total_uploads;
-	//	s_regression_buffer.readbacks = s_total_readbacks;
-	//}
 }
 
 #ifdef _WIN32
@@ -1138,29 +1134,6 @@ bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::
 	return true;
 }
 
-int __dump_files_i__ = 0;
-std::vector<std::string> __dump_files_debug__ = {
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\airranger.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Booting PS2 BIOS... _20220901235528.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Final Fantasy XII preload frame data texture isses.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\football_aa_shirtsthingy.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\God of War_SCUS-97399_20230611151951.gs.zst",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\golf.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\golf.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Largo Winch - Empire Under Threat_SLES-51093_20250601214727.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Monopoly Party_SLES-51145_In_Game.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\monopoly.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\ps2-bios.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Ridge Racer V_SLUS-20002_20240613085131.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\ridge-racer.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\sh3-60hz.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\toto_aa.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\toto_aa.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\Valkyrie Profile 2 - Silmeria_SLUS-21452_20250517200921.gs.xz",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs",
-	"C:\\Users\\tchan\\Desktop\\pcsx2_gs_dumps\\accline\\VP2Bloom.gs.xz",
-};
-
 int main_runner(int argc, char* argv[])
 {
 	if (!GSRunner::InitializeConfig())
@@ -1195,22 +1168,6 @@ int main_runner(int argc, char* argv[])
 		StartRegressionTest(&s_regression_buffer, s_regression_file,
 			regression_num_packets, regression_dump_size);
 	}
-
-	//CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
-
-	//std::vector<std::string> dump_files;
-	//GSDumpReplayer::ReadDumpFileList(params.filename, __dump_files_debug__);
-
-	//DumpFileSharedMemory* ds = GetRegressionBuffer()->GetDumpWrite();
-
-	/*size_t size;
-	dump->ReadFile(ds->GetDump(), regression_dump_size, &size, nullptr);
-	ds->SetName("Amagami_transparency.gs.xz");
-	ds->SetDumpSize(size);*/
-
-	//GSDumpFile::Serialize(*dump, ds->GetDump(), ds->GetDumpSize());
-
-	//GetRegressionBuffer()->DoneDumpWrite();
 	
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
@@ -1358,6 +1315,17 @@ bool RestartRunnersRegressionTest()
 	return StartRunnersRegressionTest();
 }
 
+// For writing YAML files.
+constexpr const char* INDENT = "    ";
+constexpr const char* OPEN_MAP = "{";
+constexpr const char* CLOSE_MAP = "}";
+constexpr const char* QUOTE = "\"";
+constexpr const char* KEY_VAL_DEL = ": ";
+constexpr const char* LIST_DEL = ", ";
+constexpr const char* LIST_ITEM = "- ";
+constexpr const char* OPEN_LIST = "[";
+constexpr const char* CLOSE_LIST = "]";
+
 int main_tester(int argc, char* argv[])
 {
 	if (!GSRunner::ParseCommandLineArgsTester(argc, argv))
@@ -1415,6 +1383,7 @@ int main_tester(int argc, char* argv[])
 	std::string dump_name_curr; // Current dump name.
 	std::string dump_file_curr; // Current dump file.
 	std::string packet_name_curr; // Current packet name.
+	u32 packet_type_curr; // Current packet type.
 
 	while (1)
 	{
@@ -1493,49 +1462,82 @@ int main_tester(int argc, char* argv[])
 			packets[i] = regression_buffer[i].GetPacketRead(false);
 		}
 
+		// Have a packets from both runners. Compare and output if different.
 		if (packets[0] && packets[1])
 		{
 			deadlock_timer.Reset();
 
 			std::string name_dump[2];
 			std::string name_packet[2];
+			u32 type_packet[2];
 
 			for (int i = 0; i < 2; i++)
 			{
 				name_dump[i] = packets[i]->GetNameDump();
 				name_packet[i] = packets[i]->GetNamePacket();
+				type_packet[i] = packets[i]->type;
 			}
 
-			if (name_packet[0] == name_packet[1] && name_dump[0] == name_dump[1])
+			if (name_dump[0] == name_dump[1] && name_packet[0] == name_packet[1] && type_packet[0] == type_packet[1])
 			{
 				dump_name_curr = name_dump[0];
 				dump_file_curr = (std::filesystem::path(regression_dump_dir) / std::filesystem::path(dump_name_curr)).string();
 				packet_name_curr = name_packet[0];
+				packet_type_curr = type_packet[0];
 				Console.WriteLnFmt("(GSDumpRunner/Tester) Comparing results for {} / {}.", dump_name_curr, packet_name_curr);
 
-				if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
+				if (packet_type_curr == RegressionPacket::IMAGE)
 				{
-					for (int i = 0; i < 2; i++)
+					if (RegressionCompareImages(packets[0], packets[1], 0) != 0.0f)
 					{
-						std::string image_dir = (
-							std::filesystem::path(regression_output_image_dir[i]) /
-							regression_runner_name[i] /
-							dump_name_curr).string();
-
-						if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
+						for (int i = 0; i < 2; i++)
 						{
-							Console.WarningFmt("(GSDumpRunner/Tester) Unable to create directory: '{}'", image_dir);
-							restart = true;
-							break;
+							std::string image_dir = (std::filesystem::path(regression_output_image_dir[i]) / dump_name_curr).string();
+
+							if (!FileSystem::EnsureDirectoryExists(image_dir.c_str(), true, &error))
+							{
+								Console.WarningFmt("(GSDumpRunner/Tester) Unable to create directory: '{}'", image_dir);
+								restart = true;
+								break;
+							}
+
+							std::string image_file = (std::filesystem::path(image_dir) / packet_name_curr).string();
+
+							if (!GSPng::Save(GSPng::RGB_A_PNG, image_file, packets[i]->image.data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+							{
+								Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", image_file);
+								restart = true;
+								break;
+							}
 						}
-
-						std::string image_path = (std::filesystem::path(image_dir) / packet_name_curr).string();
-
-						if (!GSPng::Save(GSPng::RGB_A_PNG, image_path, packets[i]->data, packets[i]->w, packets[i]->h, packets[i]->pitch, GSConfig.PNGCompressionLevel, false))
+					}
+				}
+				else if (packet_type_curr == RegressionPacket::HWSTAT)
+				{
+					if (packets[0]->hwstat != packets[1]->hwstat)
+					{
+						for (int i = 0; i < 2; i++)
 						{
-							Console.WarningFmt("(GSDumpRunner/Tester) Unable to save image file: '{}'", image_path);
-							restart = true;
-							break;
+							std::string hwstat_file = (std::filesystem::path(regression_output_hwstat_dir[i]) / (packet_name_curr + ".txt")).string();
+
+							std::ofstream oss(hwstat_file);
+
+							if (!oss.is_open())
+							{
+								Console.ErrorFmt("(GSDumpRunner/Tester) Unable to open HW stat file: '{}'", hwstat_file);
+								restart = true;
+								break;
+							}
+
+							oss << "frames" << KEY_VAL_DEL << packets[i]->hwstat.frames << std::endl;
+							oss << "draws" << KEY_VAL_DEL << packets[i]->hwstat.draws << std::endl;
+							oss << "render_passes" << KEY_VAL_DEL << packets[i]->hwstat.render_passes << std::endl;
+							oss << "barriers" << KEY_VAL_DEL << packets[i]->hwstat.barriers << std::endl;
+							oss << "copies" << KEY_VAL_DEL << packets[i]->hwstat.copies << std::endl;
+							oss << "uploads" << KEY_VAL_DEL << packets[i]->hwstat.uploads << std::endl;
+							oss << "readbacks" << KEY_VAL_DEL << packets[i]->hwstat.readbacks << std::endl;
+
+							oss.close();
 						}
 					}
 				}
@@ -1560,6 +1562,7 @@ int main_tester(int argc, char* argv[])
 			}
 		}
 
+		// Check state of runner processes.
 		for (int i = 0; i < 2; i++)
 		{
 			done[i] = exited[i] || (state[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
@@ -1571,6 +1574,7 @@ int main_tester(int argc, char* argv[])
 			break;
 		}
 
+		// Handle possible deadlock.
 		if (deadlock_timer.GetTimeSeconds() >= deadlock_timeout)
 		{
 			Console.ErrorFmt("(GSDumpRunner/Tester) Possible deadlock detected at dump {}.", dump_name_curr);
@@ -1579,51 +1583,8 @@ int main_tester(int argc, char* argv[])
 			continue;
 		}
 
+		// Don't hog CPU.
 		std::this_thread::yield();
-
-		//// Write results to directory.
-		//std::filesystem::path out_dir = std::filesystem::path(regression_output_dir);
-		//std::filesystem::path out_path = out_dir / (dump_name + ".txt");
-
-		//std::ofstream oss(out_path);
-
-		//constexpr const char* INDENT = "    ";
-		//constexpr const char* OPEN_MAP = "{";
-		//constexpr const char* CLOSE_MAP = "}";
-		//constexpr const char* QUOTE = "\"";
-		//constexpr const char* KEY_VAL_DEL = ": ";
-		//constexpr const char* LIST_DEL = ", ";
-		//constexpr const char* LIST_ITEM = "- ";
-		//constexpr const char* OPEN_LIST = "[";
-		//constexpr const char* CLOSE_LIST = "]";
-
-		//if (!image_diffs.empty())
-		//{
-		//	oss << "diffs: " << std::endl;
-
-		//	for (const auto& [name, diff_frac] : image_diffs)
-		//	{
-		//		oss << INDENT << QUOTE << name << QUOTE << KEY_VAL_DEL << diff_frac << CLOSE_MAP << std::endl;
-		//	}
-
-		//	oss << std::endl;
-		//}
-
-		//for (int i = 0; i < 2; i++)
-		//{
-		//	if (!mismatched[i].empty())
-		//	{
-		//		oss << "mismatched_" << (i + 1) << KEY_VAL_DEL << std::endl;
-		//		for (const auto& [name_dump, name_packet] : mismatched[i])
-		//		{
-		//			oss << INDENT << LIST_ITEM << OPEN_LIST << QUOTE << name_dump << QUOTE <<
-		//				LIST_DEL << QUOTE << name_packet << QUOTE << CLOSE_LIST << std::endl;
-		//		}
-		//		oss << std::endl;
-		//	}
-		//}
-
-		//oss.close();
 	}
 
 	EndRunnersRegressionTest();
