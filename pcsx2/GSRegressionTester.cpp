@@ -53,16 +53,21 @@ std::size_t GSIntSharedMemory::GetTotalSize()
 
 bool GSSpinlockSharedMemory::LockWrite(bool block, GSIntSharedMemory* state)
 {
-	while (1)
+	while (true)
 	{
+		if (state && state->Get() == GSRegressionBuffer::DONE)
+		{
+			return false; // Always fail when DONE.
+		}
+
 		if (lock.CompareExchange(WRITEABLE, WRITEABLE) == WRITEABLE)
 		{
 			return true;
 		}
 
-		if (!block || (state && state->Get() == GSRegressionBuffer::DONE))
+		if (!block)
 		{
-			return false;
+			return false; // Fail after 1 try when non-blocking.
 		}
 
 		std::this_thread::yield();
@@ -75,14 +80,19 @@ bool GSSpinlockSharedMemory::LockRead(bool block, GSIntSharedMemory* state)
 {
 	while (true)
 	{
+		if (state && state->Get() == GSRegressionBuffer::DONE)
+		{
+			return false; // Always fail when DONE.
+		}
+
 		if (lock.CompareExchange(READABLE, READABLE) == READABLE)
 		{
 			return true;
 		}
 
-		if (!block || (state && state->Get() == GSRegressionBuffer::DONE))
+		if (!block)
 		{
-			return false;
+			return false; // Fail after 1 try when non-blocking.
 		}
 
 		std::this_thread::yield();
@@ -116,14 +126,19 @@ bool GSSpinlockSharedMemory::Lock(bool block, GSIntSharedMemory* state)
 {
 	while (true)
 	{
+		if (state && state->Get() == GSRegressionBuffer::DONE)
+		{
+			return false; // Always fail when DONE.
+		}
+
 		if (lock.CompareExchange(LOCKED, UNLOCKED) == UNLOCKED)
 		{
 			return true;
 		}
 
-		if (!block || (state && state->Get() == GSRegressionBuffer::DONE))
+		if (!block)
 		{
-			return false;
+			return false; // Fail after 1 try when non-blocking.
 		}
 
 		std::this_thread::yield();

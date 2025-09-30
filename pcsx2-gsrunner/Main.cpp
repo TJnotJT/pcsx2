@@ -1340,7 +1340,6 @@ bool GSTester::StartRunners()
 		if (regression_buffer[0].GetStateRunner() == GSRegressionBuffer::WAIT_DUMP &&
 			regression_buffer[1].GetStateRunner() == GSRegressionBuffer::WAIT_DUMP)
 		{
-			Console.WriteLn("(GSTester) Both runners are initialized.");
 			return true;
 		}
 	}
@@ -1354,31 +1353,29 @@ bool GSTester::EndRunners()
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE);
 
-	bool ended = false;
+	constexpr double terminate_timeout = 10.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
 	while (1)
 	{
 		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning())
 		{
-			ended = true;
 			break;
 		}
 
-		if (timer.GetTimeSeconds() >= 5.0)
+		if (timer.GetTimeSeconds() >= terminate_timeout)
 			break;
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 
-	if (!ended)
+	if (regression_runner_proc[0].IsRunning() || regression_runner_proc[1].IsRunning())
 	{
 		Console.ErrorFmt("(GSTester) Unable to safely end runner processes...terminating.");
 		for (int i = 0; i < 2; i++)
 			regression_runner_proc[i].Terminate();
-		return false;
 	}
 
-	return true;
+	return !regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning();
 }
 
 bool GSTester::RestartRunners()
@@ -1405,6 +1402,8 @@ static constexpr const char* CLOSE_LIST = "]";
 
 int GSTester::main_tester(int argc, char* argv[])
 {
+	Common::Timer timer_total;
+
 	if (!ParseCommandLineArgs(argc, argv))
 		return EXIT_FAILURE;
 
@@ -1426,6 +1425,7 @@ int GSTester::main_tester(int argc, char* argv[])
 
 	Console.WriteLnFmt("(GSTester) Found {} dumps in '{}'", dump_files.size(), regression_dump_dir);
 
+	Console.WriteLn("(GSTester) Opening shared memory files.");
 	for (int i = 0; i < 2; i++)
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
@@ -1437,12 +1437,17 @@ int GSTester::main_tester(int argc, char* argv[])
 		}
 	}
 
+	Console.WriteLn("(GSTester) Starting runner processes.");
 	if (!StartRunners())
 	{
 		Console.Error("(GSTester) Unable to start runner processes. Exiting.");
 		return EXIT_FAILURE;
 	}
+	Console.WriteLn("(GSTester) Runners processes are initialized.");
 
+	std::size_t dumps_processed = 0; // Number of dumps processed.
+	std::size_t dumps_skipped = 0; // Number of dumps skipped.
+	std::size_t packets_processed = 0; // Number of packets processed.
 	std::size_t dump_index = 0; // Current dump that should be written to dump buffer.
 	constexpr double deadlock_timeout = 5.0; // Seconds before determining a deadlock.
 	Common::Timer deadlock_timer; // Time since seeing a packet from a runner.
@@ -1462,20 +1467,25 @@ int GSTester::main_tester(int argc, char* argv[])
 	std::string packet_name_curr; // Current packet name.
 	u32 packet_type_curr; // Current packet type.
 
+	Console.WriteLn("(GSTester) Starting main testing loop.");
+
+	// Main testing loop.
 	while (1)
 	{
 		if (restart)
 		{
 			restart = false;
 
-			if (failure_restarts++ >= regression_failure_restarts)
+			if (++failure_restarts >= regression_failure_restarts)
 			{
-				Console.ErrorFmt("(GSTester) Restarted {} times due to failures. Exiting.", failure_restarts);
+				Console.ErrorFmt("(GSTester) Attempted restarting {} times due to failures...exiting.", failure_restarts);
 				EndRunners();
 				break;
 			}
 			else
 			{
+				Console.ErrorFmt("(GSTester) Attempting to restart due to failure (attempt {}).", failure_restarts);
+
 				// Reset dump to the last one we got packets for.
 				if (dump_file_curr.empty())
 				{
@@ -1506,6 +1516,7 @@ int GSTester::main_tester(int argc, char* argv[])
 					Console.WriteLnFmt("(GSTester) Copied '{}' to shared memory", dump.name);
 					dump.Reset();
 					dump_index++;
+					dumps_processed++;
 					deadlock_timer.Reset(); // Decompressing the dump can take time. Don't want false positives.
 				}
 				else if (!error.GetDescription().empty())
@@ -1513,6 +1524,7 @@ int GSTester::main_tester(int argc, char* argv[])
 					Console.ErrorFmt("(GSTester) Error copying '{}' to shared memory.", dump_files[dump_index]);
 					dump.Reset();
 					dump_index++; // Skip
+					dumps_skipped++;
 				}
 				else
 				{
@@ -1524,6 +1536,7 @@ int GSTester::main_tester(int argc, char* argv[])
 				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).",
 					dump_files[dump_index], error.GetDescription());
 				dump_index++; // Skip
+				dumps_skipped++;
 			}
 		}
 
@@ -1591,6 +1604,9 @@ int GSTester::main_tester(int argc, char* argv[])
 							}
 						}
 					}
+
+					if (!restart)
+						packets_processed++;
 				}
 				else if (packet_type_curr == GSRegressionPacket::HWSTAT)
 				{
@@ -1621,9 +1637,18 @@ int GSTester::main_tester(int argc, char* argv[])
 						}
 					}
 				}
+				else
+				{
+					Console.ErrorFmt("(GSTester) Unknown packet type '{}'", packet_type_curr);
+					restart = true;
+				}
+
+				restart = true;
 
 				if (restart)
 					continue;
+
+				packets_processed++; // Packet processed successfully.
 			}
 			else
 			{
@@ -1684,6 +1709,14 @@ int GSTester::main_tester(int argc, char* argv[])
 
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].CloseFile();
+
+	Console.WriteLnFmt("GSTester Stats:");
+	Console.WriteLnFmt("    Run time: {:.2} minutes", timer_total.GetTimeSeconds() / 60.0);
+	Console.WriteLnFmt("    Dumps processed: {} / {}", dumps_processed, dump_files.size());
+	Console.WriteLnFmt("    Dumps skipped: {} / {}", dumps_skipped, dump_files.size());
+	Console.WriteLnFmt("    Packets processed: {} (Avg {})",
+		packets_processed, dumps_processed == 0 ? -1 : (packets_processed / dumps_processed));
+	Console.WriteLnFmt("    Failure restarts: {}", failure_restarts);
 
 	return EXIT_SUCCESS;
 }
