@@ -145,10 +145,10 @@ namespace GSTester
 	static constexpr std::size_t regression_deadlock_timeout = 1000;
 	static constexpr std::size_t regression_failure_restarts = 10;
 
-	static constexpr std::size_t regression_status_size = 4096;
-	static constexpr std::size_t regression_dump_size = 64 * 1024 * 1024;
+	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
 	static constexpr std::size_t regression_num_packets_default = 10;
 	static std::size_t regression_num_packets = regression_num_packets_default;
+	static std::size_t regression_dump_size = regression_dump_size_default;
 } // namespace GSTester
 
 // For both tester/runner
@@ -819,6 +819,13 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 				GSTester::regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(GSTester::regression_num_packets_default);
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-regression-dump-size"))
+			{
+				std::optional<u32> size_mb = StringUtil::FromChars<u32>(argv[++i]);
+				if (size_mb.has_value())
+					GSTester::regression_dump_size = size_mb.value() * _1mb;
+				continue;
+			}
 			else if (CHECK_ARG("-batch"))
 			{
 				s_batch_mode = true;
@@ -1007,6 +1014,16 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
 			ENSURE_ARG_COUNT("-npackets", 2);
 
 			regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_num_packets_default);
+
+			continue;
+		}
+		else if (CHECK_ARG("-regression-dump-size"))
+		{
+			ENSURE_ARG_COUNT("-regression-dump-size", 1);
+
+			std::optional<u32> size_mb = StringUtil::FromChars<u32>(argv[++i]);
+			if (size_mb.has_value())
+				GSTester::regression_dump_size = size_mb.value() * _1mb;
 
 			continue;
 		}
@@ -1220,6 +1237,21 @@ int GSRunner::main_runner(int argc, char* argv[])
 
 bool GSTester::CachedDump::Load(const std::string& file, Error* error)
 {
+	s64 size = FileSystem::GetPathFileSize(file.c_str());
+	if (size < 0)
+	{
+		Error::SetStringFmt(error, "Unable to stat file '{}'", file);
+		return false;
+	}
+
+	// Check the disk size before trying to decompress to fail quickly.
+	// The decompressed size is usually more than 4x the disk size.
+	if (4 * size > regression_dump_size)
+	{
+		Error::SetStringFmt(error, "Disk size too large '{}' ({} bytes)", file, size);
+		return false;
+	}
+
 	ptr = GSDumpFile::OpenGSDump(file.c_str(), error);
 	if (!ptr)
 		return false;
@@ -1253,12 +1285,13 @@ bool GSTester::StartRunners()
 				std::string(" -dump f ") +
 				std::string(" -regression-test ") + regression_shared_file[i] +
 				std::string(" -npackets ") + std::to_string(regression_num_packets) +
+				std::string(" -regression-dump-size ") + std::to_string(regression_dump_size / _1mb) +
 				" " + regression_runner_args;
 		}
 
 		if (!regression_runner_proc[i].Start(regression_runner_command[i]))
 		{
-			Console.ErrorFmt("Unable to start runner: {} (command: {})", regression_runner_name[i],
+			Console.ErrorFmt("(GSTester) Unable to start runner: {} (command: {})", regression_runner_name[i],
 				regression_runner_command[i]);
 			return false;
 		}
@@ -1271,7 +1304,7 @@ bool GSTester::StartRunners()
 	{
 		if (timer.GetTimeSeconds() > static_cast<double>(timeout))
 		{
-			Console.WriteLn("(GSTester) Both runners not initialized after {} seconds.", timeout);
+			Console.ErrorFmt("(GSTester) Both runners not initialized after {} seconds.", timeout);
 			return false;
 		}
 
@@ -1444,6 +1477,7 @@ int GSTester::main_tester(int argc, char* argv[])
 					Console.WriteLnFmt("(GSTester) Copied '{}' to shared memory", dump.name);
 					dump.Reset();
 					dump_index++;
+					deadlock_timer.Reset(); // Decompressing the dump can take time. Don't want false positives.
 				}
 				else if (!error.GetDescription().empty())
 				{

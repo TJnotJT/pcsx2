@@ -559,6 +559,8 @@ void GSDumpReplayerCpuStep()
 			{
 				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for HW stats.", GSDumpReplayer::GetRunnerName());
 			}
+
+			g_perfmon.Reset();
 		}
 		
 		if (GSDumpReplayer::NextDump())
