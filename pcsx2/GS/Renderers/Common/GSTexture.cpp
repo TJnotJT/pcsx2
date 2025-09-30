@@ -63,9 +63,10 @@ bool GSTexture::Save(const std::string& fn, RegressionBuffer* rbp)
 
 	if (rbp)
 	{
-		rbp->SetStatusRunner(RegressionBuffer::WRITING_DATA);
+		rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
 		RegressionPacket* packet = nullptr;
 		ScopedGuard sg([&]() {
+			rbp->SetStateRunner(RegressionBuffer::DEFAULT);
 			if (packet)
 				rbp->DonePacketWrite();
 		});

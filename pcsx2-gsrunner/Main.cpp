@@ -1177,7 +1177,7 @@ int main_runner(int argc, char* argv[])
 
 	for (int i = 0; i < 2; i++)
 	{
-		regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), regression_num_packets, regression_dump_size, regression_status_size);
+		regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), regression_num_packets, regression_dump_size);
 	}
 
 	// Regression testing needs to be started before applying settings
@@ -1186,7 +1186,7 @@ int main_runner(int argc, char* argv[])
 	if (!s_regression_file.empty())
 	{
 		StartRegressionTest(&s_regression_buffer, s_regression_file,
-			regression_num_packets, regression_dump_size, regression_status_size);
+			regression_num_packets, regression_dump_size);
 	}
 
 	//CopyDumpToSharedMemory(__dump_files_debug__[__dump_files_i__++], true);
@@ -1297,8 +1297,8 @@ bool StartRunnersRegressionTest()
 			return false;
 		}
 
-		if (regression_buffer[0].GetStatusRunner() == RegressionBuffer::WAIT_DUMP &&
-			regression_buffer[1].GetStatusRunner() == RegressionBuffer::WAIT_DUMP)
+		if (regression_buffer[0].GetStateRunner() == RegressionBuffer::WAIT_DUMP &&
+			regression_buffer[1].GetStateRunner() == RegressionBuffer::WAIT_DUMP)
 		{
 			Console.WriteLn("(GSDumpRunner/RegressionTester) Both runners are initialized.");
 			return true;
@@ -1311,7 +1311,7 @@ bool StartRunnersRegressionTest()
 bool EndRunnersRegressionTest()
 {
 	for (int i = 0; i < 2; i++)
-		regression_buffer[i].SetDoneRunner(true);
+		regression_buffer[i].SetStateTester(RegressionBuffer::DONE);
 
 	bool ended = false;
 	Common::Timer timer;
@@ -1378,8 +1378,7 @@ int main_tester(int argc, char* argv[])
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
 
-		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets,
-			regression_dump_size, regression_status_size))
+		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets, regression_dump_size))
 		{
 			Console.ErrorFmt("(GSDumpRunner/RegressionTester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
@@ -1392,7 +1391,7 @@ int main_tester(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	std::string status[2];
+	u32 state[2];
 	bool exited[2] = {false, false};
 	bool done[2] = {false, false};
 	RegressionPacket* packets[2];
@@ -1476,7 +1475,7 @@ int main_tester(int argc, char* argv[])
 		for (int i = 0; i < 2; i++)
 		{
 			exited[i] = !regression_runner_proc[i].IsRunning();
-			status[i] = status[i] = regression_buffer[i].GetStatusRunner();
+			state[i] = state[i] = regression_buffer[i].GetStateRunner();
 		}
 
 		for (int i = 0; i < 2; i++)
@@ -1486,7 +1485,6 @@ int main_tester(int argc, char* argv[])
 
 		if (packets[0] && packets[1])
 		{
-			//deadlock_count = 0;
 			deadlock_timer.Reset();
 
 			std::string name_dump[2];
@@ -1537,16 +1535,9 @@ int main_tester(int argc, char* argv[])
 			}
 		}
 
-		// BOTH EXITED: MUST EXIT!!!
-
 		for (int i = 0; i < 2; i++)
 		{
-			status[i] = regression_buffer[i].GetStatusRunner();
-			if (status[i] == RegressionBuffer::WAIT_DUMP)
-			{
-				printf("");
-			}
-			done[i] = exited[i] || (status[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
+			done[i] = exited[i] || (state[i] == RegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
 		}
 
 		//for (int i = 0; i < 2; i++)

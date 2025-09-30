@@ -218,22 +218,28 @@ bool GSDumpReplayer::Initialize(const char* filename)
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
 {
-	GetRegressionBuffer()->SetStatusRunner(RegressionBuffer::WAIT_DUMP);
+	GetRegressionBuffer()->SetStateRunner(RegressionBuffer::WAIT_DUMP);
 
 	DumpFileSharedMemory* dump = nullptr;
 
 	ScopedGuard sg([&]() {
+		GetRegressionBuffer()->SetStateRunner(RegressionBuffer::DEFAULT);
 		if (dump)
 			GetRegressionBuffer()->DoneDumpRead();
 	});
 
 	Common::Timer timer;
-	while (!(dump = GetRegressionBuffer()->GetDumpRead(false)))
+	while (1)
 	{
 		// FIXME: maybe we should put a time limit...
-		if (GetRegressionBuffer()->IsDoneRunner())
-		{
+
+		if (dump = GetRegressionBuffer()->GetDumpRead(false))
 			break;
+
+		if (GetRegressionBuffer()->GetStateTester() == RegressionBuffer::DONE)
+		{
+			s_dump_running = false;
+			return false;
 		}
 
 		std::this_thread::yield();
@@ -245,17 +251,10 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 		}
 	}
 
-	if (!dump)
-	{
-		s_dump_running = false;
-		return false;
-	}
-
 	RegressionBuffer* r = GetRegressionBuffer();
 
 	const std::string dump_name = dump->GetNameDump();
 
-	GetRegressionBuffer()->SetStatusRunner(RegressionBuffer::RUNNING);
 	GetRegressionBuffer()->SetNameDump(dump_name);
 
 	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
@@ -456,9 +455,6 @@ void GSDumpReplayerCpuStep()
 			s_dump_running = false;
 		}
 	}
-
-	if (IsRegressionTesting())
-		GetRegressionBuffer()->SetStatusRunner("Writing packet");
 
 	switch (packet.id)
 	{

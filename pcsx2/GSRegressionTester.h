@@ -125,37 +125,21 @@ struct DumpFileSharedMemory
 	static std::size_t GetTotalSize(std::size_t dump_size);
 };
 
-struct StatusSharedMemory
-{
-	SpinlockSharedMemory lock;
-	std::size_t size;
-
-	// Call only once before sharing. Not thread safe.
-	void Init(std::size_t size);
-
-	// Thread safe.
-	std::string GetStatus();
-	void SetStatus(const std::string& status);
-
-	// Not thread safe.
-	char* GetStatusPtr();
-
-	// Static.
-	static std::size_t GetTotalSize(std::size_t size);
-};
-
-/// Ring buffer of regression packets, dump files, and status.
+/// Ring buffer of regression packets and dump files.
 struct RegressionBuffer
 {
-	static constexpr const char* RUNNING = "RUNNING";
-	static constexpr const char* WAIT_DUMP = "WAIT_DUMP";
-	static constexpr const char* WRITING_DATA = "WRITING_DATA";
-	static constexpr const char* DONE = "DONE";
-
-	enum
+	enum : u32
 	{
 		RUNNER = 0,
-		TESTER
+		TESTER = 1
+	};
+
+	enum : u32
+	{
+		DEFAULT = 0,
+		WAIT_DUMP,
+		WRITE_DATA,
+		DONE
 	};
 
 	SharedMemoryFile shm;
@@ -166,30 +150,26 @@ struct RegressionBuffer
 	std::size_t packet_read = 0;
 
 	static constexpr std::size_t num_dumps = 2;
-	DumpFileSharedMemory* dumps[num_dumps];
+	DumpFileSharedMemory* dumps[num_dumps]; // Must use array of pointer because object size is unknown at compile time.
 	std::size_t dump_write = 0;
 	std::size_t dump_read = 0;
 	std::size_t dump_size = 0;
 	std::string dump_name;
 
-	StatusSharedMemory* status[2];
-	std::size_t status_size;
-
-	IntSharedMemory* done[2];
+	static constexpr std::size_t num_states = 2;
+	IntSharedMemory* state; // Two states owned by runner and tester.
 
 	// Call only once before sharing.
-	bool CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size,
-		std::size_t status_size);
+	bool CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size);
 
 	// Call only once by child.
-	bool OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
-		std::size_t status_size);
+	bool OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size);
 
 	// Call only once by parent.
 	bool CloseFile();
 
 	// Call only once to initialize.
-	void Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
+	void Init(std::size_t num_packets, std::size_t dump_size);
 	void Reset();
 
 	// Thread safe; acquire ownership.
@@ -209,28 +189,23 @@ struct RegressionBuffer
 	void DoneDumpRead();
 
 	// Thread safe.
-	bool IsDoneRunner();
-	bool IsDoneTester();
-	void SetDoneRunner(bool done);
-	void SetDoneTester(bool done);
-	std::string GetStatus(u32 type);
-	void SetStatus(const std::string& str, u32 type);
-	std::string GetStatusRunner();
-	std::string GetStatusTester();
-	void SetStatusRunner(const std::string& str);
-	void SetStatusTester(const std::string& str);
+	u32 GetState(u32 which);
+	void SetState(u32 which, u32 state);
+	u32 GetStateRunner();
+	u32 GetStateTester();
+	void SetStateRunner(u32 state);
+	void SetStateTester(u32 state);
 
 	// Access only local data.
 	void SetNameDump(const std::string& name);
 	std::string GetNameDump();
 
 	// Static.
-	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size);
+	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t dump_size);
 };
 
 bool IsRegressionTesting();
-void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets,
-	std::size_t dump_size, std::size_t status_size);
+void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t dump_size);
 void EndRegressionTest();
 RegressionBuffer* GetRegressionBuffer();
 
