@@ -51,7 +51,7 @@ std::size_t IntSharedMemory::GetTotalSize()
 	return sizeof(IntSharedMemory);
 }
 
-bool SpinlockSharedMemory::LockWrite(bool block, IntSharedMemory* done)
+bool SpinlockSharedMemory::LockWrite(bool block, IntSharedMemory* state)
 {
 	while (1)
 	{
@@ -60,7 +60,7 @@ bool SpinlockSharedMemory::LockWrite(bool block, IntSharedMemory* done)
 			return true;
 		}
 
-		if (!block || (done && done->Get()))
+		if (!block || (state && state->Get() == RegressionBuffer::DONE))
 		{
 			return false;
 		}
@@ -71,7 +71,7 @@ bool SpinlockSharedMemory::LockWrite(bool block, IntSharedMemory* done)
 	return false; // timeout
 }
 
-bool SpinlockSharedMemory::LockRead(bool block, IntSharedMemory* done)
+bool SpinlockSharedMemory::LockRead(bool block, IntSharedMemory* state)
 {
 	while (true)
 	{
@@ -80,7 +80,7 @@ bool SpinlockSharedMemory::LockRead(bool block, IntSharedMemory* done)
 			return true;
 		}
 
-		if (!block || (done && done->Get()))
+		if (!block || (state && state->Get() == RegressionBuffer::DONE))
 		{
 			return false;
 		}
@@ -112,7 +112,7 @@ bool SpinlockSharedMemory::Readable()
 	return lock.Get() == READABLE;
 }
 
-bool SpinlockSharedMemory::Lock(bool block, IntSharedMemory* done)
+bool SpinlockSharedMemory::Lock(bool block, IntSharedMemory* state)
 {
 	while (true)
 	{
@@ -121,7 +121,7 @@ bool SpinlockSharedMemory::Lock(bool block, IntSharedMemory* done)
 			return true;
 		}
 
-		if (!block || (done && done->Get()))
+		if (!block || (state && state->Get() == RegressionBuffer::DONE))
 		{
 			return false;
 		}
@@ -137,7 +137,7 @@ bool SpinlockSharedMemory::Unlock()
 
 RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
 {	
-	if (!packets[packet_write % num_packets].lock.LockWrite(block, done[RUNNER]))
+	if (!packets[packet_write % num_packets].lock.LockWrite(block, &state[TESTER]))
 		return nullptr;
 
 	return &packets[packet_write % num_packets];
@@ -145,7 +145,7 @@ RegressionPacket* RegressionBuffer::GetPacketWrite(bool block)
 
 RegressionPacket* RegressionBuffer::GetPacketRead(bool block)
 {
-	if (!packets[packet_read % num_packets].lock.LockRead(block, done[TESTER]))
+	if (!packets[packet_read % num_packets].lock.LockRead(block, &state[TESTER]))
 		return nullptr;
 
 	return &packets[packet_read % num_packets];
@@ -169,7 +169,7 @@ void RegressionBuffer::DonePacketRead()
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
 {
-	if (!dumps[dump_write % num_dumps]->lock.LockWrite(block, done[TESTER]))
+	if (!dumps[dump_write % num_dumps]->lock.LockWrite(block, &state[TESTER]))
 		return nullptr;
 
 	return dumps[dump_write % num_dumps];
@@ -177,7 +177,7 @@ DumpFileSharedMemory* RegressionBuffer::GetDumpWrite(bool block)
 
 DumpFileSharedMemory* RegressionBuffer::GetDumpRead(bool block)
 {
-	if (!dumps[dump_read % num_dumps]->lock.LockRead(block, done[RUNNER]))
+	if (!dumps[dump_read % num_dumps]->lock.LockRead(block, &state[TESTER]))
 		return nullptr;
 
 	return dumps[dump_read % num_dumps];
@@ -317,65 +317,20 @@ void DumpFileSharedMemory::SetNameDump(const std::string& str)
 	name[std::min(name_size - 1, str.length())] = '\0';
 }
 
-
-void StatusSharedMemory::Init(std::size_t size)
-{
-	this->size = size;
-
-	memset(GetStatusPtr(), 0, size);
-}
-
-std::string StatusSharedMemory::GetStatus()
-{
-	lock.Lock(true);
-
-	ScopedGuard sg([&]() { lock.Unlock(); });
-
-	GetStatusPtr()[size - 1] = '\0';
-
-	std::string str(GetStatusPtr());
-
-	return str;
-}
-
-void StatusSharedMemory::SetStatus(const std::string& status)
-{
-	lock.Lock();
-
-	ScopedGuard sg([&]() { lock.Unlock(); });
-
-	memcpy(GetStatusPtr(), status.c_str(), std::min(size - 1, status.length()));
-
-	GetStatusPtr()[std::min(size - 1, status.length())] = '\0';
-}
-
-// Not thread safe.
-char* StatusSharedMemory::GetStatusPtr()
-{
-	return reinterpret_cast<char*>(this) + sizeof(StatusSharedMemory);
-}
-
-std::size_t StatusSharedMemory::GetTotalSize(std::size_t size)
-{
-	return sizeof(StatusSharedMemory) + size;
-}
-
-std::size_t RegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
+std::size_t RegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_t dump_size)
 {
 	return num_packets * RegressionPacket::GetTotalSize() +
 	       num_dumps * DumpFileSharedMemory::GetTotalSize(dump_size) +
-	       2 * StatusSharedMemory::GetTotalSize(status_size) +
-	       2 * IntSharedMemory::GetTotalSize();
+	       num_states * IntSharedMemory::GetTotalSize();
 }
 
-bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets,
-	std::size_t dump_size, std::size_t status_size)
+bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size)
 {
-	if (!shm.CreateFile_(name, GetTotalSize(num_packets, dump_size, status_size)))
+	if (!shm.CreateFile_(name, GetTotalSize(num_packets, dump_size)))
 		return false;
 
 	// Non-shared memory initialization.
-	Init(num_packets, dump_size, status_size);
+	Init(num_packets, dump_size);
 
 	// All of these live in shared memory.
 	for (int i = 0; i < num_packets; i++)
@@ -383,19 +338,16 @@ bool RegressionBuffer::CreateFile_(const std::string& name, std::size_t num_pack
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i]->Init(dump_size);
 	for (int i = 0; i < 2; i++)
-		status[i]->Init(status_size);
-	for (int i = 0; i < 2; i++)
-		done[i]->Init();
+		state[i].Set(DEFAULT);
 
 	return true;
 }
 
-void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std::size_t status_size)
+void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size)
 {
 	std::size_t packet_offset;
 	std::size_t dump_file_offset[num_dumps];
-	std::size_t status_offset[2];
-	std::size_t done_offset[2];
+	std::size_t state_offset;
 
 	const std::size_t start_offset = reinterpret_cast<std::size_t>(shm.data);
 	std::size_t curr_offset = start_offset;
@@ -409,27 +361,15 @@ void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std:
 		curr_offset += DumpFileSharedMemory::GetTotalSize(dump_size);
 	}
 
-	for (int i = 0; i < 2; i++)
-	{
-		status_offset[i] = curr_offset;
-		curr_offset += StatusSharedMemory::GetTotalSize(status_size);
-	}
+	state_offset = curr_offset;
+	curr_offset += num_states * IntSharedMemory::GetTotalSize();
 
-	for (int i = 0; i < 2; i++)
-	{
-		done_offset[i] = curr_offset;
-		curr_offset += IntSharedMemory::GetTotalSize();
-	}
-
-	pxAssert(curr_offset - start_offset == GetTotalSize(num_packets, dump_size, status_size));
+	pxAssert(curr_offset - start_offset == GetTotalSize(num_packets, dump_size));
 
 	packets = reinterpret_cast<RegressionPacket*>(packet_offset);
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i] = reinterpret_cast<DumpFileSharedMemory*>(dump_file_offset[i]);
-	for (int i = 0; i < 2; i++)
-		status[i] = reinterpret_cast<StatusSharedMemory*>(status_offset[i]);
-	for (int i = 0; i < 2; i++)
-		done[i] = reinterpret_cast<IntSharedMemory*>(done_offset[i]);
+	state = reinterpret_cast<IntSharedMemory*>(state_offset);
 	
 	this->num_packets = num_packets;
 	this->packet_write = 0;
@@ -438,7 +378,6 @@ void RegressionBuffer::Init(std::size_t num_packets, std::size_t dump_size, std:
 	this->dump_write = 0;
 	this->dump_read = 0;
 	this->dump_name.clear();
-	this->status_size = status_size;
 }
 
 void RegressionBuffer::Reset()
@@ -448,18 +387,15 @@ void RegressionBuffer::Reset()
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i]->Init(dump_size);
 	for (int i = 0; i < 2; i++)
-		status[i]->Init(status_size);
-	for (int i = 0; i < 2; i++)
-		done[i]->Init();
+		state[i].Init();
 }
 
-bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size,
-	std::size_t status_size)
+bool RegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t dump_size)
 {
-	if (!shm.OpenFile(name, GetTotalSize(num_packets, dump_size, status_size)))
+	if (!shm.OpenFile(name, GetTotalSize(num_packets, dump_size)))
 		return false;
 
-	Init(num_packets, dump_size, status_size);
+	Init(num_packets, dump_size);
 
 	return true;
 }
@@ -469,10 +405,7 @@ bool RegressionBuffer::CloseFile()
 	packets = nullptr;
 	for (int i = 0; i < num_dumps; i++)
 		dumps[i] = nullptr;
-	for (int i = 0; i < 2; i++)
-		status[i] = nullptr;
-	for (int i = 0; i < 2; i++)
-		done[i] = nullptr;
+	state = nullptr;
 	num_packets = 0;
 
 	if (!shm.CloseFile())
@@ -481,54 +414,34 @@ bool RegressionBuffer::CloseFile()
 	return true;
 }
 
-bool RegressionBuffer::IsDoneRunner()
+void RegressionBuffer::SetState(u32 which, u32 s)
 {
-	return done[RUNNER]->Get();
+	state[which].Set(static_cast<IntSharedMemory::ValType>(s));
 }
 
-bool RegressionBuffer::IsDoneTester()
+void RegressionBuffer::SetStateRunner(u32 s)
 {
-	return done[TESTER]->Get();
+	SetState(RUNNER, s);
 }
 
-void RegressionBuffer::SetDoneRunner(bool d)
+void RegressionBuffer::SetStateTester(u32 s)
 {
-	done[RUNNER]->Set(static_cast<IntSharedMemory::ValType>(d));
+	SetState(TESTER, s);
 }
 
-void RegressionBuffer::SetDoneTester(bool d)
+u32 RegressionBuffer::GetState(u32 which)
 {
-	done[TESTER]->Set(static_cast<IntSharedMemory::ValType>(d));
-}
-
-std::string RegressionBuffer::GetStatus(u32 type)
-{
-	return status[type]->GetStatus();
+	return static_cast<u32>(state[which].Get());
 };
 
-std::string RegressionBuffer::GetStatusRunner()
+u32 RegressionBuffer::GetStateRunner()
 {
-	return GetStatus(RUNNER);
+	return GetState(RUNNER);
 };
 
-std::string RegressionBuffer::GetStatusTester()
+u32 RegressionBuffer::GetStateTester()
 {
-	return GetStatus(TESTER);
-};
-
-void RegressionBuffer::SetStatus(const std::string& str, u32 type)
-{
-	status[type]->SetStatus(str);
-};
-
-void RegressionBuffer::SetStatusRunner(const std::string& str)
-{
-	SetStatus(str, RUNNER);
-};
-
-void RegressionBuffer::SetStatusTester(const std::string& str)
-{
-	SetStatus(str, TESTER);
+	return GetState(TESTER);
 };
 
 void RegressionBuffer::SetNameDump(const std::string& name)
@@ -547,10 +460,9 @@ bool IsRegressionTesting()
 }
 
 /// Start regression testing within the producer/GS runner process.
-void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets,
-	std::size_t dump_size, std::size_t status_size)
+void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t dump_size)
 {
-	if (!rpb->OpenFile(fn, num_packets, dump_size, status_size))
+	if (!rpb->OpenFile(fn, num_packets, dump_size))
 	{
 		pxFail("Unable to start regression test.");
 		return;

@@ -664,12 +664,17 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	RegressionPacket* packet = nullptr;
 
 	ScopedGuard sg([&]() {
-		if (packet)
-			rbp->DonePacketWrite();
+		if (rbp)
+		{
+			rbp->SetStateRunner(RegressionBuffer::DEFAULT);
+			if (packet)
+				rbp->DonePacketWrite();
+		}
 	});
 	
 	if (rbp)
 	{
+		rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
 		packet = rbp->GetPacketWrite(true);
 		if (!packet)
 		{
