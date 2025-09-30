@@ -568,7 +568,7 @@ void GSDumpReplayerCpuStep()
 		}
 		else
 		{
-			Console.ErrorFmt("(GSDumpReplayer/{}) Batch mode no more dumps.", GSDumpReplayer::GetRunnerName());
+			Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode no more dumps.", GSDumpReplayer::GetRunnerName());
 			Host::RequestVMShutdown(false, false, false);
 			s_dump_running = false;
 		}
