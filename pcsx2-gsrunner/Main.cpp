@@ -79,6 +79,7 @@ namespace GSRunner
 	static MemorySettingsInterface s_settings_interface;
 
 	static std::string s_output_prefix;
+	static std::string s_runner_name;
 	static std::string s_regression_file;
 	GSRegressionBuffer s_regression_buffer;
 	static s32 s_loop_count = 1;
@@ -814,6 +815,11 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 				s_batch_mode = true;
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-name"))
+			{
+				s_runner_name = argv[++i];
+				continue;
+			}
 			else if (CHECK_ARG_PARAM("-npackets"))
 			{
 				GSTester::regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(GSTester::regression_num_packets_default);
@@ -867,6 +873,11 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		if (!params.filename.empty())
 			params.filename += ' ';
 		params.filename += argv[i];
+	}
+
+	if (s_runner_name.empty())
+	{
+		s_runner_name = std::filesystem::path(argv[0]).filename().string();
 	}
 
 	if (!s_regression_file.empty())
@@ -1072,8 +1083,8 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
 	if (regression_runner_name[0] == regression_runner_name[1])
 	{
 		// Need unique names for output directories.
-		regression_runner_name[0] += "-1";
-		regression_runner_name[1] += "-2";
+		regression_runner_name[0] += " (1)";
+		regression_runner_name[1] += " (2)";
 	}
 
 	for (int i = 0; i < 2; i++)
@@ -1212,7 +1223,7 @@ int GSRunner::main_runner(int argc, char* argv[])
 	
 	// apply new settings (e.g. pick up renderer change)
 	VMManager::ApplySettings();
-	GSDumpReplayer::SetIsDumpRunner(true, std::filesystem::path(argv[0]).filename().string());
+	GSDumpReplayer::SetIsDumpRunner(true, s_runner_name);
 	if (s_batch_mode)
 	{
 		GSDumpReplayer::SetIsBatchMode(true);
@@ -1284,6 +1295,7 @@ bool GSTester::StartRunners()
 				std::string(" -loop 1 ") +
 				std::string(" -dump f ") +
 				std::string(" -regression-test ") + regression_shared_file[i] +
+				std::string(" -name ") + regression_runner_name[i] +
 				std::string(" -npackets ") + std::to_string(regression_num_packets) +
 				std::string(" -regression-dump-size ") + std::to_string(regression_dump_size / _1mb) +
 				" " + regression_runner_args;
