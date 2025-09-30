@@ -6,7 +6,8 @@
 #include <windows.h>
 #endif
 
-struct IntSharedMemory
+// Atomic integer for inter-process shared memory since std::atomic is not guaranteed across processes.
+struct GSIntSharedMemory
 {
 
 #ifdef __WIN32__
@@ -22,8 +23,9 @@ struct IntSharedMemory
 	static std::size_t GetTotalSize();
 };
 
+// Spinlock using the inter-process atomic.
 #ifdef __WIN32__
-struct SpinlockSharedMemory
+struct GSSpinlockSharedMemory
 {
 	// For producer/consumer semantics.
 	enum : LONG
@@ -32,10 +34,10 @@ struct SpinlockSharedMemory
 		READABLE = 1
 	};
 
-	IntSharedMemory lock;
+	GSIntSharedMemory lock;
 
-	bool LockWrite(bool block = true, IntSharedMemory* done = nullptr);
-	bool LockRead(bool block = false, IntSharedMemory* done = nullptr);
+	bool LockWrite(bool block = true, GSIntSharedMemory* done = nullptr);
+	bool LockRead(bool block = false, GSIntSharedMemory* done = nullptr);
 	bool UnlockWrite();
 	bool UnlockRead();
 	bool Writeable();
@@ -48,14 +50,16 @@ struct SpinlockSharedMemory
 		LOCKED = 1
 	};
 
-	bool Lock(bool block = false, IntSharedMemory* done = nullptr);
+	bool Lock(bool block = false, GSIntSharedMemory* done = nullptr);
 	bool Unlock();
 };
 #else
 // Not implemented
 #endif
 
-struct RegressionPacket
+// Packet holding data uploaded by runners for tester to consume and diff.
+// Lives in shared memory.
+struct GSRegressionPacket
 {
 	static constexpr std::size_t name_size = 4096;
 	static constexpr std::size_t image_size = 4 * 1024 * 1024;
@@ -97,7 +101,7 @@ struct RegressionPacket
 		u8 data[image_size];
 	};
 
-	SpinlockSharedMemory lock;
+	GSSpinlockSharedMemory lock;
 	u32 type;
 	char name_dump[name_size];
 	char name_packet[name_size];
@@ -124,7 +128,8 @@ struct RegressionPacket
 	static std::size_t GetTotalSize();
 };
 
-struct SharedMemoryFile
+// Cross-platform shared memory file for regression testing.
+struct GSSharedMemoryFile
 {
 	std::string name = "";
 	void* data = nullptr;
@@ -142,15 +147,17 @@ struct SharedMemoryFile
 	void ResetFile();
 };
 
-struct DumpFileSharedMemory
+// GSDumpFile that lives in shared memory. Allows the tester to read/decode dump
+// files from disk once and upload for runners.
+struct GSDumpFileSharedMemory
 {
 	static constexpr std::size_t name_size = 4096;
 
-	SpinlockSharedMemory lock;
+	GSSpinlockSharedMemory lock;
 	char name[name_size];
 
 	// Note: not the true dump size; just size of buffer.
-	// The actual dump size is serialized in the buffer.
+	// The actual dump size is obtained by parsing the buffer.
 	std::size_t dump_size;
 
 	// Call only once before sharing. Not thread safe.
@@ -167,8 +174,8 @@ struct DumpFileSharedMemory
 	static std::size_t GetTotalSize(std::size_t dump_size);
 };
 
-/// Ring buffer of regression packets and dump files.
-struct RegressionBuffer
+// Ring buffers of regression packets and dump files.
+struct GSRegressionBuffer
 {
 	enum : u32
 	{
@@ -184,22 +191,22 @@ struct RegressionBuffer
 		DONE
 	};
 
-	SharedMemoryFile shm;
+	GSSharedMemoryFile shm;
 
-	RegressionPacket* packets = nullptr;
+	GSRegressionPacket* packets = nullptr;
 	std::size_t num_packets = 0;
 	std::size_t packet_write = 0;
 	std::size_t packet_read = 0;
 
 	static constexpr std::size_t num_dumps = 2;
-	DumpFileSharedMemory* dumps[num_dumps]; // Must use array of pointer because object size is unknown at compile time.
+	GSDumpFileSharedMemory* dumps[num_dumps]; // Must use array of pointer because object size is unknown at compile time.
 	std::size_t dump_write = 0;
 	std::size_t dump_read = 0;
 	std::size_t dump_size = 0;
 	std::string dump_name;
 
 	static constexpr std::size_t num_states = 2;
-	IntSharedMemory* state; // Two states owned by runner and tester.
+	GSIntSharedMemory* state; // Two states owned by runner and tester.
 
 	// Call only once before sharing.
 	bool CreateFile_(const std::string& name, std::size_t num_packets, std::size_t dump_size);
@@ -215,16 +222,16 @@ struct RegressionBuffer
 	void Reset();
 
 	// Thread safe; acquire ownership.
-	RegressionPacket* GetPacketWrite(bool block = true);
-	RegressionPacket* GetPacketRead(bool block = false);
+	GSRegressionPacket* GetPacketWrite(bool block = true);
+	GSRegressionPacket* GetPacketRead(bool block = false);
 
 	// Call only by owner to release ownership.
 	void DonePacketWrite();
 	void DonePacketRead();
 
 	// Thread safe; acquire ownership.
-	DumpFileSharedMemory* GetDumpWrite(bool block = true);
-	DumpFileSharedMemory* GetDumpRead(bool block = false);
+	GSDumpFileSharedMemory* GetDumpWrite(bool block = true);
+	GSDumpFileSharedMemory* GetDumpRead(bool block = false);
 
 	// Call only by owner to release ownership.
 	void DoneDumpWrite();
@@ -246,10 +253,11 @@ struct RegressionBuffer
 	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t dump_size);
 };
 
-bool IsRegressionTesting();
-void StartRegressionTest(RegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t dump_size);
-void EndRegressionTest();
-RegressionBuffer* GetRegressionBuffer();
+// To be call by the runner process when in regression test mode.
+bool GSIsRegressionTesting();
+void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t dump_size);
+void GSEndRegressionTest();
+GSRegressionBuffer* GSGetRegressionBuffer();
 
 enum ImageCompare
 {
@@ -259,9 +267,10 @@ enum ImageCompare
 	FRACTIONAL_THRESHOLD
 };
 
-float RegressionCompareImages(const RegressionPacket* p1, const RegressionPacket* p2, int threshold);
+float RegressionCompareImages(const GSRegressionPacket* p1, const GSRegressionPacket* p2, int threshold);
 
-struct Process
+// Cross-platform process.
+struct GSProcess
 {
 	std::string command;
 #ifdef __WIN32__
@@ -276,18 +285,3 @@ struct Process
 	bool Close();
 	void Terminate();
 };
-
-#ifdef __WIN32__
-struct Mutex
-{
-	HANDLE handle;
-	// Not implemented
-	Mutex();
-	~Mutex();
-
-	void Lock();
-	void Unlock();
-};
-#else
-// Not implemented
-#endif

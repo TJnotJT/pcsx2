@@ -137,7 +137,7 @@ bool GSDumpReplayer::NextDump()
 
 	Error error;
 
-	if (IsRegressionTesting())
+	if (GSIsRegressionTesting())
 	{
 		return ChangeDumpRegressionTest();
 	}
@@ -188,7 +188,7 @@ bool GSDumpReplayer::ReadDumpFileList(const std::string& dir, std::vector<std::s
 
 bool GSDumpReplayer::Initialize(const char* filename)
 {
-	if (IsRegressionTesting())
+	if (GSIsRegressionTesting())
 	{
 		if (!NextDump())
 			return false;
@@ -220,14 +220,14 @@ bool GSDumpReplayer::Initialize(const char* filename)
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
 {
-	GetRegressionBuffer()->SetStateRunner(RegressionBuffer::WAIT_DUMP);
+	GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 
-	DumpFileSharedMemory* dump = nullptr;
+	GSDumpFileSharedMemory* dump = nullptr;
 
 	ScopedGuard sg([&]() {
-		GetRegressionBuffer()->SetStateRunner(RegressionBuffer::DEFAULT);
+		GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::DEFAULT);
 		if (dump)
-			GetRegressionBuffer()->DoneDumpRead();
+			GSGetRegressionBuffer()->DoneDumpRead();
 	});
 
 	Common::Timer timer;
@@ -235,10 +235,10 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 	{
 		// FIXME: maybe we should put a time limit...
 
-		if (dump = GetRegressionBuffer()->GetDumpRead(false))
+		if (dump = GSGetRegressionBuffer()->GetDumpRead(false))
 			break;
 
-		if (GetRegressionBuffer()->GetStateTester() == RegressionBuffer::DONE)
+		if (GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
 		{
 			s_dump_running = false;
 			return false;
@@ -253,11 +253,11 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 		}
 	}
 
-	RegressionBuffer* r = GetRegressionBuffer();
+	GSRegressionBuffer* r = GSGetRegressionBuffer();
 
 	const std::string dump_name = dump->GetNameDump();
 
-	GetRegressionBuffer()->SetNameDump(dump_name);
+	GSGetRegressionBuffer()->SetNameDump(dump_name);
 
 	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
 
@@ -525,13 +525,13 @@ void GSDumpReplayerCpuStep()
 		GSState::s_n = 0; // Needed for proper file naming.
 
 		// Send HW stats if needed.
-		if (GSIsHardwareRenderer() && IsRegressionTesting())
+		if (GSIsHardwareRenderer() && GSIsRegressionTesting())
 		{
-			RegressionBuffer* rbp = GetRegressionBuffer();
-			rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
-			RegressionPacket* packet = nullptr;
+			GSRegressionBuffer* rbp = GSGetRegressionBuffer();
+			rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
+			GSRegressionPacket* packet = nullptr;
 			ScopedGuard sg([&]() {
-				rbp->SetStateRunner(RegressionBuffer::DEFAULT);
+				rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 				if (packet)
 					rbp->DonePacketWrite();
 			});
@@ -542,7 +542,7 @@ void GSDumpReplayerCpuStep()
 				packet->SetNameDump(name_dump);
 				packet->SetNamePacket(name_dump + " HWStat");
 
-				RegressionPacket::HWStat hwstat;
+				GSRegressionPacket::HWStat hwstat;
 				hwstat.frames = 0; // FIXME
 				hwstat.draws = g_perfmon.GetCounter(GSPerfMon::DrawCalls);
 				hwstat.render_passes = g_perfmon.GetCounter(GSPerfMon::RenderPasses);

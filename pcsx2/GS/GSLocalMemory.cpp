@@ -656,17 +656,17 @@ void GSLocalMemory::ReadTexture(const GSOffset& off, const GSVector4i& r, u8* ds
 //
 
 void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int w, int h, int x, int y,
-	RegressionBuffer* rbp)
+	GSRegressionBuffer* rbp)
 {
 	int pitch = w * 4;
 	int size = pitch * h;
 
-	RegressionPacket* packet = nullptr;
+	GSRegressionPacket* packet = nullptr;
 
 	ScopedGuard sg([&]() {
 		if (rbp)
 		{
-			rbp->SetStateRunner(RegressionBuffer::DEFAULT);
+			rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 			if (packet)
 				rbp->DonePacketWrite();
 		}
@@ -674,7 +674,7 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	
 	if (rbp)
 	{
-		rbp->SetStateRunner(RegressionBuffer::WRITE_DATA);
+		rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
 		packet = rbp->GetPacketWrite(true);
 		if (!packet)
 		{

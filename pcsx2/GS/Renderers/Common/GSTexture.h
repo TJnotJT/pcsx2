@@ -89,7 +89,7 @@ public:
 	virtual void SetDebugName(std::string_view name) = 0;
 #endif
 
-	bool Save(const std::string& fn, RegressionBuffer* rpb = nullptr);
+	bool Save(const std::string& fn, GSRegressionBuffer* rpb = nullptr);
 
 	__fi int GetWidth() const { return m_size.x; }
 	__fi int GetHeight() const { return m_size.y; }

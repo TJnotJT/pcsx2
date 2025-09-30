@@ -1076,7 +1076,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 		SWDumpDirectory = Path::Combine(EmuFolders::DataRoot, SWDumpDirectory);
 
 	// Sanity check: don't dump a bunch of crap in the current working directory.
-	if (DumpGSData && (HWDumpDirectory.empty() || SWDumpDirectory.empty()) && !IsRegressionTesting())
+	if (DumpGSData && (HWDumpDirectory.empty() || SWDumpDirectory.empty()) && !GSIsRegressionTesting())
 	{
 		Console.Error("Draw dumping is enabled but directory is unconfigured, please set one.");
 		DumpGSData = false;

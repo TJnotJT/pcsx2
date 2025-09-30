@@ -1486,7 +1486,7 @@ bool VMManager::Initialize(VMBootParameters boot_params)
 
 	if (GSDumpReplayer::IsRunner())
 	{
-		if (!GSDumpReplayer::Initialize(IsRegressionTesting() ? nullptr : boot_params.filename.c_str()))
+		if (!GSDumpReplayer::Initialize(GSIsRegressionTesting() ? nullptr : boot_params.filename.c_str()))
 			return false;
 	}
 
