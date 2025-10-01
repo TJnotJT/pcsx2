@@ -595,7 +595,7 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	const bool done_dump = (s_dump_loop_count == 0) ||
+	const bool done_dump = (s_current_packet == 0 && s_dump_loop_count == 0) ||
 	                       (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
 	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::EXIT)
