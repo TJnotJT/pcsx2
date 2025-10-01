@@ -1357,6 +1357,10 @@ bool GSTester::StartRunners()
 		{
 			return true;
 		}
+
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+
+		Console.WriteLn("(GSTester) Waiting for runner processes...");
 	}
 
 	return true; // Unreachable
@@ -1366,7 +1370,7 @@ bool GSTester::StartRunners()
 bool GSTester::EndRunners()
 {
 	for (int i = 0; i < 2; i++)
-		regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE);
+		regression_buffer[i].SetStateTester(GSRegressionBuffer::EXIT);
 
 	constexpr double terminate_timeout = 10.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
@@ -1493,8 +1497,6 @@ int GSTester::main_tester(int argc, char* argv[])
 	DumpCached dump; // Cache the dump from disk to shared with runner processes.
 	GSRegressionPacket* packets[2]; // Packet read from each .
 	Error error; // Current error.
-	bool exited[2]; // Runner process exited.
-	bool done[2]; // Runner process done
 	bool restart = false; // Whether to attempt a restart on next iteration.
 	DumpInfo* dump_curr; // Pointer into dumps vector of current dump.
 	std::string packet_name_curr; // Current packet name.
@@ -1573,6 +1575,13 @@ int GSTester::main_tester(int argc, char* argv[])
 			{
 				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).", dumps[dump_index].file, error.GetDescription());
 				dump_index++; // Skip
+			}
+
+			if (dump_index >= dumps.size())
+			{
+				Console.WriteLn("(GSTester) Done uploading dumps.");
+				for (int i = 0; i < 2; i++)
+					regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE_UPLOADING);
 			}
 		}
 
@@ -1698,30 +1707,7 @@ int GSTester::main_tester(int argc, char* argv[])
 			}
 		}
 
-		// Check state of runner processes.
-		//for (int i = 0; i < 2; i++)
-		//{
-		//	done[i] = exited[i] || (state[i] == GSRegressionBuffer::WAIT_DUMP && packets[i] == nullptr);
-		//}
-		for (int i = 0; i < 2; i++)
-		{
-			// Runner is in its final wait loop if it is waiting for a new dump but
-			// there are no more dumps to upload and the dump buffer is empty.
-			// Warning: the order of the check probably matters here. In particular,
-			// we should probably check that the dump buffer is empty before checking
-			// that the runner is waiting, since otherwise the runner could read a new dump
-			// and empty the buffer in between the two checks.
-			const bool runner_end_waiting =
-				dump_index >= dumps.size() &&
-				regression_buffer[i].GetDumpRead(false) == nullptr &&
-				regression_buffer[i].GetStateRunner() == GSRegressionBuffer::WAIT_DUMP;
-
-			const bool packet_buffer_empty = regression_buffer[i].GetPacketRead(false) == nullptr;
-
-			done[i] = exited[i] || (runner_end_waiting && packet_buffer_empty);
-		}
-
-		if (done[0] && done[1] && dump_index >= dumps.size())
+		if (last_dump_completed == dumps.back().name)
 		{
 			Console.WriteLn("(GSTester) All dumps/packets finished.");
 			break;

@@ -294,26 +294,27 @@ bool GSDumpReplayer::Initialize(const char* filename)
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
 {
-
+	GSRegressionBuffer* rbp = GSGetRegressionBuffer();
 	GSDumpFileSharedMemory* dump = nullptr;
+	rbp->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 
 	ScopedGuard sg([&]() {
-		GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::DEFAULT);
+		rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 		if (dump)
-			GSGetRegressionBuffer()->DoneDumpRead();
+			rbp->DoneDumpRead();
 	});
 
 	Common::Timer timer;
 	while (true)
 	{
-		// FIXME: maybe we should put a time limit...
+		// Get state before checking dump buffer to avoid race condition.
+		u32 state_tester = rbp->GetStateTester();
 
-		if (dump = GSGetRegressionBuffer()->GetDumpRead(false))
+		if (dump = rbp->GetDumpRead(false))
 			break;
-		
-		GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 
-		if (GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
+		if (state_tester == GSRegressionBuffer::EXIT ||
+			state_tester == GSRegressionBuffer::DONE_UPLOADING)
 		{
 			s_dump_running = false;
 			return false;
@@ -328,11 +329,9 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 		}
 	}
 
-	GSRegressionBuffer* r = GSGetRegressionBuffer();
-
 	const std::string dump_name = dump->GetNameDump();
 
-	GSGetRegressionBuffer()->SetNameDump(dump_name);
+	rbp->SetNameDump(dump_name);
 
 	s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
 
@@ -599,14 +598,14 @@ void GSDumpReplayerCpuStep()
 	const bool done_dump = (s_dump_loop_count == 0) ||
 	                       (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
-	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
+	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::EXIT)
 	{
 		start_shutdown = true;
 	}
-
-	// Check if we are need to change dumps for batch mode; or done with all dumps.
-	if (done_dump)
+	else if (done_dump)
 	{
+		// Check if we need to change dumps for batch mode; or done with all dumps.
+
 		if (GSDumpReplayer::IsBatchMode())
 		{
 			MTGS::WaitGS(false, false, false); // Let GS thread finish.

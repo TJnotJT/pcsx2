@@ -55,9 +55,9 @@ bool GSSpinlockSharedMemory::LockWrite(bool block, GSIntSharedMemory* state)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::DONE)
+		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when DONE.
+			return false; // Always fail when EXIT.
 		}
 
 		if (lock.CompareExchange(WRITEABLE, WRITEABLE) == WRITEABLE)
@@ -80,9 +80,9 @@ bool GSSpinlockSharedMemory::LockRead(bool block, GSIntSharedMemory* state)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::DONE)
+		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when DONE.
+			return false; // Always fail when EXIT.
 		}
 
 		if (lock.CompareExchange(READABLE, READABLE) == READABLE)
@@ -126,9 +126,9 @@ bool GSSpinlockSharedMemory::Lock(bool block, GSIntSharedMemory* state)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::DONE)
+		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when DONE.
+			return false; // Always fail when EXIT.
 		}
 
 		if (lock.CompareExchange(LOCKED, UNLOCKED) == UNLOCKED)

@@ -183,10 +183,11 @@ struct GSRegressionBuffer
 
 	enum : u32
 	{
-		DEFAULT = 0,
-		WAIT_DUMP,
-		WRITE_DATA,
-		DONE
+		DEFAULT, // Both
+		WRITE_DATA, // Runner
+		WAIT_DUMP, // Runner
+		DONE_UPLOADING, // Tester
+		EXIT // Tester
 	};
 
 	GSSharedMemoryFile shm;
