@@ -25,6 +25,7 @@ namespace GSDumpReplayer
 	bool Initialize(const char* filename);
 	bool NextDump(); // For batch mode.
 	bool ChangeDumpRegressionTest();
+	void EndDumpRegressionTest();
 	bool ChangeDump(const char* filename);
 	void Shutdown();
 

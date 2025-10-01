@@ -131,6 +131,79 @@ int GSDumpReplayer::GetLoopCount()
 	return s_dump_loop_count;
 }
 
+void GSDumpReplayer::EndDumpRegressionTest()
+{
+	pxAssert(GSIsRegressionTesting());
+
+	GSRegressionBuffer* rbp = GSGetRegressionBuffer();
+
+	rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
+	ScopedGuard set_default([&]() {
+		rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
+	});
+
+	// Note: must process only one packet sequentially or it will break ring buffer locking.
+
+	if (GSIsHardwareRenderer())
+	{
+		// Send HW stats packet
+		GSRegressionPacket* packet_hwstat = nullptr;
+		ScopedGuard done_hwstat([&]() {
+			if (packet_hwstat)
+				rbp->DonePacketWrite();
+		});
+
+		if (packet_hwstat = rbp->GetPacketWrite(true))
+		{
+			const std::string name_dump = rbp->GetNameDump();
+			packet_hwstat->SetNameDump(name_dump);
+			packet_hwstat->SetNamePacket(name_dump + " HWStat");
+
+			GSRegressionPacket::HWStat hwstat;
+			hwstat.frames = 0; // FIXME
+			hwstat.draws = g_perfmon.GetCounter(GSPerfMon::DrawCalls);
+			hwstat.render_passes = g_perfmon.GetCounter(GSPerfMon::RenderPasses);
+			hwstat.barriers = g_perfmon.GetCounter(GSPerfMon::Barriers);
+			hwstat.copies = g_perfmon.GetCounter(GSPerfMon::TextureCopies);
+			hwstat.uploads = g_perfmon.GetCounter(GSPerfMon::TextureUploads);
+			hwstat.readbacks = g_perfmon.GetCounter(GSPerfMon::Readbacks);
+			packet_hwstat->SetHWStat(hwstat);
+
+			Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
+				GSDumpReplayer::GetRunnerName(), packet_hwstat->GetNameDump(), packet_hwstat->GetNamePacket());
+		}
+		else
+		{
+			Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for HW stats.", GSDumpReplayer::GetRunnerName());
+		}
+	}
+
+	{
+		// Send done dump packet.
+		GSRegressionPacket* packet_done_dump = nullptr;
+		ScopedGuard done_done_dump([&]() {
+			if (packet_done_dump)
+				rbp->DonePacketWrite();
+		});
+
+		if (packet_done_dump = rbp->GetPacketWrite(true))
+		{
+			const std::string name_dump = rbp->GetNameDump();
+			packet_done_dump->SetNameDump(name_dump);
+			packet_done_dump->SetNamePacket(name_dump + " Done");
+			packet_done_dump->SetDoneDump();
+
+			Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
+				GSDumpReplayer::GetRunnerName(), packet_done_dump->GetNameDump(), packet_done_dump->GetNamePacket());
+		}
+		else
+		{
+			Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for done dump signal.",
+				GSDumpReplayer::GetRunnerName());
+		}
+	}
+}
+
 bool GSDumpReplayer::NextDump()
 {
 	if (!IsBatchMode())
@@ -221,7 +294,6 @@ bool GSDumpReplayer::Initialize(const char* filename)
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
 {
-	GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 
 	GSDumpFileSharedMemory* dump = nullptr;
 
@@ -232,12 +304,14 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 	});
 
 	Common::Timer timer;
-	while (1)
+	while (true)
 	{
 		// FIXME: maybe we should put a time limit...
 
 		if (dump = GSGetRegressionBuffer()->GetDumpRead(false))
 			break;
+		
+		GSGetRegressionBuffer()->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 
 		if (GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
 		{
@@ -522,15 +596,8 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	if (s_dump_loop_count == 0 && !GSDumpReplayer::IsBatchMode())
-	{
-		start_shutdown = true;
-	}
-
-	if (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max)
-	{
-		start_shutdown = true;
-	}
+	const bool done_dump = (s_dump_loop_count == 0) ||
+	                       (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
 	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::DONE)
 	{
@@ -538,93 +605,33 @@ void GSDumpReplayerCpuStep()
 	}
 
 	// Check if we are need to change dumps for batch mode; or done with all dumps.
-	if (GSDumpReplayer::IsBatchMode() && s_current_packet == 0 && s_dump_loop_count == 0)
+	if (done_dump)
 	{
-		MTGS::WaitGS(false, false, false); // Let GS thread finish.
-		GSState::s_n = 0; // Needed for proper packet naming for next dump.
-
-		// Send HW stats and done packet if needed.
-		if (GSIsRegressionTesting())
+		if (GSDumpReplayer::IsBatchMode())
 		{
-			GSRegressionBuffer* rbp = GSGetRegressionBuffer();
+			MTGS::WaitGS(false, false, false); // Let GS thread finish.
+			GSState::s_n = 0; // Needed for proper file naming for next dump.
 
-			rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
-			ScopedGuard set_default([&]() {
-				rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
-			});
-
-			// Note: make sure to process only one packet at at time sequentially or it will break ring buffer locking.
-
-			if (GSIsHardwareRenderer())
+			// Send HW stats and done packet if needed.
+			if (GSIsRegressionTesting())
 			{
-				// Send HW stats packet
-				GSRegressionPacket* packet_hwstat = nullptr;
-				ScopedGuard done_hwstat([&]() {
-					if (packet_hwstat)
-						rbp->DonePacketWrite();
-				});
-
-				if (packet_hwstat = rbp->GetPacketWrite(true))
-				{
-					const std::string name_dump = rbp->GetNameDump();
-					packet_hwstat->SetNameDump(name_dump);
-					packet_hwstat->SetNamePacket(name_dump + " HWStat");
-
-					GSRegressionPacket::HWStat hwstat;
-					hwstat.frames = 0; // FIXME
-					hwstat.draws = g_perfmon.GetCounter(GSPerfMon::DrawCalls);
-					hwstat.render_passes = g_perfmon.GetCounter(GSPerfMon::RenderPasses);
-					hwstat.barriers = g_perfmon.GetCounter(GSPerfMon::Barriers);
-					hwstat.copies = g_perfmon.GetCounter(GSPerfMon::TextureCopies);
-					hwstat.uploads = g_perfmon.GetCounter(GSPerfMon::TextureUploads);
-					hwstat.readbacks = g_perfmon.GetCounter(GSPerfMon::Readbacks);
-					packet_hwstat->SetHWStat(hwstat);
-
-					Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
-						GSDumpReplayer::GetRunnerName(), packet_hwstat->GetNameDump(), packet_hwstat->GetNamePacket());
-				}
-				else
-				{
-					Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for HW stats.", GSDumpReplayer::GetRunnerName());
-				}
+				GSDumpReplayer::EndDumpRegressionTest();
 			}
 
+			if (GSDumpReplayer::NextDump())
 			{
-				// Send done dump packet.
-				GSRegressionPacket* packet_done_dump = nullptr;
-				ScopedGuard done_done_dump([&]() {
-					if (packet_done_dump)
-						rbp->DonePacketWrite();
-				});
-
-				if (packet_done_dump = rbp->GetPacketWrite(true))
-				{
-					const std::string name_dump = rbp->GetNameDump();
-					packet_done_dump->SetNameDump(name_dump);
-					packet_done_dump->SetNamePacket(name_dump + " Done");
-					packet_done_dump->SetDoneDump();
-
-					Console.WriteLnFmt("(GSDumpReplayer/{}) New regression packet: {} / {}",
-						GSDumpReplayer::GetRunnerName(), packet_done_dump->GetNameDump(), packet_done_dump->GetNamePacket());
-				}
-				else
-				{
-					Console.ErrorFmt("(GSDumpReplayer/{}) Failed to get regression packet for done dump signal.",
-						GSDumpReplayer::GetRunnerName());
-				}
+				s_dump_loop_count = s_dump_loop_count_start;
+				g_perfmon.Reset(); // Make sure stats are reset for new dump.
+				GSDumpReplayerCpuReset();
 			}
-
-			g_perfmon.Reset(); // Make sure stats are reset for new dump.
+			else
+			{
+				Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode has no more dumps.", GSDumpReplayer::GetRunnerName());
+				start_shutdown = true;
+			}
 		}
-
-		if (GSDumpReplayer::NextDump())
+		else // Normal (non-batch) mode
 		{
-			s_dump_loop_count = s_dump_loop_count_start;
-			GSDumpReplayerCpuReset();
-		}
-		else
-		{
-			Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode has no more dumps.", GSDumpReplayer::GetRunnerName());
 			start_shutdown = true;
 		}
 	}
