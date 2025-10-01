@@ -57,6 +57,72 @@
 
 #include "svnrev.h"
 
+struct GSTester
+{
+	struct DumpInfo
+	{
+		std::string file = "";
+		std::string name = "";
+		std::size_t packets = 0;
+		bool completed = false;
+	};
+
+	struct DumpCached
+	{
+		std::unique_ptr<GSDumpFile> ptr;
+		std::string name;
+
+		bool Load(DumpInfo& d, std::size_t max_dump_size, Error* error);
+		bool HasCached();
+		void Reset();
+	};
+
+	static void PrintCommandLineHelp(const char* progname);
+	bool ParseCommandLineArgs(int argc, char* argv[], int thread_id);
+	bool GetDumpInfo(std::vector<DumpInfo>& dump_infos, std::map<std::string, std::size_t>& dumps_map, int nthreads, int thread_id);
+	bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error);
+	bool StartRunners();
+	bool EndRunners();
+	bool RestartRunners();
+	int MainThread(int argc, char* argv[], int nthreads = 1, int thread_id = 0);
+	
+	static int main_tester(int argc, char* argv[]);
+
+	enum
+	{
+		VERBOSE_LOW,
+		VERBOSE_TESTER,
+		VERBOSE_TESTER_AND_RUNNER
+	};
+
+	static constexpr std::size_t regression_deadlock_timeout = 1000;
+	static constexpr std::size_t regression_failure_restarts_max = 10;
+	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
+	static constexpr std::size_t regression_num_packets_default = 10;
+	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
+
+	std::string regression_output_dir;
+	std::string regression_output_image_dir[2];
+	std::string regression_output_hwstat_dir[2];
+	std::string regression_runner_args;
+	GSRegressionBuffer regression_buffer[2];
+	std::string regression_runner_path[2];
+	std::string regression_runner_command[2];
+	std::string regression_runner_name[2];
+	std::string regression_shared_file[2];
+	std::string regression_dump_dir;
+	GSProcess regression_runner_proc[2];
+	std::size_t regression_num_packets = regression_num_packets_default;
+	std::size_t regression_dump_size = regression_dump_size_default;
+	u32 regression_verbose_level = regression_verbose_level_default;
+
+	// Stats
+	std::size_t regression_packets_completed;
+	std::size_t regression_dumps_completed;
+	std::size_t regression_dumps_skipped;
+	std::size_t regression_failure_restarts;
+};
+
 namespace GSRunner
 {
 	static void InitializeConsole();
@@ -82,6 +148,8 @@ namespace GSRunner
 	static std::string s_runner_name;
 	static std::string s_regression_file;
 	GSRegressionBuffer s_regression_buffer;
+	static size_t s_regression_num_packets = GSTester::regression_num_packets_default;
+	static size_t s_regression_dump_size = GSTester::regression_dump_size_default;
 	static s32 s_loop_count = 1;
 	static std::optional<bool> s_use_window;
 	static bool s_no_console = false;
@@ -110,68 +178,6 @@ namespace GSRunner
 	static std::string s_dump_gs_data_dir_hw;
 	static std::string s_dump_gs_data_dir_sw;
 } // namespace GSRunner
-
-namespace GSTester
-{
-	struct DumpInfo
-	{
-		std::string file = "";
-		std::string name = "";
-		std::size_t packets = 0;
-		bool completed = false;
-	};
-
-	struct DumpCached
-	{
-		std::unique_ptr<GSDumpFile> ptr;
-		std::string name;
-
-		bool Load(DumpInfo& d, Error* error);
-		bool HasCached();
-		void Reset();
-	};
-
-	static bool ParseCommandLineArgs(int argc, char* argv[]);
-	static void PrintCommandLineHelp(const char* progname);
-	bool GetDumpInfo(std::vector<DumpInfo>& dump_infos, std::map<std::string, std::size_t>& dumps_map);
-	bool CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name, Error* error);
-	bool StartRunners();
-	bool EndRunners();
-	bool RestartRunners();
-
-	int main_tester(int argc, char* argv[]);
-
-	enum
-	{
-		VERBOSE_LOW,
-		VERBOSE_TESTER,
-		VERBOSE_TESTER_AND_RUNNER
-	};
-
-	// For the tester
-	static constexpr std::size_t regression_deadlock_timeout = 1000;
-	static constexpr std::size_t regression_failure_restarts = 10;
-	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
-	static constexpr std::size_t regression_num_packets_default = 10;
-	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
-
-	static std::string regression_output_dir;
-	static std::string regression_output_image_dir[2];
-	static std::string regression_output_hwstat_dir[2];
-	static std::string regression_runner_args;
-	static GSRegressionBuffer regression_buffer[2];
-	static std::string regression_runner_path[2];
-	static std::string regression_runner_command[2];
-	static std::string regression_runner_name[2];
-	static std::string regression_shared_file[2];
-	static std::string regression_dump_dir;
-	static GSProcess regression_runner_proc[2];
-	static std::size_t regression_num_packets = regression_num_packets_default;
-	static std::size_t regression_dump_size = regression_dump_size_default;
-	static u32 regression_verbose_level = regression_verbose_level_default;
-} // namespace GSTester
-
-// For both tester/runner
 
 bool GSRunner::InitializeConfig()
 {
@@ -576,7 +582,7 @@ static void GSRunner::PrintCommandLineHelp(const char* progname)
 	std::fprintf(stderr, "\n");
 }
 
-static void GSTester::PrintCommandLineHelp(const char* progname)
+void GSTester::PrintCommandLineHelp(const char* progname)
 {
 	PrintCommandLineVersion();
 	std::fprintf(stderr, "Usage: %s [parameters] [--] [filename]\n", progname);
@@ -838,19 +844,19 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			}
 			else if (CHECK_ARG_PARAM("-npackets"))
 			{
-				GSTester::regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(GSTester::regression_num_packets_default);
+				s_regression_num_packets = StringUtil::FromChars<u32>(argv[++i]).value_or(GSTester::regression_num_packets_default);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-regression-dump-size"))
 			{
 				std::optional<u32> size_mb = StringUtil::FromChars<u32>(argv[++i]);
 				if (size_mb.has_value())
-					GSTester::regression_dump_size = size_mb.value() * _1mb;
+					s_regression_dump_size = size_mb.value() * _1mb;
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-frames-max"))
 			{
-				s_frames_max = StringUtil::FromChars<u32>(argv[++i]).value_or(0);
+				s_frames_max = StringUtil::FromChars<u32>(argv[++i]).value_or(0xFFFFFFFF);
 				continue;
 			}
 			else if (CHECK_ARG("-batch"))
@@ -956,7 +962,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 	return true;
 }
 
-bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
+bool GSTester::ParseCommandLineArgs(int argc, char* argv[], int thread_id)
 {
 	for (int i = 1; i < argc; i++)
 	{
@@ -1065,6 +1071,11 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[])
 
 			regression_verbose_level = StringUtil::FromChars<u32>(argv[++i]).value_or(regression_verbose_level_default);
 
+			continue;
+		}
+		else if (CHECK_ARG("-nthreads"))
+		{
+			i++; // Skip -- handled by the main thread.
 			continue;
 		}
 		else
@@ -1236,18 +1247,13 @@ int GSRunner::main_runner(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	for (int i = 0; i < 2; i++)
-	{
-		GSTester::regression_buffer[i].CreateFile_(s_regression_file + (i == 0 ? "" : "_"), GSTester::regression_num_packets, GSTester::regression_dump_size);
-	}
-
 	// Regression testing needs to be started before applying settings
 	// or it might complain that there is no dumping directory
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
 	{
 		GSStartRegressionTest(&s_regression_buffer, s_regression_file,
-			GSTester::regression_num_packets, GSTester::regression_dump_size);
+			s_regression_num_packets, s_regression_dump_size);
 	}
 	
 	// apply new settings (e.g. pick up renderer change)
@@ -1257,9 +1263,9 @@ int GSRunner::main_runner(int argc, char* argv[])
 	if (s_batch_mode)
 	{
 		GSDumpReplayer::SetIsBatchMode(true);
+		GSDumpReplayer::SetLoopCountStart(s_loop_count);
 		if (s_settings_interface.GetBoolValue("EmuCore/GS", "DumpGSData", false))
 		{
-			GSDumpReplayer::SetLoopCountStart(s_loop_count);
 			GSDumpReplayer::SetDumpGSDataDirHW(s_dump_gs_data_dir_hw);
 			GSDumpReplayer::SetDumpGSDataDirSW(s_dump_gs_data_dir_sw);
 		}
@@ -1276,7 +1282,7 @@ int GSRunner::main_runner(int argc, char* argv[])
 	return EXIT_SUCCESS;
 }
 
-bool GSTester::DumpCached::Load(DumpInfo& d, Error* error)
+bool GSTester::DumpCached::Load(DumpInfo& d, std::size_t max_dump_size, Error* error)
 {
 	s64 size = FileSystem::GetPathFileSize(d.file.c_str());
 	if (size < 0)
@@ -1287,7 +1293,7 @@ bool GSTester::DumpCached::Load(DumpInfo& d, Error* error)
 
 	// Check the disk size before trying to decompress to fail quickly.
 	// The decompressed size is usually more than 4x the disk size.
-	if (static_cast<std::size_t>(4 * size) > regression_dump_size)
+	if (static_cast<std::size_t>(4 * size) > max_dump_size)
 	{
 		Error::SetStringFmt(error, "Disk size too large '{}' ({} bytes)", d.file, size);
 		return false;
@@ -1420,7 +1426,7 @@ static constexpr const char* LIST_ITEM = "- ";
 static constexpr const char* OPEN_LIST = "[";
 static constexpr const char* CLOSE_LIST = "]";
 
-bool GSTester::GetDumpInfo(std::vector<DumpInfo>& dumps, std::map<std::string, std::size_t>& dumps_map)
+bool GSTester::GetDumpInfo(std::vector<DumpInfo>& dumps, std::map<std::string, std::size_t>& dumps_map, int nthreads, int thread_id)
 {
 	std::vector<std::string> dump_files;
 
@@ -1438,8 +1444,9 @@ bool GSTester::GetDumpInfo(std::vector<DumpInfo>& dumps, std::map<std::string, s
 		return false;
 	}
 
-	for (const std::string& file : dump_files)
+	for (int i = thread_id; i < static_cast<int>(dump_files.size()); i += nthreads)
 	{
+		const std::string& file = dump_files[i];
 		std::string name = std::filesystem::path(file).filename().string();
 		dumps.emplace_back(file, name, 0, false);
 	}
@@ -1452,16 +1459,15 @@ bool GSTester::GetDumpInfo(std::vector<DumpInfo>& dumps, std::map<std::string, s
 	return true;
 }
 
-int GSTester::main_tester(int argc, char* argv[])
+int GSTester::MainThread(int argc, char* argv[], int nthreads, int thread_id)
 {
-	Common::Timer timer_total;
 	std::vector<DumpInfo> dumps;
 	std::map<std::string, std::size_t> dumps_map; // Name to index.
 
-	if (!ParseCommandLineArgs(argc, argv))
+	if (!ParseCommandLineArgs(argc, argv, thread_id))
 		return EXIT_FAILURE;
 
-	if (!GetDumpInfo(dumps, dumps_map))
+	if (!GetDumpInfo(dumps, dumps_map, nthreads, thread_id))
 		return EXIT_FAILURE;
 
 	Console.WriteLnFmt("(GSTester) Found {} dumps in '{}'", dumps.size(), regression_dump_dir);
@@ -1469,7 +1475,8 @@ int GSTester::main_tester(int argc, char* argv[])
 	Console.WriteLn("(GSTester) Opening shared memory files.");
 	for (int i = 0; i < 2; i++)
 	{
-		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(i);
+		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) +
+			"-" + std::to_string(thread_id) + "-" + std::to_string(i);
 
 		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets, regression_dump_size))
 		{
@@ -1511,15 +1518,15 @@ int GSTester::main_tester(int argc, char* argv[])
 		{
 			restart = false;
 
-			if (++failure_restarts >= regression_failure_restarts)
+			if (++regression_failure_restarts >= regression_failure_restarts_max)
 			{
-				Console.ErrorFmt("(GSTester) Attempted restarting {} times due to failures...exiting.", failure_restarts);
+				Console.ErrorFmt("(GSTester) Attempted restarting {} times due to failures...exiting.", regression_failure_restarts);
 				EndRunners();
 				break;
 			}
 			else
 			{
-				Console.ErrorFmt("(GSTester) Attempting to restart due to failure (attempt {}).", failure_restarts);
+				Console.ErrorFmt("(GSTester) Attempting to restart due to failure (attempt {}).", regression_failure_restarts);
 
 				// Reset dump to the last one we got packets for.
 				if (last_dump_completed.empty())
@@ -1571,7 +1578,7 @@ int GSTester::main_tester(int argc, char* argv[])
 					// The copy failed because the buffer is full. Try again next iteration.
 				}
 			}
-			else if (!dump.Load(dumps[dump_index], &error))
+			else if (!dump.Load(dumps[dump_index], regression_dump_size, &error))
 			{
 				Console.ErrorFmt("(GSTester) Failed to load dump '{}' (error: {}).", dumps[dump_index].file, error.GetDescription());
 				dump_index++; // Skip
@@ -1747,20 +1754,113 @@ int GSTester::main_tester(int argc, char* argv[])
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].CloseFile();
 
-	// Get stats and print stats.
-	std::size_t packets_completed = 0;
-	std::size_t dumps_completed = 0;
-	std::size_t dumps_skipped = 0;
+	// Get stats for main thread.
+	regression_packets_completed = 0;
+	regression_dumps_completed = 0;
+	regression_dumps_skipped = 0;
 	for (std::size_t i = 0; i < dumps.size(); i++)
 	{
-		packets_completed += dumps[i].packets;
-		dumps_completed += dumps[i].completed;
-		dumps_skipped += !dumps[i].completed;
+		regression_packets_completed += dumps[i].packets;
+		regression_dumps_completed += dumps[i].completed;
+		regression_dumps_skipped += !dumps[i].completed;
 	}
+
+	return EXIT_SUCCESS;
+}
+
+int GSTester::main_tester(int argc, char* argv[])
+{
+	Common::Timer timer_total;
+
+	int nthreads = 1;
+	for (int i = 1; i < argc; i++)
+	{
+		if (strncmp(argv[i], "-nthreads", 9) == 0)
+		{
+			if (i + 1 >= argc)
+			{
+				Console.ErrorFmt("(GSTester) Expected an argument for '-nthreads'");
+				return EXIT_FAILURE;
+			}
+			nthreads = StringUtil::FromChars<u32>(argv[++i]).value_or(1);
+		}
+	}
+
+	nthreads = std::clamp(nthreads, 1, 8);
+
+	Console.WriteLnFmt("(GSTester) Running regression test with {} threads.", nthreads);
+
+	std::vector<GSTester> testers;
+	std::vector<int> return_value;
+	testers.resize(nthreads);
+	return_value.resize(nthreads);
+
+	if (nthreads == 1)
+	{
+		GSTester tester;
+		return_value[0] = tester.MainThread(argc, argv);
+	}
+	else
+	{
+		std::vector<std::thread> threads;
+		threads.resize(nthreads);
+
+		for (int i = 0; i < nthreads; i++)
+			return_value[i] = EXIT_FAILURE;
+
+		const auto run_thread = [&](u32 thread_id) {
+			return_value[thread_id] = testers[thread_id].MainThread(argc, argv, nthreads, thread_id);
+		};
+
+		for (int i = 0; i < nthreads; i++)
+		{
+			threads[i] = std::thread(run_thread, i);
+		}
+
+		for (int i = 0; i < nthreads; i++)
+			threads[i].join();
+	}
+
+	std::string threads_failed;
+	for (int i = 0; i < nthreads; i++)
+	{
+		if (return_value[i] != EXIT_SUCCESS)
+		{
+			if (!threads_failed.empty())
+				threads_failed += ", ";
+			threads_failed += std::to_string(i);
+		}
+	}
+
+	if (threads_failed.empty())
+	{
+		Console.WriteLn("(GSTester) All threads succeeded.");
+	}
+	else
+	{
+		Console.WriteLnFmt("(GSTester) The follow threads failed: {}", threads_failed);
+	}
+
+	std::size_t dumps_total;
+	std::size_t dumps_completed = 0;
+	std::size_t dumps_skipped = 0;
+	std::size_t packets_completed = 0;
+	std::size_t failure_restarts = 0;
+
+	for (int i = 0; i < nthreads; i++)
+	{
+		dumps_completed += testers[i].regression_dumps_completed;
+		dumps_skipped += testers[i].regression_dumps_skipped;
+		packets_completed += testers[i].regression_packets_completed;
+		failure_restarts += testers[i].regression_failure_restarts;
+	}
+
+	dumps_total = dumps_completed + dumps_skipped;
+
 	Console.WriteLnFmt("GSTester Stats:");
 	Console.WriteLnFmt("    Run time: {:.2} minutes", timer_total.GetTimeSeconds() / 60.0);
-	Console.WriteLnFmt("    Dumps completed: {} / {}", dumps_completed, dumps.size());
-	Console.WriteLnFmt("    Dumps skipped: {} / {}", dumps_skipped, dumps.size());
+	Console.WriteLnFmt("    Dumps completed: {} / {}", dumps_completed, dumps_total);
+	Console.WriteLnFmt("    Dumps skipped: {} / {}", dumps_skipped, dumps_total);
 	Console.WriteLnFmt("    Packets processed: {} (Avg {})",
 		packets_completed, dumps_completed == 0 ? 0 : packets_completed / dumps_completed);
 	Console.WriteLnFmt("    Failure restarts: {}", failure_restarts);

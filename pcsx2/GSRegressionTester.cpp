@@ -843,4 +843,3 @@ void GSSharedMemoryFile::ResetFile()
 {
 	memset(data, 0, size);
 }
-
