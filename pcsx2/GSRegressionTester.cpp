@@ -51,18 +51,23 @@ std::size_t GSIntSharedMemory::GetTotalSize()
 	return sizeof(GSIntSharedMemory);
 }
 
-bool GSSpinlockSharedMemory::LockWrite(bool block, GSIntSharedMemory* state)
+bool GSSpinlockSharedMemory::LockWrite(bool block, GSIntSharedMemory* state, bool check_parent)
 {
 	while (true)
 	{
 		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when EXIT.
+			return false; // Fail when EXIT message.
+		}
+
+		if (check_parent && !GSProcess::IsParentRunning())
+		{
+			return false; // Fail when parent exited.
 		}
 
 		if (lock.CompareExchange(WRITEABLE, WRITEABLE) == WRITEABLE)
 		{
-			return true;
+			return true; // Acquired write.
 		}
 
 		if (!block)
@@ -76,18 +81,23 @@ bool GSSpinlockSharedMemory::LockWrite(bool block, GSIntSharedMemory* state)
 	return false; // timeout
 }
 
-bool GSSpinlockSharedMemory::LockRead(bool block, GSIntSharedMemory* state)
+bool GSSpinlockSharedMemory::LockRead(bool block, GSIntSharedMemory* state, bool check_parent)
 {
 	while (true)
 	{
 		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when EXIT.
+			return false; // Fail when EXIT message.
 		}
 
-		if (lock.CompareExchange(READABLE, READABLE) == READABLE)
+		if (check_parent && !GSProcess::IsParentRunning())
 		{
-			return true;
+			return false; // Fail when parent exited.
+		}
+
+		if (lock.CompareExchange(READABLE, READABLE) == READABLE) // Check the lock
+		{
+			return true; // Acquired read.
 		}
 
 		if (!block)
@@ -122,18 +132,23 @@ bool GSSpinlockSharedMemory::Readable()
 	return lock.Get() == READABLE;
 }
 
-bool GSSpinlockSharedMemory::Lock(bool block, GSIntSharedMemory* state)
+bool GSSpinlockSharedMemory::Lock(bool block, GSIntSharedMemory* state, bool check_parent)
 {
 	while (true)
 	{
 		if (state && state->Get() == GSRegressionBuffer::EXIT)
 		{
-			return false; // Always fail when EXIT.
+			return false; // Fail when exit message.
+		}
+
+		if (check_parent && !GSProcess::IsParentRunning())
+		{
+			return false; // Fail when parent exited.
 		}
 
 		if (lock.CompareExchange(LOCKED, UNLOCKED) == UNLOCKED)
 		{
-			return true;
+			return true; // Locked successfully.
 		}
 
 		if (!block)
@@ -150,17 +165,17 @@ bool GSSpinlockSharedMemory::Unlock()
 	return lock.CompareExchange(UNLOCKED, LOCKED) == LOCKED;
 }
 
-GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(bool block)
+GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(bool block, bool check_parent)
 {	
-	if (!packets[packet_write % num_packets].lock.LockWrite(block, &state[TESTER]))
+	if (!packets[packet_write % num_packets].lock.LockWrite(block, &state[TESTER], check_parent))
 		return nullptr;
 
 	return &packets[packet_write % num_packets];
 }
 
-GSRegressionPacket* GSRegressionBuffer::GetPacketRead(bool block)
+GSRegressionPacket* GSRegressionBuffer::GetPacketRead(bool block, bool check_parent)
 {
-	if (!packets[packet_read % num_packets].lock.LockRead(block, &state[TESTER]))
+	if (!packets[packet_read % num_packets].lock.LockRead(block, &state[TESTER], check_parent))
 		return nullptr;
 
 	return &packets[packet_read % num_packets];
@@ -182,17 +197,17 @@ void GSRegressionBuffer::DonePacketRead()
 	packet_read++;
 }
 
-GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(bool block)
+GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(bool block, bool check_parent)
 {
-	if (!dumps[dump_write % num_dumps]->lock.LockWrite(block, &state[TESTER]))
+	if (!dumps[dump_write % num_dumps]->lock.LockWrite(block, &state[TESTER], check_parent))
 		return nullptr;
 
 	return dumps[dump_write % num_dumps];
 }
 
-GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpRead(bool block)
+GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpRead(bool block, bool check_parent)
 {
-	if (!dumps[dump_read % num_dumps]->lock.LockRead(block, &state[TESTER]))
+	if (!dumps[dump_read % num_dumps]->lock.LockRead(block, &state[TESTER], check_parent))
 		return nullptr;
 
 	return dumps[dump_read % num_dumps];
@@ -675,8 +690,6 @@ bool GSProcess::Start(const std::string& command, bool detached)
 		}
 	}
 
-	Console.WriteLnFmt("Created runner process (PID: {}) with command: '{}'", pi.dwProcessId, command);
-
 	this->command = command;
 
 	return true;
@@ -685,21 +698,42 @@ bool GSProcess::Start(const std::string& command, bool detached)
 #endif
 }
 
-bool GSProcess::IsRunning()
+bool GSProcess::IsRunning(Handle_t handle, double seconds)
 {
 #ifdef __WIN32__
-	DWORD status = WaitForSingleObject(pi.hProcess, 0);
+	DWORD status = WaitForSingleObject(handle, static_cast<DWORD>(seconds * 1000.0));
+
+	if (status == WAIT_FAILED)
+	{
+		Console.ErrorFmt("Waiting for process {} failed.", handle);
+		return false;
+	}
+
 	return status == WAIT_TIMEOUT;
+#else
+	return false; // Not implemented
+#endif
+}
+
+bool GSProcess::IsRunning(double seconds)
+{
+#ifdef __WIN32__
+	if (!pi.hProcess)
+	{
+		Console.ErrorFmt("Do not have a valid handle.");
+		return false;
+	}
+	return IsRunning(pi.hProcess, seconds);
 #else
 	// Not implemented
 	return false;
 #endif
 }
 
-int GSProcess::WaitForExit(u32 msec)
+int GSProcess::WaitForExit(double seconds)
 {
 #ifdef __WIN32__
-	return WaitForSingleObject(pi.hProcess, msec);
+	return IsRunning(pi.hProcess, seconds);
 #else
 	// Not implemented
 	return false;
@@ -720,6 +754,54 @@ void GSProcess::Terminate()
 {
 #ifdef __WIN32__
 	TerminateProcess(pi.hProcess, EXIT_FAILURE);
+#else
+	// Not implemented
+	return false;
+#endif
+}
+
+GSProcess::PID_t GSProcess::GetPID()
+{
+	return pi.dwProcessId;
+}
+
+GSProcess::PID_t GSProcess::parent_pid = 0;
+GSProcess::Handle_t GSProcess::parent_h = 0;
+
+bool GSProcess::SetParentPID(PID_t pid)
+{
+#ifdef __WIN32__
+	parent_pid = pid;
+	parent_h = OpenProcess(SYNCHRONIZE, FALSE, pid);
+	return parent_h != 0;
+#else
+	return false; // Not implemented
+#endif
+}
+
+GSProcess::PID_t GSProcess::GetParentPID()
+{
+	return parent_pid;
+}
+
+GSProcess::PID_t GSProcess::GetCurrentPID()
+{
+#ifdef __WIN32__
+	return GetCurrentProcessId();
+#else
+	return 0; // Not implemented
+#endif
+}
+
+bool GSProcess::IsParentRunning(double seconds)
+{
+	if (!parent_pid || !parent_h)
+	{
+		Console.ErrorFmt("Do not have a valid parent PID and/or handle.");
+		return false;
+	}
+#ifdef __WIN32__
+	return IsRunning(parent_h, seconds);
 #else
 	// Not implemented
 	return false;
@@ -758,8 +840,6 @@ bool GSSharedMemoryFile::CreateFile_(const std::string& name, std::size_t size)
 		CloseHandle(handle);
 		return false;
 	}
-
-	Console.WriteLnFmt("Created regression packets file: {}", name);
 
 	this->name = name;
 	this->size = size;

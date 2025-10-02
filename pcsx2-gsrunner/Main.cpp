@@ -194,6 +194,7 @@ namespace GSRunner
 	static bool s_no_console = false;
 	static bool s_batch_mode = false;
 	static u32 s_frames_max = 0;
+	static u32 s_parent_pid = 0;
 
 	// Owned by the GS thread.
 	static u32 s_dump_frame_number = 0;
@@ -898,6 +899,11 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 				s_frames_max = StringUtil::FromChars<u32>(argv[++i]).value_or(0xFFFFFFFF);
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-ppid"))
+			{
+				s_parent_pid = StringUtil::FromChars<u32>(argv[++i]).value_or(0);
+				continue;
+			}
 			else if (CHECK_ARG("-batch"))
 			{
 				s_batch_mode = true;
@@ -1436,6 +1442,21 @@ int GSRunner::main_runner(int argc, char* argv[])
 	{
 		GSStartRegressionTest(&s_regression_buffer, s_regression_file,
 			s_regression_num_packets, s_regression_dump_size);
+
+		if (s_parent_pid == 0)
+		{
+			Console.ErrorFmt("Regression testing without a valid parent PID.");
+			return EXIT_FAILURE;
+		}
+
+
+		if (!GSProcess::SetParentPID(s_parent_pid))
+		{
+			Console.ErrorFmt("Unable to open parent PID {}.", s_parent_pid);
+			return EXIT_FAILURE;
+		}
+
+		Console.WriteLnFmt("(GSRunner/{}) Opened parent PID {}.", s_runner_name, s_parent_pid);
 	}
 	
 	// apply new settings (e.g. pick up renderer change)
@@ -1506,6 +1527,8 @@ bool GSTester::StartRunners()
 	// Start the runner processes in regression testing mode.
 	for (int i = 0; i < 2; i++)
 	{
+		GSProcess::PID_t pid = GSProcess::GetCurrentPID();
+
 		if (regression_runner_command[i].empty())
 		{
 			regression_runner_command[i] =
@@ -1518,6 +1541,7 @@ bool GSTester::StartRunners()
 				std::string(" -name ") + quote(regression_runner_name[i]) +
 				std::string(" -npackets ") + std::to_string(regression_num_packets) +
 				std::string(" -regression-dump-size ") + std::to_string(regression_dump_size / _1mb) +
+				std::string(" -ppid ") + std::to_string(pid) +
 				" " + regression_runner_args;
 		}
 
@@ -1527,6 +1551,9 @@ bool GSTester::StartRunners()
 				regression_runner_command[i]);
 			return false;
 		}
+
+		Console.WriteLnFmt("(GSTester) Created runner process (PID: {}) with command: '{}'",
+			regression_runner_proc[i].GetPID(), regression_runner_command[i]);
 	}
 
 	// Wait until the runners initialize and hit the dump waiting loop.
@@ -1560,12 +1587,12 @@ bool GSTester::EndRunners()
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].SetStateTester(GSRegressionBuffer::EXIT);
 
-	constexpr double terminate_timeout = 10.0; // Seconds to wait before forcefully terminating processes.
+	constexpr double terminate_timeout = 20.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
 	double sec;
 	while (1)
 	{
-		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning())
+		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[1].IsRunning())
 		{
 			break;
 		}
@@ -1574,6 +1601,8 @@ bool GSTester::EndRunners()
 			break;
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
+
+		Console.WriteLnFmt("(GSTester) Waiting for runners to exit...");
 	}
 
 	if (regression_runner_proc[0].IsRunning() || regression_runner_proc[1].IsRunning())
@@ -1583,7 +1612,7 @@ bool GSTester::EndRunners()
 			regression_runner_proc[i].Terminate();
 	}
 
-	return !regression_runner_proc[0].IsRunning() && !regression_runner_proc[0].IsRunning();
+	return !regression_runner_proc[0].IsRunning() && !regression_runner_proc[1].IsRunning();
 }
 
 bool GSTester::RestartRunners()
@@ -1651,6 +1680,8 @@ int GSTester::MainThread(int argc, char* argv[], int nthreads, int thread_id)
 			Console.ErrorFmt("(GSTester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
 		}
+
+		Console.WriteLnFmt("(GSTester) Created regression packets file: {}", regression_shared_file[i]);
 	}
 
 	Console.WriteLn("(GSTester) Starting runner processes.");

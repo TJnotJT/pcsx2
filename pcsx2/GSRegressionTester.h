@@ -35,8 +35,8 @@ struct GSSpinlockSharedMemory
 
 	GSIntSharedMemory lock;
 
-	bool LockWrite(bool block = true, GSIntSharedMemory* done = nullptr);
-	bool LockRead(bool block = false, GSIntSharedMemory* done = nullptr);
+	bool LockWrite(bool block = true, GSIntSharedMemory* done = nullptr, bool check_parent = false);
+	bool LockRead(bool block = false, GSIntSharedMemory* done = nullptr, bool check_parent = false);
 	bool UnlockWrite();
 	bool UnlockRead();
 	bool Writeable();
@@ -49,7 +49,7 @@ struct GSSpinlockSharedMemory
 		LOCKED = 1
 	};
 
-	bool Lock(bool block = false, GSIntSharedMemory* done = nullptr);
+	bool Lock(bool block = false, GSIntSharedMemory* done = nullptr, bool check_parent = false);
 	bool Unlock();
 };
 
@@ -221,16 +221,16 @@ struct GSRegressionBuffer
 	void Reset();
 
 	// Thread safe; acquire ownership.
-	GSRegressionPacket* GetPacketWrite(bool block = true);
-	GSRegressionPacket* GetPacketRead(bool block = false);
+	GSRegressionPacket* GetPacketWrite(bool block = true, bool check_parent = false);
+	GSRegressionPacket* GetPacketRead(bool block = false, bool check_parent = false);
 
 	// Call only by owner to release ownership.
 	void DonePacketWrite();
 	void DonePacketRead();
 
 	// Thread safe; acquire ownership.
-	GSDumpFileSharedMemory* GetDumpWrite(bool block = true);
-	GSDumpFileSharedMemory* GetDumpRead(bool block = false);
+	GSDumpFileSharedMemory* GetDumpWrite(bool block = true, bool check_parent = false);
+	GSDumpFileSharedMemory* GetDumpRead(bool block = false, bool check_parent = false);
 
 	// Call only by owner to release ownership.
 	void DoneDumpWrite();
@@ -271,18 +271,39 @@ float RegressionCompareImages(const GSRegressionPacket* p1, const GSRegressionPa
 // Cross-platform process.
 struct GSProcess
 {
-	static constexpr u32 infinite = 0xFFFFFFFF;
+#ifdef __WIN32__
+	using PID_t = DWORD;
+	using Handle_t = HANDLE;
+	using Time_t = DWORD;
+	static constexpr double infinite = static_cast<double>(0xFFFFFFFF);
+#else
+	using PID_t = int;
+	using Handle_t = int;
+	using Time_t = u32;
+	using constexpr double infinite = static_cast<double>(0x7FFFFFFF);
+#endif
+
+	static PID_t parent_pid;
+	static Handle_t parent_h;
 
 	std::string command;
 #ifdef __WIN32__
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
+
+	static bool IsRunning(Handle_t handle, double seconds = 0.0); // private
 #else
 	// Not implemented.
 #endif
 	bool Start(const std::string& command, bool detached);
-	bool IsRunning();
-	int WaitForExit(u32 msec = infinite);
+
+	bool IsRunning(double seconds = 0.0);
+	int WaitForExit(double seconds = infinite);
 	bool Close();
 	void Terminate();
+	PID_t GetPID();
+	static bool SetParentPID(PID_t pid);
+	static PID_t GetParentPID();
+	static bool IsParentRunning(double seconds = 0.0);
+	static PID_t GetCurrentPID();
 };

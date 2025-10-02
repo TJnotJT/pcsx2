@@ -313,14 +313,28 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 		if (dump = rbp->GetDumpRead(false))
 			break;
 
-		if (state_tester == GSRegressionBuffer::EXIT ||
-			state_tester == GSRegressionBuffer::DONE_UPLOADING)
+		if (state_tester == GSRegressionBuffer::EXIT)
 		{
+			Console.WarningFmt("(GSRunner/{}) Got exit state from tester.", GetRunnerName());
 			s_dump_running = false;
 			return false;
 		}
 
-		std::this_thread::yield();
+		if (state_tester == GSRegressionBuffer::DONE_UPLOADING)
+		{
+			Console.WriteLnFmt("(GSRunner/{}) Got done uploading from tester.", GetRunnerName());
+			s_dump_running = false;
+			return false;
+		}
+
+		if (!GSProcess::IsParentRunning())
+		{
+			Console.ErrorFmt("(GSRunner/{}) Tester process exited.", GetRunnerName());
+			s_dump_running = false;
+			return false;
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
 		if (timer.GetTimeSeconds() >= 1.0)
 		{
