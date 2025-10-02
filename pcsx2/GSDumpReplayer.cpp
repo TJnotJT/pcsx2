@@ -60,6 +60,8 @@ static u64 s_frame_ticks = 0;
 static u64 s_next_frame_time = 0;
 static bool s_is_dump_runner = false;
 static bool s_batch_mode = false;
+static u32 s_num_batches = 1;
+static u32 s_batch_id = 0;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -104,6 +106,16 @@ std::string GSDumpReplayer::GetRunnerName()
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
 {
 	s_batch_mode = batch_mode;
+}
+
+void GSDumpReplayer::SetNumBatches(u32 n_batches)
+{
+	s_num_batches = n_batches;
+}
+
+void GSDumpReplayer::SetBatchID(u32 batch_id)
+{
+	s_batch_id = batch_id;
 }
 
 void GSDumpReplayer::SetDumpGSDataDirHW(const std::string& dir)
@@ -227,7 +239,7 @@ bool GSDumpReplayer::NextDump()
 	}
 }
 
-bool GSDumpReplayer::ReadDumpFileList(const std::string& dir, std::vector<std::string>& file_list)
+bool GSDumpReplayer::GetDumpFileList(const std::string& dir, std::vector<std::string>& file_list, u32 nbatches, u32 batch_id)
 {
 	file_list.clear();
 
@@ -243,10 +255,15 @@ bool GSDumpReplayer::ReadDumpFileList(const std::string& dir, std::vector<std::s
 		"*",
 		FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES,
 		&files);
-	for (const auto& file : files)
+
+	std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) {
+		return a.FileName < b.FileName;
+	});
+
+	for (u32 i = s_batch_id; i < files.size(); i += s_num_batches)
 	{
-		if (VMManager::IsGSDumpFileName(file.FileName))
-			file_list.push_back(file.FileName);
+		if (VMManager::IsGSDumpFileName(files[i].FileName))
+			file_list.push_back(files[i].FileName);
 	}
 
 	if (file_list.empty())
@@ -269,7 +286,7 @@ bool GSDumpReplayer::Initialize(const char* filename)
 	}
 	else if (IsBatchMode())
 	{
-		if (!ReadDumpFileList(filename, s_dump_file_list))
+		if (!GetDumpFileList(filename, s_dump_file_list, s_num_batches, s_batch_id))
 			return false;
 
 		if (!NextDump())

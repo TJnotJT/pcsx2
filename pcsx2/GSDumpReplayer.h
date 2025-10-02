@@ -19,6 +19,8 @@ namespace GSDumpReplayer
 	void SetIsDumpRunner(bool is_runner, const std::string& name = "");
 	std::string GetRunnerName();
 	void SetIsBatchMode(bool batch_mode);
+	void SetNumBatches(u32 n_batches);
+	void SetBatchID(u32 batch_id);
 	void SetDumpGSDataDirHW(const std::string& dir);
 	void SetDumpGSDataDirSW(const std::string& dir);
 
@@ -37,5 +39,5 @@ namespace GSDumpReplayer
 
 	void RenderUI();
 
-	bool ReadDumpFileList(const std::string& dir, std::vector<std::string>& file_list);
+	bool GetDumpFileList(const std::string& dir, std::vector<std::string>& file_list, u32 nbatches, u32 batch_id);
 } // namespace GSDumpReplayer

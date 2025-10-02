@@ -110,14 +110,14 @@ struct GSTester
 	};
 
 	static void PrintCommandLineHelp(const char* progname);
-	bool ParseCommandLineArgs(int argc, char* argv[], int thread_id);
-	bool GetDumpInfo(int nthreads, int thread_id);
+	bool ParseCommandLineArgs(int argc, char* argv[], u32 thread_id);
+	bool GetDumpInfo(u32 nthreads, u32 thread_id);
 	ReturnValue CopyDumpToSharedMemory(const std::unique_ptr<GSDumpFile>& dump, const std::string& name);
 	ReturnValue ProcessPackets();
 	bool StartRunners();
 	bool EndRunners();
 	bool RestartRunners();
-	int MainThread(int argc, char* argv[], int nthreads = 1, int thread_id = 0);
+	int MainThread(int argc, char* argv[], u32 nthreads = 1, u32 thread_id = 0);
 	
 	static int main_tester(int argc, char* argv[]);
 
@@ -193,6 +193,8 @@ namespace GSRunner
 	static std::optional<bool> s_use_window;
 	static bool s_no_console = false;
 	static bool s_batch_mode = false;
+	static u32 s_num_batches = 0;
+	static u32 s_batch_id = 0;
 	static u32 s_frames_max = 0;
 	static u32 s_parent_pid = 0;
 
@@ -904,6 +906,16 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 				s_parent_pid = StringUtil::FromChars<u32>(argv[++i]).value_or(0);
 				continue;
 			}
+			else if (CHECK_ARG_PARAM("-nbatches"))
+			{
+				s_num_batches = StringUtil::FromChars<u32>(argv[++i]).value_or(1);
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("-batch-id"))
+			{
+				s_batch_id = StringUtil::FromChars<u32>(argv[++i]).value_or(0);
+				continue;
+			}
 			else if (CHECK_ARG("-batch"))
 			{
 				s_batch_mode = true;
@@ -1007,7 +1019,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 	return true;
 }
 
-bool GSTester::ParseCommandLineArgs(int argc, char* argv[], int thread_id)
+bool GSTester::ParseCommandLineArgs(int argc, char* argv[], u32 thread_id)
 {
 	for (int i = 1; i < argc; i++)
 	{
@@ -1211,7 +1223,8 @@ void GSRunner::DumpStats()
 #define main real_main
 #endif
 
-static void CPUThreadMain(VMBootParameters* params) {
+static void CPUThreadMain(VMBootParameters* params)
+{
 	if (VMManager::Initialize(*params))
 	{
 		// run until end
@@ -1449,7 +1462,6 @@ int GSRunner::main_runner(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-
 		if (!GSProcess::SetParentPID(s_parent_pid))
 		{
 			Console.ErrorFmt("Unable to open parent PID {}.", s_parent_pid);
@@ -1466,6 +1478,8 @@ int GSRunner::main_runner(int argc, char* argv[])
 	if (s_batch_mode)
 	{
 		GSDumpReplayer::SetIsBatchMode(true);
+		GSDumpReplayer::SetNumBatches(s_num_batches);
+		GSDumpReplayer::SetBatchID(s_batch_id);
 		GSDumpReplayer::SetLoopCountStart(s_loop_count);
 		if (s_settings_interface.GetBoolValue("EmuCore/GS", "DumpGSData", false))
 		{
@@ -1626,7 +1640,7 @@ bool GSTester::RestartRunners()
 	return StartRunners();
 }
 
-bool GSTester::GetDumpInfo(int nthreads, int thread_id)
+bool GSTester::GetDumpInfo(u32 nthreads, u32 thread_id)
 {
 	std::vector<std::string> dump_files;
 
@@ -1636,7 +1650,7 @@ bool GSTester::GetDumpInfo(int nthreads, int thread_id)
 	}
 	else if (FileSystem::DirectoryExists(regression_dump_dir.c_str()))
 	{
-		GSDumpReplayer::ReadDumpFileList(regression_dump_dir, dump_files);
+		GSDumpReplayer::GetDumpFileList(regression_dump_dir, dump_files, nthreads, thread_id);
 	}
 	else
 	{
@@ -1644,9 +1658,8 @@ bool GSTester::GetDumpInfo(int nthreads, int thread_id)
 		return false;
 	}
 
-	for (int i = thread_id; i < static_cast<int>(dump_files.size()); i += nthreads)
+	for (const std::string& file : dump_files)
 	{
-		const std::string& file = dump_files[i];
 		std::string name = std::filesystem::path(file).filename().string();
 		regression_dumps.push_back(DumpInfo(file, name));
 	}
@@ -1659,7 +1672,7 @@ bool GSTester::GetDumpInfo(int nthreads, int thread_id)
 	return true;
 }
 
-int GSTester::MainThread(int argc, char* argv[], int nthreads, int thread_id)
+int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 {
 	if (!ParseCommandLineArgs(argc, argv, thread_id))
 		return EXIT_FAILURE;
