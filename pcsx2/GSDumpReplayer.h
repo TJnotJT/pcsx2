@@ -21,6 +21,8 @@ namespace GSDumpReplayer
 	void SetIsBatchMode(bool batch_mode); // Batch mode
 	void SetNumBatches(u32 n_batches); // Batch mode
 	void SetBatchID(u32 batch_id); // Batch mode
+	void SetBatchDefaultGSOptions(const Pcsx2Config::GSOptions& gs_config);
+	void UpdateBatchGameSettings();
 	void SetDumpGSDataDirHW(const std::string& dir); // Batch mode
 	void SetDumpGSDataDirSW(const std::string& dir); // Batch mode
 

@@ -64,6 +64,7 @@ static bool s_is_dump_runner = false;
 static bool s_batch_mode = false;
 static u32 s_num_batches = 1;
 static u32 s_batch_id = 0;
+static Pcsx2Config::GSOptions s_batch_gs_config;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -118,6 +119,11 @@ void GSDumpReplayer::SetNumBatches(u32 n_batches)
 void GSDumpReplayer::SetBatchID(u32 batch_id)
 {
 	s_batch_id = batch_id;
+}
+
+void GSDumpReplayer::SetBatchDefaultGSOptions(const Pcsx2Config::GSOptions& gs_options)
+{
+	s_batch_gs_config = gs_options;
 }
 
 void GSDumpReplayer::SetDumpGSDataDirHW(const std::string& dir)
@@ -305,7 +311,8 @@ bool GSDumpReplayer::Initialize(const char* filename)
 	}
 	else
 	{
-		return ChangeDump(filename);
+		if (!ChangeDump(filename))
+			return false;
 	}
 
 	// We replace all CPUs.
@@ -318,6 +325,23 @@ bool GSDumpReplayer::Initialize(const char* filename)
 	s_dump_loop_count = -1;
 
 	return true;
+}
+
+void GSDumpReplayer::UpdateBatchGameSettings()
+{
+	const GameDatabaseSchema::GameEntry* game = GameDatabase::findGame(s_dump_file->GetSerial());
+	if (!game)
+		return;
+
+	EmuConfig.GS = s_batch_gs_config;
+
+	game->applyGSHardwareFixes(EmuConfig.GS);
+
+	// Re-remove upscaling fixes, make sure they don't apply at native res.
+	// We do this in LoadCoreSettings(), but game fixes get applied afterwards because of the unsafe warning.
+	EmuConfig.GS.MaskUpscalingHacks();
+
+	MTGS::ApplySettings();
 }
 
 bool GSDumpReplayer::ChangeDumpRegressionTest()
@@ -386,6 +410,10 @@ bool GSDumpReplayer::ChangeDumpRegressionTest()
 
 	Console.WriteLnFmt("(GSDumpReplayer) Switching to {}...", dump_name);
 
+	UpdateBatchGameSettings();
+
+	Host::OnBatchDumpStart(s_dump_name);
+
 	return true;
 }
 
@@ -415,7 +443,11 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 	GSDumpReplayerCpuReset();
 
 	if (IsBatchMode())
+	{
+		UpdateBatchGameSettings();
+		
 		Host::OnBatchDumpStart(s_dump_name);
+	}
 
 	return true;
 }
@@ -434,7 +466,7 @@ void GSDumpReplayer::Shutdown()
 std::string GSDumpReplayer::GetDumpSerial()
 {
 	if (IsBatchMode())
-		return "";
+		return ""; // We will update game settings later.
 
 	std::string ret;
 

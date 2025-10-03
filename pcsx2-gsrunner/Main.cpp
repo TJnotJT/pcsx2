@@ -1642,6 +1642,7 @@ int GSRunner::main_runner(int argc, char* argv[])
 		GSDumpReplayer::SetNumBatches(s_num_batches);
 		GSDumpReplayer::SetBatchID(s_batch_id);
 		GSDumpReplayer::SetLoopCountStart(s_loop_count);
+		GSDumpReplayer::SetBatchDefaultGSOptions(EmuConfig.GS);
 		if (s_settings_interface.GetBoolValue("EmuCore/GS", "DumpGSData", false))
 		{
 			GSDumpReplayer::SetDumpGSDataDirHW(s_dump_gs_data_dir_hw);
