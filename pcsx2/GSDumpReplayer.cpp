@@ -47,6 +47,7 @@ static std::string s_runner_name;
 static std::string s_dump_dir;
 static std::string s_dump_gs_data_dir_hw;
 static std::string s_dump_gs_data_dir_sw;
+static std::string s_dump_name;
 static std::vector<std::string> s_dump_file_list;
 static std::size_t s_curr_dump = 0;
 static u32 s_current_packet = 0;
@@ -78,7 +79,7 @@ static InterpVU1 gsDumpVU1;
 
 bool GSDumpReplayer::IsReplayingDump()
 {
-	return static_cast<bool>(s_dump_file);
+	return static_cast<bool>(s_dump_file) || (IsRunner() && IsBatchMode());
 }
 
 bool GSDumpReplayer::IsRunner()
@@ -101,6 +102,11 @@ void GSDumpReplayer::SetIsDumpRunner(bool is_runner, const std::string& runner_n
 std::string GSDumpReplayer::GetRunnerName()
 {
 	return s_runner_name;
+}
+
+std::string GSDumpReplayer::GetDumpName()
+{
+	return s_dump_name;
 }
 
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
@@ -135,7 +141,7 @@ void GSDumpReplayer::SetLoopCount(s32 loop_count)
 
 void GSDumpReplayer::SetLoopCountStart(s32 loop_count)
 {
-	s_dump_loop_count_start = loop_count - 1;
+	s_dump_loop_count_start = loop_count;
 }
 
 int GSDumpReplayer::GetLoopCount()
@@ -219,7 +225,10 @@ void GSDumpReplayer::EndDumpRegressionTest()
 bool GSDumpReplayer::NextDump()
 {
 	if (!IsBatchMode())
+	{
+		Console.ErrorFmt("Called NextDump() while not in batch mode.");
 		return false;
+	}
 
 	Error error;
 
@@ -241,6 +250,12 @@ bool GSDumpReplayer::NextDump()
 
 bool GSDumpReplayer::GetDumpFileList(const std::string& dir, std::vector<std::string>& file_list, u32 nbatches, u32 batch_id)
 {
+	if (nbatches == 0)
+	{
+		Host::ReportErrorAsync("GSDumpReplayer", fmt::format("nbatches must be positive -- got {}.", nbatches));
+		return false;
+	}
+
 	file_list.clear();
 
 	if (!FileSystem::DirectoryExists(dir.c_str()))
@@ -397,23 +412,21 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		return false;
 	}
 
+	s_dump_name = std::filesystem::path(filename).filename().string();
 	s_dump_file = std::move(new_dump);
-	s_current_packet = 0;
 
 	// Don't forget to reset the GS!
 	GSDumpReplayerCpuReset();
 
-	if (GSConfig.DumpGSData)
+	if (IsBatchMode() && GSConfig.DumpGSData)
 	{
 		// In case we are saving GS data in batch mode, make sure to update the directories.
-		const std::filesystem::path dump_name = std::filesystem::path(filename).filename();
-
 		std::string* src_dir[] = {&s_dump_gs_data_dir_hw, &s_dump_gs_data_dir_sw};
 		std::string* dst_dir[] = {&GSConfig.HWDumpDirectory, &GSConfig.SWDumpDirectory};
 
 		for (int i = 0; i < 2; i++)
 		{
-			*dst_dir[i] = (std::filesystem::path(*src_dir[i]) / dump_name).string();
+			*dst_dir[i] = (std::filesystem::path(*src_dir[i]) / s_dump_name).string();
 			if (!FileSystem::EnsureDirectoryExists(dst_dir[i]->c_str(), false, &error))
 			{
 				Host::ReportErrorAsync("GSDumpReplayer", fmt::format("(GSDumpReplayer) Could not create output directory: {} ({})", *dst_dir[i], error.GetDescription()));
@@ -441,6 +454,9 @@ void GSDumpReplayer::Shutdown()
 
 std::string GSDumpReplayer::GetDumpSerial()
 {
+	if (IsBatchMode())
+		return "";
+
 	std::string ret;
 
 	if (!s_dump_file->GetSerial().empty())
@@ -462,7 +478,7 @@ std::string GSDumpReplayer::GetDumpSerial()
 
 u32 GSDumpReplayer::GetDumpCRC()
 {
-	return s_dump_file->GetCRC();
+	return IsBatchMode() ? 0 : s_dump_file->GetCRC();
 }
 
 void GSDumpReplayer::SetFrameNumberMax(u32 frame_number_max)
@@ -548,8 +564,6 @@ static void GSDumpReplayerFrameLimit()
 
 void GSDumpReplayerCpuStep()
 {
-	bool start_shutdown = false;
-
 	if (s_needs_state_loaded)
 	{
 		GSDumpReplayerLoadInitialState();
@@ -557,13 +571,6 @@ void GSDumpReplayerCpuStep()
 	}
 
 	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
-	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
-	if (s_current_packet == 0)
-	{
-		s_dump_frame_number = 0;
-		if (s_dump_loop_count > 0)
-			s_dump_loop_count--;
-	}
 
 	switch (packet.id)
 	{
@@ -597,14 +604,13 @@ void GSDumpReplayerCpuStep()
 
 		case GSDumpTypes::GSType::VSync:
 		{
-			s_dump_frame_number++;
+			Host::PumpMessagesOnCPUThread(); // Update frame number.
 			GSDumpReplayerUpdateFrameLimit();
 			GSDumpReplayerFrameLimit();
 			MTGS::PostVsyncStart(false);
 			VMManager::Internal::VSyncOnCPUThread();
 			if (VMManager::Internal::IsExecutionInterrupted())
 				GSDumpReplayerExitExecution();
-			Host::PumpMessagesOnCPUThread();
 		}
 		break;
 
@@ -626,12 +632,31 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
-	const bool done_dump = (s_current_packet == 0 && s_dump_loop_count == 0) ||
-	                       (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
+	// Handle state.
+
+	bool done_all_dumps = false;
+	bool done_dump = false;
+
+	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
+	if (s_current_packet == 0)
+	{
+		s_dump_frame_number = 0;
+		if (s_dump_loop_count > 0)
+			s_dump_loop_count--;
+		else
+			done_dump = true;
+		
+	}
+	else if (packet.id == GSDumpTypes::GSType::VSync)
+	{
+		s_dump_frame_number++;
+	}
+
+	done_dump = done_dump || (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
 	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::EXIT)
 	{
-		start_shutdown = true;
+		done_all_dumps = true;
 	}
 	else if (done_dump)
 	{
@@ -650,23 +675,24 @@ void GSDumpReplayerCpuStep()
 
 			if (GSDumpReplayer::NextDump())
 			{
-				s_dump_loop_count = s_dump_loop_count_start;
+				std::string n = GSDumpReplayer::GetDumpName();
+				GSDumpReplayer::SetLoopCount(s_dump_loop_count_start);
 				g_perfmon.Reset(); // Make sure stats are reset for new dump.
 				GSDumpReplayerCpuReset();
 			}
 			else
 			{
 				Console.WriteLnFmt("(GSDumpReplayer/{}) Batch mode has no more dumps.", GSDumpReplayer::GetRunnerName());
-				start_shutdown = true;
+				done_all_dumps = true;
 			}
 		}
 		else // Normal (non-batch) mode
 		{
-			start_shutdown = true;
+			done_all_dumps = true;
 		}
 	}
 
-	if (start_shutdown)
+	if (done_all_dumps)
 	{
 		Host::RequestVMShutdown(false, false, false);
 		GSDumpReplayerExitExecution();

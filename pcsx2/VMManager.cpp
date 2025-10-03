@@ -1198,7 +1198,7 @@ bool VMManager::HasBootedELF()
 
 bool VMManager::AutoDetectSource(const std::string& filename)
 {
-	if (GSDumpReplayer::IsRunner())
+	if (GSDumpReplayer::IsBatchMode())
 	{
 		CDVDsys_ChangeSource(CDVD_SourceType::NoDisc);
 		return true; // Initialize the actual GS dump runner later after GS settings are loaded.
@@ -1354,7 +1354,7 @@ bool VMManager::Initialize(VMBootParameters boot_params)
 	ScopedGuard close_cdvd_files(&CDVDsys_ClearFiles);
 
 	// Playing GS dumps don't need a BIOS.
-	if (!(GSDumpReplayer::IsReplayingDump() || GSDumpReplayer::IsRunner()))
+	if (!GSDumpReplayer::IsReplayingDump())
 	{
 		Console.WriteLn("Loading BIOS...");
 		if (!LoadBIOS())
@@ -1484,7 +1484,7 @@ bool VMManager::Initialize(VMBootParameters boot_params)
 		return false;
 	}
 
-	if (GSDumpReplayer::IsRunner())
+	if (GSDumpReplayer::IsBatchMode())
 	{
 		if (!GSDumpReplayer::Initialize(GSIsRegressionTesting() ? nullptr : boot_params.filename.c_str()))
 			return false;

@@ -193,9 +193,9 @@ namespace GSRunner
 	static std::optional<bool> s_use_window;
 	static bool s_no_console = false;
 	static bool s_batch_mode = false;
-	static u32 s_num_batches = 0;
+	static u32 s_num_batches = 1;
 	static u32 s_batch_id = 0;
-	static u32 s_frames_max = 0;
+	static u32 s_frames_max = 0xFFFFFFFF;
 	static u32 s_parent_pid = 0;
 
 	// Owned by the GS thread.
@@ -395,9 +395,25 @@ void Host::BeginPresentFrame()
 		// when we wrap around, don't race other files
 		GSJoinSnapshotThreads();
 
+		std::string prefix = GSRunner::s_output_prefix;
+
+		if (GSRunner::s_batch_mode)
+		{
+			std::string dump_name = GSDumpReplayer::GetDumpName();
+			std::string_view title(Path::GetFileTitle(dump_name));
+			if (StringUtil::EndsWithNoCase(title, ".gs"))
+				title = Path::GetFileTitle(title);
+			prefix = Path::Combine(prefix, StringUtil::StripWhitespace(title));
+
+			if (title.starts_with("Final"))
+			{
+				printf("");
+			}
+		}
+
 		// queue dumping of this frame
-		std::string dump_path(fmt::format("{}_frame{:05}.png", GSRunner::s_output_prefix, GSRunner::s_dump_frame_number));
-		GSQueueSnapshot(dump_path);
+		std::string dump_file(fmt::format("{}_frame{:05}.png", prefix, GSRunner::s_dump_frame_number));
+		GSQueueSnapshot(dump_file);
 	}
 
 	if (GSIsHardwareRenderer())
@@ -980,10 +996,13 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			Console.Error("Provided directory does not exist.");
 			return false;
 		}
+
+		s_num_batches = std::max(s_num_batches, 1u);
+		s_batch_id = s_batch_id % s_num_batches;
 	}
 	else
 	{
-		if (VMManager::IsGSDumpFileName(params.filename))
+		if (!VMManager::IsGSDumpFileName(params.filename))
 		{
 			Console.Error("Provided filename is not a GS dump.");
 			return false;
@@ -1007,13 +1026,20 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 	// set up the frame dump directory
 	if (!s_output_prefix.empty())
 	{
-		// strip off all extensions
-		std::string_view title(Path::GetFileTitle(params.filename));
-		if (StringUtil::EndsWithNoCase(title, ".gs"))
-			title = Path::GetFileTitle(title);
+		if (!s_batch_mode)
+		{
+			// strip off all extensions
+			std::string_view title(Path::GetFileTitle(params.filename));
+			if (StringUtil::EndsWithNoCase(title, ".gs"))
+				title = Path::GetFileTitle(title);
 
-		s_output_prefix = Path::Combine(s_output_prefix, StringUtil::StripWhitespace(title));
-		Console.WriteLn(fmt::format("Saving dumps as {}_frameN.png", s_output_prefix));
+			s_output_prefix = Path::Combine(s_output_prefix, StringUtil::StripWhitespace(title));
+			Console.WriteLn(fmt::format("Saving dumps as {}_frameN.png", s_output_prefix));
+		}
+		else
+		{
+			Console.WriteLn(fmt::format("Saving dumps to {}", s_output_prefix));
+		}
 	}
 
 	return true;
@@ -1229,11 +1255,13 @@ static void CPUThreadMain(VMBootParameters* params)
 	{
 		// run until end
 		GSDumpReplayer::SetLoopCount(GSRunner::s_loop_count);
+		Host::PumpMessagesOnCPUThread(); // Make sure we have the correct loop count/frame.
 		VMManager::SetState(VMState::Running);
 		while (VMManager::GetState() == VMState::Running)
 			VMManager::Execute();
 		VMManager::Shutdown(false);
-		GSRunner::DumpStats();
+		if (!GSRunner::s_batch_mode)
+			GSRunner::DumpStats();
 	}
 
 	VMManager::Internal::CPUThreadShutdown();

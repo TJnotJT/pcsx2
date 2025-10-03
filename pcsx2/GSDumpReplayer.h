@@ -11,21 +11,22 @@ namespace GSDumpReplayer
 	bool IsReplayingDump();
 
 	/// If set, playback will repeat once it reaches the last frame.
-	void SetLoopCountStart(s32 loop_count = 0); // For batch mode.
-	void SetLoopCount(s32 loop_count = 0);
+	void SetLoopCountStart(s32 loop_count = 0); // Batch mode
+	void SetLoopCount(s32 loop_count = 0); 
 	int GetLoopCount();
 	bool IsRunner();
-	bool IsBatchMode();
+	bool IsBatchMode(); // Batch mode
 	void SetIsDumpRunner(bool is_runner, const std::string& name = "");
 	std::string GetRunnerName();
-	void SetIsBatchMode(bool batch_mode);
-	void SetNumBatches(u32 n_batches);
-	void SetBatchID(u32 batch_id);
-	void SetDumpGSDataDirHW(const std::string& dir);
-	void SetDumpGSDataDirSW(const std::string& dir);
+	std::string GetDumpName(); // Batch mode
+	void SetIsBatchMode(bool batch_mode); // Batch mode
+	void SetNumBatches(u32 n_batches); // Batch mode
+	void SetBatchID(u32 batch_id); // Batch mode
+	void SetDumpGSDataDirHW(const std::string& dir); // Batch mode
+	void SetDumpGSDataDirSW(const std::string& dir); // Batch mode
 
 	bool Initialize(const char* filename);
-	bool NextDump(); // For batch mode.
+	bool NextDump(); // Batch mode
 	bool ChangeDumpRegressionTest();
 	void EndDumpRegressionTest();
 	bool ChangeDump(const char* filename);
