@@ -41,7 +41,7 @@ def run_regression_test(runner, dumpdir, renderer, upscale, renderhacks, gspath,
 
     # loop a couple of times for those stubborn merge/interlace dumps that don't render anything
     # the first time around
-    args.extend(["-loop", "2"])
+    args.extend(["-loop", "1"])
 
     # disable shader cache for parallel runs, otherwise it'll have sharing violations
     if nbatches > 1:

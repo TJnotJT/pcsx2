@@ -5,6 +5,7 @@
 #include "GS/GSPerfMon.h"
 #include "GS/GSState.h"
 #include "GS/GSLzma.h"
+#include "GS/Renderers/Common/GSRenderer.h"
 #include "GSDumpReplayer.h"
 #include "GameList.h"
 #include "Gif.h"
@@ -508,6 +509,7 @@ static void GSDumpReplayerLoadInitialState()
 	MTGS::Freeze(FreezeAction::Load, mfd);
 	if (mfd.retval != 0)
 		Host::ReportFormattedErrorAsync("GSDumpReplayer", "Failed to load GS state.");
+
 }
 
 static void GSDumpReplayerSendPacketToMTGS(GIF_PATH path, const u8* data, u32 length)
@@ -653,7 +655,13 @@ void GSDumpReplayerCpuStep()
 
 		if (GSDumpReplayer::IsBatchMode())
 		{
-			Host::OnBatchDumpEnd(s_dump_name);
+			Host::OnBatchDumpEnd(s_dump_name); // Dump stats
+
+			// Reset draw count. Unfortunately, kind of a pain to make this accessible from the runner.
+			//MTGS::RunOnGSThread([]() { GSState::s_n = 0; });
+			//MTGS::ResetGS(true);
+			//MTGS::WaitGS(false, false, false); // Let GS thread finish.
+			//GSState::s_n = 0; // Needed for proper file naming for next dump. 
 
 			// Send HW stats and done packet if needed.
 			if (GSIsRegressionTesting())

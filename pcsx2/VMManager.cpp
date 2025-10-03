@@ -2677,8 +2677,6 @@ void VMManager::Execute()
 		vtlb_ResetFastmem();
 	}
 
-	void GSDumpReplayerCpuExecute();
-
 	// Execute until we're asked to stop.
 	Cpu->Execute();
 }
