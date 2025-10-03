@@ -2958,6 +2958,19 @@ void GSState::Transfer(const u8* mem, u32 size)
 	}
 }
 
+void GSState::ClearVertexQueue()
+{
+	memset(&m_v, 0, sizeof(m_v));
+	m_v.RGBAQ.Q = 1.0f;
+
+	m_vertex.head = 0;
+	m_vertex.tail = 0;
+	m_vertex.next = 0;
+	m_vertex.xy_tail = 0;
+	
+	m_index.tail = 0;
+}
+
 template <class T>
 static void WriteState(u8*& dst, T* src, size_t len = sizeof(T))
 {

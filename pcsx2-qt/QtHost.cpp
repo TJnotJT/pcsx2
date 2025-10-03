@@ -982,7 +982,12 @@ void Host::OnVMResumed()
 	emit g_emu_thread->onVMResumed();
 }
 
-void Host::OnDumpChanged()
+void Host::OnBatchDumpStart(const std::string& dump_name)
+{
+	// Not required; only for GSRunner batch mode.
+}
+
+void Host::OnBatchDumpEnd(const std::string& dump_name)
 {
 	// Not required; only for GSRunner batch mode.
 }

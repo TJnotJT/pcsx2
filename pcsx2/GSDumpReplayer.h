@@ -18,7 +18,6 @@ namespace GSDumpReplayer
 	bool IsBatchMode(); // Batch mode
 	void SetIsDumpRunner(bool is_runner, const std::string& name = "");
 	std::string GetRunnerName();
-	std::string GetDumpName(); // Batch mode
 	void SetIsBatchMode(bool batch_mode); // Batch mode
 	void SetNumBatches(u32 n_batches); // Batch mode
 	void SetBatchID(u32 batch_id); // Batch mode

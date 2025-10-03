@@ -104,11 +104,6 @@ std::string GSDumpReplayer::GetRunnerName()
 	return s_runner_name;
 }
 
-std::string GSDumpReplayer::GetDumpName()
-{
-	return s_dump_name;
-}
-
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
 {
 	s_batch_mode = batch_mode;
@@ -412,31 +407,14 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		return false;
 	}
 
-	s_dump_name = std::filesystem::path(filename).filename().string();
+	s_dump_name = Path::GetFileName(filename);
 	s_dump_file = std::move(new_dump);
 
 	// Don't forget to reset the GS!
 	GSDumpReplayerCpuReset();
 
-	if (IsBatchMode() && GSConfig.DumpGSData)
-	{
-		// In case we are saving GS data in batch mode, make sure to update the directories.
-		std::string* src_dir[] = {&s_dump_gs_data_dir_hw, &s_dump_gs_data_dir_sw};
-		std::string* dst_dir[] = {&GSConfig.HWDumpDirectory, &GSConfig.SWDumpDirectory};
-
-		for (int i = 0; i < 2; i++)
-		{
-			*dst_dir[i] = (std::filesystem::path(*src_dir[i]) / s_dump_name).string();
-			if (!FileSystem::EnsureDirectoryExists(dst_dir[i]->c_str(), false, &error))
-			{
-				Host::ReportErrorAsync("GSDumpReplayer", fmt::format("(GSDumpReplayer) Could not create output directory: {} ({})", *dst_dir[i], error.GetDescription()));
-			}
-			else
-			{
-				Console.WriteLnFmt("(GSDumpReplayer) Dumping GS data to '{}'", *dst_dir[i]);
-			}
-		}
-	}
+	if (IsBatchMode())
+		Host::OnBatchDumpStart(s_dump_name);
 
 	return true;
 }
@@ -511,6 +489,17 @@ static void GSDumpReplayerLoadInitialState()
 	// reset GS registers to initial dump values
 	std::memcpy(PS2MEM_GS, s_dump_file->GetRegsData().data(),
 		std::min(Ps2MemSize::GSregs, static_cast<u32>(s_dump_file->GetRegsData().size())));
+
+	// Clear the queue so that leftover vertices don't get used in new dump.
+	if (GSDumpReplayer::IsBatchMode())
+	{
+		MTGS::RunOnGSThread([]() {
+			GSState::s_n = 0; // For proper file naming in new dump.
+			GSState::s_transfer_n = 0;
+			GSState::s_last_transfer_draw_n = 0;
+			g_gs_renderer->ClearVertexQueue();
+		});
+	}
 
 	// load GS state
 	freezeData fd = {static_cast<int>(s_dump_file->GetStateData().size()),
@@ -664,10 +653,7 @@ void GSDumpReplayerCpuStep()
 
 		if (GSDumpReplayer::IsBatchMode())
 		{
-			Host::OnDumpChanged(); // Dump stats
-			MTGS::ResetGS(true);
-			MTGS::WaitGS(false, false, false); // Let GS thread finish.
-			GSState::s_n = 0; // Needed for proper file naming for next dump. 
+			Host::OnBatchDumpEnd(s_dump_name);
 
 			// Send HW stats and done packet if needed.
 			if (GSIsRegressionTesting())
@@ -677,7 +663,6 @@ void GSDumpReplayerCpuStep()
 
 			if (GSDumpReplayer::NextDump())
 			{
-				std::string n = GSDumpReplayer::GetDumpName();
 				GSDumpReplayer::SetLoopCount(s_dump_loop_count_start);
 				GSDumpReplayerCpuReset();
 			}

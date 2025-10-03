@@ -175,8 +175,7 @@ namespace GSRunner
 	static std::optional<WindowInfo> GetPlatformWindowInfo();
 	static void PumpPlatformMessages(bool forever = false);
 	static void StopPlatformMessagePump();
-	static std::string GetDumpTitle();
-	static void SaveHWStats(); // Only called on GS thread by dump replayer in batch mode.
+	static std::string GetBatchDumpTitle();
 
 	int main_runner(int argc, char* argv[]);
 
@@ -222,6 +221,7 @@ namespace GSRunner
 	static u32 s_total_drawn_frames = 0;
 	static std::string s_dump_gs_data_dir_hw;
 	static std::string s_dump_gs_data_dir_sw;
+	static std::string s_batch_dump_name;
 } // namespace GSRunner
 
 bool GSRunner::InitializeConfig()
@@ -403,7 +403,7 @@ void Host::BeginPresentFrame()
 
 		if (GSRunner::s_batch_mode)
 		{
-			std::string title(GSRunner::GetDumpTitle());
+			std::string title(GSRunner::GetBatchDumpTitle());
 			std::string dir(Path::Combine(GSRunner::s_output_prefix, title));
 			Error error;
 			if (FileSystem::EnsureDirectoryExists(dir.c_str(), &error))
@@ -430,8 +430,6 @@ void Host::BeginPresentFrame()
 
 	if (GSIsHardwareRenderer())
 	{
-		std::string title = GSRunner::GetDumpTitle();
-
 		const u32 last_draws = GSRunner::s_total_internal_draws;
 		const u32 last_uploads = GSRunner::s_total_uploads;
 
@@ -441,6 +439,9 @@ void Host::BeginPresentFrame()
 			dst += static_cast<u64>((val < last) ? val : (val - last));
 			last = val;
 		};
+
+		Console.WriteLnFmt("{} {} {} {}", GSRunner::s_batch_dump_name, g_perfmon.GetCounter(GSPerfMon::Draw),
+			g_perfmon.GetCounter(GSPerfMon::DrawCalls), GSRunner::s_total_frames);
 
 		update_stat(GSPerfMon::Draw, GSRunner::s_total_internal_draws, GSRunner::s_last_internal_draws);
 		update_stat(GSPerfMon::DrawCalls, GSRunner::s_total_draws, GSRunner::s_last_draws);
@@ -485,7 +486,58 @@ void Host::OnVMResumed()
 {
 }
 
-void Host::OnDumpChanged()
+void Host::OnBatchDumpStart(const std::string& dump_name)
+{
+	if (GSRunner::s_batch_mode)
+	{
+		MTGS::RunOnGSThread([dump_name]() {
+			GSRunner::s_last_internal_draws = 0;
+			GSRunner::s_last_draws = 0;
+			GSRunner::s_last_render_passes = 0;
+			GSRunner::s_last_barriers = 0;
+			GSRunner::s_last_copies = 0;
+			GSRunner::s_last_uploads = 0;
+			GSRunner::s_last_readbacks = 0;
+			GSRunner::s_total_internal_draws = 0;
+			GSRunner::s_total_draws = 0;
+			GSRunner::s_total_render_passes = 0;
+			GSRunner::s_total_barriers = 0;
+			GSRunner::s_total_copies = 0;
+			GSRunner::s_total_uploads = 0;
+			GSRunner::s_total_readbacks = 0;
+			GSRunner::s_total_frames = 0;
+			GSRunner::s_total_drawn_frames = 0;
+			g_perfmon.Reset();
+
+			GSRunner::s_batch_dump_name = dump_name; // Set before getting title.
+
+			if (GSConfig.DumpGSData)
+			{
+				std::string dump_title(GSRunner::GetBatchDumpTitle());
+
+				// In case we are saving GS data in batch mode, make sure to update the directories.
+				std::string* src_dir[] = {&GSRunner::s_dump_gs_data_dir_hw, &GSRunner::s_dump_gs_data_dir_sw};
+				std::string* dst_dir[] = {&GSConfig.HWDumpDirectory, &GSConfig.SWDumpDirectory};
+
+				Error error;
+				for (int i = 0; i < 2; i++)
+				{
+					*dst_dir[i] = Path::Combine(*src_dir[i], dump_title);
+					if (!FileSystem::EnsureDirectoryExists(dst_dir[i]->c_str(), false, &error))
+					{
+						Host::ReportErrorAsync("(GSRunner)", fmt::format(" Could not create output directory: {} ({})", *dst_dir[i], error.GetDescription()));
+					}
+					else
+					{
+						Console.WriteLnFmt("(GSRunner) Dumping GS data to '{}'", *dst_dir[i]);
+					}
+				}
+			}
+		});
+	}
+}
+
+void Host::OnBatchDumpEnd(const std::string& dump_name)
 {
 	if (GSRunner::s_batch_mode)
 	{
@@ -679,17 +731,12 @@ void GSRunner::InitializeConsole()
 		Log::SetConsoleOutputLevel(LOGLEVEL_DEBUG);
 }
 
-static std::string GSRunner::GetDumpTitle()
+static std::string GSRunner::GetBatchDumpTitle()
 {
-	std::string title(Path::GetFileTitle(GSDumpReplayer::GetDumpName()));
+	std::string title(Path::GetFileTitle(s_batch_dump_name));
 	if (StringUtil::EndsWithNoCase(title, ".gs"))
 		title = Path::GetFileTitle(title);
 	return title;
-}
-
-static void GSRunner::SaveHWStats()
-{
-
 }
 
 bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
@@ -1284,7 +1331,9 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[], u32 thread_id)
 
 void GSRunner::DumpStats()
 {
-	std::atomic_thread_fence(std::memory_order_acquire);
+	// Batch mode DumpStats() runs on GS thread so fence not needed.
+	if (!s_batch_mode)
+		std::atomic_thread_fence(std::memory_order_acquire);
 
 	const std::string hwstats[] = {
 		fmt::format("======= HW STATISTICS FOR {} ({}) FRAMES ========", s_total_frames, s_total_drawn_frames),
@@ -1301,7 +1350,7 @@ void GSRunner::DumpStats()
 	{
 		if (!s_logfile.empty())
 		{
-			std::string title(GetDumpTitle());
+			std::string title(GetBatchDumpTitle());
 			std::string file(Path::Combine(Path::Combine(s_logfile, title), title + "_emulog.txt"));
 			std::ofstream oss(file);
 
@@ -1318,27 +1367,6 @@ void GSRunner::DumpStats()
 				Host::ReportErrorAsync("(GSRunner)", fmt::format("Unable to open {} for dumping stats.", file));
 			}
 		}
-
-		// Reset all stats.
-		s_last_internal_draws = 0;
-		s_last_draws = 0;
-		s_last_render_passes = 0;
-		s_last_barriers = 0;
-		s_last_copies = 0;
-		s_last_uploads = 0;
-		s_last_readbacks = 0;
-		s_total_internal_draws = 0;
-		s_total_draws = 0;
-		s_total_render_passes = 0;
-		s_total_barriers = 0;
-		s_total_copies = 0;
-		s_total_uploads = 0;
-		s_total_readbacks = 0;
-		s_total_frames = 0;
-		s_total_drawn_frames = 0;
-		g_perfmon.Reset();
-
-		std::atomic_thread_fence(std::memory_order_release);
 	}
 	else
 	{
