@@ -37,7 +37,7 @@ def run_regression_test(runner, dumpdir, renderer, upscale, renderhacks, gspath,
         args.extend(["-renderhacks", renderhacks])
 
     args.extend(["-dumpdir", dumpdir])
-    args.extend(["-logfile", os.path.join(dumpdir, "emulog.txt")])
+    args.extend(["-logfile", dumpdir])
 
     # loop a couple of times for those stubborn merge/interlace dumps that don't render anything
     # the first time around

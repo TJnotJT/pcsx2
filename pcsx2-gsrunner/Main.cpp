@@ -175,6 +175,8 @@ namespace GSRunner
 	static std::optional<WindowInfo> GetPlatformWindowInfo();
 	static void PumpPlatformMessages(bool forever = false);
 	static void StopPlatformMessagePump();
+	static std::string GetDumpTitle();
+	static void SaveHWStats(); // Only called on GS thread by dump replayer in batch mode.
 
 	int main_runner(int argc, char* argv[]);
 
@@ -184,6 +186,7 @@ namespace GSRunner
 	static MemorySettingsInterface s_settings_interface;
 
 	static std::string s_output_prefix;
+	static std::string s_logfile;
 	static std::string s_runner_name;
 	static std::string s_regression_file;
 	GSRegressionBuffer s_regression_buffer;
@@ -395,29 +398,40 @@ void Host::BeginPresentFrame()
 		// when we wrap around, don't race other files
 		GSJoinSnapshotThreads();
 
-		std::string prefix = GSRunner::s_output_prefix;
+		std::string dump_file;
+		bool queue_snapshot = true;
 
 		if (GSRunner::s_batch_mode)
 		{
-			std::string dump_name = GSDumpReplayer::GetDumpName();
-			std::string_view title(Path::GetFileTitle(dump_name));
-			if (StringUtil::EndsWithNoCase(title, ".gs"))
-				title = Path::GetFileTitle(title);
-			prefix = Path::Combine(prefix, StringUtil::StripWhitespace(title));
-
-			if (title.starts_with("Final"))
+			std::string title(GSRunner::GetDumpTitle());
+			std::string dir(Path::Combine(GSRunner::s_output_prefix, title));
+			Error error;
+			if (FileSystem::EnsureDirectoryExists(dir.c_str(), &error))
 			{
-				printf("");
+				dump_file = Path::Combine(Path::Combine(GSRunner::s_output_prefix, title),
+					fmt::format("{}_frame{:05}.png", title, GSRunner::s_dump_frame_number));
 			}
+			else
+			{
+				Host::ReportFormattedErrorAsync("(GSRunner)", "Unable to create output directory '{}' (error: {})",
+					dir, error.GetDescription());
+				queue_snapshot = false;
+			}
+		}
+		else
+		{
+			dump_file = fmt::format("{}_frame{:05}.png", GSRunner::s_output_prefix, GSRunner::s_dump_frame_number);
 		}
 
 		// queue dumping of this frame
-		std::string dump_file(fmt::format("{}_frame{:05}.png", prefix, GSRunner::s_dump_frame_number));
-		GSQueueSnapshot(dump_file);
+		if (queue_snapshot)
+			GSQueueSnapshot(dump_file);
 	}
 
 	if (GSIsHardwareRenderer())
 	{
+		std::string title = GSRunner::GetDumpTitle();
+
 		const u32 last_draws = GSRunner::s_total_internal_draws;
 		const u32 last_uploads = GSRunner::s_total_uploads;
 
@@ -469,6 +483,14 @@ void Host::OnVMPaused()
 
 void Host::OnVMResumed()
 {
+}
+
+void Host::OnDumpChanged()
+{
+	if (GSRunner::s_batch_mode)
+	{
+		MTGS::RunOnGSThread([]() { GSRunner::DumpStats(); });
+	}
 }
 
 void Host::OnGameChanged(const std::string& title, const std::string& elf_override, const std::string& disc_path,
@@ -655,6 +677,19 @@ void GSRunner::InitializeConsole()
 	s_no_console = (var && StringUtil::FromChars<bool>(var).value_or(false));
 	if (!s_no_console)
 		Log::SetConsoleOutputLevel(LOGLEVEL_DEBUG);
+}
+
+static std::string GSRunner::GetDumpTitle()
+{
+	std::string title(Path::GetFileTitle(GSDumpReplayer::GetDumpName()));
+	if (StringUtil::EndsWithNoCase(title, ".gs"))
+		title = Path::GetFileTitle(title);
+	return title;
+}
+
+static void GSRunner::SaveHWStats()
+{
+
 }
 
 bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& params)
@@ -877,16 +912,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			}
 			else if (CHECK_ARG_PARAM("-logfile"))
 			{
-				const char* logfile = argv[++i];
-				if (std::strlen(logfile) > 0)
-				{
-					// disable timestamps, since we want to be able to diff the logs
-					Console.WriteLn("Logging to %s...", logfile);
-					VMManager::Internal::SetFileLogPath(logfile);
-					s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", true);
-					s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
-				}
-
+				s_logfile = StringUtil::StripWhitespace(argv[++i]);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-regression-test"))
@@ -978,6 +1004,31 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 	if (s_runner_name.empty())
 	{
 		s_runner_name = std::filesystem::path(argv[0]).filename().string();
+	}
+
+	if (!s_logfile.empty())
+	{
+		if (s_batch_mode)
+		{
+			if (s_logfile == "-")
+			{
+				s_logfile = dumpdir;
+			}
+
+			Error error;
+			if (!FileSystem::EnsureDirectoryExists(s_logfile.c_str(), true, &error))
+			{
+				Console.ErrorFmt("(GSRunner) Unable to ensure log directory '{}' exists (error: {})", s_logfile, error.GetDescription());
+			}
+		}
+		else
+		{
+			// disable timestamps, since we want to be able to diff the logs
+			Console.WriteLn("Logging to %s...", s_logfile);
+			VMManager::Internal::SetFileLogPath(s_logfile);
+			s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", true);
+			s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
+		}
 	}
 
 	if (!s_regression_file.empty())
@@ -1234,14 +1285,68 @@ bool GSTester::ParseCommandLineArgs(int argc, char* argv[], u32 thread_id)
 void GSRunner::DumpStats()
 {
 	std::atomic_thread_fence(std::memory_order_acquire);
-	Console.WriteLn(fmt::format("======= HW STATISTICS FOR {} ({}) FRAMES ========", s_total_frames, s_total_drawn_frames));
-	Console.WriteLn(fmt::format("@HWSTAT@ Draw Calls: {} (avg {})", s_total_draws, static_cast<u64>(std::ceil(s_total_draws / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn(fmt::format("@HWSTAT@ Render Passes: {} (avg {})", s_total_render_passes, static_cast<u64>(std::ceil(s_total_render_passes / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn(fmt::format("@HWSTAT@ Barriers: {} (avg {})", s_total_barriers, static_cast<u64>(std::ceil(s_total_barriers / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn(fmt::format("@HWSTAT@ Copies: {} (avg {})", s_total_copies, static_cast<u64>(std::ceil(s_total_copies / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn(fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
-	Console.WriteLn("============================================");
+
+	const std::string hwstats[] = {
+		fmt::format("======= HW STATISTICS FOR {} ({}) FRAMES ========", s_total_frames, s_total_drawn_frames),
+		fmt::format("@HWSTAT@ Draw Calls: {} (avg {})", s_total_draws, static_cast<u64>(std::ceil(s_total_draws / static_cast<double>(s_total_drawn_frames)))),
+		fmt::format("@HWSTAT@ Render Passes: {} (avg {})", s_total_render_passes, static_cast<u64>(std::ceil(s_total_render_passes / static_cast<double>(s_total_drawn_frames)))),
+		fmt::format("@HWSTAT@ Barriers: {} (avg {})", s_total_barriers, static_cast<u64>(std::ceil(s_total_barriers / static_cast<double>(s_total_drawn_frames)))),
+		fmt::format("@HWSTAT@ Copies: {} (avg {})", s_total_copies, static_cast<u64>(std::ceil(s_total_copies / static_cast<double>(s_total_drawn_frames)))),
+		fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))),
+		fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))),
+		"============================================",
+	};
+
+	if (s_batch_mode)
+	{
+		if (!s_logfile.empty())
+		{
+			std::string title(GetDumpTitle());
+			std::string file(Path::Combine(Path::Combine(s_logfile, title), title + "_emulog.txt"));
+			std::ofstream oss(file);
+
+			if (oss.is_open())
+			{
+				for (std::size_t i = 0; i < std::size(hwstats); i++)
+				{
+					oss << hwstats[i] << std::endl;
+				}
+				oss.close();
+			}
+			else
+			{
+				Host::ReportErrorAsync("(GSRunner)", fmt::format("Unable to open {} for dumping stats.", file));
+			}
+		}
+
+		// Reset all stats.
+		s_last_internal_draws = 0;
+		s_last_draws = 0;
+		s_last_render_passes = 0;
+		s_last_barriers = 0;
+		s_last_copies = 0;
+		s_last_uploads = 0;
+		s_last_readbacks = 0;
+		s_total_internal_draws = 0;
+		s_total_draws = 0;
+		s_total_render_passes = 0;
+		s_total_barriers = 0;
+		s_total_copies = 0;
+		s_total_uploads = 0;
+		s_total_readbacks = 0;
+		s_total_frames = 0;
+		s_total_drawn_frames = 0;
+		g_perfmon.Reset();
+
+		std::atomic_thread_fence(std::memory_order_release);
+	}
+	else
+	{
+		for (std::size_t i = 0; i < std::size(hwstats); i++)
+		{
+			Console.WriteLn(hwstats[i]);
+		}
+	}
 }
 
 #ifdef _WIN32

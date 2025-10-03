@@ -664,8 +664,10 @@ void GSDumpReplayerCpuStep()
 
 		if (GSDumpReplayer::IsBatchMode())
 		{
+			Host::OnDumpChanged(); // Dump stats
+			MTGS::ResetGS(true);
 			MTGS::WaitGS(false, false, false); // Let GS thread finish.
-			GSState::s_n = 0; // Needed for proper file naming for next dump.
+			GSState::s_n = 0; // Needed for proper file naming for next dump. 
 
 			// Send HW stats and done packet if needed.
 			if (GSIsRegressionTesting())
@@ -677,7 +679,6 @@ void GSDumpReplayerCpuStep()
 			{
 				std::string n = GSDumpReplayer::GetDumpName();
 				GSDumpReplayer::SetLoopCount(s_dump_loop_count_start);
-				g_perfmon.Reset(); // Make sure stats are reset for new dump.
 				GSDumpReplayerCpuReset();
 			}
 			else
