@@ -91,6 +91,9 @@ static u64 s_total_readbacks = 0;
 static u32 s_total_frames = 0;
 static u32 s_total_drawn_frames = 0;
 
+u64 triquadstime = 0;
+u64 triquadscalls = 0;
+
 bool GSRunner::InitializeConfig()
 {
 	EmuFolders::SetAppRoot();
@@ -146,6 +149,8 @@ bool GSRunner::InitializeConfig()
 		si.SetBoolValue("MemoryCards", fmt::format("Slot{}_Enable", i + 1).c_str(), false);
 		si.SetStringValue("MemoryCards", fmt::format("Slot{}_Filename", i + 1).c_str(), "");
 	}
+
+	si.SetIntValue("EmuCore/GS", "accurate_blending_unit", 5);
 
 	VMManager::Internal::LoadStartupSettings();
 	return true;
@@ -816,6 +821,7 @@ void GSRunner::DumpStats()
 	Console.WriteLn(fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn("============================================");
+	Console.WriteLnFmt("Triquads avg time: {} ({} calls)", triquadstime / triquadscalls, triquadscalls);
 }
 
 #ifdef _WIN32

@@ -3307,6 +3307,9 @@ void GSState::GrowVertexBuffer()
 	m_vertex.maxcount = maxcount - 3; // -3 to have some space at the end of the buffer before DrawingKick can grow it
 }
 
+extern u64 triquadstime;
+extern u64 triquadscalls;
+
 template<bool shuffle_check>
 bool GSState::TrianglesAreQuadsImpl()
 {
@@ -3323,6 +3326,9 @@ bool GSState::TrianglesAreQuadsImpl()
 	// Check if the result is cached.
 	if (quad_check_valid)
 		return are_quads;
+
+	auto starttime = std::chrono::steady_clock::now();
+	triquadscalls += 1;
 
 	quad_check_valid = true;
 	are_quads = true;
@@ -3421,6 +3427,9 @@ bool GSState::TrianglesAreQuadsImpl()
 			prev_bbox = bbox;
 		}
 	}
+
+	auto endtime = std::chrono::steady_clock::now();
+	triquadstime += std::chrono::duration_cast<std::chrono::nanoseconds>(endtime - starttime).count();
 
 	return are_quads;
 }
