@@ -9,6 +9,7 @@
 #include "GS/Renderers/SW/GSTextureCacheSW.h"
 #include "GS/GSState.h"
 #include "GS/MultiISA.h"
+#include "GS/GSPerfmon.h"
 
 class GSRendererHW;
 MULTI_ISA_DEF(class GSRendererHWFunctions;)

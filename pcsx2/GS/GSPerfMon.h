@@ -58,6 +58,10 @@ public:
 		m_disp_fb_sprite_blits = 0;
 		return blits;
 	}
+
+	GSPerfMon operator-(const GSPerfMon& other);
+
+	void Dump(const std::string& filename, bool hw);
 };
 
 extern GSPerfMon g_perfmon;
