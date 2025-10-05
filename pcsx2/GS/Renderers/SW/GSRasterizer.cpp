@@ -136,7 +136,10 @@ void GSRasterizer::Draw(GSRasterizerData& data)
 		data.start = GetCPUTicks();
 
 	m_min_step_size = data.min_step_size;
-	for (int i = 0; i <= step_size_index[m_min_step_size]; i++)
+	m_max_step_size = data.max_step_size;
+	int min_index = step_size_index[m_max_step_size];
+	int max_index = step_size_index[m_min_step_size];
+	for (int i = min_index; i <= max_index; i++)
 	{
 		m_setup_prim[i] = data.setup_prim[i];
 		m_draw_scanline[i] = data.draw_scanline[i];
@@ -1160,7 +1163,7 @@ void GSRasterizer::DrawSprite(const GSVertexSW* vertex, const u16* index)
 
 	scan.t = (scan.t + dt * prestep).xyzw(scan.t);
 
-	const int step_size = GetStepSize(dscan.t);
+	const int step_size = GetStepSize(dscan.t, m_min_step_size, m_max_step_size);
 
 	m_setup_prim[step_size_index[step_size]](vertex, index, dscan, m_local);
 
@@ -1391,7 +1394,7 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 
 	if (count > 0)
 	{
-		const int step_size = GetStepSize(dscan.t, dscan.c);
+		const int step_size = GetStepSize(dscan.t, dscan.c, m_min_step_size, m_max_step_size);
 
 		m_setup_prim[step_size_index[step_size]](vertex, index, dscan, m_local);
 
@@ -1432,15 +1435,6 @@ void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW&
 	m_pixels.total += ((left + pixels + (step_size - 1)) & ~(step_size - 1)) - (left & ~(step_size - 1));
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
-
-	if (GSState::s_n == 2)
-	{
-		m_local.temp.bp = GSVector4i(-1, -1, -1, -1);
-	}
-	else
-	{
-		m_local.temp.bp = GSVector4i::zero();
-	}
 
 	m_draw_scanline[step_size_index[step_size]](pixels, left, top, scan, m_local);
 }
@@ -1669,27 +1663,25 @@ const GSRasterizer::DrawEdgeLinePtr GSRasterizer::m_draw_edge_line[2][2][2][2] =
 #undef INIT2
 #undef INIT3
 
-int GSRasterizer::GetStepSize(const GSVector4& dt)
+int GSRasterizer::GetStepSize(const GSVector4& dt, int min_step_size, int max_step_size)
 {
-	if (m_min_step_size >= vlen)
+	if (min_step_size >= vlen)
 		return vlen; // Disable variable step size.
 	
 	GSVector4 ssf = tmax / dt.abs();
 	ssf = ssf.xyxy().min(ssf.yxyx());
 	int ss = step_size_round[static_cast<int>(std::min(ssf.x, vlenf))];
-	//return std::max(ss, m_min_step_size);
-	return 1;
+	return std::clamp(ss, min_step_size, max_step_size);
 }
 
-int GSRasterizer::GetStepSize(const GSVector4& dt, const GSVector4& dc)
+int GSRasterizer::GetStepSize(const GSVector4& dt, const GSVector4& dc, int min_step_size, int max_step_size)
 {
-	if (m_min_step_size >= vlen)
+	if (min_step_size >= vlen)
 		return vlen; // Disable variable step size.
 	
 	GSVector4 ssf = (tmax / dt.abs()).min(cmax / dc.abs());
 	ssf = ssf.xyxy().min(ssf.zwxy());
 	ssf = ssf.xyxy().min(ssf.yxyx());
 	int ss = step_size_round[static_cast<int>(std::min(ssf.x, vlenf))];
-	//return std::max(ss, m_min_step_size);
-	return 1;
+	return std::clamp(ss, min_step_size, max_step_size);
 }

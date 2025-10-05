@@ -41,6 +41,7 @@ public:
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> draw_scanline;
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> draw_edge;
 	int min_step_size;
+	int max_step_size;
 
 	GSRasterizerData()
 		: scissor(GSVector4i::zero())
@@ -81,13 +82,14 @@ protected:
 	struct { GSVertexSW* buff; int count; } m_edge;
 	struct { int sum, actual, total; } m_pixels;
 	int m_primcount;
+	int m_min_step_size;
+	int m_max_step_size;
 
 	// For the current draw.
 	GSScanlineLocalData m_local = {};
 	std::array<GSDrawScanline::SetupPrimPtr, n_step_sizes> m_setup_prim = {};
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_scanline = {};
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_edge = {};
-	int m_min_step_size;
 
 	__forceinline bool HasEdge() const { return (m_draw_edge[0] != nullptr); }
 
@@ -139,8 +141,8 @@ protected:
 	static constexpr GSVector4 tmax = GSVector4::cxpr(static_cast<float>(0x7FFFFF80)); // 1:15:16 fixed point format.
 	static constexpr GSVector4 cmax = GSVector4::cxpr(static_cast<float>(0x7FFF));     // 1: 8: 7 fixed point format.
 
-	int GetStepSize(const GSVector4& dt);
-	int GetStepSize(const GSVector4& dt, const GSVector4& dc);
+	static int GetStepSize(const GSVector4& dt, int min_step_size, int max_step_size);
+	static int GetStepSize(const GSVector4& dt, const GSVector4& dc, int min_step_size, int max_step_size);
 
 public:
 	GSRasterizer(GSDrawScanline* ds, int id, int threads);

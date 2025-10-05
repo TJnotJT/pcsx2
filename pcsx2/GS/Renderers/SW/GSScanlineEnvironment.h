@@ -249,8 +249,9 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i uv_minmax[2];
 		GSVector4i trb, tga;
 		GSVector4i test;
-
-		GSVector4i bp;
+#if 0
+		GSVector4i bp; // Breakpoint flag for breaking in JIT code.
+#endif
 	} temp;
 
 #endif
