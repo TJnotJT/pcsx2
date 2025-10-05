@@ -125,14 +125,16 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 {
 	const GSScanlineGlobalData& global = data.global;
 
-	const int max_index = std::clamp(static_cast<int>(GSConfig.UserHacks_SWVariableStepSize), 0, n_step_sizes - 1);
+	const int max_index = std::clamp(static_cast<int>(GSConfig.UserHacks_SWVariableStepMax), 0, n_step_sizes - 1);
+	const int min_index = std::clamp(static_cast<int>(GSConfig.UserHacks_SWVariableStepMin), 0, n_step_sizes - 1);
 	data.min_step_size = step_size_order[max_index];
+	data.max_step_size = step_size_order[min_index];
 
 #ifdef ENABLE_JIT_RASTERIZER
 	GSScanlineSelector sel;
 
 	sel.key = global.sel.key;
-	for (int i = 0; i <= max_index; i++)
+	for (int i = min_index; i <= max_index; i++)
 	{
 		sel.sss = i;
 		data.draw_scanline[i] = m_ds_map[sel];
@@ -146,7 +148,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 		sel.zwrite = 0;
 		sel.edge = 1;
 
-		for (int i = 0; i <= max_index; i++)
+		for (int i = min_index; i <= max_index; i++)
 		{
 			sel.sss = i;
 			data.draw_edge[i] = m_ds_map[sel];
@@ -156,7 +158,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 	}
 	else
 	{
-		for (int i = 0; i <= max_index; i++)
+		for (int i = min_index; i <= max_index; i++)
 			data.draw_edge[i] = nullptr;
 	}
 
@@ -176,12 +178,19 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 	sel.zequal = global.sel.zequal;
 	sel.notest = global.sel.notest;
 
-	for (int i = 0; i <= max_index; i++)
+	for (int i = min_index; i <= max_index; i++)
 	{
 		sel.sss = i;
 		data.setup_prim[i] = m_sp_map[sel];
 		if (!data.setup_prim[i]) [[unlikely]]
 			return false;
+	}
+
+	for (int i = 0; i < min_index; i++)
+	{
+		data.draw_scanline[i] = nullptr;
+		data.draw_edge[i] = nullptr;
+		data.setup_prim[i] = nullptr;
 	}
 
 	for (int i = max_index + 1; i < n_step_sizes; i++)
@@ -193,7 +202,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 
 	return true;
 #else
-	for (int i = 0; i <= max_index; i++)
+	for (int i = min_index; i <= max_index; i++)
 	{
 		data.setup_prim[i] = m_c_setup_prim[i];
 		data.draw_scanline[i] = m_c_draw_scanline[i];
