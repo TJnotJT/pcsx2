@@ -617,14 +617,24 @@ static void GSDumpReplayerLoadInitialState()
 
 			Common::Timer timer;
 
-			// Must run before recreating renderer to prevent vertices from being flushed to new dump.
+			// Order here is important:
+			// 1. Reset vertex queue before recreating renderer to prevent unwanted vertex flush.
+			// 2. Recreate renderer before resetting/recreating device to allow all texture cache
+			//    texture to be properly purged.
+			// 3. Reset/recreate device last to cleanup texture (orderered in GSreopen if
+			//    recreating device).
 			g_gs_renderer->ResetVertexQueue();
 
 			GSreopen(s_batch_recreate_device, true, EmuConfig.GS.Renderer, std::nullopt);
 
+			g_gs_device->ResetRenderState();
+
+			g_perfmon.Reset(); // Resetting the render state can end a render pass.
+
 			double sec = timer.GetTimeSeconds();
 
-			Console.WriteLnFmt("(GSRunner/{}) GS reopened ({:.2} seconds).", GSDumpReplayer::GetRunnerName(), sec);
+			Console.WriteLnFmt("(GSRunner/{}) GS reopened ({}) ({:.2} seconds).", GSDumpReplayer::GetRunnerName(),
+				s_batch_recreate_device ? "renderer and device" : "renderer only", sec);
 		});
 	}
 
