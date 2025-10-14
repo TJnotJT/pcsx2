@@ -306,6 +306,8 @@ public:
 	bool ReadFile(Error* error);
 	bool ReadFile(void* dst, size_t max_size, size_t* size, Error* error);
 
+	virtual s64 GetFileSize() = 0;
+
 	//static bool Serialize(const GSDumpFile& dump, void* ptr, std::size_t size);
 	//static std::unique_ptr<GSDumpFile> Deserialize(void* ptr, std::size_t size);
 
@@ -334,3 +336,56 @@ private:
 
 // Initializes CRC tables used by LZMA SDK.
 void GSInit7ZCRCTables();
+
+
+struct GSDumpFileLoader
+{
+	// Stays constant after construction.
+	size_t num_threads = 0;
+	size_t num_dumps_buffered = 0;
+	size_t max_file_size = 0;
+	std::vector<std::string> filenames;
+
+	// Threads.
+	std::vector<std::thread> threads;
+
+	bool start = false; // Started flag. Only used by consumer.
+
+	// Synchronization. Following member should only be modified with the mutex held.
+	std::mutex mut;
+	std::condition_variable cond_read; // For consumer to wait on.
+	std::condition_variable cond_write; // For producer to wait on.
+	std::vector<u8> ready; // Per-file flag to indicate finished reading.
+	std::vector<double> loading_time; // Per-file load time in seconds.
+	std::vector<std::string> error_list; // Per-file error for reporting asynchronously.
+	size_t read = 0; // Read index.
+	size_t write = 0; // Write index.
+	bool stopped = false; // Stopped flag.
+	
+	// Read/decompressed dump list. Same size as file names.
+	// Consumer thread acquires write by incrementing write index
+	// and releases write by setting corresponding ready flag.
+	std::vector<std::unique_ptr<GSDumpFile>> dumps;
+
+	// Stats. Modified by consumer with or without mutex.
+	std::atomic<size_t> num_loaded = 0;
+	std::atomic<size_t> num_errored = 0;
+	std::atomic<size_t> num_too_large = 0;
+
+	GSDumpFileLoader(size_t nthreads = 2, size_t num_dumps_buffered = 2, size_t max_file_size = UINT64_MAX);
+	~GSDumpFileLoader();
+
+	void Start(const std::vector<std::string>& files);
+	std::unique_ptr<GSDumpFile> Get(std::string* name, std::vector<std::string>* errors = nullptr, double* block_time = nullptr, double* load_time = nullptr);
+	void Stop();
+	static void LoaderFunc(GSDumpFileLoader* parent);
+
+	bool Started(); // Call any time by consumer.
+
+	// Call only with mut locked.
+	bool Full();
+	bool Empty();
+	bool DoneWrite();
+	bool DoneRead();
+	bool Stopped();
+};

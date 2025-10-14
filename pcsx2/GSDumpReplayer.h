@@ -31,7 +31,6 @@ namespace GSDumpReplayer
 	
 	void UpdateBatchGameSettings();
 	bool Initialize(const char* filename);
-	bool NextDump(); // Batch mode
 	void EndDumpRegressionTest();
 	bool ChangeDump(const char* filename = nullptr);
 	void Shutdown();
