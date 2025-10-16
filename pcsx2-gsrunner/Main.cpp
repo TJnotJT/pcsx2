@@ -1945,14 +1945,22 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	std::string dump_name; // Cache the dump from disk to shared with runner processes.
 	Error error; // Current error.
 	bool fail = false; // Signals a failure at some point in processing.
-	bool sleep = false; // Signals to sleep a bit for runners to catch up.
+	bool sleep_dump = false; // Signals to sleep a bit for runners to catch up.
+	bool sleep_packet = false; // Signals to sleep a bit for runners to catch up.
+	const int sleep_ms_min = 16;
+	const int sleep_ms_max = 128;
+	int sleep_ms = sleep_ms_min;
 
 	Console.WriteLnFmt("(GSTester/{}) Starting main testing loop.", GetTesterName());
 
 	// Main testing loop.
 	while (true)
 	{
-		sleep = false;
+		if (!(sleep_dump && sleep_packet))
+			sleep_ms = sleep_ms_min;
+
+		sleep_dump = false;
+		sleep_packet = false;
 
 		if (fail)
 		{
@@ -2066,7 +2074,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 					else if (retval == BUFFER_NOT_READY)
 					{
 						// Try again next iteration.
-						sleep = true;
+						sleep_dump = true;
 					}
 					else
 					{
@@ -2114,7 +2122,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		else if (retval == BUFFER_NOT_READY)
 		{
 			// Try again next iteration.
-			sleep = true;
+			sleep_packet = true;
 		}
 		else
 		{
@@ -2160,10 +2168,15 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			continue;
 		}
 
-		if (sleep)
-			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		if (sleep_dump && sleep_packet)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+			sleep_ms = std::min(sleep_ms * 2, sleep_ms_max);
+		}
 		else
+		{
 			std::this_thread::yield();
+		}
 	}
 
 	EndRunners();
