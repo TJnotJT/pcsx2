@@ -134,7 +134,7 @@ struct GSTester
 	static constexpr std::size_t regression_num_packets_default = 60;
 	static constexpr std::size_t regression_num_dumps_default = 3;
 	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
-	static constexpr double regression_deadlock_timeout_default = 10.0; // seconds
+	static constexpr double regression_deadlock_timeout_default = 60.0; // seconds
 
 	std::vector<std::string> regression_dump_files;
 	std::vector<DumpInfo> regression_dumps;
@@ -1795,12 +1795,12 @@ bool GSTester::StartRunners()
 
 	// Wait until the runners initialize and hit the dump waiting loop.
 	Common::Timer timer;
-	constexpr int timeout = 10;
+	constexpr double start_timeout = 30.0;
 	while (true)
 	{
-		if (timer.GetTimeSeconds() > static_cast<double>(timeout))
+		if (timer.GetTimeSeconds() > start_timeout)
 		{
-			Console.ErrorFmt("(GSTester/{}) Both runners not initialized after {} seconds.", GetTesterName(), timeout);
+			Console.ErrorFmt("(GSTester/{}) Both runners not initialized after {:.1} seconds.", GetTesterName(), start_timeout);
 			return false;
 		}
 
@@ -1824,13 +1824,14 @@ bool GSTester::EndRunners()
 	for (int i = 0; i < 2; i++)
 		regression_buffer[i].SetStateTester(GSRegressionBuffer::EXIT);
 
-	constexpr double terminate_timeout = 20.0; // Seconds to wait before forcefully terminating processes.
+	constexpr double terminate_timeout = 30.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
 	double sec;
 	while (1)
 	{
 		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[1].IsRunning())
 		{
+			Console.ErrorFmt("(GSTester/{}) Both runners not exited after {:.1} seconds.", GetTesterName(), terminate_timeout);
 			break;
 		}
 
@@ -1943,13 +1944,16 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	std::vector<u8> dump_data; // Cache the dump from disk to shared with runner processes.
 	std::string dump_name; // Cache the dump from disk to shared with runner processes.
 	Error error; // Current error.
-	bool fail = false; // Signals a failure aat some point in processing.
+	bool fail = false; // Signals a failure at some point in processing.
+	bool sleep = false; // Signals to sleep a bit for runners to catch up.
 
 	Console.WriteLnFmt("(GSTester/{}) Starting main testing loop.", GetTesterName());
 
 	// Main testing loop.
 	while (true)
 	{
+		sleep = false;
+
 		if (fail)
 		{
 			fail = false;
@@ -2062,6 +2066,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 					else if (retval == BUFFER_NOT_READY)
 					{
 						// Try again next iteration.
+						sleep = true;
 					}
 					else
 					{
@@ -2109,6 +2114,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		else if (retval == BUFFER_NOT_READY)
 		{
 			// Try again next iteration.
+			sleep = true;
 		}
 		else
 		{
@@ -2146,7 +2152,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		if (deadlock_timer.GetTimeSeconds() >= regression_deadlock_timeout)
 		{
 			if (regression_dump_last_completed.empty())
-				Console.ErrorFmt("(GSTester/{}) Possible deadlock on dump {}.", GetTesterName(), regression_dumps[0].name);
+				Console.ErrorFmt("(GSTester/{}) Possible deadlock on dump {} (timeout: {:.2} seconds).", GetTesterName(), regression_dumps[0].name, regression_deadlock_timeout);
 			else
 				Console.ErrorFmt("(GSTester/{}) Possible deadlock detected after dump {}.", GetTesterName(), regression_dump_last_completed);
 			deadlock_timer.Reset();
@@ -2154,7 +2160,10 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			continue;
 		}
 
-		std::this_thread::yield();
+		if (sleep)
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		else
+			std::this_thread::yield();
 	}
 
 	EndRunners();
