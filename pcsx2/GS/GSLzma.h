@@ -293,9 +293,12 @@ public:
 	virtual ~GSDumpFile();
 
 	static std::unique_ptr<GSDumpFile> OpenGSDump(const char* filename, Error* error = nullptr);
-	static std::unique_ptr<GSDumpFile> OpenGSDumpMemory(const void* ptr, const size_t size);
-	static std::unique_ptr<GSDumpFile> OpenGSDumpMemory(const std::vector<u8>& data);
-	static std::unique_ptr<GSDumpFile> OpenGSDumpMemory(const std::vector<u8>&& data);
+
+	// We modify the GSDumpFile in place to avoid having to reallocate if frequently.
+	// Warning: The GSDumpFile does not copy the data--it must be fully read before the
+	// caller deallocates it. The GSDumpFile must make been opened with this function
+	// to be reused in this way.
+	static void OpenGSDumpMemory(std::unique_ptr<GSDumpFile>& dump, const void* ptr, const size_t size);
 	static bool GetPreviewImageFromDump(const char* filename, u32* width, u32* height, std::vector<u32>* pixels);
 
 	__fi const std::string& GetSerial() const { return m_serial; }
@@ -314,12 +317,11 @@ public:
 	static std::unique_ptr<GSDumpFile> Deserialize(void* ptr, size_t max_size, size_t* size, Error* error = nullptr);
 
 protected:
-	GSDumpFile();
+	GSDumpFile();	
 
 	virtual bool Open(FileSystem::ManagedCFilePtr fp, Error* error) = 0;
 	virtual bool IsEof() = 0;
 	virtual size_t Read(void* ptr, size_t size) = 0;
-
 protected:
 	FileSystem::ManagedCFilePtr m_fp;
 	s64 m_size = -1;
@@ -334,6 +336,8 @@ private:
 	std::vector<u8> m_packet_data;
 
 	GSDataArray m_dump_packets;
+
+	void Clear();
 };
 
 // Initializes CRC tables used by LZMA SDK.

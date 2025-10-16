@@ -326,6 +326,16 @@ bool GSDumpFile::ReadFile(std::vector<u8>& dst, size_t max_size, Error* error)
 	}
 }
 
+void GSDumpFile::Clear()
+{
+	m_serial.clear();
+	m_crc = 0;
+	m_regs_data.clear();
+	m_state_data.clear();
+	m_packet_data.clear();
+	m_dump_packets.clear();
+}
+
 /******************************************************************/
 
 static std::once_flag s_lzma_crc_table_init;
@@ -734,13 +744,14 @@ namespace
 
 	class GSDumpMemory final : public GSDumpFile
 	{
+		friend class GSDumpFile;
 	private:
-		std::vector<u8> data;
+		const u8* data;
 		size_t curr = 0;
+
+		void Init(const u8* data, size_t curr);
 	public:
 		GSDumpMemory(const u8* data, size_t size);
-		GSDumpMemory(const std::vector<u8>& data);
-		GSDumpMemory(const std::vector<u8>&& data);
 		~GSDumpMemory() override;
 
 		bool Open(FileSystem::ManagedCFilePtr fp, Error* error) override;
@@ -749,22 +760,17 @@ namespace
 		s64 GetFileSize() override;
 	};
 
+	void GSDumpMemory::Init(const u8* data, size_t size)
+	{
+		this->data = data;
+		m_size = static_cast<s64>(size);
+		curr = 0;
+
+	}
+
 	GSDumpMemory::GSDumpMemory(const u8* data, size_t size)
 	{
-		m_size = size;
-
-		this->data.resize(size);
-		std::memcpy(this->data.data(), data, size);
-	}
-
-	GSDumpMemory::GSDumpMemory(const std::vector<u8>& data) : data(data)
-	{
-		m_size = data.size();
-	}
-
-	GSDumpMemory::GSDumpMemory(const std::vector<u8>&& data) : data(std::move(data))
-	{
-		m_size = data.size();
+		Init(data, size);
 	}
 
 	GSDumpMemory::~GSDumpMemory() = default;
@@ -777,7 +783,7 @@ namespace
 
 	bool GSDumpMemory::IsEof()
 	{
-		return curr >= data.size();
+		return curr >= static_cast<size_t>(m_size);
 	}
 
 	size_t GSDumpMemory::Read(void* ptr, size_t size)
@@ -785,7 +791,7 @@ namespace
 		if (IsEof())
 			size = 0;
 		else
-			size = std::min(size, static_cast<size_t>(data.size() - curr));
+			size = std::min(size, static_cast<size_t>(m_size) - curr);
 		memcpy(ptr, &data[curr], size);
 		curr += size;
 		return size;
@@ -819,19 +825,18 @@ std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDump(const char* filename, Error* 
 	return file;
 }
 
-std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDumpMemory(const void* ptr, const size_t size)
+void GSDumpFile::OpenGSDumpMemory(std::unique_ptr<GSDumpFile>& dump_, const void* ptr, const size_t size)
 {
-	return std::make_unique<GSDumpMemory>(static_cast<const u8*>(ptr), size);
-}
-
-std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDumpMemory(const std::vector<u8>& data)
-{
-	return std::make_unique<GSDumpMemory>(data);
-}
-
-std::unique_ptr<GSDumpFile> GSDumpFile::OpenGSDumpMemory(const std::vector<u8>&& data)
-{
-	return std::make_unique<GSDumpMemory>(std::move(data));
+	if (!dump_)
+	{
+		dump_ = std::make_unique<GSDumpMemory>(static_cast<const u8*>(ptr), size);
+	}
+	else
+	{
+		GSDumpMemory* dump = static_cast<GSDumpMemory*>(dump_.get());
+		dump->Clear();
+		dump->Init(static_cast<const u8*>(ptr), size);
+	}
 }
 
 bool GSDumpFile::Serialize(const GSDumpFile& dump, void* ptr, size_t max_size, size_t* size, Error* error)
@@ -994,9 +999,10 @@ GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dst, std::string*
 	{
 		dst.resize(dumps[i]->size());
 		std::memcpy(dst.data(), dumps[i]->data(), dumps[i]->size());
-		dumps[i]->clear();
-		dumps[i] = nullptr;
 	}
+
+	dumps[i]->clear();
+	dumps[i] = nullptr;
 
 	cond_write.notify_one();
 

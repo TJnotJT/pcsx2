@@ -68,6 +68,7 @@ static std::string s_batch_start_from_dump;
 static bool s_regression_test_send_hwstats = false; // Only send HWSTAT packets if the log is not written.
 static bool s_verbose_logging = false;
 static GSDumpFileLoader s_dump_file_loader; // For batch mode.
+static std::vector<u8> s_dump_file_data; // For batch mode.
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -392,17 +393,11 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 		while (true)
 		{
-			std::vector<u8> data;
-
-			GSDumpFileLoader::State state = s_dump_file_loader.Get(data, &dump_name, &error, &block_time, &load_time);
+			GSDumpFileLoader::State state = s_dump_file_loader.Get(s_dump_file_data, &dump_name, &error, &block_time, &load_time);
 
 			if (state == GSDumpFileLoader::READY)
 			{
-				s_dump_file = GSDumpFile::OpenGSDumpMemory(std::move(data));
-			}
-			else
-			{
-				s_dump_file.reset();
+				GSDumpFile::OpenGSDumpMemory(s_dump_file, s_dump_file_data.data(), s_dump_file_data.size());
 			}
 
 			if (s_dump_file)
@@ -512,17 +507,10 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			rbp->SetNameDump(dump_name);
 		});
 
-		s_dump_file = GSDumpFile::OpenGSDumpMemory(dump->GetPtrDump(), dump->GetSizeDump());
+		s_dump_file_data.resize(dump->GetSizeDump());
+		std::memcpy(s_dump_file_data.data(), dump->GetPtrDump(), dump->GetSizeDump());
 
-		sec = timer.GetTimeSeconds();
-
-		if (!s_dump_file)
-		{
-			MTGS::RunOnGSThread([dump_name = s_dump_name, runner_name = GetRunnerName()]() {
-				Console.ErrorFmt("(GSRunner/{}) Failed to open dump '{}'", runner_name, dump_name);
-			});
-			return false;
-		}
+		GSDumpFile::OpenGSDumpMemory(s_dump_file, s_dump_file_data.data(), s_dump_file_data.size());
 	}
 	else
 	{
