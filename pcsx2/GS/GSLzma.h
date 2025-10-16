@@ -355,7 +355,8 @@ struct GSDumpFileLoader
 	size_t num_dumps_buffered = 0;
 	size_t max_file_size = 0;
 	std::vector<std::string> filenames;
-	std::vector<std::vector<u8>> dumps;
+	std::vector<std::vector<u8>> dumps_avail_list; // One vector for each dump being buffered to prevent too many reallocations.
+	std::vector<std::vector<u8>*> dumps; // Data for each dump buffered. Only valid until consume, then set to null.
 
 	// Threads.
 	std::vector<std::thread> threads;
@@ -400,7 +401,4 @@ struct GSDumpFileLoader
 	bool DoneWrite();
 	bool DoneRead();
 	bool Stopped();
-
-	// Private - call only by owning producer.
-	u8* GetBufferPtr(size_t i);
 };

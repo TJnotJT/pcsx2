@@ -267,7 +267,7 @@ bool GSDumpFile::ReadFile(std::vector<u8>& dst, size_t max_size, Error* error)
 {
 	if (m_size >= 0)
 	{
-		if (m_size > max_size)
+		if (static_cast<size_t>(m_size) > max_size)
 		{
 			Error::SetStringFmt(error, "Buffer out of memory (got {}; expected {})", m_size, max_size);
 			return false;
@@ -881,6 +881,7 @@ GSDumpFileLoader::GSDumpFileLoader(size_t num_threads, size_t num_dumps_buffered
 	: num_threads(num_threads)
 	, num_dumps_buffered(num_dumps_buffered)
 	, max_file_size(max_file_size)
+	, dumps_avail_list(num_dumps_buffered)
 {
 	pxAssert(1 <= num_threads && num_threads <= num_dumps_buffered && num_dumps_buffered <= 8);
 }
@@ -956,7 +957,7 @@ bool GSDumpFileLoader::Stopped()
 	return stopped;
 }
 
-GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dump, std::string* name, std::string* error, double* block_time, double* load_time, bool block)
+GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dst, std::string* name, std::string* error, double* block_time, double* load_time, bool block)
 {
 	std::unique_lock<std::mutex> lock(mut);
 
@@ -991,7 +992,10 @@ GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dump, std::string
 
 	if (state[i] == READY)
 	{
-		dump = std::move(dumps[i]);
+		dst.resize(dumps[i]->size());
+		std::memcpy(dst.data(), dumps[i]->data(), dumps[i]->size());
+		dumps[i]->clear();
+		dumps[i] = nullptr;
 	}
 
 	cond_write.notify_one();
@@ -1002,8 +1006,6 @@ GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dump, std::string
 void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 {
 	int i = -1;
-
-	std::vector<u8> data;
 
 	while (true)
 	{
@@ -1017,12 +1019,13 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 
 			i = parent->write++;
 
-			parent->dumps[i].clear();
+			parent->dumps[i] = &parent->dumps_avail_list[i % parent->num_dumps_buffered];
+
+			bool empty = parent->dumps[i]->empty();
+			pxAssert(empty); // Or something went wrong...
 
 			parent->state[i] = EMPTY;
 		}
-
-		data.clear();
 
 		Common::Timer load_timer;
 
@@ -1053,7 +1056,7 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 				
 				parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
 			}
-			else if (!dump->ReadFile(data, parent->max_file_size, &error))
+			else if (!dump->ReadFile(*parent->dumps[i], parent->max_file_size, &error))
 			{
 				parent->error_list[i] = fmt::format("Unable to read GS dump '{}' (error: {})", parent->filenames[i], error.GetDescription());
 
@@ -1075,8 +1078,6 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 			std::unique_lock<std::mutex> lock(parent->mut);
 
 			parent->state[i] = state;
-
-			parent->dumps[i] = std::move(data);
 		}
 			
 		parent->cond_read.notify_one();
