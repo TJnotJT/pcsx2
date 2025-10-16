@@ -363,7 +363,7 @@ struct GSProcess
 	bool Start(const std::string& command, bool detached);
 
 	bool IsRunning(double seconds = 0.0);
-	int WaitForExit(double seconds = infinite);
+	bool WaitForExit(double seconds = infinite);
 	bool Close();
 	void Terminate();
 	PID_t GetPID();

@@ -805,7 +805,8 @@ bool GSProcess::Start(const std::string& command, bool detached)
 
 	return true;
 #else
-	// Not implemented
+	// Not implemented.
+	return false;
 #endif
 }
 
@@ -841,7 +842,7 @@ bool GSProcess::IsRunning(double seconds)
 #endif
 }
 
-int GSProcess::WaitForExit(double seconds)
+bool GSProcess::WaitForExit(double seconds)
 {
 #ifdef __WIN32__
 	return IsRunning(pi.hProcess, seconds);

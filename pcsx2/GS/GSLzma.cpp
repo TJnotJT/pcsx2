@@ -964,7 +964,6 @@ GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dump, std::string
 
 	cond_read.wait(lock, [&]() { return !block || !Empty() || DoneRead() || Stopped(); });
 
-
 	if (DoneRead() || Stopped())
 	{
 		cond_write.notify_all();
@@ -1056,7 +1055,7 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 			}
 			else if (!dump->ReadFile(data, parent->max_file_size, &error))
 			{
-				parent->error_list[i] = fmt::format("Unable to read GS dump '{}'", parent->filenames[i]);
+				parent->error_list[i] = fmt::format("Unable to read GS dump '{}' (error: {})", parent->filenames[i], error.GetDescription());
 
 				state = ERROR_;
 

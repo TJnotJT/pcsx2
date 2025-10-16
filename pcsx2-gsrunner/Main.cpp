@@ -1147,7 +1147,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 		
 		// disable timestamps, since we want to be able to diff the logs
 		s_settings_interface.SetBoolValue("Logging", "EnableFileLogging", true);
-		s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
+		//s_settings_interface.SetBoolValue("Logging", "EnableTimestamps", false);
 	}
 
 	if (!s_regression_file.empty())
@@ -2040,10 +2040,6 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				{
 					pxAssert(!dump_data.empty());
 
-					auto xx = GSDumpFile::OpenGSDumpMemory(dump_data.data(), dump_data.size());
-
-					xx->ReadFile(nullptr);
-
 					Common::Timer timer;
 
 					ReturnValue retval = CopyDumpToSharedMemory(dump_data, dump_name);
@@ -2052,7 +2048,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 
 					if (retval == SUCCESS)
 					{
-						Console.WriteLnFmt("(GSTester/{}) Copied '{}' to shared memory (load: {:.2} seconds; block: {:.2} seconds; copy: {:.2} seconds))",
+						Console.WriteLnFmt("(GSTester/{}) Copied '{}' to shared memory (load: {:.2} seconds; block: {:.2} seconds; copy: {:.2} seconds)",
 							GetTesterName(), dump_name, info->load_time, info->block_time, seconds);
 						dump_data.clear();
 						deadlock_timer.Reset(); // Decompressing the dump can take time. Don't want false positives.
@@ -2076,7 +2072,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				else if (state == GSDumpFileLoader::FINISHED)
 				{
 					done_loading = true;
-					Console.WriteLnFmt("(GSTester/{}) Done uploading dumps.", GetTesterName());
+					Console.WarningFmt("(GSTester/{}) Done uploading dumps.", GetTesterName());
 					for (int i = 0; i < 2; i++)
 						regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE_UPLOADING);
 					break;
@@ -2106,6 +2102,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		}
 		else if (retval == ERROR_)
 		{
+			Console.ErrorFmt("(GSTester/{}) Error in processing packets.", GetTesterName());
 			fail = true;
 			continue;
 		}
