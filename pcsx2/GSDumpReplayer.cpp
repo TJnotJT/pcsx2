@@ -460,7 +460,11 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 		Common::Timer timer;
 
-		dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus, true, true));
+		dump = rbp->GetDumpRead(); // First one non-blocking check since otherwise the done uploading status is polled too early.
+		if (!dump)
+		{
+			dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus, true, true));
+		}
 
 		if (!dump)
 		{

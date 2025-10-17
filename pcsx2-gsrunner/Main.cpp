@@ -1975,14 +1975,13 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	std::optional<GSDumpFileLoader> dump_loader;
 	dump_loader.emplace(regression_num_dumps, regression_num_dumps, regression_dump_size);
 	dump_loader->Start(regression_dump_files);
-	bool done_loading = false;
+	bool done_uploading = false;
 
 	// Temporary loop variables.
 	std::vector<u8> dump_data; // Cache the dump from disk to shared with runner processes.
 	std::string dump_name; // Cache the dump from disk to shared with runner processes.
 	Error error; // Current error.
 	bool fail = false; // Signals a failure at some point in processing.
-	bool read_packet;
 
 	Console.WriteLnFmt("(GSTester/{}) Starting main testing loop.", GetTesterName());
 
@@ -1990,7 +1989,6 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	while (true)
 	{
 		loop_counter++;
-		read_packet = false;
 
 		// Failure restarting.
 		if (fail)
@@ -2058,7 +2056,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		}
 
 		// Dump uploading processing.
-		if (!done_loading)
+		if (!done_uploading)
 		{
 			std::string error;
 			DumpInfo* info = nullptr;
@@ -2123,7 +2121,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				}
 				else if (state == GSDumpFileLoader::FINISHED)
 				{
-					done_loading = true;
+					done_uploading = true;
 					Console.WarningFmt("(GSTester/{}) Done uploading dumps.", GetTesterName());
 					dump_loader->DebugPrint();
 					for (int i = 0; i < 2; i++)
@@ -2154,7 +2152,6 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			if (retval == SUCCESS)
 			{
 				activity_timer.Reset();
-				read_packet = true;
 			}
 			else if (retval == ERROR_)
 			{
@@ -2198,17 +2195,23 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			{
 				bool running = regression_runner_proc[i].IsRunning();
 				u32 state = regression_buffer[i].GetStateRunner();
-				if (!running && state != GSRegressionBuffer::DONE_RUNNING)
+				if (!running)
 				{
-					Console.ErrorFmt("(GSTester/{}) Runner {} exited unexpectedly.", GetTesterName(), regression_runner_name[i]);
-					fail = true;
+					if (state == GSRegressionBuffer::DONE_RUNNING)
+					{
+						num_exited++;
+					}
+					else
+					{
+						Console.ErrorFmt("(GSTester/{}) Runner {} exited unexpectedly.", GetTesterName(), regression_runner_name[i]);
+						fail = true;
+					}
 				}
-				num_exited += !running;
 			}
 
-			if (num_exited == 2 && !read_packet)
+			if (num_exited == 2 && !done_uploading)
 			{
-				// Both processes exited and we didn't read any packets. Something bad happened.
+				// Both processes exited and we didn't finish uploading. Something bad happened.
 				Console.ErrorFmt("(GSTester/{}) Both runners exited unexpectedly.", GetTesterName());
 				fail = true;
 			}
