@@ -385,7 +385,6 @@ struct GSDumpFileLoader
 	// Stats. Modified by consumer with or without mutex.
 	std::atomic<size_t> num_loaded = 0;
 	std::atomic<size_t> num_errored = 0;
-	std::atomic<size_t> num_too_large = 0;
 
 	GSDumpFileLoader(size_t nthreads = 2, size_t num_dumps_buffered = 2, size_t max_file_size = UINT64_MAX);
 	~GSDumpFileLoader();

@@ -1998,9 +1998,12 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				regression_buffer[i].DebugState();
 				regression_buffer[i].DebugDumpBuffer();
 				regression_buffer[i].DebugPacketBuffer();
+				Console.WarningFmt("");
 			}
 
+			dump_loader->Stop();
 			dump_loader->DebugPrint();
+			Console.WarningFmt("");
 
 			if (++regression_failure_restarts >= regression_failure_restarts_max)
 			{
@@ -2114,6 +2117,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				{
 					done_loading = true;
 					Console.WarningFmt("(GSTester/{}) Done uploading dumps.", GetTesterName());
+					dump_loader->DebugPrint();
 					for (int i = 0; i < 2; i++)
 						regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE_UPLOADING);
 					break;
@@ -2207,9 +2211,9 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			continue;
 		}
 
-		double wait_ms = 1000 * deadlock_timer.GetTimeSeconds();
-		if (wait_ms >= 1.0)
+		if (deadlock_timer.GetTimeSeconds() >= 0.001)
 		{
+			// Wait on event if no packets for 1 ms.
 			regression_event_tester.Reset();
 			regression_event_tester.Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
 		}

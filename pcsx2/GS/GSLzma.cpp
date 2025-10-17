@@ -903,7 +903,7 @@ void GSDumpFileLoader::Start(const std::vector<std::string>& files, const std::s
 	
 	if (!from.empty())
 	{
-		std::erase_if(filenames, [&](const std::string& x) { return x < from; });
+		std::erase_if(filenames, [&](const std::string& x) { return Path::GetFileName(x) < from; });
 	}
 
 	state.resize(filenames.size());
@@ -1052,49 +1052,35 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 
 		Common::Timer load_timer;
 
-		size_t size = FileSystem::GetPathFileSize(parent->filenames[i].c_str());
-
 		State state = EMPTY;
 
-		if (size >= parent->max_file_size)
+		Error error;
+		std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(parent->filenames[i].c_str(), &error);
+
+		if (!dump)
 		{
-			parent->error_list[i] = fmt::format("File '{}' is too large (got {}; expected {}).",
-				parent->filenames[i], size, parent->max_file_size);
+			parent->error_list[i] = fmt::format("Unable to open GS dump '{}' (error: {})",
+				parent->filenames[i], error.GetDescription());
+
+			state = ERROR_;
+				
+			parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
+		}
+		else if (!dump->ReadFile(*parent->dumps[i], parent->max_file_size, &error))
+		{
+			parent->error_list[i] = fmt::format("Unable to read GS dump '{}' (error: {})", parent->filenames[i], error.GetDescription());
 
 			state = ERROR_;
 
-			parent->num_too_large.fetch_add(1, std::memory_order_acq_rel);
+			parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
 		}
 		else
 		{
-			Error error;
-			std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(parent->filenames[i].c_str(), &error);
+			parent->loading_time[i] = load_timer.GetTimeSeconds();
 
-			if (!dump)
-			{
-				parent->error_list[i] = fmt::format("Unable to open GS dump '{}' (error: {})",
-					parent->filenames[i], error.GetDescription());
+			state = READY;
 
-				state = ERROR_;
-				
-				parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
-			}
-			else if (!dump->ReadFile(*parent->dumps[i], parent->max_file_size, &error))
-			{
-				parent->error_list[i] = fmt::format("Unable to read GS dump '{}' (error: {})", parent->filenames[i], error.GetDescription());
-
-				state = ERROR_;
-
-				parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
-			}
-			else
-			{
-				parent->loading_time[i] = load_timer.GetTimeSeconds();
-
-				state = READY;
-
-				parent->num_loaded.fetch_add(1, std::memory_order_acq_rel);
-			}
+			parent->num_loaded.fetch_add(1, std::memory_order_acq_rel);
 		}
 
 		{
@@ -1128,7 +1114,7 @@ void GSDumpFileLoader::Stop()
 void GSDumpFileLoader::DebugPrint()
 {
 	Console.WarningFmt("GSDumpLoader debug");
-	Console.WarningFmt("   Dump           = {}", filenames.size());
+	Console.WarningFmt("   Total dumps    = {}", filenames.size());
 	Console.WarningFmt("   Threads        = {}", num_threads);
 	Console.WarningFmt("   Dumps buffered = {}", num_dumps_buffered);
 	Console.WarningFmt("   Max file size  = {}", max_file_size);
@@ -1138,7 +1124,6 @@ void GSDumpFileLoader::DebugPrint()
 	Console.WarningFmt("   Write          = {}", write);
 	Console.WarningFmt("   Loaded         = {}", num_loaded.load());
 	Console.WarningFmt("   Errored        = {}", num_errored.load());
-	Console.WarningFmt("   Too large      = {}", num_too_large.load());
 	Console.WarningFmt("");
 	for (size_t i = 0; i < filenames.size(); i++)
 	{
