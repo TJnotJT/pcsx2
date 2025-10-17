@@ -1966,11 +1966,14 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	Console.WriteLnFmt("(GSTester/{}) Runners processes are initialized.", GetTesterName());
 
 	std::size_t dump_index = 0; // Current dump that should be written to dump buffer.
-	Common::Timer deadlock_timer; // Time since seeing a packet from a runner.
+	Common::Timer deadlock_timer; // Time since seeing both runners' heartbeats.
+	Common::Timer activity_timer; // Time since uploading a dump or reading a packet.
 	constexpr std::size_t max_failure_restarts = 10; // Max times to attempt restarting before giving up.
 	std::size_t failure_restarts = 0; // Current number of failure restarts.
+	std::size_t loop_counter = 0; // Number of main loop iterations.
 
-	std::optional<GSDumpFileLoader> dump_loader(std::in_place, regression_num_dumps, regression_num_dumps, regression_dump_size);
+	std::optional<GSDumpFileLoader> dump_loader;
+	dump_loader.emplace(regression_num_dumps, regression_num_dumps, regression_dump_size);
 	dump_loader->Start(regression_dump_files);
 	bool done_loading = false;
 
@@ -1986,8 +1989,10 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	// Main testing loop.
 	while (true)
 	{
+		loop_counter++;
 		read_packet = false;
 
+		// Failure restarting.
 		if (fail)
 		{
 			fail = false;
@@ -2046,10 +2051,13 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 					break;
 				}
 
+				// Reset timers.
+				activity_timer.Reset();
 				deadlock_timer.Reset();
 			}
 		}
 
+		// Dump uploading processing.
 		if (!done_loading)
 		{
 			std::string error;
@@ -2095,7 +2103,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 						Console.WriteLnFmt("(GSTester/{}) Copied '{}' to shared memory (load: {:.2} seconds; block: {:.2} seconds; copy: {:.2} seconds)",
 							GetTesterName(), dump_name, info->load_time, info->block_time, seconds);
 						dump_data.clear();
-						deadlock_timer.Reset(); // Decompressing the dump can take time. Don't want false positives.
+						activity_timer.Reset();
 					}
 					else if (retval == ERROR_)
 					{
@@ -2139,83 +2147,100 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			}
 		}
 
-		ReturnValue retval = ProcessPackets();
+		// Packet processing.
+		{
+			ReturnValue retval = ProcessPackets();
 
-		if (retval == SUCCESS)
-		{
-			deadlock_timer.Reset();
-			read_packet = true;
-		}
-		else if (retval == ERROR_)
-		{
-			Console.ErrorFmt("(GSTester/{}) Error in processing packets.", GetTesterName());
-			fail = true;
-			continue;
-		}
-		else if (retval == BUFFER_NOT_READY)
-		{
-			// Try again next iteration.
-		}
-		else
-		{
-			pxFailRel("Unknown return value (impossible).");
-		}
-
-		// See if all dumps are completed or remaining dumps are all skipped.
-		std::size_t i = regression_dump_last_completed.empty() ?
-			0 :
-			regression_dumps_map.at(regression_dump_last_completed) + 1;
-		while (i < regression_dumps.size() && regression_dumps[i].state == DumpInfo::SKIPPED)
-		{
-			i++;
-		}
-		if (i >= regression_dumps.size())
-		{
-			Console.WriteLnFmt("(GSTester/{}) All dumps/packets finished.", GetTesterName());
-			break;
-		}
-
-		// Handle children exiting unexpectedly.
-		int num_exited = 0;
-		for (int i = 0; i < 2; i++)
-		{
-			bool running = regression_runner_proc[i].IsRunning();
-			u32 state = regression_buffer[i].GetStateRunner();
-			if (!running && state != GSRegressionBuffer::DONE_RUNNING)
+			if (retval == SUCCESS)
 			{
-				Console.ErrorFmt("(GSTester/{}) Runner {} exited unexpectedly.", GetTesterName(), regression_runner_name[i]);
+				activity_timer.Reset();
+				read_packet = true;
+			}
+			else if (retval == ERROR_)
+			{
+				Console.ErrorFmt("(GSTester/{}) Error in processing packets.", GetTesterName());
+				fail = true;
+				continue;
+			}
+			else if (retval == BUFFER_NOT_READY)
+			{
+				// Try again next iteration.
+			}
+			else
+			{
+				pxFailRel("Unknown return value (impossible).");
+			}
+		}
+
+		// Check if remaining dumps are all skipped.
+		{
+			std::size_t i =
+				regression_dump_last_completed.empty() ?
+					0 :
+			        regression_dumps_map.at(regression_dump_last_completed) + 1;
+			while (i < regression_dumps.size() && regression_dumps[i].state == DumpInfo::SKIPPED)
+			{
+				i++;
+			}
+			if (i >= regression_dumps.size())
+			{
+				Console.WriteLnFmt("(GSTester/{}) All dumps/packets finished.", GetTesterName());
+				break;
+			}
+		}
+
+		// Do expensive checks every 1024 iterations.
+		if ((loop_counter & 0x3FF) == 0)
+		{
+			// Handle children exiting unexpectedly.
+			int num_exited = 0;
+			for (int i = 0; i < 2; i++)
+			{
+				bool running = regression_runner_proc[i].IsRunning();
+				u32 state = regression_buffer[i].GetStateRunner();
+				if (!running && state != GSRegressionBuffer::DONE_RUNNING)
+				{
+					Console.ErrorFmt("(GSTester/{}) Runner {} exited unexpectedly.", GetTesterName(), regression_runner_name[i]);
+					fail = true;
+				}
+				num_exited += !running;
+			}
+
+			if (num_exited == 2 && !read_packet)
+			{
+				// Both processes exited and we didn't read any packets. Something bad happened.
+				Console.ErrorFmt("(GSTester/{}) Both runners exited unexpectedly.", GetTesterName());
 				fail = true;
 			}
-			num_exited += !running;
-		}
 
-		if (num_exited == 2 && !read_packet)
-		{
-			// Both processes exited and we didn't read any packets. Something bad happened.
-			Console.ErrorFmt("(GSTester/{}) Both runners exited unexpectedly.", GetTesterName());
-			fail = true;
-		}
+			if (fail)
+				continue;
 
-		if (fail)
-			continue;
+			// Check if children are alive and handle possible deadlock.
+			if (regression_buffer[0].CheckRunnerHeartbeat() && regression_buffer[1].CheckRunnerHeartbeat())
+			{
+				for (int i = 0; i < 2; i++)
+					regression_buffer[i].ResetRunnerHeartbeat();
+				deadlock_timer.Reset();
+			}
+			else if (deadlock_timer.GetTimeSeconds() >= regression_deadlock_timeout)
+			{
+				if (regression_dump_last_completed.empty())
+					Console.ErrorFmt("(GSTester/{}) Possible deadlock on dump {} (timeout: {:.2} seconds).", GetTesterName(), regression_dumps[0].name, regression_deadlock_timeout);
+				else
+					Console.ErrorFmt("(GSTester/{}) Possible deadlock detected after dump {}.", GetTesterName(), regression_dump_last_completed);
+				deadlock_timer.Reset();
+				fail = true;
+				continue;
+			}
 
-		// Handle possible deadlock.
-		if (deadlock_timer.GetTimeSeconds() >= regression_deadlock_timeout)
-		{
-			if (regression_dump_last_completed.empty())
-				Console.ErrorFmt("(GSTester/{}) Possible deadlock on dump {} (timeout: {:.2} seconds).", GetTesterName(), regression_dumps[0].name, regression_deadlock_timeout);
-			else
-				Console.ErrorFmt("(GSTester/{}) Possible deadlock detected after dump {}.", GetTesterName(), regression_dump_last_completed);
-			deadlock_timer.Reset();
-			fail = true;
-			continue;
-		}
-
-		if (deadlock_timer.GetTimeSeconds() >= 0.001)
-		{
-			// Wait on event if no packets for 1 ms.
-			regression_event_tester.Reset();
-			regression_event_tester.Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
+			if (activity_timer.GetTimeSeconds() >= GSRegressionBuffer::EVENT_WAIT_SECONDS)
+			{
+				// Wait on event if no packets for some time.
+				regression_event_tester.Reset();
+				regression_event_tester.Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
+				activity_timer.Reset();
+			}
 		}
 		else
 		{

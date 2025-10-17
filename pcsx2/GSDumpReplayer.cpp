@@ -187,11 +187,6 @@ void GSDumpReplayer::EndDumpRegressionTest()
 			rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 		});
 
-		std::function<bool()> wait_cond = [rbp]() {
-			return rbp->GetStateTester() == GSRegressionBuffer::EXIT ||
-			       !GSProcess::IsParentRunning();
-		};
-
 		// Note: must process only one packet sequentially or it will break ring buffer locking.
 
 		if (GSIsHardwareRenderer())
@@ -205,7 +200,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 						rbp->DonePacketWrite();
 				});
 
-				if (packet_hwstat = rbp->GetPacketWrite(wait_cond))
+				if (packet_hwstat = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus, true, false)))
 				{
 					const std::string name_dump = rbp->GetNameDump();
 					packet_hwstat->SetNameDump(name_dump);
@@ -242,7 +237,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 					rbp->DonePacketWrite();
 			});
 
-			if (packet_done_dump = rbp->GetPacketWrite(wait_cond))
+			if (packet_done_dump = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus, true, false)))
 			{
 				const std::string name_dump = rbp->GetNameDump();
 				packet_done_dump->SetNameDump(name_dump);
@@ -463,16 +458,9 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			Console.WriteLnFmt("(GSRunner/{}) Waiting for new dump.", runner_name);
 		});
 
-		std::function<bool()> wait_cond = [rbp]() {
-			u32 state_tester = rbp->GetStateTester();
-			return state_tester == GSRegressionBuffer::EXIT ||
-			       state_tester == GSRegressionBuffer::DONE_UPLOADING ||
-			       !GSProcess::IsParentRunning();
-		};
-
 		Common::Timer timer;
 
-		dump = rbp->GetDumpRead(wait_cond);
+		dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus, true, true));
 
 		if (!dump)
 		{
@@ -524,6 +512,8 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		std::memcpy(s_dump_file_data.data(), dump->GetPtrDump(), dump->GetSizeDump());
 
 		GSDumpFile::OpenGSDumpMemory(s_dump_file, s_dump_file_data.data(), s_dump_file_data.size());
+
+		GSSignalRunnerHeartbeat();
 	}
 	else
 	{
@@ -656,7 +646,6 @@ static void GSDumpReplayerLoadInitialState()
 	std::memcpy(PS2MEM_GS, s_dump_file->GetRegsData().data(),
 		std::min(Ps2MemSize::GSregs, static_cast<u32>(s_dump_file->GetRegsData().size())));
 
-	// Clear the queue so that leftover vertices don't get used in new dump.
 	if (GSDumpReplayer::IsBatchMode())
 	{
 		MTGS::RunOnGSThread([]() {
@@ -666,7 +655,7 @@ static void GSDumpReplayerLoadInitialState()
 
 			Common::Timer timer;
 
-			// Order here is important:
+			// Order is important here:
 			// 1. Reset vertex queue before recreating renderer to prevent unwanted vertex flush.
 			// 2. Recreate renderer before resetting/recreating device to allow all texture cache
 			//    texture to be properly purged.
@@ -684,6 +673,9 @@ static void GSDumpReplayerLoadInitialState()
 
 			Console.WriteLnFmt("(GSRunner/{}) GS reopened ({}) ({:.2} seconds).", GSDumpReplayer::GetRunnerName(),
 				s_batch_recreate_device ? "renderer and device" : "renderer only", sec);
+
+			if (GSIsRegressionTesting())
+				GSSignalRunnerHeartbeat();
 		});
 	}
 
@@ -825,10 +817,10 @@ void GSDumpReplayerCpuStep()
 
 	done_dump = done_dump || (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
-	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::EXIT)
+	if (GSIsRegressionTesting() && GSCheckTesterStatus(true, false))
 	{
 		MTGS::RunOnGSThread([runner_name = GSDumpReplayer::GetRunnerName()]() {
-			Console.WarningFmt("(GSDumpReplayer/{}) Got EXIT from tester.", runner_name);
+			Console.WarningFmt("(GSDumpReplayer/{}) Got exit status from tester.", runner_name);
 		});
 		done_all_dumps = true;
 	}

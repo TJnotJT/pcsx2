@@ -467,8 +467,10 @@ void GSRegressionBuffer::Reset()
 		GetPacket(i)->Init(packet_size);
 	for (int i = 0; i < num_dumps; i++)
 		GetDump(i)->Init(dump_size);
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < num_states; i++)
 		state[i].Set(DEFAULT);
+	for (int i = 0; i < num_events; i++)
+		event[i].Reset();
 }
 
 bool GSRegressionBuffer::OpenFile(
@@ -508,7 +510,7 @@ bool GSRegressionBuffer::CloseFile()
 	num_packets = 0;
 	num_dumps = 0;
 
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < num_events; i++)
 		event[i].Close();
 
 	if (!shm.CloseFile())
@@ -555,6 +557,21 @@ void GSRegressionBuffer::SetNameDump(const std::string& name)
 std::string GSRegressionBuffer::GetNameDump()
 {
 	return dump_name;
+}
+
+void GSRegressionBuffer::SignalRunnerHeartbeat()
+{
+	state[RUNNER_HEARTBEAT].Set(ALIVE);
+}
+
+bool GSRegressionBuffer::CheckRunnerHeartbeat()
+{
+	return state[RUNNER_HEARTBEAT].Get() == ALIVE;
+}
+
+void GSRegressionBuffer::ResetRunnerHeartbeat()
+{
+	state[RUNNER_HEARTBEAT].Set(DEFAULT);
 }
 
 GSRegressionPacket* GSRegressionBuffer::GetPacket(std::size_t i)
@@ -654,9 +671,16 @@ void GSEndRegressionTest()
 
 GSRegressionBuffer* GSGetRegressionBuffer()
 {
-	return GSIsRegressionTesting() ? regression_buffer : nullptr;
+	return regression_buffer;
 }
 
+void GSSignalRunnerHeartbeat()
+{
+	if (regression_buffer)
+		regression_buffer->SignalRunnerHeartbeat();
+	else
+		Console.ErrorFmt("Not regression testing.");
+}
 
 int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2)
 {
@@ -664,12 +688,29 @@ int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPack
 	const GSRegressionPacket::ImageHeader& img2 = p2->image_header;
 
 	if (img1.w != img2.w || img1.h != img2.h || img1.bytes_per_pixel != img2.bytes_per_pixel)
-		return 1.0f; // Formats are different.
+		return INT_MAX; // Formats are different.
 
 	int w = img1.w;
 	int h = img2.h;
 	int bytes_per_pixel = img1.bytes_per_pixel;
 	return StringUtil::StrideMemCmp(p1->GetData(), img1.pitch, p2->GetData(), img2.pitch, w * bytes_per_pixel, h);
+}
+
+bool GSCheckTesterStatus(bool exit, bool done_uploading)
+{
+	if (regression_buffer)
+	{
+		u32 state = regression_buffer->GetStateTester();
+		return
+			(exit && state == GSRegressionBuffer::EXIT) ||
+			(exit && !GSProcess::IsParentRunning()) ||
+			(done_uploading && state == GSRegressionBuffer::DONE_UPLOADING);
+	}
+	else
+	{
+		Console.ErrorFmt("Not regression testing.");
+		return false;
+	}
 }
 
 bool GSProcess::Start(const std::string& command, bool detached)

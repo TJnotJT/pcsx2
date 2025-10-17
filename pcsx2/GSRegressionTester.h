@@ -219,23 +219,26 @@ struct GSRegressionBuffer
 	enum : u32
 	{
 		RUNNER = 0,
-		TESTER = 1
+		TESTER,
+		RUNNER_HEARTBEAT // Used for events
 	};
 
 	enum : u32
 	{
 		DEFAULT = 0, // Both
+		ALIVE, // Runner
 		WRITE_DATA, // Runner
 		WAIT_DUMP, // Runner
 		DONE_RUNNING, // Running
 		DONE_UPLOADING, // Tester
 		EXIT, // Tester
-		STATE_N
+		NUM_STATE_TYPES
 	};
 
-	static constexpr std::array<const char*, STATE_N> STATE_STR = []() {
-		std::array<const char*, STATE_N> arr;
+	static constexpr std::array<const char*, NUM_STATE_TYPES> STATE_STR = []() {
+		std::array<const char*, NUM_STATE_TYPES> arr;
 		arr[DEFAULT] = "DEFAULT";
+		arr[ALIVE] = "ALIVE";
 		arr[WRITE_DATA] = "WRITE_DATA";
 		arr[WAIT_DUMP] = "WAIT_DUMP";
 		arr[DONE_RUNNING] = "DONE_RUNNING";
@@ -245,7 +248,9 @@ struct GSRegressionBuffer
 	}();
 
 	GSSharedMemoryFile shm;
-	GSEvent event[2]; // For signaling runner and tester.
+
+	static constexpr std::size_t num_events = 2;
+	GSEvent event[num_events]; // For signaling runner, tester, and runner heartbeat.
 
 	// (Runner) Owned by GS thread.
 	void* packets = nullptr;
@@ -263,7 +268,7 @@ struct GSRegressionBuffer
 	std::string dump_name;
 
 	// (Runner) Owned by GS thread.
-	static constexpr std::size_t num_states = 2;
+	static constexpr std::size_t num_states = 3;
 	GSIntSharedMemory* state; // Two states owned by runner and tester.
 
 	// Call only once before sharing.
@@ -331,8 +336,9 @@ struct GSRegressionBuffer
 	std::string GetNameDump(); // (Runner) GS thread only.
 
 	// Always safe to call.
-	void WaitEventRead(double seconds);
-	void WaitEventWrite(double seconds);
+	void SignalRunnerHeartbeat(); // Only use by runner.
+	bool CheckRunnerHeartbeat(); // Only use by tester.
+	void ResetRunnerHeartbeat(); // Only use by tester.
 
 	// Unsafe, for private use only.
 	GSRegressionPacket* GetPacket(std::size_t i);
@@ -360,6 +366,8 @@ void GSStartRegressionTest(
 	std::size_t dump_size);
 void GSEndRegressionTest();
 GSRegressionBuffer* GSGetRegressionBuffer();
+bool GSCheckTesterStatus(bool exit, bool done_uploading);
+void GSSignalRunnerHeartbeat();
 
 // Used by the tester process to compare images.
 int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2);
