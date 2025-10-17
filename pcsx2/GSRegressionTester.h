@@ -1,6 +1,8 @@
 #pragma once
 
 #include <mutex>
+#include <functional>
+#include <array>
 
 #ifdef __WIN32__
 #include <windows.h>
@@ -31,10 +33,10 @@ struct GSEvent
 
 	static std::wstring GetGlobalName(const std::string& name);
 #else
-	// Not inplemented;
+	// Not implemented;
 #endif
 	bool Open_(const std::string& name);
-	bool Create(const std::string& name, std::size_t count, std::size_t max_count);
+	bool Create(const std::string& name);
 	bool Close() const;
 	bool Wait(double seconds) const;
 	bool Reset() const;
@@ -212,6 +214,8 @@ struct GSSemaphore
 // Ring buffers of regression packets and dump files.
 struct GSRegressionBuffer
 {
+	static constexpr double EVENT_WAIT_SECONDS = 15.0 / 1000.0;
+
 	enum : u32
 	{
 		RUNNER = 0,
@@ -220,15 +224,28 @@ struct GSRegressionBuffer
 
 	enum : u32
 	{
-		DEFAULT, // Both
+		DEFAULT = 0, // Both
 		WRITE_DATA, // Runner
 		WAIT_DUMP, // Runner
 		DONE_RUNNING, // Running
 		DONE_UPLOADING, // Tester
-		EXIT // Tester
+		EXIT, // Tester
+		STATE_N
 	};
 
+	static constexpr std::array<const char*, STATE_N> STATE_STR = []() {
+		std::array<const char*, STATE_N> arr;
+		arr[DEFAULT] = "DEFAULT";
+		arr[WRITE_DATA] = "WRITE_DATA";
+		arr[WAIT_DUMP] = "WAIT_DUMP";
+		arr[DONE_RUNNING] = "DONE_RUNNING";
+		arr[DONE_UPLOADING] = "DONE_UPLOADING";
+		arr[EXIT] = "EXIT";
+		return arr;
+	}();
+
 	GSSharedMemoryFile shm;
+	GSEvent event[2]; // For signaling runner and tester.
 
 	// (Runner) Owned by GS thread.
 	void* packets = nullptr;
@@ -236,9 +253,6 @@ struct GSRegressionBuffer
 	std::size_t packet_size = 0;
 	std::size_t packet_write = 0;
 	std::size_t packet_read = 0;
-
-	GSEvent event_packet_write;
-	GSEvent event_packet_read;
 
 	// (Runner) Owned by main thread.
 	void* dumps = nullptr;
@@ -248,24 +262,40 @@ struct GSRegressionBuffer
 	std::size_t dump_size = 0;
 	std::string dump_name;
 
-	GSEvent event_dump_write;
-	GSEvent event_dump_read;
-
 	// (Runner) Owned by GS thread.
 	static constexpr std::size_t num_states = 2;
 	GSIntSharedMemory* state; // Two states owned by runner and tester.
 
 	// Call only once before sharing.
-	bool CreateFile_(std::string& semaphore_name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+	bool CreateFile_(
+		const std::string& name,
+		const std::string& event_runner_name,
+		const std::string& event_tester_name,
+		std::size_t num_packets,
+		std::size_t packet_size,
+		std::size_t num_dumps,
+		std::size_t dump_size);
 
 	// Call only once by child.
-	bool OpenFile(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+	bool OpenFile(
+		const std::string& name,
+		const std::string& event_runner_name,
+		const std::string& event_tester_name,
+		std::size_t num_packets,
+		std::size_t packet_size,
+		std::size_t num_dumps,
+		std::size_t dump_size);
 
 	// Call only once by parent.
 	bool CloseFile();
 
 	// Call only once to initialize.
-	void Init(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
+	void Init(
+		const std::string& name,
+		std::size_t num_packets,
+		std::size_t packet_size,
+		std::size_t num_dumps,
+		std::size_t dump_size);
 	void Reset();
 
 	// Thread safe; acquire ownership.
@@ -300,21 +330,16 @@ struct GSRegressionBuffer
 	void SetNameDump(const std::string& name); // (Runner) main thread only.
 	std::string GetNameDump(); // (Runner) GS thread only.
 
+	// Always safe to call.
+	void WaitEventRead(double seconds);
+	void WaitEventWrite(double seconds);
+
 	// Unsafe, for private use only.
 	GSRegressionPacket* GetPacket(std::size_t i);
 	GSDumpFileSharedMemory* GetDump(std::size_t i);
 
 	// Static.
 	static std::size_t GetTotalSize(std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size);
-	static std::string GetSemPacketWriteName(const std::string& name);
-	static std::string GetSemPacketReadName(const std::string& name);
-	static std::string GetSemDumpWriteName(const std::string& name);
-	static std::string GetSemDumpReadName(const std::string& name);
-
-	static std::string GetEventPacketWriteName(const std::string& name);
-	static std::string GetEventPacketReadName(const std::string& name);
-	static std::string GetEventDumpWriteName(const std::string& name);
-	static std::string GetEventDumpReadName(const std::string& name);
 
 	// Debug; unsafe.
 	void DebugDumpBuffer();
@@ -324,8 +349,15 @@ struct GSRegressionBuffer
 
 // To be call by the runner process when in regression test mode.
 bool GSIsRegressionTesting();
-void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::size_t num_packets, std::size_t packet_size,
-	std::size_t num_dumps, std::size_t dump_size);
+void GSStartRegressionTest(
+	GSRegressionBuffer* rpb,
+	const std::string& fn,
+	const std::string& event_name_runner,
+	const std::string& event_name_tester,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size);
 void GSEndRegressionTest();
 GSRegressionBuffer* GSGetRegressionBuffer();
 

@@ -1107,3 +1107,8 @@ void GSDumpFileLoader::Stop()
 			t.join();
 	}
 }
+
+void GSDumpFileLoader::DebugPrint()
+{
+
+}

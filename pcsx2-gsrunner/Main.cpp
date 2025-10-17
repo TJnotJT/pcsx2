@@ -119,6 +119,9 @@ struct GSTester
 	std::string GetTesterName();
 	int MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id);
 	
+	static std::string GetEventNameRunner(GSProcess::PID_t tester_pid, const std::string& runner_name);
+	static std::string GetEventNameTester(GSProcess::PID_t tester_pid);
+	
 	static int main_tester(int argc, char* argv[]);
 
 	enum
@@ -144,6 +147,7 @@ struct GSTester
 	std::string regression_output_dir_runner[2];
 	std::string regression_runner_args;
 	GSRegressionBuffer regression_buffer[2];
+	GSEvent regression_event_tester;
 	std::string regression_runner_path[2];
 	std::string regression_runner_command[2];
 	std::string regression_runner_name[2];
@@ -1481,6 +1485,16 @@ static void CPUThreadMain(VMBootParameters* params)
 	GSRunner::StopPlatformMessagePump();
 }
 
+std::string GSTester::GetEventNameRunner(GSProcess::PID_t tester_pid, const std::string& runner_name)
+{
+	return std::string("runner event ") + std::to_string(tester_pid) + " " + runner_name;
+}
+
+std::string GSTester::GetEventNameTester(GSProcess::PID_t tester_pid)
+{
+	return std::string("tester event ") + std::to_string(tester_pid);
+}
+
 GSTester::ReturnValue GSTester::CopyDumpToSharedMemory(const std::vector<u8>& data, const std::string& name)
 {
 	pxAssert(data.size() <= regression_dump_size);
@@ -1688,14 +1702,22 @@ int GSRunner::main_runner(int argc, char* argv[])
 	// (regression test data is dumped to memory).
 	if (!s_regression_file.empty())
 	{
-		GSStartRegressionTest(&s_regression_buffer, s_regression_file,
-			s_regression_num_packets, s_regression_packet_size, s_regression_num_dumps, s_regression_dump_size);
 
 		if (s_parent_pid == 0)
 		{
 			Console.ErrorFmt("(GSRunner/{}/{}) Regression testing without a valid parent PID.", s_runner_name, GSProcess::GetCurrentPID());
 			return EXIT_FAILURE;
 		}
+
+		GSStartRegressionTest(
+			&s_regression_buffer,
+			s_regression_file,
+			GSTester::GetEventNameRunner(s_parent_pid, s_runner_name),
+			GSTester::GetEventNameTester(s_parent_pid),
+			s_regression_num_packets,
+			s_regression_packet_size,
+			s_regression_num_dumps,
+			s_regression_dump_size);
 
 		if (!GSProcess::SetParentPID(s_parent_pid))
 		{
@@ -1907,14 +1929,23 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 
 	Console.WriteLnFmt("(GSTester/{}) Found {} dumps in '{}'", GetTesterName(), regression_dumps.size(), regression_dump_dir);
 
+	// Make the tester event.
+	regression_event_tester.Create(GetEventNameTester(GSProcess::GetCurrentPID()));
+
 	Console.WriteLnFmt("(GSTester/{}) Creating shared memory files.", GetTesterName());
 	for (int i = 0; i < 2; i++)
 	{
 		regression_shared_file[i] = "regression-test-file-" + std::to_string(GetCurrentProcessId()) +
 			"-" + std::to_string(thread_id) + "-" + std::to_string(i);
 
-		if (!regression_buffer[i].CreateFile_(regression_shared_file[i], regression_num_packets, regression_packet_size,
-			regression_num_dumps, regression_dump_size))
+		if (!regression_buffer[i].CreateFile_(
+			regression_shared_file[i],
+			GetEventNameRunner(GSProcess::GetCurrentPID(), regression_runner_name[i]),
+			regression_event_tester.name,
+			regression_num_packets,
+			regression_packet_size,
+			regression_num_dumps,
+			regression_dump_size))
 		{
 			Console.ErrorFmt("(GSTester) Unable to create regression shared file: {}", regression_shared_file[i]);
 			return EXIT_FAILURE;
@@ -1945,29 +1976,20 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	std::string dump_name; // Cache the dump from disk to shared with runner processes.
 	Error error; // Current error.
 	bool fail = false; // Signals a failure at some point in processing.
-	bool sleep_dump = false; // Signals to sleep a bit for runners to catch up.
-	bool sleep_packet = false; // Signals to sleep a bit for runners to catch up.
-	const int sleep_ms_min = 16;
-	const int sleep_ms_max = 128;
-	int sleep_ms = sleep_ms_min;
+	int wait_buffer = 0;
 
 	Console.WriteLnFmt("(GSTester/{}) Starting main testing loop.", GetTesterName());
 
 	// Main testing loop.
 	while (true)
 	{
-		if (!(sleep_dump && sleep_packet))
-			sleep_ms = sleep_ms_min;
-
-		sleep_dump = false;
-		sleep_packet = false;
-
 		if (fail)
 		{
 			fail = false;
 
 			for (int i = 0; i < 2; i++)
 			{
+				Console.WarningFmt("Debug for {}", regression_runner_name[i]);
 				regression_buffer[i].DebugState();
 				regression_buffer[i].DebugDumpBuffer();
 				regression_buffer[i].DebugPacketBuffer();
@@ -2074,7 +2096,6 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 					else if (retval == BUFFER_NOT_READY)
 					{
 						// Try again next iteration.
-						sleep_dump = true;
 					}
 					else
 					{
@@ -2122,7 +2143,6 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		else if (retval == BUFFER_NOT_READY)
 		{
 			// Try again next iteration.
-			sleep_packet = true;
 		}
 		else
 		{
@@ -2168,10 +2188,11 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 			continue;
 		}
 
-		if (sleep_dump && sleep_packet)
+		double wait_ms = 1000 * deadlock_timer.GetTimeSeconds();
+		if (wait_ms >= 1.0)
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-			sleep_ms = std::min(sleep_ms * 2, sleep_ms_max);
+			regression_event_tester.Reset();
+			regression_event_tester.Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
 		}
 		else
 		{

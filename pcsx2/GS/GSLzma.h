@@ -405,4 +405,7 @@ struct GSDumpFileLoader
 	bool DoneWrite();
 	bool DoneRead();
 	bool Stopped();
+
+	// Unsafe
+	void DebugPrint();
 };

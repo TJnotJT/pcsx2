@@ -12,8 +12,6 @@
 #include "common/StringUtil.h"
 #endif
 
-constexpr double EVENT_WAIT_SECONDS = 0.1;
-
 static GSRegressionBuffer* regression_buffer; // Used by GS runner processes.
 
 __forceinline static void CopyStringToBuffer(char* dst, std::size_t dst_size, const std::string& src)
@@ -90,7 +88,7 @@ bool GSSpinlockSharedMemory::LockWrite(bool block, GSEvent* event, GSIntSharedMe
 		}
 
 		if (event)
-			event->Wait(EVENT_WAIT_SECONDS);
+			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
 		else
 			std::this_thread::yield();
 	}
@@ -121,7 +119,7 @@ bool GSSpinlockSharedMemory::LockRead(bool block, GSEvent* event, GSIntSharedMem
 		}
 
 		if (event)
-			event->Wait(EVENT_WAIT_SECONDS);
+			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
 		else
 			std::this_thread::yield();
 	}
@@ -175,7 +173,7 @@ bool GSSpinlockSharedMemory::Lock(bool block, GSEvent* event, GSIntSharedMemory*
 		}
 
 		if (event)
-			event->Wait(EVENT_WAIT_SECONDS);
+			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
 		else
 			std::this_thread::yield();
 	}
@@ -188,9 +186,9 @@ bool GSSpinlockSharedMemory::Unlock()
 
 GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(bool block, bool check_parent)
 {
-	event_packet_write.Reset();
+	event[RUNNER].Reset();
 
-	if (!GetPacket(packet_write % num_packets)->lock.LockWrite(block, &event_packet_write, &state[TESTER], check_parent))
+	if (!GetPacket(packet_write % num_packets)->lock.LockWrite(block, &event[RUNNER], &state[TESTER], check_parent))
 		return nullptr;
 
 	return GetPacket(packet_write % num_packets);
@@ -198,9 +196,9 @@ GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(bool block, bool check_pa
 
 GSRegressionPacket* GSRegressionBuffer::GetPacketRead(bool block, bool check_parent)
 {
-	event_packet_read.Reset();
+	event[TESTER].Reset();
 
-	if (!GetPacket(packet_read % num_packets)->lock.LockRead(block, &event_packet_read, & state[TESTER], check_parent))
+	if (!GetPacket(packet_read % num_packets)->lock.LockRead(block, &event[TESTER], &state[TESTER], check_parent))
 		return nullptr;
 
 	return GetPacket(packet_read % num_packets);
@@ -211,7 +209,7 @@ void GSRegressionBuffer::DonePacketWrite()
 	if (!GetPacket(packet_write % num_packets)->lock.UnlockWrite())
 		pxFail("Unlock packet write is broken.");
 
-	event_packet_read.Signal();
+	event[TESTER].Signal();
 
 	packet_write++;
 }
@@ -221,16 +219,16 @@ void GSRegressionBuffer::DonePacketRead()
 	if (!GetPacket(packet_read % num_packets)->lock.UnlockRead())
 		pxFail("Unlock packet read is broken.");
 
-	event_packet_write.Signal();
+	event[RUNNER].Signal();
 
 	packet_read++;
 }
 
 GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(bool block, bool check_parent)
 {
-	event_dump_write.Reset();
+	event[TESTER].Reset();
 
-	if (!GetDump(dump_write % num_dumps)->lock.LockWrite(block, &event_dump_write, &state[TESTER], check_parent))
+	if (!GetDump(dump_write % num_dumps)->lock.LockWrite(block, &event[TESTER], &state[TESTER], check_parent))
 		return nullptr;
 
 	return GetDump(dump_write % num_dumps);
@@ -238,9 +236,9 @@ GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(bool block, bool check_
 
 GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpRead(bool block, bool check_parent)
 {
-	event_dump_read.Reset();
+	event[RUNNER].Reset();
 
-	if (!GetDump(dump_read % num_dumps)->lock.LockRead(block, &event_dump_read, & state[TESTER], check_parent))
+	if (!GetDump(dump_read % num_dumps)->lock.LockRead(block, &event[RUNNER], &state[TESTER], check_parent))
 		return nullptr;
 
 	return GetDump(dump_read % num_dumps);
@@ -251,7 +249,7 @@ void GSRegressionBuffer::DoneDumpWrite()
 	if (!GetDump(dump_write % num_dumps)->lock.UnlockWrite())
 		pxFail("Unlock dump write is broken.");
 
-	event_dump_read.Signal();
+	event[RUNNER].Signal();
 
 	dump_write++;
 }
@@ -261,7 +259,7 @@ void GSRegressionBuffer::DoneDumpRead()
 	if (!GetDump(dump_read % num_dumps)->lock.UnlockRead())
 		pxFail("Unlock dump read is broken.");
 
-	event_dump_write.Signal();
+	event[TESTER].Signal();
 
 	dump_read++;
 }
@@ -416,57 +414,38 @@ std::size_t GSRegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_
 		num_states * GSIntSharedMemory::GetTotalSize();
 }
 
-std::string GSRegressionBuffer::GetEventPacketWriteName(const std::string& name)
-{
-	return name + " (event packet write)";
-}
-
-std::string GSRegressionBuffer::GetEventPacketReadName(const std::string& name)
-{
-	return name + " (event packet read)";
-}
-
-std::string GSRegressionBuffer::GetEventDumpWriteName(const std::string& name)
-{
-	return name + " (event dump write)";
-}
-
-std::string GSRegressionBuffer::GetEventDumpReadName(const std::string& name)
-{
-	return name + " (event dump read)";
-}
-
-bool GSRegressionBuffer::CreateFile_(std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size)
+bool GSRegressionBuffer::CreateFile_(
+	const std::string& name,
+	const std::string& event_runner_name,
+	const std::string& event_tester_name,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
 {
 	if (!shm.CreateFile_(name, GetTotalSize(num_packets, packet_size, num_dumps, dump_size)))
 		return false;
 
-	if (!event_packet_write.Create(GetEventPacketWriteName(name), num_packets, num_packets))
+	if (!event[RUNNER].Create(event_runner_name))
 	{
 		CloseFile();
 		return false;
 	}
 
-	if (!event_packet_read.Create(GetEventPacketReadName(name), 0, num_packets))
-	{
-		CloseFile();
-		return false;
-	}
-
-	if (!event_dump_write.Create(GetEventDumpWriteName(name), num_dumps, num_dumps))
-	{
-		CloseFile();
-		return false;
-	}
-
-	if (!event_dump_read.Create(GetEventDumpReadName(name), 0, num_dumps))
+	// Should be created by tester process before.
+	if (!event[TESTER].Open_(event_tester_name))
 	{
 		CloseFile();
 		return false;
 	}
 
 	// Set constant state.
-	Init(name, num_packets, packet_size, num_dumps, dump_size);
+	Init(
+		name,
+		num_packets,
+		packet_size,
+		num_dumps,
+		dump_size);
 
 	// Set transient state.
 	Reset();
@@ -474,7 +453,12 @@ bool GSRegressionBuffer::CreateFile_(std::string& name, std::size_t num_packets,
 	return true;
 }
 
-void GSRegressionBuffer::Init(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size)
+void GSRegressionBuffer::Init(
+	const std::string& name,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
 {
 	std::size_t packet_offset;
 	std::size_t dump_file_offset;
@@ -520,30 +504,25 @@ void GSRegressionBuffer::Reset()
 		state[i].Set(DEFAULT);
 }
 
-bool GSRegressionBuffer::OpenFile(const std::string& name, std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size)
+bool GSRegressionBuffer::OpenFile(
+	const std::string& name,
+	const std::string& event_runner_name,
+	const std::string& event_tester_name,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
 {
 	if (!shm.OpenFile(name, GetTotalSize(num_packets, packet_size, num_dumps, dump_size)))
 		return false;
 
-	if (!event_packet_write.Open_(GetEventPacketWriteName(name)))
+	if (!event[RUNNER].Open_(event_runner_name))
 	{
 		CloseFile();
 		return false;
 	}
 
-	if (!event_packet_read.Open_(GetEventPacketReadName(name)))
-	{
-		CloseFile();
-		return false;
-	}
-
-	if (!event_dump_write.Open_(GetEventDumpWriteName(name)))
-	{
-		CloseFile();
-		return false;
-	}
-
-	if (!event_dump_read.Open_(GetEventDumpReadName(name)))
+	if (!event[TESTER].Open_(event_tester_name))
 	{
 		CloseFile();
 		return false;
@@ -562,10 +541,8 @@ bool GSRegressionBuffer::CloseFile()
 	num_packets = 0;
 	num_dumps = 0;
 
-	event_packet_write.Close();
-	event_packet_read.Close();
-	event_dump_write.Close();
-	event_dump_read.Close();
+	for (int i = 0; i < 2; i++)
+		event[i].Close();
 
 	if (!shm.CloseFile())
 		return false;
@@ -656,7 +633,7 @@ void GSRegressionBuffer::DebugPacketBuffer()
 
 void GSRegressionBuffer::DebugState()
 {
-	Console.WarningFmt("runner_state={} tester_state={}", state[RUNNER].Get(), state[TESTER].Get());
+	Console.WarningFmt("runner_state={} tester_state={}", STATE_STR.at(state[RUNNER].Get()), STATE_STR.at(state[TESTER].Get()));
 }
 
 bool GSIsRegressionTesting()
@@ -665,10 +642,24 @@ bool GSIsRegressionTesting()
 }
 
 /// Start regression testing within the producer/GS runner process.
-void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::size_t num_packets,
-	std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size)
+void GSStartRegressionTest(
+	GSRegressionBuffer* rbp,
+	const std::string& fn,
+	const std::string& event_name_runner,
+	const std::string& event_name_tester,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
 {
-	if (!rpb->OpenFile(fn, num_packets, packet_size, num_dumps, dump_size))
+	if (!rbp->OpenFile(
+		fn,
+		event_name_runner,
+		event_name_tester,
+		num_packets,
+		packet_size,
+		num_dumps,
+		dump_size))
 	{
 		pxFail("Unable to start regression test.");
 		return;
@@ -676,7 +667,7 @@ void GSStartRegressionTest(GSRegressionBuffer* rpb, const std::string& fn, std::
 
 	Console.WriteLnFmt("Opened {} for regression testing.", fn);
 
-	regression_buffer = rpb;
+	regression_buffer = rbp;
 }
 
 void GSEndRegressionTest()
@@ -1142,7 +1133,7 @@ std::wstring GSEvent::GetGlobalName(const std::string& name)
 	return StringUtil::UTF8StringToWideString("Global\\" + name);
 }
 
-bool GSEvent::Create(const std::string& name, std::size_t count, std::size_t max_count)
+bool GSEvent::Create(const std::string& name)
 {
 #ifdef __WIN32__
 	std::wstring name_global = GetGlobalName(name);
@@ -1155,7 +1146,7 @@ bool GSEvent::Create(const std::string& name, std::size_t count, std::size_t max
 
 	if (!handle)
 	{
-		Console.ErrorFmt("Failed to create semaphore: {} (error: {}).", name, GetLastError());
+		Console.ErrorFmt("Failed to create event: {} (error: {}).", name, GetLastError());
 		return false;
 	}
 
