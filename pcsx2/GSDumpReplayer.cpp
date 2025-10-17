@@ -187,6 +187,11 @@ void GSDumpReplayer::EndDumpRegressionTest()
 			rbp->SetStateRunner(GSRegressionBuffer::DEFAULT);
 		});
 
+		std::function<bool()> wait_cond = [rbp]() {
+			return rbp->GetStateTester() == GSRegressionBuffer::EXIT ||
+			       !GSProcess::IsParentRunning();
+		};
+
 		// Note: must process only one packet sequentially or it will break ring buffer locking.
 
 		if (GSIsHardwareRenderer())
@@ -200,7 +205,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 						rbp->DonePacketWrite();
 				});
 
-				if (packet_hwstat = rbp->GetPacketWrite(true, true))
+				if (packet_hwstat = rbp->GetPacketWrite(wait_cond))
 				{
 					const std::string name_dump = rbp->GetNameDump();
 					packet_hwstat->SetNameDump(name_dump);
@@ -237,7 +242,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 					rbp->DonePacketWrite();
 			});
 
-			if (packet_done_dump = rbp->GetPacketWrite(true, true))
+			if (packet_done_dump = rbp->GetPacketWrite(wait_cond))
 			{
 				const std::string name_dump = rbp->GetNameDump();
 				packet_done_dump->SetNameDump(name_dump);
@@ -458,9 +463,16 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			Console.WriteLnFmt("(GSRunner/{}) Waiting for new dump.", runner_name);
 		});
 
+		std::function<bool()> wait_cond = [rbp]() {
+			u32 state_tester = rbp->GetStateTester();
+			return state_tester == GSRegressionBuffer::EXIT ||
+			       state_tester == GSRegressionBuffer::DONE_UPLOADING ||
+			       !GSProcess::IsParentRunning();
+		};
+
 		Common::Timer timer;
 
-		dump = rbp->GetDumpRead(true, true);
+		dump = rbp->GetDumpRead(wait_cond);
 
 		if (!dump)
 		{
@@ -486,6 +498,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			}
 			else
 			{
+				// Should be impossible.
 				MTGS::RunOnGSThread([runner_name = GetRunnerName()]() {
 					Console.ErrorFmt("(GSRunner/{}) Dump read failed for unknown reason.", runner_name);
 				});

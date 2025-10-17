@@ -55,8 +55,8 @@ struct GSSpinlockSharedMemory
 
 	GSIntSharedMemory lock;
 
-	bool LockWrite(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
-	bool LockRead(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
+	bool LockWrite(GSEvent* event, std::function<bool()> cond);
+	bool LockRead(GSEvent* event, std::function<bool()> cond);
 	bool UnlockWrite();
 	bool UnlockRead();
 	bool Writeable();
@@ -69,7 +69,7 @@ struct GSSpinlockSharedMemory
 		LOCKED = 1
 	};
 
-	bool Lock(bool block, GSEvent* event, GSIntSharedMemory* done, bool check_parent);
+	bool Lock(GSEvent* event, std::function<bool()> cond);
 	bool Unlock();
 };
 
@@ -300,8 +300,8 @@ struct GSRegressionBuffer
 
 	// Thread safe; acquire ownership.
 	// (Runner) GS thread only.
-	GSRegressionPacket* GetPacketWrite(bool block = true, bool check_parent = false);
-	GSRegressionPacket* GetPacketRead(bool block = false, bool check_parent = false);
+	GSRegressionPacket* GetPacketWrite(std::function<bool()> cond = nullptr);
+	GSRegressionPacket* GetPacketRead(std::function<bool()> cond = nullptr);
 
 	// Call only by owner to release ownership.
 	// (Runner) GS thread only.
@@ -310,8 +310,8 @@ struct GSRegressionBuffer
 
 	// Thread safe; acquire ownership.
 	// (Runner) Main thread only.
-	GSDumpFileSharedMemory* GetDumpWrite(bool block = true, bool check_parent = false);
-	GSDumpFileSharedMemory* GetDumpRead(bool block = false, bool check_parent = false);
+	GSDumpFileSharedMemory* GetDumpWrite(std::function<bool()> cond = nullptr);
+	GSDumpFileSharedMemory* GetDumpRead(std::function<bool()> cond = nullptr);
 
 	// Call only by owner to release ownership.
 	// (Runner) Main thread only.

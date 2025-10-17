@@ -779,7 +779,12 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 					screenshot_pixels.clear();
 				});
 
-				if (packet = rbp->GetPacketWrite(true, true))
+				std::function<bool()> wait_cond = [rbp]() {
+					return rbp->GetStateTester() == GSRegressionBuffer::EXIT ||
+					       !GSProcess::IsParentRunning();
+				};
+
+				if (packet = rbp->GetPacketWrite(wait_cond))
 				{
 					packet->SetNameDump(rbp->GetNameDump());
 					packet->SetNamePacket(m_snapshot);

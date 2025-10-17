@@ -134,7 +134,7 @@ struct GSTester
 	static constexpr std::size_t regression_failure_restarts_max = 10;
 	static constexpr std::size_t regression_packet_size_default = 5 * _1mb;
 	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
-	static constexpr std::size_t regression_num_packets_default = 60;
+	static constexpr std::size_t regression_num_packets_default = 100;
 	static constexpr std::size_t regression_num_dumps_default = 3;
 	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
 	static constexpr double regression_deadlock_timeout_default = 60.0; // seconds
@@ -1503,7 +1503,7 @@ GSTester::ReturnValue GSTester::CopyDumpToSharedMemory(const std::vector<u8>& da
 
 	for (int i = 0; i < 2; i++)
 	{
-		dump_shared[i] = regression_buffer[i].GetDumpWrite(false); // Don't block
+		dump_shared[i] = regression_buffer[i].GetDumpWrite();
 		if (!dump_shared[i])
 		{
 			return BUFFER_NOT_READY;
@@ -1540,7 +1540,7 @@ GSTester::ReturnValue GSTester::ProcessPackets()
 
 	for (int i = 0; i < 2; i++)
 	{
-		packets[i] = regression_buffer[i].GetPacketRead(false);
+		packets[i] = regression_buffer[i].GetPacketRead();
 	}
 
 	// We have packets from both runners. Compare and output if different.
@@ -1837,7 +1837,7 @@ bool GSTester::StartRunners()
 		Console.WriteLnFmt("(GSTester/{}) Waiting for runner processes...", GetTesterName());
 	}
 
-	return true; // Unreachable
+	return false; // Unreachable
 }
 
 // Try to end the runner processes gracefully and otherwise terminate them.
@@ -1976,13 +1976,15 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 	std::string dump_name; // Cache the dump from disk to shared with runner processes.
 	Error error; // Current error.
 	bool fail = false; // Signals a failure at some point in processing.
-	int wait_buffer = 0;
+	bool read_packet;
 
 	Console.WriteLnFmt("(GSTester/{}) Starting main testing loop.", GetTesterName());
 
 	// Main testing loop.
 	while (true)
 	{
+		read_packet = false;
+
 		if (fail)
 		{
 			fail = false;
@@ -2133,6 +2135,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		if (retval == SUCCESS)
 		{
 			deadlock_timer.Reset();
+			read_packet = true;
 		}
 		else if (retval == ERROR_)
 		{
@@ -2164,13 +2167,24 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		}
 
 		// Handle children exiting unexpectedly.
+		int num_exited = 0;
 		for (int i = 0; i < 2; i++)
 		{
-			if (!regression_runner_proc[i].IsRunning() && regression_buffer[i].GetStateRunner() != GSRegressionBuffer::DONE_RUNNING)
+			bool running = regression_runner_proc[i].IsRunning();
+			u32 state = regression_buffer[i].GetStateRunner();
+			if (!running && state != GSRegressionBuffer::DONE_RUNNING)
 			{
 				Console.ErrorFmt("(GSTester/{}) Runner {} exited unexpectedly.", GetTesterName(), regression_runner_name[i]);
 				fail = true;
 			}
+			num_exited += !running;
+		}
+
+		if (num_exited == 2 && !read_packet)
+		{
+			// Both processes exited and we didn't read any packets. Something bad happened.
+			Console.ErrorFmt("(GSTester/{}) Both runners exited unexpectedly.", GetTesterName());
+			fail = true;
 		}
 
 		if (fail)

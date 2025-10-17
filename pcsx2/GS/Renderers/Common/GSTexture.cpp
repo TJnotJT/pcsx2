@@ -70,7 +70,13 @@ bool GSTexture::Save(const std::string& fn, GSRegressionBuffer* rbp)
 			if (packet)
 				rbp->DonePacketWrite();
 		});
-		if (packet = rbp->GetPacketWrite(true, true))
+
+		std::function<bool()> wait_cond = [rbp]() {
+			return rbp->GetStateTester() == GSRegressionBuffer::EXIT ||
+			       !GSProcess::IsParentRunning();
+		};
+
+		if (packet = rbp->GetPacketWrite(wait_cond))
 		{
 			packet->SetNameDump(rbp->GetNameDump());
 			packet->SetNamePacket(fn);

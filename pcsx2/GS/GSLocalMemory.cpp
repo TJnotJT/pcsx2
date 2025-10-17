@@ -675,7 +675,13 @@ void GSLocalMemory::SaveBMP(const std::string& fn, u32 bp, u32 bw, u32 psm, int 
 	if (rbp)
 	{
 		rbp->SetStateRunner(GSRegressionBuffer::WRITE_DATA);
-		packet = rbp->GetPacketWrite(true, true);
+
+		std::function<bool()> wait_cond = [rbp]() {
+			return rbp->GetStateTester() == GSRegressionBuffer::EXIT ||
+			       !GSProcess::IsParentRunning();
+		};
+
+		packet = rbp->GetPacketWrite(wait_cond);
 		if (!packet)
 		{
 			Console.ErrorFmt("(GSRunner/{}) Failed to get regression packet.", GSDumpReplayer::GetRunnerName());

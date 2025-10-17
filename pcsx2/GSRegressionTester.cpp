@@ -63,29 +63,18 @@ std::size_t GSIntSharedMemory::GetTotalSize()
 	return sizeof(GSIntSharedMemory);
 }
 
-bool GSSpinlockSharedMemory::LockWrite(bool block, GSEvent* event, GSIntSharedMemory* state, bool check_parent)
+bool GSSpinlockSharedMemory::LockWrite(GSEvent* event, std::function<bool()> cond)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::EXIT)
-		{
-			return false; // Fail when EXIT message.
-		}
+		if (cond && cond())
+			return false;
 
-		if (check_parent && GSProcess::GetParentPID() != 0 && !GSProcess::IsParentRunning())
-		{
-			return false; // Fail when parent exited.
-		}
-
-		if (lock.CompareExchange(WRITEABLE, WRITEABLE) == WRITEABLE)
-		{
+		if (lock.CompareExchange(WRITEABLE, WRITEABLE) == WRITEABLE) // Check the lock
 			return true; // Acquired write.
-		}
 
-		if (!block)
-		{
-			return false; // Fail after 1 try when non-blocking.
-		}
+		if (!cond) // Fail after 1 try when non-blocking.
+			return false;
 
 		if (event)
 			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
@@ -94,29 +83,18 @@ bool GSSpinlockSharedMemory::LockWrite(bool block, GSEvent* event, GSIntSharedMe
 	}
 }
 
-bool GSSpinlockSharedMemory::LockRead(bool block, GSEvent* event, GSIntSharedMemory* state, bool check_parent)
+bool GSSpinlockSharedMemory::LockRead(GSEvent* event, std::function<bool()> cond)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::EXIT)
-		{
-			return false; // Fail when EXIT message.
-		}
-
-		if (check_parent && GSProcess::GetParentPID() != 0 && !GSProcess::IsParentRunning())
-		{
-			return false; // Fail when parent exited.
-		}
+		if (cond && cond())
+			return false;
 
 		if (lock.CompareExchange(READABLE, READABLE) == READABLE) // Check the lock
-		{
 			return true; // Acquired read.
-		}
 
-		if (!block)
-		{
-			return false; // Fail after 1 try when non-blocking.
-		}
+		if (!cond) // Fail after 1 try when non-blocking.
+			return false;
 
 		if (event)
 			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
@@ -148,29 +126,18 @@ bool GSSpinlockSharedMemory::Readable()
 	return lock.Get() == READABLE;
 }
 
-bool GSSpinlockSharedMemory::Lock(bool block, GSEvent* event, GSIntSharedMemory* state, bool check_parent)
+bool GSSpinlockSharedMemory::Lock(GSEvent* event, std::function<bool()> cond)
 {
 	while (true)
 	{
-		if (state && state->Get() == GSRegressionBuffer::EXIT)
-		{
-			return false; // Fail when exit message.
-		}
+		if (cond && cond())
+			return false;
 
-		if (check_parent && GSProcess::GetParentPID() != 0 && !GSProcess::IsParentRunning())
-		{
-			return false; // Fail when parent exited.
-		}
-
-		if (lock.CompareExchange(LOCKED, UNLOCKED) == UNLOCKED)
-		{
+		if (lock.CompareExchange(LOCKED, UNLOCKED) == UNLOCKED) // Check the lock
 			return true; // Locked successfully.
-		}
 
-		if (!block)
-		{
+		if (!cond)
 			return false; // Fail after 1 try when non-blocking.
-		}
 
 		if (event)
 			event->Wait(GSRegressionBuffer::EVENT_WAIT_SECONDS);
@@ -184,21 +151,21 @@ bool GSSpinlockSharedMemory::Unlock()
 	return lock.CompareExchange(UNLOCKED, LOCKED) == LOCKED;
 }
 
-GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(bool block, bool check_parent)
+GSRegressionPacket* GSRegressionBuffer::GetPacketWrite(std::function<bool()> cond)
 {
 	event[RUNNER].Reset();
 
-	if (!GetPacket(packet_write % num_packets)->lock.LockWrite(block, &event[RUNNER], &state[TESTER], check_parent))
+	if (!GetPacket(packet_write % num_packets)->lock.LockWrite(&event[RUNNER], cond))
 		return nullptr;
 
 	return GetPacket(packet_write % num_packets);
 }
 
-GSRegressionPacket* GSRegressionBuffer::GetPacketRead(bool block, bool check_parent)
+GSRegressionPacket* GSRegressionBuffer::GetPacketRead(std::function<bool()> cond)
 {
 	event[TESTER].Reset();
 
-	if (!GetPacket(packet_read % num_packets)->lock.LockRead(block, &event[TESTER], &state[TESTER], check_parent))
+	if (!GetPacket(packet_read % num_packets)->lock.LockRead(&event[TESTER], cond))
 		return nullptr;
 
 	return GetPacket(packet_read % num_packets);
@@ -224,21 +191,21 @@ void GSRegressionBuffer::DonePacketRead()
 	packet_read++;
 }
 
-GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(bool block, bool check_parent)
+GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpWrite(std::function<bool()> cond)
 {
 	event[TESTER].Reset();
 
-	if (!GetDump(dump_write % num_dumps)->lock.LockWrite(block, &event[TESTER], &state[TESTER], check_parent))
+	if (!GetDump(dump_write % num_dumps)->lock.LockWrite(&event[TESTER], cond))
 		return nullptr;
 
 	return GetDump(dump_write % num_dumps);
 }
 
-GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpRead(bool block, bool check_parent)
+GSDumpFileSharedMemory* GSRegressionBuffer::GetDumpRead(std::function<bool()> cond)
 {
 	event[RUNNER].Reset();
 
-	if (!GetDump(dump_read % num_dumps)->lock.LockRead(block, &event[RUNNER], &state[TESTER], check_parent))
+	if (!GetDump(dump_read % num_dumps)->lock.LockRead(&event[RUNNER], cond))
 		return nullptr;
 
 	return GetDump(dump_read % num_dumps);
