@@ -9,6 +9,7 @@
 #include "common/Error.h"
 #include "common/HeapArray.h"
 #include "common/Timer.h"
+#include "common/Path.h"
 
 #include "GS/GSDump.h"
 #include "GS/GSLzma.h"
@@ -914,12 +915,12 @@ void GSDumpFileLoader::Start(const std::vector<std::string>& files, const std::s
 	for (int i = 0; i < num_threads; i++)
 		threads.emplace_back(LoaderFunc, this);
 
-	start = true;
+	started = true;
 }
 
 bool GSDumpFileLoader::Started()
 {
-	return start;
+	return started;
 }
 
 bool GSDumpFileLoader::Finished()
@@ -927,32 +928,42 @@ bool GSDumpFileLoader::Finished()
 	std::unique_lock lock(mut);
 
 	return DoneRead();
-} 
+}
+
+void GSDumpFileLoader::DebugCheck()
+{
+	pxAssertRel(
+		read <= filenames.size() &&
+		read <= write &&
+		write <= filenames.size() &&
+		write <= read + num_dumps_buffered,
+		"Dump loader is in an inconsistent state.");
+}
 
 bool GSDumpFileLoader::Full()
 {
-	pxAssert(read <= filenames.size() && read <= write && write <= filenames.size());
+	DebugCheck();
 
 	return write == read + num_dumps_buffered;
 }
 
 bool GSDumpFileLoader::Empty()
 {
-	pxAssert(read <= filenames.size() && read <= write && write <= filenames.size());
+	DebugCheck();
 
 	return read == write || (read < write && state[read] == EMPTY);
 }
 
 bool GSDumpFileLoader::DoneRead()
 {
-	pxAssert(read <= filenames.size() && read <= write && write <= filenames.size());
+	DebugCheck();
 
 	return read >= filenames.size();
 }
 
 bool GSDumpFileLoader::DoneWrite()
 {
-	pxAssert(read <= filenames.size() && read <= write && write <= filenames.size());
+	DebugCheck();
 
 	return write >= filenames.size();
 }
@@ -962,7 +973,13 @@ bool GSDumpFileLoader::Stopped()
 	return stopped;
 }
 
-GSDumpFileLoader::State GSDumpFileLoader::Get(std::vector<u8>& dst, std::string* name, std::string* error, double* block_time, double* load_time, bool block)
+GSDumpFileLoader::State GSDumpFileLoader::Get(
+	std::vector<u8>& dst,
+	std::string* name,
+	std::string* error,
+	double* block_time,
+	double* load_time,
+	bool block)
 {
 	std::unique_lock<std::mutex> lock(mut);
 
@@ -1110,5 +1127,24 @@ void GSDumpFileLoader::Stop()
 
 void GSDumpFileLoader::DebugPrint()
 {
-
+	Console.WarningFmt("GSDumpLoader debug");
+	Console.WarningFmt("   Dump           = {}", filenames.size());
+	Console.WarningFmt("   Threads        = {}", num_threads);
+	Console.WarningFmt("   Dumps buffered = {}", num_dumps_buffered);
+	Console.WarningFmt("   Max file size  = {}", max_file_size);
+	Console.WarningFmt("   Started        = {}", started);
+	Console.WarningFmt("   Stopped        = {}", stopped);
+	Console.WarningFmt("   Read           = {}", read);
+	Console.WarningFmt("   Write          = {}", write);
+	Console.WarningFmt("   Loaded         = {}", num_loaded.load());
+	Console.WarningFmt("   Errored        = {}", num_errored.load());
+	Console.WarningFmt("   Too large      = {}", num_too_large.load());
+	Console.WarningFmt("");
+	for (size_t i = 0; i < filenames.size(); i++)
+	{
+		if (state[i] == ERROR_)
+		{
+			Console.WarningFmt("   Error: {}: '{}'", i, Path::GetFileName(filenames[i]));
+		}
+	}
 }

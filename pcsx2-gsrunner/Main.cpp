@@ -1849,16 +1849,19 @@ bool GSTester::EndRunners()
 	constexpr double terminate_timeout = 30.0; // Seconds to wait before forcefully terminating processes.
 	Common::Timer timer;
 	double sec;
-	while (1)
+	while (true)
 	{
 		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[1].IsRunning())
 		{
-			Console.ErrorFmt("(GSTester/{}) Both runners not exited after {:.1} seconds.", GetTesterName(), terminate_timeout);
+			Console.WriteLnFmt("(GSTester/{}) Both runners exited in {:.2} seconds.", timer.GetTimeSeconds(), GetTesterName());
 			break;
 		}
 
 		if ((sec = timer.GetTimeSeconds()) >= terminate_timeout)
+		{
+			Console.ErrorFmt("(GSTester/{}) Both runners not exited after {:.1} seconds.", GetTesterName(), terminate_timeout);
 			break;
+		}
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -1996,6 +1999,8 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				regression_buffer[i].DebugDumpBuffer();
 				regression_buffer[i].DebugPacketBuffer();
 			}
+
+			dump_loader->DebugPrint();
 
 			if (++regression_failure_restarts >= regression_failure_restarts_max)
 			{

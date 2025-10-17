@@ -827,6 +827,9 @@ void GSDumpReplayerCpuStep()
 
 	if (GSIsRegressionTesting() && GSGetRegressionBuffer()->GetStateTester() == GSRegressionBuffer::EXIT)
 	{
+		MTGS::RunOnGSThread([runner_name = GSDumpReplayer::GetRunnerName()]() {
+			Console.WarningFmt("(GSDumpReplayer/{}) Got EXIT from tester.", runner_name);
+		});
 		done_all_dumps = true;
 	}
 	else if (done_dump)

@@ -577,7 +577,7 @@ void GSRegressionBuffer::DebugDumpBuffer()
 		GSDumpFileSharedMemory* dump = GetDump(i);
 		std::size_t name_size = strnlen(dump->name, std::size(dump->name));
 		std::string name(dump->name, name_size);
-		Console.WarningFmt("    {}: lock={} name={} size={}", i, dump->lock.lock.val, name, dump->dump_size);
+		Console.WarningFmt("    {}: lock={} name='{}' size={}", i, dump->lock.lock.val, name, dump->dump_size);
 	}
 }
 
@@ -594,7 +594,7 @@ void GSRegressionBuffer::DebugPacketBuffer()
 		std::string name_packet(packet->name_packet, name_packet_size);
 		std::string name_dump(packet->name_dump, name_dump_size);
 
-		Console.WarningFmt("    {}: lock={} name_dump={} name_packet={}", i, packet->lock.lock.val, name_dump, name_packet);
+		Console.WarningFmt("    {}: lock={} name_dump='{}' name_packet='{}'", i, packet->lock.lock.val, name_dump, name_packet);
 	}
 }
 

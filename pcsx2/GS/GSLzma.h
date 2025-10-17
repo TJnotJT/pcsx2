@@ -365,7 +365,7 @@ struct GSDumpFileLoader
 	// Threads.
 	std::vector<std::thread> threads;
 
-	bool start = false; // Started flag. Only used by consumer.
+	bool started = false; // Started flag. Only used by consumer.
 
 	// Synchronization. 
 	std::mutex mut;
@@ -405,6 +405,7 @@ struct GSDumpFileLoader
 	bool DoneWrite();
 	bool DoneRead();
 	bool Stopped();
+	void DebugCheck();
 
 	// Unsafe
 	void DebugPrint();
