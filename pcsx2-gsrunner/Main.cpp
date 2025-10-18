@@ -135,7 +135,7 @@ struct GSTester
 	static constexpr std::size_t regression_packet_size_default = 5 * _1mb;
 	static constexpr std::size_t regression_dump_size_default = 256 * _1mb;
 	static constexpr std::size_t regression_num_packets_default = 100;
-	static constexpr std::size_t regression_num_dumps_default = 3;
+	static constexpr std::size_t regression_num_dumps_default = 1;
 	static constexpr u32 regression_verbose_level_default = VERBOSE_LOW;
 	static constexpr double regression_deadlock_timeout_default = 60.0; // seconds
 
@@ -1853,7 +1853,7 @@ bool GSTester::EndRunners()
 	{
 		if (!regression_runner_proc[0].IsRunning() && !regression_runner_proc[1].IsRunning())
 		{
-			Console.WriteLnFmt("(GSTester/{}) Both runners exited in {:.2} seconds.", timer.GetTimeSeconds(), GetTesterName());
+			Console.WriteLnFmt("(GSTester/{}) Both runners exited in {:.2} seconds.", GetTesterName(), timer.GetTimeSeconds());
 			break;
 		}
 
