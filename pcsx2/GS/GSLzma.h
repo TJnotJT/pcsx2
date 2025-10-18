@@ -341,14 +341,23 @@ private:
 // Initializes CRC tables used by LZMA SDK.
 void GSInit7ZCRCTables();
 
+// Must define outside class declaration for MSVC.
+template <typename T>
+concept GSDumpFileLoader_IsDstType = std::same_as<T, std::unique_ptr<GSDumpFile>> || std::same_as<T, std::vector<u8>>;
 
 struct GSDumpFileLoader
 {
-	enum State : u8
+	enum SlotState
 	{
-		EMPTY = 0,
-		READY,
+		WRITEABLE = 0,
+		READABLE
+	};
+
+	enum ReturnValue
+	{
+		EMPTY,
 		ERROR_,
+		SUCCESS,
 		FINISHED
 	};
 
@@ -376,7 +385,7 @@ struct GSDumpFileLoader
 	bool stopped = false; // Stopped flag.
 
 	// Per-file data. Only access by owner.
-	std::vector<State> state; // State of file.
+	std::vector<SlotState> state; // State of file.
 	std::vector<double> loading_time; // Load time in seconds.
 	std::vector<std::string> error_list; // Error for reporting asynchronously.
 	
@@ -388,7 +397,16 @@ struct GSDumpFileLoader
 	~GSDumpFileLoader();
 
 	void Start(const std::vector<std::string>& files, const std::string& from = "");
-	State Get(std::vector<u8>& dst, std::string* name = nullptr, std::string* error = nullptr, double* block_time = nullptr, double* load_time = nullptr, bool block = true);
+
+	template<typename T>
+		requires GSDumpFileLoader_IsDstType<T>
+	ReturnValue Get(
+		T& dst,
+		std::string* name = nullptr,
+		std::string* error = nullptr,
+		double* block_time = nullptr,
+		double* load_time = nullptr,
+		bool block = true);
 	void Stop();
 	static void LoaderFunc(GSDumpFileLoader* parent);
 

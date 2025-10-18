@@ -2059,7 +2059,7 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 		{
 			std::string error;
 			DumpInfo* info = nullptr;
-			GSDumpFileLoader::State state;
+			GSDumpFileLoader::ReturnValue retval;
 
 			while (true)
 			{
@@ -2068,9 +2068,9 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 					double block_time;
 					double load_time;
 
-					state = dump_loader->Get(dump_data, &dump_name, &error, &block_time, &load_time, false);
+					retval = dump_loader->Get(dump_data, &dump_name, &error, &block_time, &load_time, false);
 
-					if (state == GSDumpFileLoader::READY || state == GSDumpFileLoader::ERROR_)
+					if (retval == GSDumpFileLoader::SUCCESS || retval == GSDumpFileLoader::ERROR_)
 					{
 						dump_name = Path::GetFileName(dump_name);
 						info = &regression_dumps[regression_dumps_map.at(dump_name)];
@@ -2082,43 +2082,43 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 				else
 				{
 					info = &regression_dumps[regression_dumps_map.at(dump_name)];
-					state = GSDumpFileLoader::READY;
+					retval = GSDumpFileLoader::SUCCESS;
 				}
 				
-				if (state == GSDumpFileLoader::READY)
+				if (retval == GSDumpFileLoader::SUCCESS)
 				{
 					pxAssert(!dump_data.empty());
 
 					Common::Timer timer;
 
-					ReturnValue retval = CopyDumpToSharedMemory(dump_data, dump_name);
+					ReturnValue retval2 = CopyDumpToSharedMemory(dump_data, dump_name);
 
 					double seconds = timer.GetTimeSeconds();
 
-					if (retval == SUCCESS)
+					if (retval2 == SUCCESS)
 					{
 						Console.WriteLnFmt("(GSTester/{}) Copied '{}' to shared memory (load: {:.2} seconds; block: {:.2} seconds; copy: {:.2} seconds)",
 							GetTesterName(), dump_name, info->load_time, info->block_time, seconds);
 						dump_data.clear();
 						activity_timer.Reset();
 					}
-					else if (retval == ERROR_)
+					else if (retval2 == ERROR_)
 					{
 						Console.ErrorFmt("(GSTester/{}) Error copying '{}' to shared memory ({:.2} seconds).", GetTesterName(), regression_dumps[dump_index].file, seconds);
 						regression_dumps[dump_index].state = DumpInfo::SKIPPED;
 						dump_data.clear();
 					}
-					else if (retval == BUFFER_NOT_READY)
+					else if (retval2 == BUFFER_NOT_READY)
 					{
 						// Try again next iteration.
 					}
 					else
 					{
-						pxFailRel("Unknown return value."); // Impossible.
+						pxFail("Unknown return value."); // Impossible.
 					}
 					break;
 				}
-				else if (state == GSDumpFileLoader::FINISHED)
+				else if (retval == GSDumpFileLoader::FINISHED)
 				{
 					done_uploading = true;
 					Console.WarningFmt("(GSTester/{}) Done uploading dumps.", GetTesterName());
@@ -2127,19 +2127,19 @@ int GSTester::MainThread(int argc, char* argv[], u32 nthreads, u32 thread_id)
 						regression_buffer[i].SetStateTester(GSRegressionBuffer::DONE_UPLOADING);
 					break;
 				}
-				else if (state == GSDumpFileLoader::ERROR_)
+				else if (retval == GSDumpFileLoader::ERROR_)
 				{
 					info->state = DumpInfo::SKIPPED;
 					Console.ErrorFmt("(GSTester/{}) Error loading dump '{}': {}.", GetTesterName(), dump_name,
 						error.empty() ? std::string("Unspecified reason") : error);
 				}
-				else if (state == GSDumpFileLoader::EMPTY)
+				else if (retval == GSDumpFileLoader::EMPTY)
 				{
 					break; // Try again next iteration.
 				}
 				else
 				{
-					pxFail("Unknown state (impossible).");
+					pxFail("Unknown return value."); // Impossible.
 				}
 			}
 		}

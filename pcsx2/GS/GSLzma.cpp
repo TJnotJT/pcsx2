@@ -908,7 +908,7 @@ bool GSDumpFileLoader::Empty()
 {
 	DebugCheck();
 
-	return read == write || (read < write && state[read] == EMPTY);
+	return read == write || (read < write && state[read] == WRITEABLE);
 }
 
 bool GSDumpFileLoader::DoneRead()
@@ -930,35 +930,42 @@ bool GSDumpFileLoader::Stopped()
 	return stopped;
 }
 
-GSDumpFileLoader::State GSDumpFileLoader::Get(
-	std::vector<u8>& dst,
+template <typename T>
+	requires GSDumpFileLoader_IsDstType<T>
+GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get(
+	T& dst,
 	std::string* name,
 	std::string* error,
 	double* block_time,
 	double* load_time,
 	bool block)
 {
-	std::unique_lock<std::mutex> lock(mut);
-
 	Common::Timer block_timer;
 
-	cond_read.wait(lock, [&]() { return !block || !Empty() || DoneRead() || Stopped(); });
-
-	if (DoneRead() || Stopped())
+	size_t i; // Copy of read index.
+	
+	// Acquire the slot.
 	{
-		cond_write.notify_all();
+		std::unique_lock<std::mutex> lock(mut);
 
-		return FINISHED;
+		cond_read.wait(lock, [&]() { return !block || !Empty() || DoneRead() || Stopped(); });
+
+		if (DoneRead() || Stopped())
+		{
+			cond_write.notify_all();
+
+			return FINISHED;
+		}
+
+		if (Empty())
+		{
+			return EMPTY;
+		}
+
+		i = read;
+
+		pxAssert(state[i] == READABLE);
 	}
-
-	if (state[read] == EMPTY)
-	{
-		return EMPTY;
-	}
-
-	pxAssert(state[read] == READY || state[read] == ERROR_);
-
-	int i = read++;
 
 	if (name)
 		*name = filenames[i];
@@ -966,29 +973,91 @@ GSDumpFileLoader::State GSDumpFileLoader::Get(
 		*block_time = block_timer.GetTimeSeconds();
 	if (load_time)
 		*load_time = loading_time[i];
-	if (error)
-		*error = error_list[i];
+	
+	ReturnValue ret;
 
-	if (state[i] == READY)
+	if (error_list[i].empty())
 	{
-		dst.resize(dumps[i]->size());
-		std::memcpy(dst.data(), dumps[i]->data(), dumps[i]->size());
+		if (error)
+			error->clear();
+
+		if constexpr (std::same_as<T, std::unique_ptr<GSDumpFile>>)
+		{
+			GSDumpFile::OpenGSDumpMemory(dst, dumps[i]->data(), dumps[i]->size());
+
+			Error error2;
+			if (!dst->ReadFile(&error2))
+			{
+				if (error)
+					*error = error2.GetDescription();
+				ret = ERROR_;
+			}
+			else
+			{
+				ret = SUCCESS;
+			}
+		}
+		else if constexpr (std::same_as<T, std::vector<u8>>)
+		{
+			dst.resize(dumps[i]->size());
+			std::memcpy(dst.data(), dumps[i]->data(), dumps[i]->size());
+			ret = SUCCESS;
+		}
+		else
+		{
+			static_assert(!std::is_same<T, T>, "Wrong type for Get()"); // Impossible.
+		}
+	}
+	else
+	{
+		if (error)
+			*error = error_list[i];
+		ret = ERROR_;
 	}
 
 	dumps[i]->clear();
 	dumps[i] = nullptr;
 
+	// Release the slot.
+	{
+		std::unique_lock<std::mutex> lock(mut);
+
+		state[i] = WRITEABLE;
+
+		read = i + 1;
+	}
+
 	cond_write.notify_one();
 
-	return state[i];
+	return ret;
 }
+
+// Instantiate templates.
+template
+GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get<std::unique_ptr<GSDumpFile>>(
+	std::unique_ptr<GSDumpFile>& dst,
+	std::string* name,
+	std::string* error,
+	double* block_time,
+	double* load_time,
+	bool block);
+
+template
+GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get<std::vector<u8>>(
+	std::vector<u8>& dst,
+	std::string* name,
+	std::string* error,
+	double* block_time,
+	double* load_time,
+	bool block);
 
 void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 {
 	while (true)
 	{
-		size_t i = static_cast<size_t>(-1);
+		size_t i; // Copy of write index.
 
+		// Acquire the slot.
 		{
 			std::unique_lock<std::mutex> lock(parent->mut);
 
@@ -997,18 +1066,16 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 			if (parent->DoneWrite() || parent->Stopped())
 				return;
 
-			i = parent->write++;
+			i = parent->write;
+
+			pxAssert(parent->state[i] == WRITEABLE);
 
 			parent->dumps[i] = &parent->dumps_avail_list[i % parent->num_dumps_buffered];
 
 			pxAssert(parent->dumps[i]->empty()); // Or something went wrong...
-
-			parent->state[i] = EMPTY;
 		}
 
 		Common::Timer load_timer;
-
-		State state = EMPTY;
 
 		Error error;
 		std::unique_ptr<GSDumpFile> dump = GSDumpFile::OpenGSDump(parent->filenames[i].c_str(), &error);
@@ -1018,15 +1085,11 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 			parent->error_list[i] = fmt::format("Unable to open GS dump '{}' (error: {})",
 				parent->filenames[i], error.GetDescription());
 
-			state = ERROR_;
-				
 			parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
 		}
 		else if (!dump->ReadFile(*parent->dumps[i], parent->max_file_size, &error))
 		{
 			parent->error_list[i] = fmt::format("Unable to read GS dump '{}' (error: {})", parent->filenames[i], error.GetDescription());
-
-			state = ERROR_;
 
 			parent->num_errored.fetch_add(1, std::memory_order_acq_rel);
 		}
@@ -1034,15 +1097,16 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 		{
 			parent->loading_time[i] = load_timer.GetTimeSeconds();
 
-			state = READY;
-
 			parent->num_loaded.fetch_add(1, std::memory_order_acq_rel);
 		}
 
+		// Release the slot.
 		{
 			std::unique_lock<std::mutex> lock(parent->mut);
 
-			parent->state[i] = state;
+			parent->state[i] = READABLE;
+
+			parent->write = i + 1;
 		}
 			
 		parent->cond_read.notify_one();
@@ -1069,7 +1133,7 @@ void GSDumpFileLoader::Stop()
 
 void GSDumpFileLoader::DebugPrint()
 {
-	Console.WarningFmt("GSDumpLoader debug");
+	Console.WarningFmt("GSDumpFileLoader debug");
 	Console.WarningFmt("   Total dumps    = {}", filenames.size());
 	Console.WarningFmt("   Threads        = {}", num_threads);
 	Console.WarningFmt("   Dumps buffered = {}", num_dumps_buffered);

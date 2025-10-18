@@ -68,7 +68,6 @@ static std::string s_batch_start_from_dump;
 static bool s_regression_test_send_hwstats = false; // Only send HWSTAT packets if the log is not written.
 static bool s_verbose_logging = false;
 static GSDumpFileLoader s_dump_file_loader; // For batch mode.
-static std::vector<u8> s_dump_file_data; // For batch mode.
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -388,6 +387,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			rbp->SetStateRunner(GSRegressionBuffer::WAIT_DUMP);
 		});
 
+		// Cleanup.
 		ScopedGuard sg([&dump, rbp]() {
 			if (s_dump_running)
 			{
@@ -409,9 +409,10 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			Console.WriteLnFmt("(GSRunner/{}) Waiting for new dump.", runner_name);
 		});
 
+		// Acquire the dump slot from the shared memory ring buffer.
 		Common::Timer timer;
 
-		dump = rbp->GetDumpRead(); // First one non-blocking check since otherwise the done uploading status is polled too early.
+		dump = rbp->GetDumpRead(); // First, one non-blocking check since otherwise the done uploading status is polled too early.
 		if (!dump)
 		{
 			dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus, true, true));
@@ -433,7 +434,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 					Console.WriteLnFmt("(GSRunner/{}) Got DONE_UPLOADING from tester.", runner_name);
 				});
 			}
-			else if (GSProcess::GetParentPID() != 0 && !GSProcess::IsParentRunning())
+			else if (!GSProcess::IsParentRunning())
 			{
 				MTGS::RunOnGSThread([runner_name = GetRunnerName()]() {
 					Console.ErrorFmt("(GSRunner/{}) Tester process exited.", runner_name);
@@ -451,9 +452,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			return false;
 		}
 
-		double sec = timer.GetTimeSeconds();
-
-		MTGS::RunOnGSThread([sec, runner_name = GetRunnerName()]() {
+		MTGS::RunOnGSThread([runner_name = GetRunnerName(), sec = timer.GetTimeSeconds()]() {
 			Console.WriteLnFmt("(GSRunner/{}) Waited {:.2} seconds for dump.", runner_name, sec);
 		});
 
@@ -463,10 +462,25 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			rbp->SetNameDump(dump_name);
 		});
 
-		s_dump_file_data.resize(dump->GetSizeDump());
-		std::memcpy(s_dump_file_data.data(), dump->GetPtrDump(), dump->GetSizeDump());
+		// Parse the dump file. Note: we cannot release the ring buffer slot until this is done
+		// since we are using the data in-place.
+		timer.Reset();
 
-		GSDumpFile::OpenGSDumpMemory(s_dump_file, s_dump_file_data.data(), s_dump_file_data.size());
+		GSDumpFile::OpenGSDumpMemory(s_dump_file, dump->GetPtrDump(), dump->GetSizeDump());
+
+		Error error;
+		if (!s_dump_file->ReadFile(&error))
+		{
+			MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, err = error.GetDescription()]() {
+				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to read GS dump '{}' (error: {})", runner_name, dump_name, err);
+			});
+			// Don't try again. Otherwise, we will most likely we will get desynchronized from the other runner.
+			return false;
+		}
+
+		MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, sec = timer.GetTimeSeconds()]() {
+			Console.WriteLnFmt("(GSDumpReplayer/{}) Read GS dump in '{}' ({:.2} seconds)", runner_name, dump_name, sec);
+		});
 
 		GSSignalRunnerHeartbeat();
 	}
@@ -486,26 +500,31 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		double block_time;
 		double load_time;
 
+		// Get/read the next available ready dump, skipping any that errored.
 		while (true)
 		{
-			GSDumpFileLoader::State state = s_dump_file_loader.Get(s_dump_file_data, &filename, &error, &block_time, &load_time);
+			// This reads the dump file as well.
+			GSDumpFileLoader::ReturnValue ret = s_dump_file_loader.Get(s_dump_file, &filename, &error, &block_time, &load_time);
 
-			if (state == GSDumpFileLoader::READY)
+			if (ret == GSDumpFileLoader::SUCCESS)
 			{
-				GSDumpFile::OpenGSDumpMemory(s_dump_file, s_dump_file_data.data(), s_dump_file_data.size());
-				pxAssert(s_dump_file);
 				break;
 			}
-
-			if (state == GSDumpFileLoader::FINISHED)
+			else if (ret == GSDumpFileLoader::FINISHED)
 			{
 				return false;
 			}
-			
-			MTGS::RunOnGSThread([error]() {
-				Console.ErrorFmt("(GSRunner/{}) Error loading dump: {}.", GetRunnerName(),
-					error.empty() ? std::string("Unspecified reason") : error);
-			});
+			else if (ret == GSDumpFileLoader::ERROR_)
+			{
+				MTGS::RunOnGSThread([error]() {
+					Console.ErrorFmt("(GSRunner/{}) Error loading/reading dump: {}.", GetRunnerName(),
+						error.empty() ? std::string("Unspecified reason") : error);
+				});
+			}
+			else
+			{
+				pxFail("Unknown return value."); // Impossible.
+			}
 		}
 
 		s_dump_name = Path::GetFileName(filename);
@@ -531,7 +550,8 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		std::unique_ptr<GSDumpFile> new_dump(GSDumpFile::OpenGSDump(filename));
 		if (!new_dump)
 		{
-			MTGS::RunOnGSThread([fn = std::string(Path::GetFileName(filename)), runner_name = GetRunnerName(), err = error.GetDescription()]() {
+			MTGS::RunOnGSThread([fn = std::string(Path::GetFileName(filename)), runner_name = GetRunnerName(),
+				err = error.GetDescription()]() {
 				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to open '{}' (error: {})", runner_name, fn, err);
 			});
 			return false;
@@ -539,24 +559,23 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 		s_dump_name = Path::GetFileName(filename);
 		s_dump_file = std::move(new_dump);
-	}
 
-	Common::Timer timer;
+		Common::Timer timer;
 
-	Error error;
-	if (!s_dump_file->ReadFile(&error))
-	{
-		MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, err = error.GetDescription()]() {
-			Console.ErrorFmt("(GSDumpReplayer/{}) Failed to read GS dump '{}' (error: {})", runner_name, dump_name, err);
+		if (!s_dump_file->ReadFile(&error))
+		{
+			MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, err = error.GetDescription()]() {
+				Console.ErrorFmt("(GSDumpReplayer/{}) Failed to read GS dump '{}' (error: {})", runner_name, dump_name, err);
+			});
+			return false;
+		}
+
+		double sec = timer.GetTimeSeconds();
+
+		MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, sec]() {
+			Console.WriteLnFmt("(GSDumpReplayer/{}) Read GS dump in '{}' ({:.2} seconds)", runner_name, dump_name, sec);
 		});
-		return false;
 	}
-
-	double sec = timer.GetTimeSeconds();
-
-	MTGS::RunOnGSThread([runner_name = GetRunnerName(), dump_name = s_dump_name, sec]() {
-		Console.WriteLnFmt("(GSDumpReplayer/{}) Read GS dump in '{}' ({:.2} seconds)", runner_name, dump_name, sec);
-	});
 
 	if (IsBatchMode())
 	{
