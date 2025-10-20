@@ -28,7 +28,7 @@ GSIntSharedMemory::ValType GSIntSharedMemory::CompareExchange(ValType expected, 
 #ifdef __WIN32__
 	return InterlockedCompareExchange(&val, desired, expected);
 #else
-	val.compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_relaxed);
+	val.compare_exchange_strong(expected, desired, std::memory_order_seq_cst, std::memory_order_seq_cst);
 	return expected;
 #endif
 }
@@ -38,7 +38,7 @@ GSIntSharedMemory::ValType GSIntSharedMemory::Get()
 #ifdef __WIN32__
 	return InterlockedCompareExchange(&val, 0, 0);
 #else
-	return val.load(std::memory_order_acquire);
+	return val.load(std::memory_order_seq_cst);
 #endif
 }
 
@@ -47,12 +47,28 @@ void GSIntSharedMemory::Set(ValType i)
 #ifdef __WIN32__
 	InterlockedExchange(&val, i);
 #else
-	val.store(i, std::memory_order_release);
+	val.store(i, std::memory_order_seq_cst);
 #endif
 }
 
-void GSIntSharedMemory::Init()
+GSIntSharedMemory::ValType GSIntSharedMemory::FetchAdd()
 {
+#ifdef __WIN32__
+	return InterlockedIncrement(&val) - 1;
+#else
+	return val::fetch_add(1, std::memory_order_seq_cst) - 1;
+#endif
+}
+
+void GSIntSharedMemory::Init(bool reset)
+{
+	// Need correct alignment.
+	pxAssertRel(reinterpret_cast<size_t>(&val) % sizeof(ValType) == 0, "Atomic not aligned correctly");
+#ifndef __WIN32__
+	if (!reset)
+		new (&val) std::atomic<ValType>;
+	pxAssert(std::atomic_is_lock_free(&val), "Atomic must be lock free.");
+#endif
 	Set(0);
 }
 
@@ -61,13 +77,9 @@ std::size_t GSIntSharedMemory::GetTotalSize()
 	return sizeof(GSIntSharedMemory);
 }
 
-GSSpinlockSharedMemory::GSSpinlockSharedMemory()
+void GSSpinlockSharedMemory::Init(bool reset)
 {
-	Init();
-}
-
-void GSSpinlockSharedMemory::Init()
-{
+	lock.Init(reset);
 	lock.Set(WRITEABLE);
 }
 
@@ -313,10 +325,13 @@ void GSRegressionPacket::SetDoneDump()
 	this->type = DONE_DUMP;
 }
 
-void GSRegressionPacket::Init(std::size_t packet_size)
+void GSRegressionPacket::Init(std::size_t packet_size, bool reset)
 {
-	memset(this, 0, GetTotalSize(packet_size));
-	lock.Init();
+	std::memset(GetData(), 0, packet_size);
+	lock.Init(reset);
+	this->type = NONE;
+	std::memset(name_dump, 0, sizeof(name_dump));
+	std::memset(name_packet, 0, sizeof(name_packet));
 	this->packet_size = packet_size;
 };
 
@@ -350,11 +365,12 @@ const void* GSRegressionPacket::GetData() const
 }
 
 // Only once before sharing. Not thread safe.
-void GSDumpFileSharedMemory::Init(std::size_t dump_size)
+void GSDumpFileSharedMemory::Init(std::size_t dump_size, bool reset)
 {
-	lock.Init();
+	lock.Init(reset);
+	std::memset(name, 0, sizeof(name));
 	this->dump_size = dump_size;
-	memset(GetPtrDump(), 0, dump_size);
+	std::memset(GetPtrDump(), 0, dump_size);
 }
 
 static std::size_t GetTotalSize(std::size_t dump_size)
@@ -396,51 +412,7 @@ std::size_t GSRegressionBuffer::GetTotalSize(std::size_t num_packets, std::size_
 		num_states * GSIntSharedMemory::GetTotalSize();
 }
 
-bool GSRegressionBuffer::CreateFile_(
-	const std::string& name,
-	const std::string& event_runner_name,
-	const std::string& event_tester_name,
-	std::size_t num_packets,
-	std::size_t packet_size,
-	std::size_t num_dumps,
-	std::size_t dump_size)
-{
-	if (!shm.CreateFile_(name, GetTotalSize(num_packets, packet_size, num_dumps, dump_size)))
-		return false;
-
-	if (!event[RUNNER].Create(event_runner_name))
-	{
-		CloseFile();
-		return false;
-	}
-
-	// Should be created by tester process before.
-	if (!event[TESTER].Open_(event_tester_name))
-	{
-		CloseFile();
-		return false;
-	}
-
-	// Set constant state.
-	Init(
-		name,
-		num_packets,
-		packet_size,
-		num_dumps,
-		dump_size);
-
-	// Set transient state.
-	Reset();
-
-	return true;
-}
-
-void GSRegressionBuffer::Init(
-	const std::string& name,
-	std::size_t num_packets,
-	std::size_t packet_size,
-	std::size_t num_dumps,
-	std::size_t dump_size)
+void GSRegressionBuffer::SetSizesPointers(std::size_t num_packets, std::size_t packet_size, std::size_t num_dumps, std::size_t dump_size)
 {
 	std::size_t packet_offset;
 	std::size_t dump_file_offset;
@@ -470,6 +442,57 @@ void GSRegressionBuffer::Init(
 	this->dump_size = dump_size;
 }
 
+bool GSRegressionBuffer::CreateFile_(
+	const std::string& name,
+	const std::string& event_runner_name,
+	const std::string& event_tester_name,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
+{
+	if (!shm.CreateFile_(name, GetTotalSize(num_packets, packet_size, num_dumps, dump_size)))
+		return false;
+
+	if (!event[RUNNER].Create(event_runner_name))
+	{
+		CloseFile();
+		return false;
+	}
+
+	// Should be created by tester process before.
+	if (!event[TESTER].Open_(event_tester_name))
+	{
+		CloseFile();
+		return false;
+	}
+
+	SetSizesPointers(num_packets, packet_size, num_dumps, dump_size);
+
+	Init(name, num_packets, packet_size, num_dumps, dump_size);
+
+	Reset();
+
+	return true;
+}
+
+void GSRegressionBuffer::Init(
+	const std::string& name,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
+{
+	for (std::size_t i = 0; i < num_packets; i++)
+		GetPacket(i)->Init(packet_size);
+	for (std::size_t i = 0; i < num_dumps; i++)
+		GetDump(i)->Init(dump_size);
+	for (std::size_t i = 0; i < num_states; i++)
+		state[i].Init();
+	for (std::size_t i = 0; i < num_events; i++)
+		event[i].Reset();
+}
+
 void GSRegressionBuffer::Reset()
 {
 	this->packet_write = 0;
@@ -479,9 +502,9 @@ void GSRegressionBuffer::Reset()
 	this->dump_name.clear();
 
 	for (std::size_t i = 0; i < num_packets; i++)
-		GetPacket(i)->Init(packet_size);
+		GetPacket(i)->Init(packet_size, true);
 	for (std::size_t i = 0; i < num_dumps; i++)
-		GetDump(i)->Init(dump_size);
+		GetDump(i)->Init(dump_size, true);
 	for (std::size_t i = 0; i < num_states; i++)
 		state[i].Set(DEFAULT);
 	for (std::size_t i = 0; i < num_events; i++)
@@ -512,7 +535,7 @@ bool GSRegressionBuffer::OpenFile(
 		return false;
 	}
 
-	Init(name, num_packets, packet_size, num_dumps, dump_size);
+	SetSizesPointers(num_packets, packet_size, num_dumps, dump_size);
 
 	return true;
 }
@@ -1172,4 +1195,166 @@ bool GSEvent::Reset() const
 #else
 	return false; // Not implemented.
 #endif
+}
+
+void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num_runners)
+{
+	std::size_t head_offset;
+	std::size_t strings_offset;
+	std::size_t runner_heartbeats_offset;
+
+	std::size_t start_offset = reinterpret_cast<std::size_t>(shm.data);
+	std::size_t curr_offset = start_offset;
+
+	head_offset = curr_offset;
+	curr_offset += sizeof(GSIntSharedMemory);
+
+	strings_offset = curr_offset;
+	curr_offset += num_strings * string_size;
+
+	runner_heartbeats_offset = curr_offset;
+	curr_offset += num_runners * sizeof(GSIntSharedMemory);
+
+	pxAssert(curr_offset - start_offset == GetTotalSize(num_strings, num_runners));
+
+	head = reinterpret_cast<GSIntSharedMemory*>(&shm.data);
+	strings = reinterpret_cast<char*>(strings_offset);
+	runner_heartbeats = reinterpret_cast<GSIntSharedMemory*>(runner_heartbeats_offset);
+
+	this->num_strings = num_strings;
+	this->num_runners = num_runners;
+}
+
+bool GSStringQueueIPC::CreateFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners)
+{
+	if (!shm.CreateFile_(name, GetTotalSize(num_strings, num_runners)))
+		return false;
+
+	SetSizesPointers(num_strings, num_runners);
+}
+
+bool GSStringQueueIPC::OpenFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners)
+{
+	if (!shm.OpenFile(name, GetTotalSize(num_strings, num_runners)))
+		return false;
+
+	SetSizesPointers(num_strings, num_runners);
+}
+
+void GSStringQueueIPC::Init()
+{
+	head->Init();
+
+	for (std::size_t i = 0; i < num_runners; i++)
+		runner_heartbeats->Init();
+}
+
+bool GSStringQueueIPC::AcquireString(std::string& string)
+{
+	std::size_t i = head->FetchAdd();
+
+	if (i >= num_strings)
+	{
+		head->Set(i);
+		string.clear();
+		return false;
+	}
+	else
+	{
+		string = GetString(i);
+	}
+}
+
+GSStringQueueIPC::FileStatus GSStringQueueIPC::GetFileStatus(std::size_t i)
+{
+	if (i >= num_strings)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: GetFileStatus() index out of bounds ({} / {}).", i, num_strings);
+		pxFail("");
+		return ERROR_;
+	}
+
+	return static_cast<FileStatus>(file_status[i].Get());
+}
+
+void GSStringQueueIPC::SetFileStatus(std::size_t i, FileStatus status)
+{
+	if (i >= num_strings)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: SetFileStatus() index out of bounds ({} / {}).", i, num_strings);
+		pxFail("");
+		return;
+	}
+
+	file_status[i].Set(status);
+}
+
+std::string GSStringQueueIPC::GetString(std::size_t i)
+{
+	if (i >= num_strings)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: GetString() index out of bounds ({} / {}).", i, num_strings);
+		pxFail("");
+		return "";
+	}
+
+	char* s = strings + i * string_size;
+	s[string_size - 1] = '\0';
+	return std::string(s);
+}
+
+bool GSStringQueueIPC::PopulateStrings(const std::vector<std::string>& strings_in)
+{
+	if (strings_in.size() != num_strings)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: PopulateStrings() incorrect number of strings ({} / {})", strings_in.size(), num_strings);
+		return false;
+	}
+	for (std::size_t i = 0; i < num_strings; i++)
+	{
+		char* s = strings + i * string_size;
+		CopyStringToBuffer(s, string_size, strings_in[i]);
+	}
+	return true;
+}
+
+void GSStringQueueIPC::SignalRunnerHeartbeat(std::size_t i)
+{
+	if (i >= num_runners)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
+		pxFail("");
+		return;
+	}
+
+	runner_heartbeats[i].Set(ALIVE);
+}
+
+bool GSStringQueueIPC::CheckRunnerHeartbeat(std::size_t i)
+{
+	if (i >= num_runners)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
+		pxFail("");
+		return;
+	}
+
+	return runner_heartbeats[i].Get() == ALIVE;
+}
+
+void GSStringQueueIPC::ResetRunnerHeartbeat(std::size_t i)
+{
+	if (i >= num_runners)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
+		pxFail("");
+		return;
+	}
+
+	runner_heartbeats[i].Set(DEFAULT);
+}
+
+std::size_t GSStringQueueIPC::GetTotalSize(std::size_t num_strings, std::size_t num_runners)
+{
+	return (string_size + sizeof(GSIntSharedMemory)) * num_strings + sizeof(GSIntSharedMemory) * num_runners;
 }

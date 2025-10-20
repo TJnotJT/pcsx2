@@ -16,16 +16,18 @@ struct GSIntSharedMemory
 {
 
 #ifdef __WIN32__
+	static_assert(sizeof(LONG) == sizeof(int));
 	using ValType = LONG;
 	ValType val;
 #else
-	using ValType = long;
+	using ValType = int;
 	std::atomic<ValType> val;
 #endif
 	ValType CompareExchange(ValType expected, ValType desired);
 	ValType Get();
 	void Set(ValType i);
-	void Init();
+	ValType FetchAdd(); // Return value before increment.
+	void Init(bool reset = false);
 	static std::size_t GetTotalSize();
 };
 
@@ -67,7 +69,7 @@ struct GSSpinlockSharedMemory
 
 	GSSpinlockSharedMemory();
 
-	void Init();
+	void Init(bool reset = false);
 	bool LockWrite(GSEvent* event, std::function<bool()> cond);
 	bool LockRead(GSEvent* event, std::function<bool()> cond);
 	bool UnlockWrite();
@@ -99,6 +101,7 @@ struct GSRegressionPacket
 
 	enum : u32
 	{
+		NONE = 0,
 		IMAGE,
 		HWSTAT,
 		DONE_DUMP
@@ -160,7 +163,7 @@ struct GSRegressionPacket
 	const void* GetData() const;
 
 	// Call only once before sharing. Not thread safe.
-	void Init(std::size_t packet_size);
+	void Init(std::size_t packet_size, bool reset = false);
 
 	// Static
 	static std::size_t GetTotalSize(std::size_t packet_size);
@@ -199,7 +202,7 @@ struct GSDumpFileSharedMemory
 	std::size_t dump_size;
 
 	// Call only once before sharing. Not thread safe.
-	void Init(std::size_t dump_size);
+	void Init(std::size_t dump_size, bool reset = false);
 
 	// Call by owner.
 	void* GetPtrDump();
@@ -271,6 +274,13 @@ struct GSRegressionBuffer
 	// (Runner) Owned by GS thread.
 	static constexpr std::size_t num_states = 3;
 	GSIntSharedMemory* state; // Two states owned by runner and tester.
+
+	// Private - set pointer/sizes. Only after shared memory file is opened/created.
+	void SetSizesPointers(
+		std::size_t num_packets,
+		std::size_t packet_size,
+		std::size_t num_dumps,
+		std::size_t dump_size);
 
 	// Call only once before sharing.
 	bool CreateFile_(
@@ -412,4 +422,63 @@ struct GSProcess
 	static PID_t GetParentPID();
 	static bool IsParentRunning(double seconds = 0.0);
 	static PID_t GetCurrentPID();
+};
+
+// Simple, read-only queue in shared memory.
+// FIXME: Change this to GSBatchRunBuffer. Change 'strings' back to 'filenames'
+struct GSStringQueueIPC
+{
+	static constexpr std::size_t string_size = 8192;
+
+	// For runner heartbeat.
+	enum RunnerHeartbeat : GSIntSharedMemory::ValType
+	{
+		DEFAULT,
+		ALIVE
+	};
+
+	// For file status.
+	enum FileStatus : GSIntSharedMemory::ValType
+	{
+		NOT_STARTED = 0,
+		STARTED,
+		COMPLETED,
+		ERROR_
+	};
+
+	GSSharedMemoryFile shm;
+
+	GSIntSharedMemory* head;
+	
+	char* strings;
+	std::size_t num_strings;
+
+	GSIntSharedMemory* file_status;
+	
+	GSIntSharedMemory* runner_heartbeats;
+	std::size_t num_runners;
+
+	// Private - only call once after creating/opening shared memory.
+	void SetSizesPointers(std::size_t num_strings, std::size_t num_runners);
+
+	bool CreateFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners);
+	bool OpenFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners);
+	void Init(); // Private
+	bool PopulateStrings(const std::vector<std::string>& strings);
+	bool AcquireString(std::string& filename);
+
+	// Call only by owner of slot.
+	FileStatus GetFileStatus(std::size_t i);
+	void SetFileStatus(std::size_t i, FileStatus status);
+
+	// Private - only call by owner of slot.
+	std::string GetString(std::size_t i);
+
+	// Call any time by that runner.
+	void SignalRunnerHeartbeat(std::size_t i);
+	bool CheckRunnerHeartbeat(std::size_t i);
+	void ResetRunnerHeartbeat(std::size_t i);
+
+	// Static.
+	static std::size_t GetTotalSize(std::size_t num_strings, std::size_t num_runners);
 };
