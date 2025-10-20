@@ -303,6 +303,9 @@ struct GSRegressionBuffer
 		std::size_t dump_size);
 
 	// Call only once by parent.
+	void DestroySharedMemory();
+
+	// Call when done with file.
 	bool CloseFile();
 
 	// Call only once to initialize.
@@ -364,25 +367,6 @@ struct GSRegressionBuffer
 	void DebugState();
 };
 
-// To be call by the runner process when in regression test mode.
-bool GSIsRegressionTesting();
-void GSStartRegressionTest(
-	GSRegressionBuffer* rpb,
-	const std::string& fn,
-	const std::string& event_name_runner,
-	const std::string& event_name_tester,
-	std::size_t num_packets,
-	std::size_t packet_size,
-	std::size_t num_dumps,
-	std::size_t dump_size);
-void GSEndRegressionTest();
-GSRegressionBuffer* GSGetRegressionBuffer();
-bool GSCheckTesterStatus(bool exit, bool done_uploading);
-void GSSignalRunnerHeartbeat();
-
-// Used by the tester process to compare images.
-int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2);
-
 // Cross-platform process.
 struct GSProcess
 {
@@ -425,11 +409,8 @@ struct GSProcess
 };
 
 // Simple, read-only queue in shared memory.
-// FIXME: Change this to GSBatchRunBuffer. Change 'strings' back to 'filenames'
-struct GSStringQueueIPC
+struct GSBatchRunBuffer
 {
-	static constexpr std::size_t string_size = 8192;
-
 	enum RunnerHeartbeat : GSIntSharedMemory::ValType
 	{
 		DEFAULT_RH = 0,
@@ -458,31 +439,34 @@ struct GSStringQueueIPC
 
 	GSIntSharedMemory* head;
 	
-	char* strings;
-	std::size_t num_strings;
+	char* filenames;
+	std::size_t num_files;
+	static constexpr std::size_t filename_size = 8192;
 
 	GSIntSharedMemory* file_status;
 	
 	GSIntSharedMemory* state_parent;
-	GSIntSharedMemory* state_child;
-	GSIntSharedMemory* runner_heartbeats; // FIXME: change to state_child_heartbeat
+	GSIntSharedMemory* state_runner;
+	GSIntSharedMemory* state_runner_heartbeat;
 	std::size_t num_runners;
 
 	// Private - only call once after creating/opening shared memory.
-	void SetSizesPointers(std::size_t num_strings, std::size_t num_runners);
+	void SetSizesPointers(std::size_t num_files, std::size_t num_runners);
 
-	bool CreateFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners);
-	bool OpenFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners);
+	bool CreateFile_(const std::string& name, std::size_t num_files, std::size_t num_runners);
+	bool OpenFile(const std::string& name, std::size_t num_files, std::size_t num_runners);
+	void DestroySharedMemory(); // Only use by creator.
+	bool CloseFile();
 	void Init(); // Private
-	bool PopulateStrings(const std::vector<std::string>& strings);
-	bool AcquireString(std::string& filename);
-
+	bool PopulateFilenames(const std::vector<std::string>& filenames);
+	bool AcquireFile(std::string& filename);
+	
 	// Call only by owner of slot.
 	FileStatus GetFileStatus(std::size_t i);
 	void SetFileStatus(std::size_t i, FileStatus status);
 
 	// Private - only call by owner of slot.
-	std::string GetString(std::size_t i);
+	std::string GetFilename(std::size_t i);
 
 	// Call any time.
 	void SignalRunnerHeartbeat(std::size_t i); // Child only.
@@ -498,5 +482,36 @@ struct GSStringQueueIPC
 	bool CheckFileIndex(std::size_t i);
 
 	// Static.
-	static std::size_t GetTotalSize(std::size_t num_strings, std::size_t num_runners);
+	static std::size_t GetTotalSize(std::size_t num_files, std::size_t num_runners);
 };
+
+/// Interface for runner process in regression test mode.
+bool GSIsRegressionTesting();
+bool GSStartRegressionTest(
+	GSRegressionBuffer* rpb,
+	const std::string& fn,
+	const std::string& event_name_runner,
+	const std::string& event_name_tester,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size);
+void GSEndRegressionTest();
+GSRegressionBuffer* GSGetRegressionBuffer();
+bool GSCheckTesterStatus_RegressionTest(bool exit, bool done_uploading);
+void GSSignalRunnerHeartbeat_RegressionTest();
+int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2);
+
+// Interface for runner process in batch run mode.
+bool GSIsBatchRunning();
+bool GSStartBatchRun(
+	GSBatchRunBuffer* buffer,
+	const std::string& fn,
+	std::size_t num_files,
+	std::size_t num_runners
+);
+void GSEndBatchRun();
+GSBatchRunBuffer* GetBatchRunBuffer();
+bool GSCheckParentStatus_BatchRun(bool exit);
+void GSSignalRunnerHeartbeat_BatchRun(std::size_t i);
+bool GSBatchRunAcquireFile(std::string& filename);

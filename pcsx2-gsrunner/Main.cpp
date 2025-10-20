@@ -226,7 +226,7 @@ namespace GSRunner
 	static s32 s_batch_runner_num_files = -1;
 	static s32 s_batch_runner_num_threads = -1;
 	static s32 s_batch_runner_index = -1;
-	static GSStringQueueIPC s_batch_runner_buffer;
+	static GSBatchRunBuffer s_batch_runner_buffer;
 	static GSProcess::PID_t s_batch_runner_ppid = 0;
 
 	// Owned by the GS thread.
@@ -273,7 +273,7 @@ namespace GSRunnerBatch
 	static std::vector<std::string> batch_runner_command;
 	static std::string batch_shared_file;
 	static std::vector<std::string> batch_dump_list;
-	static GSStringQueueIPC batch_runner_buffer;
+	static GSBatchRunBuffer batch_runner_buffer;
 	static std::vector<GSProcess> batch_runner_proc;
 	std::vector<Common::Timer> batch_deadlock_timer;
 
@@ -1909,15 +1909,18 @@ int GSRunner::main_runner(int argc, const char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		GSStartRegressionTest(
-			&s_regression_buffer,
-			s_regression_file,
-			GSTester::GetEventNameRunner(s_parent_pid, s_runner_name),
-			GSTester::GetEventNameTester(s_parent_pid),
-			s_regression_num_packets,
-			s_regression_packet_size,
-			s_regression_num_dumps,
-			s_regression_dump_size);
+		if (!GSStartRegressionTest(
+				&s_regression_buffer,
+				s_regression_file,
+				GSTester::GetEventNameRunner(s_parent_pid, s_runner_name),
+				GSTester::GetEventNameTester(s_parent_pid),
+				s_regression_num_packets,
+				s_regression_packet_size,
+				s_regression_num_dumps,
+				s_regression_dump_size))
+		{
+			return EXIT_FAILURE;
+		}
 
 		if (!GSProcess::SetParentPID(s_parent_pid))
 		{
@@ -1935,12 +1938,12 @@ int GSRunner::main_runner(int argc, const char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		if (!s_batch_runner_buffer.OpenFile_(
-			s_batch_runner_shared_file,
-			s_batch_runner_num_files,
-			s_batch_runner_num_threads))
+		if (!GSStartBatchRun(
+				&s_batch_runner_buffer,
+				s_batch_runner_shared_file,
+				s_batch_runner_num_files,
+				s_batch_runner_num_threads))
 		{
-			Console.ErrorFmt("(GSRunner/{}/{}) Unable to open shared file: {}.", s_runner_name, GSProcess::GetCurrentPID(), s_batch_runner_shared_file);
 			return EXIT_FAILURE;
 		}
 
@@ -1958,11 +1961,9 @@ int GSRunner::main_runner(int argc, const char* argv[])
 	GSDumpReplayer::SetVerboseLogging(s_verbose_logging);
 	if (s_batch_mode)
 	{
-		if (!s_batch_runner_shared_file.empty())
-		{
-			GSDumpReplayer::SetBatchRunnerBuffer(&s_batch_runner_buffer);
+		if (GSIsBatchRunning())
 			GSDumpReplayer::SetBatchRunnerIndex(s_batch_runner_index);
-		}
+
 		GSDumpReplayer::SetIsBatchMode(true);
 		GSDumpReplayer::SetNumBatches(s_num_batches);
 		GSDumpReplayer::SetBatchID(s_batch_id);
@@ -1988,6 +1989,8 @@ int GSRunner::main_runner(int argc, const char* argv[])
 	DestroyPlatformWindow();
 	if (GSIsRegressionTesting())
 		GSEndRegressionTest();
+	if (GSIsBatchRunning())
+		GSEndBatchRun();
 	return EXIT_SUCCESS;
 }
 
@@ -2015,7 +2018,7 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 	}
 	Console.WriteLnFmt("(GSRunnerBatch) Created batch file: {}", batch_shared_file);
 
-	batch_runner_buffer.PopulateStrings(batch_dump_list);
+	batch_runner_buffer.PopulateFilenames(batch_dump_list);
 
 	if (batch_num_threads == 1)
 	{
@@ -2078,6 +2081,11 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
+
+	// TODO: End runners.
+
+	batch_runner_buffer.DestroySharedMemory();
+	batch_runner_buffer.CloseFile();
 
 	return 0;
 }
@@ -2147,7 +2155,7 @@ bool GSRunnerBatch::StartRunner(std::size_t i)
 
 bool GSRunnerBatch::EndRunner(std::size_t i)
 {
-	batch_runner_buffer.SetStateParent(i, GSStringQueueIPC::EXIT);
+	batch_runner_buffer.SetStateParent(i, GSBatchRunBuffer::EXIT);
 }
 
 bool GSTester::StartRunners()
@@ -2647,7 +2655,10 @@ int GSTester::MainThread(int argc, const char* argv[], u32 nthreads, u32 thread_
 	}
 
 	for (int i = 0; i < 2; i++)
+	{
+		regression_buffer[i].DestroySharedMemory();
 		regression_buffer[i].CloseFile();
+	}
 
 	// Get stats for main thread.
 	regression_dumps_completed = 0;

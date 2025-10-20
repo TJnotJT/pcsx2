@@ -10,6 +10,7 @@
 #include <atomic>
 
 static GSRegressionBuffer* regression_buffer; // Used by GS runner processes.
+static GSBatchRunBuffer* batch_run_buffer; // Used by GS runner processes.
 
 __forceinline static void CopyStringToBuffer(char* dst, std::size_t dst_size, const std::string& src)
 {
@@ -540,19 +541,31 @@ bool GSRegressionBuffer::OpenFile(
 	return true;
 }
 
+void GSRegressionBuffer::DestroySharedMemory()
+{
+	for (std::size_t i = 0; i < num_packets; i++)
+		GetPacket(i)->~GSRegressionPacket();
+
+	for (std::size_t i = 0; i < num_dumps; i++)
+		GetDump(i)->~GSDumpFileSharedMemory();
+
+	for (std::size_t i = 0; i < num_states; i++)
+		state[i].~GSIntSharedMemory();
+}
+
 bool GSRegressionBuffer::CloseFile()
 {
-	packets = nullptr;
-	dumps = nullptr;
-	state = nullptr;
-	num_packets = 0;
-	num_dumps = 0;
-
 	for (std::size_t i = 0; i < num_events; i++)
 		event[i].Close();
 
 	if (!shm.CloseFile())
 		return false;
+
+	packets = nullptr;
+	dumps = nullptr;
+	state = nullptr;
+	num_packets = 0;
+	num_dumps = 0;
 
 	return true;
 }
@@ -656,99 +669,6 @@ void GSRegressionBuffer::DebugPacketBuffer()
 void GSRegressionBuffer::DebugState()
 {
 	Console.WarningFmt("runner_state={} tester_state={}", STATE_STR.at(state[RUNNER].Get()), STATE_STR.at(state[TESTER].Get()));
-}
-
-bool GSIsRegressionTesting()
-{
-	return regression_buffer != nullptr;
-}
-
-/// Start regression testing within the producer/GS runner process.
-void GSStartRegressionTest(
-	GSRegressionBuffer* rbp,
-	const std::string& fn,
-	const std::string& event_name_runner,
-	const std::string& event_name_tester,
-	std::size_t num_packets,
-	std::size_t packet_size,
-	std::size_t num_dumps,
-	std::size_t dump_size)
-{
-	if (!rbp->OpenFile(
-		fn,
-		event_name_runner,
-		event_name_tester,
-		num_packets,
-		packet_size,
-		num_dumps,
-		dump_size))
-	{
-		pxFail("Unable to start regression test.");
-		return;
-	}
-
-	Console.WriteLnFmt("Opened {} for regression testing.", fn);
-
-	regression_buffer = rbp;
-}
-
-void GSEndRegressionTest()
-{
-	if (!regression_buffer)
-	{
-		pxFail("No regression buffer to close.");
-		return;
-	}
-
-	if (!regression_buffer->CloseFile())
-	{
-		pxFail("Unable to end regression test.");
-		return;
-	}
-}
-
-GSRegressionBuffer* GSGetRegressionBuffer()
-{
-	return regression_buffer;
-}
-
-void GSSignalRunnerHeartbeat()
-{
-	if (regression_buffer)
-		regression_buffer->SignalRunnerHeartbeat();
-	else
-		Console.ErrorFmt("Not regression testing.");
-}
-
-int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2)
-{
-	const GSRegressionPacket::ImageHeader& img1 = p1->image_header;
-	const GSRegressionPacket::ImageHeader& img2 = p2->image_header;
-
-	if (img1.w != img2.w || img1.h != img2.h || img1.bytes_per_pixel != img2.bytes_per_pixel)
-		return INT_MAX; // Formats are different.
-
-	int w = img1.w;
-	int h = img2.h;
-	int bytes_per_pixel = img1.bytes_per_pixel;
-	return StringUtil::StrideMemCmp(p1->GetData(), img1.pitch, p2->GetData(), img2.pitch, w * bytes_per_pixel, h);
-}
-
-bool GSCheckTesterStatus(bool exit, bool done_uploading)
-{
-	if (regression_buffer)
-	{
-		u32 state = regression_buffer->GetStateTester();
-		return
-			(exit && state == GSRegressionBuffer::EXIT) ||
-			(exit && !GSProcess::IsParentRunning()) ||
-			(done_uploading && state == GSRegressionBuffer::DONE_UPLOADING);
-	}
-	else
-	{
-		Console.ErrorFmt("Not regression testing.");
-		return false;
-	}
 }
 
 bool GSProcess::Start(const std::string& command, bool detached)
@@ -1197,13 +1117,13 @@ bool GSEvent::Reset() const
 #endif
 }
 
-void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num_runners)
+void GSBatchRunBuffer::SetSizesPointers(std::size_t num_files, std::size_t num_runners)
 {
 	std::size_t head_offset;
 	std::size_t file_status_offset;
-	std::size_t strings_offset;
+	std::size_t filenames_offset;
 	std::size_t state_parent_offset;
-	std::size_t state_child_offset;
+	std::size_t state_runner_offset;
 	std::size_t runner_heartbeats_offset;
 
 	std::size_t start_offset = reinterpret_cast<std::size_t>(shm.data);
@@ -1213,58 +1133,88 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 	curr_offset += sizeof(GSIntSharedMemory);
 
 	file_status_offset = curr_offset;
-	curr_offset += num_strings * sizeof(GSIntSharedMemory);
+	curr_offset += num_files * sizeof(GSIntSharedMemory);
 
-	strings_offset = curr_offset;
-	curr_offset += num_strings * string_size;
+	filenames_offset = curr_offset;
+	curr_offset += num_files * filename_size;
 
 	state_parent_offset = curr_offset;
 	curr_offset += num_runners * sizeof(GSIntSharedMemory);
 
-	state_child_offset = curr_offset;
+	state_runner_offset = curr_offset;
 	curr_offset += num_runners * sizeof(GSIntSharedMemory);
 
 	runner_heartbeats_offset = curr_offset;
 	curr_offset += num_runners * sizeof(GSIntSharedMemory);
 
-	pxAssert(curr_offset - start_offset == GetTotalSize(num_strings, num_runners));
+	pxAssert(curr_offset - start_offset == GetTotalSize(num_files, num_runners));
 
 	head = reinterpret_cast<GSIntSharedMemory*>(head_offset);
 	file_status = reinterpret_cast<GSIntSharedMemory*>(file_status_offset);
-	strings = reinterpret_cast<char*>(strings_offset);
+	filenames = reinterpret_cast<char*>(filenames_offset);
 	state_parent = reinterpret_cast<GSIntSharedMemory*>(state_parent_offset);
-	state_child = reinterpret_cast<GSIntSharedMemory*>(state_child_offset);
-	runner_heartbeats = reinterpret_cast<GSIntSharedMemory*>(runner_heartbeats_offset);
+	state_runner = reinterpret_cast<GSIntSharedMemory*>(state_runner_offset);
+	state_runner_heartbeat = reinterpret_cast<GSIntSharedMemory*>(runner_heartbeats_offset);
 
-	this->num_strings = num_strings;
+	this->num_files = num_files;
 	this->num_runners = num_runners;
 }
 
-bool GSStringQueueIPC::CreateFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners)
+bool GSBatchRunBuffer::CreateFile_(const std::string& name, std::size_t num_files, std::size_t num_runners)
 {
-	if (!shm.CreateFile_(name, GetTotalSize(num_strings, num_runners)))
+	if (!shm.CreateFile_(name, GetTotalSize(num_files, num_runners)))
 		return false;
 
-	SetSizesPointers(num_strings, num_runners);
+	SetSizesPointers(num_files, num_runners);
 
 	Init();
 	return true;
 }
 
-bool GSStringQueueIPC::OpenFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners)
+bool GSBatchRunBuffer::OpenFile(const std::string& name, std::size_t num_files, std::size_t num_runners)
 {
-	if (!shm.OpenFile(name, GetTotalSize(num_strings, num_runners)))
+	if (!shm.OpenFile(name, GetTotalSize(num_files, num_runners)))
 		return false;
 
-	SetSizesPointers(num_strings, num_runners);
+	SetSizesPointers(num_files, num_runners);
 	return true;
 }
 
-void GSStringQueueIPC::Init()
+void GSBatchRunBuffer::DestroySharedMemory()
+{
+	for (std::size_t i = 0; i < num_files; i++)
+		file_status[i].~GSIntSharedMemory();
+
+	for (std::size_t i = 0; i < num_runners; i++)
+	{
+		state_parent[i].~GSIntSharedMemory();
+		state_runner[i].~GSIntSharedMemory();
+		state_runner_heartbeat[i].~GSIntSharedMemory();
+	}
+}
+
+bool GSBatchRunBuffer::CloseFile()
+{
+	if (!shm.CloseFile())
+		return false;
+
+	head = nullptr;
+	filenames = nullptr;
+	num_files = 0;
+	file_status = nullptr;
+	state_parent = nullptr;
+	state_runner = nullptr;
+	state_runner_heartbeat = nullptr;
+	num_runners = 0;
+
+	return true;
+}
+
+void GSBatchRunBuffer::Init()
 {
 	head->Init();
 
-	for (std::size_t i = 0; i < num_strings; i++)
+	for (std::size_t i = 0; i < num_files; i++)
 	{
 		file_status[i].Init();
 	}
@@ -1272,33 +1222,33 @@ void GSStringQueueIPC::Init()
 	for (std::size_t i = 0; i < num_runners; i++)
 	{
 		state_parent[i].Init();
-		state_child[i].Init();
-		runner_heartbeats[i].Init();
+		state_runner[i].Init();
+		state_runner_heartbeat[i].Init();
 	}
 }
 
-bool GSStringQueueIPC::AcquireString(std::string& string)
+bool GSBatchRunBuffer::AcquireFile(std::string& filename)
 {
 	std::size_t i = head->FetchAdd();
 
-	if (i >= num_strings)
+	if (i >= num_files)
 	{
 		head->Set(i);
-		string.clear();
+		filename.clear();
 		return false;
 	}
 	else
 	{
-		string = GetString(i);
+		filename = GetFilename(i);
 		return true;
 	}
 }
 
-bool GSStringQueueIPC::CheckRunnerIndex(std::size_t i)
+bool GSBatchRunBuffer::CheckRunnerIndex(std::size_t i)
 {
 	if (i >= num_runners)
 	{
-		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {}).", i, num_runners);
+		Console.ErrorFmt("GSBatchRunBuffer: Runner index out of bounds ({} / {}).", i, num_runners);
 		pxFail("");
 		return false;
 	}
@@ -1306,11 +1256,11 @@ bool GSStringQueueIPC::CheckRunnerIndex(std::size_t i)
 	return true;
 }
 
-bool GSStringQueueIPC::CheckFileIndex(std::size_t i)
+bool GSBatchRunBuffer::CheckFileIndex(std::size_t i)
 {
-	if (i >= num_strings)
+	if (i >= num_files)
 	{
-		Console.ErrorFmt("GSStringQueueIPC: File index out of bounds ({} / {}).", i, num_strings);
+		Console.ErrorFmt("GSBatchRunBuffer: File index out of bounds ({} / {}).", i, num_files);
 		pxFail("");
 		return false;
 	}
@@ -1318,7 +1268,7 @@ bool GSStringQueueIPC::CheckFileIndex(std::size_t i)
 	return true;
 }
 
-GSStringQueueIPC::FileStatus GSStringQueueIPC::GetFileStatus(std::size_t i)
+GSBatchRunBuffer::FileStatus GSBatchRunBuffer::GetFileStatus(std::size_t i)
 {
 	if (!CheckFileIndex(i))
 		return ERROR_FS;
@@ -1326,7 +1276,7 @@ GSStringQueueIPC::FileStatus GSStringQueueIPC::GetFileStatus(std::size_t i)
 	return static_cast<FileStatus>(file_status[i].Get());
 }
 
-void GSStringQueueIPC::SetFileStatus(std::size_t i, FileStatus status)
+void GSBatchRunBuffer::SetFileStatus(std::size_t i, FileStatus status)
 {
 	if (!CheckFileIndex(i))
 		return;
@@ -1334,64 +1284,64 @@ void GSStringQueueIPC::SetFileStatus(std::size_t i, FileStatus status)
 	file_status[i].Set(status);
 }
 
-std::string GSStringQueueIPC::GetString(std::size_t i)
+std::string GSBatchRunBuffer::GetFilename(std::size_t i)
 {
 	if (!CheckFileIndex(i))
 		return "";
 
-	char* s = strings + i * string_size;
-	s[string_size - 1] = '\0';
+	char* s = filenames + i * filename_size;
+	s[filename_size - 1] = '\0';
 	return std::string(s);
 }
 
-bool GSStringQueueIPC::PopulateStrings(const std::vector<std::string>& strings_in)
+bool GSBatchRunBuffer::PopulateFilenames(const std::vector<std::string>& filenames_in)
 {
-	if (strings_in.size() != num_strings)
+	if (filenames_in.size() != num_files)
 	{
-		Console.ErrorFmt("GSStringQueueIPC: PopulateStrings() incorrect number of strings ({} / {})", strings_in.size(), num_strings);
+		Console.ErrorFmt("GSBatchRunBuffer: PopulateFilenames() incorrect number of strings ({} / {})", filenames_in.size(), num_files);
 		return false;
 	}
-	for (std::size_t i = 0; i < num_strings; i++)
+	for (std::size_t i = 0; i < num_files; i++)
 	{
-		char* s = strings + i * string_size;
-		CopyStringToBuffer(s, string_size, strings_in[i]);
+		char* s = filenames + i * filename_size;
+		CopyStringToBuffer(s, filename_size, filenames_in[i]);
 	}
 	return true;
 }
 
-void GSStringQueueIPC::SignalRunnerHeartbeat(std::size_t i)
+void GSBatchRunBuffer::SignalRunnerHeartbeat(std::size_t i)
 {
 	if (!CheckRunnerIndex(i))
 		return;
 
-	runner_heartbeats[i].Set(ALIVE);
+	state_runner_heartbeat[i].Set(ALIVE);
 }
 
-bool GSStringQueueIPC::CheckRunnerHeartbeat(std::size_t i)
+bool GSBatchRunBuffer::CheckRunnerHeartbeat(std::size_t i)
 {
 	if (!CheckRunnerIndex(i))
 		return false;
 
-	return runner_heartbeats[i].Get() == ALIVE;
+	return state_runner_heartbeat[i].Get() == ALIVE;
 }
 
-void GSStringQueueIPC::ResetRunnerHeartbeat(std::size_t i)
+void GSBatchRunBuffer::ResetRunnerHeartbeat(std::size_t i)
 {
 	if (!CheckRunnerIndex(i))
 		return;
 
-	runner_heartbeats[i].Set(DEFAULT_RH);
+	state_runner_heartbeat[i].Set(DEFAULT_RH);
 }
 
-void GSStringQueueIPC::SetStateChild(std::size_t i, ProcessState state)
+void GSBatchRunBuffer::SetStateChild(std::size_t i, ProcessState state)
 {
 	if (!CheckRunnerIndex(i))
 		return;
 
-	state_child[i].Set(static_cast<GSIntSharedMemory::ValType>(state));
+	state_runner[i].Set(static_cast<GSIntSharedMemory::ValType>(state));
 }
 
-void GSStringQueueIPC::SetStateParent(std::size_t i, ProcessState state)
+void GSBatchRunBuffer::SetStateParent(std::size_t i, ProcessState state)
 {
 	if (!CheckRunnerIndex(i))
 		return;
@@ -1399,15 +1349,15 @@ void GSStringQueueIPC::SetStateParent(std::size_t i, ProcessState state)
 	state_parent[i].Set(static_cast<GSIntSharedMemory::ValType>(state));
 }
 
-GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateChild(std::size_t i)
+GSBatchRunBuffer::ProcessState GSBatchRunBuffer::GetStateChild(std::size_t i)
 {
 	if (!CheckRunnerIndex(i))
 		return ERROR_PS;
 
-	return static_cast<ProcessState>(state_child[i].Get());
+	return static_cast<ProcessState>(state_runner[i].Get());
 }
 
-GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateParent(std::size_t i)
+GSBatchRunBuffer::ProcessState GSBatchRunBuffer::GetStateParent(std::size_t i)
 {
 	if (!CheckRunnerIndex(i))
 		return ERROR_PS;
@@ -1415,9 +1365,186 @@ GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateParent(std::size_t i)
 	return static_cast<ProcessState>(state_parent[i].Get());
 }
 
-std::size_t GSStringQueueIPC::GetTotalSize(std::size_t num_strings, std::size_t num_runners)
+std::size_t GSBatchRunBuffer::GetTotalSize(std::size_t num_files, std::size_t num_runners)
 {
 	return
-		(string_size + sizeof(GSIntSharedMemory)) * num_strings + // File status and names.
+		(filename_size + sizeof(GSIntSharedMemory)) * num_files + // File status and names.
 		sizeof(GSIntSharedMemory) * (3 * num_runners + 1); // Runner parent/child/child-heartbeat status and head.
+}
+
+bool GSIsRegressionTesting()
+{
+	return regression_buffer != nullptr;
+}
+
+// Start regression testing within the producer/GS runner process.
+bool GSStartRegressionTest(
+	GSRegressionBuffer* rbp,
+	const std::string& fn,
+	const std::string& event_name_runner,
+	const std::string& event_name_tester,
+	std::size_t num_packets,
+	std::size_t packet_size,
+	std::size_t num_dumps,
+	std::size_t dump_size)
+{
+	if (!rbp->OpenFile(
+		fn,
+		event_name_runner,
+		event_name_tester,
+		num_packets,
+		packet_size,
+		num_dumps,
+		dump_size))
+	{
+		pxFail("Unable to start regression test.");
+		return false;
+	}
+
+	Console.WriteLnFmt("Opened {} for regression testing.", fn);
+
+	regression_buffer = rbp;
+	
+	return true;
+}
+
+void GSEndRegressionTest()
+{
+	if (!regression_buffer)
+	{
+		pxFail("No regression buffer to close.");
+		return;
+	}
+
+	if (!regression_buffer->CloseFile())
+	{
+		pxFail("Unable to end regression test.");
+		return;
+	}
+}
+
+GSRegressionBuffer* GSGetRegressionBuffer()
+{
+	return regression_buffer;
+}
+
+void GSSignalRunnerHeartbeat_RegressionTest()
+{
+	if (regression_buffer)
+		regression_buffer->SignalRunnerHeartbeat();
+	else
+		Console.ErrorFmt("Not regression testing.");
+}
+
+int GSRegressionImageMemCmp(const GSRegressionPacket* p1, const GSRegressionPacket* p2)
+{
+	const GSRegressionPacket::ImageHeader& img1 = p1->image_header;
+	const GSRegressionPacket::ImageHeader& img2 = p2->image_header;
+
+	if (img1.w != img2.w || img1.h != img2.h || img1.bytes_per_pixel != img2.bytes_per_pixel)
+		return INT_MAX; // Formats are different.
+
+	int w = img1.w;
+	int h = img2.h;
+	int bytes_per_pixel = img1.bytes_per_pixel;
+	return StringUtil::StrideMemCmp(p1->GetData(), img1.pitch, p2->GetData(), img2.pitch, w * bytes_per_pixel, h);
+}
+
+bool GSCheckTesterStatus_RegressionTest(bool exit, bool done_uploading)
+{
+	if (regression_buffer)
+	{
+		u32 state = regression_buffer->GetStateTester();
+		return (exit && state == GSRegressionBuffer::EXIT) ||
+		       (exit && !GSProcess::IsParentRunning()) ||
+		       (done_uploading && state == GSRegressionBuffer::DONE_UPLOADING);
+	}
+	else
+	{
+		Console.ErrorFmt("Not regression testing.");
+		return false;
+	}
+}
+
+bool GSIsBatchRunning()
+{
+	return batch_run_buffer != nullptr;
+}
+
+GSBatchRunBuffer* GetBatchRunBuffer()
+{
+	return batch_run_buffer;
+}
+
+bool GSStartBatchRun(
+	GSBatchRunBuffer* bbp,
+	const std::string& fn,
+	std::size_t num_files,
+	std::size_t num_runners)
+{
+	if (!bbp->OpenFile(fn, num_files, num_runners))
+	{
+		Console.ErrorFmt("Unable to open {} for batch running.", fn);
+		pxFail("");
+		return false;
+	}
+
+	Console.WriteLnFmt("Opened {} for batch running.", fn);
+
+	batch_run_buffer = bbp;
+
+	return true;
+}
+
+void GSEndBatchRun()
+{
+	if (!batch_run_buffer)
+	{
+		pxFail("No batch run buffer to close.");
+		return;
+	}
+
+	if (!batch_run_buffer->CloseFile())
+	{
+		pxFail("Unable to end batch run.");
+		return;
+	}
+}
+
+bool GSCheckParentStatus_BatchRun(std::size_t i)
+{
+	if (!batch_run_buffer)
+	{
+		Console.ErrorFmt("Not batch running.");
+		return false;
+	}
+
+	if (!GSProcess::IsParentRunning())
+		return false;
+
+	if (batch_run_buffer->GetStateParent(i) == GSBatchRunBuffer::EXIT)
+		return false;
+
+	return true;
+}
+
+void GSSignalRunnerHeartbeat_BatchRun(std::size_t i)
+{
+	if (batch_run_buffer)
+		batch_run_buffer->SignalRunnerHeartbeat(i);
+	else
+		Console.ErrorFmt("Not batch running.");
+}
+
+bool GSBatchRunAcquireFile(std::string& filename)
+{
+	if (batch_run_buffer)
+	{
+		return batch_run_buffer->AcquireFile(filename);
+	}
+	else
+	{
+		Console.ErrorFmt("Not batch running.");
+		return false;
+	}
 }

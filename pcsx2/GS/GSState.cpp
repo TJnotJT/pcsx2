@@ -1835,7 +1835,7 @@ void GSState::Flush(GSFlushReason reason)
 {
 	if (GSIsRegressionTesting() && ((s_n & 0x3FF) == 0))
 	{
-		GSSignalRunnerHeartbeat(); // Let tester know we are not deadlocked.
+		GSSignalRunnerHeartbeat_RegressionTest(); // Let tester know we are not deadlocked.
 	}
 
 	FlushWrite();

@@ -68,7 +68,6 @@ static std::string s_batch_start_from_dump;
 static bool s_regression_test_send_hwstats = false; // Only send HWSTAT packets if the log is not written.
 static bool s_verbose_logging = false;
 static GSDumpFileLoader s_dump_file_loader; // For batch mode.
-static GSStringQueueIPC* s_batch_runner_buffer = nullptr;
 static s64 s_batch_runner_index = -1;
 
 R5900cpu GSDumpReplayerCpu = {
@@ -124,11 +123,6 @@ void GSDumpReplayer::SetVerboseLogging(bool verbose)
 bool GSDumpReplayer::IsVerboseLogging()
 {
 	return s_verbose_logging;
-}
-
-void GSDumpReplayer::SetBatchRunnerBuffer(GSStringQueueIPC* buffer)
-{
-	s_batch_runner_buffer = buffer;
 }
 
 void GSDumpReplayer::SetBatchRunnerIndex(std::size_t index)
@@ -211,7 +205,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 						rbp->DonePacketWrite();
 				});
 
-				if (packet_hwstat = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus, true, false)))
+				if (packet_hwstat = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus_RegressionTest, true, false)))
 				{
 					const std::string name_dump = rbp->GetNameDump();
 					packet_hwstat->SetNameDump(name_dump);
@@ -248,7 +242,7 @@ void GSDumpReplayer::EndDumpRegressionTest()
 					rbp->DonePacketWrite();
 			});
 
-			if (packet_done_dump = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus, true, false)))
+			if (packet_done_dump = rbp->GetPacketWrite(std::bind(GSCheckTesterStatus_RegressionTest, true, false)))
 			{
 				const std::string name_dump = rbp->GetNameDump();
 				packet_done_dump->SetNameDump(name_dump);
@@ -340,9 +334,8 @@ bool GSDumpReplayer::Initialize(const char* filename)
 		if (!ChangeDump())
 			return false;
 	}
-	else if (s_batch_runner_buffer)
+	else if (GSIsBatchRunning())
 	{
-		// FIXME: Make a better check for batch running from memory.
 		if (!ChangeDump())
 			return false;
 	}
@@ -433,7 +426,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 		dump = rbp->GetDumpRead(); // First, one non-blocking check since otherwise the done uploading status is polled too early.
 		if (!dump)
 		{
-			dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus, true, true));
+			dump = rbp->GetDumpRead(std::bind(GSCheckTesterStatus_RegressionTest, true, true));
 		}
 
 		if (!dump)
@@ -500,9 +493,9 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			Console.WriteLnFmt("(GSDumpReplayer/{}) Read GS dump in '{}' ({:.2} seconds)", runner_name, dump_name, sec);
 		});
 
-		GSSignalRunnerHeartbeat();
+		GSSignalRunnerHeartbeat_RegressionTest();
 	}
-	else if (IsBatchMode() && s_batch_runner_buffer)
+	else if (GSIsBatchRunning())
 	{
 		pxAssert(filename == nullptr);
 
@@ -521,7 +514,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			while (!s_dump_file_loader.IsFull())
 			{
 				std::string file_str;
-				if (s_batch_runner_buffer->AcquireString(file_str))
+				if (GSBatchRunAcquireFile(file_str))
 					s_dump_file_loader.AddFile(file_str);
 				else
 					break;
@@ -562,7 +555,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 					GetRunnerName(), name, static_cast<double>(size) / _1mb, block_time, load_time);
 			});
 
-		s_batch_runner_buffer->SignalRunnerHeartbeat(s_batch_runner_index);
+		GSSignalRunnerHeartbeat_BatchRun(s_batch_runner_index);
 	}
 	else if (IsBatchMode())
 	{
@@ -775,7 +768,7 @@ static void GSDumpReplayerLoadInitialState()
 				s_batch_recreate_device ? "renderer and device" : "renderer only", sec);
 
 			if (GSIsRegressionTesting())
-				GSSignalRunnerHeartbeat();
+				GSSignalRunnerHeartbeat_RegressionTest();
 		});
 	}
 
@@ -917,7 +910,7 @@ void GSDumpReplayerCpuStep()
 
 	done_dump = done_dump || (s_dump_frame_number_max > 0 && s_dump_frame_number >= s_dump_frame_number_max);
 
-	if (GSIsRegressionTesting() && GSCheckTesterStatus(true, false))
+	if (GSIsRegressionTesting() && GSCheckTesterStatus_RegressionTest(true, false))
 	{
 		MTGS::RunOnGSThread([runner_name = GSDumpReplayer::GetRunnerName()]() {
 			Console.WarningFmt("(GSDumpReplayer/{}) Got exit status from tester.", runner_name);
