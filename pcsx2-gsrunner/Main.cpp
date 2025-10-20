@@ -2682,7 +2682,6 @@ int GSTester::MainThread(int argc, const char* argv[], u32 nthreads, u32 thread_
 	}
 
 	return EXIT_SUCCESS;
-}
 
 int GSTester::main_tester(int argc, const char* argv[])
 {
