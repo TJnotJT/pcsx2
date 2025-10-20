@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+struct GSStringQueueIPC;
+
 namespace GSDumpReplayer
 {
 	bool IsReplayingDump();
@@ -21,6 +23,7 @@ namespace GSDumpReplayer
 	void SetVerboseLogging(bool verbose);
 	bool IsVerboseLogging();
 
+	void SetBatchRunnerBuffer(GSStringQueueIPC* buffer);
 	void SetIsBatchMode(bool batch_mode); // Batch mode
 	void SetNumBatches(u32 n_batches); // Batch mode
 	void SetBatchID(u32 batch_id); // Batch mode

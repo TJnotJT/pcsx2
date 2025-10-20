@@ -1201,6 +1201,8 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 {
 	std::size_t head_offset;
 	std::size_t strings_offset;
+	std::size_t state_parent_offset;
+	std::size_t state_child_offset;
 	std::size_t runner_heartbeats_offset;
 
 	std::size_t start_offset = reinterpret_cast<std::size_t>(shm.data);
@@ -1212,6 +1214,12 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 	strings_offset = curr_offset;
 	curr_offset += num_strings * string_size;
 
+	state_parent_offset = curr_offset;
+	curr_offset += num_runners * sizeof(GSIntSharedMemory);
+
+	state_child_offset = curr_offset;
+	curr_offset += num_runners * sizeof(GSIntSharedMemory);
+
 	runner_heartbeats_offset = curr_offset;
 	curr_offset += num_runners * sizeof(GSIntSharedMemory);
 
@@ -1219,6 +1227,8 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 
 	head = reinterpret_cast<GSIntSharedMemory*>(&shm.data);
 	strings = reinterpret_cast<char*>(strings_offset);
+	state_parent = reinterpret_cast<GSIntSharedMemory*>(state_parent_offset);
+	state_child = reinterpret_cast<GSIntSharedMemory*>(state_child_offset);
 	runner_heartbeats = reinterpret_cast<GSIntSharedMemory*>(runner_heartbeats_offset);
 
 	this->num_strings = num_strings;
@@ -1231,6 +1241,7 @@ bool GSStringQueueIPC::CreateFile_(const std::string& name, std::size_t num_stri
 		return false;
 
 	SetSizesPointers(num_strings, num_runners);
+	return true;
 }
 
 bool GSStringQueueIPC::OpenFile_(const std::string& name, std::size_t num_strings, std::size_t num_runners)
@@ -1246,7 +1257,11 @@ void GSStringQueueIPC::Init()
 	head->Init();
 
 	for (std::size_t i = 0; i < num_runners; i++)
-		runner_heartbeats->Init();
+	{
+		state_parent[i].Init();
+		state_child[i].Init();
+		runner_heartbeats[i].Init();
+	}
 }
 
 bool GSStringQueueIPC::AcquireString(std::string& string)
@@ -1262,41 +1277,54 @@ bool GSStringQueueIPC::AcquireString(std::string& string)
 	else
 	{
 		string = GetString(i);
+		return true;
 	}
+}
+
+bool GSStringQueueIPC::CheckRunnerIndex(std::size_t i)
+{
+	if (i >= num_runners)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {}).", i, num_runners);
+		pxFail("");
+		return false;
+	}
+
+	return true;
+}
+
+bool GSStringQueueIPC::CheckFileIndex(std::size_t i)
+{
+	if (i >= num_strings)
+	{
+		Console.ErrorFmt("GSStringQueueIPC: File index out of bounds ({} / {}).", i, num_strings);
+		pxFail("");
+		return false;
+	}
+
+	return true;
 }
 
 GSStringQueueIPC::FileStatus GSStringQueueIPC::GetFileStatus(std::size_t i)
 {
-	if (i >= num_strings)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: GetFileStatus() index out of bounds ({} / {}).", i, num_strings);
-		pxFail("");
-		return ERROR_;
-	}
+	if (!CheckFileIndex(i))
+		return ERROR_FS;
 
 	return static_cast<FileStatus>(file_status[i].Get());
 }
 
 void GSStringQueueIPC::SetFileStatus(std::size_t i, FileStatus status)
 {
-	if (i >= num_strings)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: SetFileStatus() index out of bounds ({} / {}).", i, num_strings);
-		pxFail("");
+	if (!CheckFileIndex(i))
 		return;
-	}
 
 	file_status[i].Set(status);
 }
 
 std::string GSStringQueueIPC::GetString(std::size_t i)
 {
-	if (i >= num_strings)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: GetString() index out of bounds ({} / {}).", i, num_strings);
-		pxFail("");
+	if (!CheckFileIndex(i))
 		return "";
-	}
 
 	char* s = strings + i * string_size;
 	s[string_size - 1] = '\0';
@@ -1320,41 +1348,62 @@ bool GSStringQueueIPC::PopulateStrings(const std::vector<std::string>& strings_i
 
 void GSStringQueueIPC::SignalRunnerHeartbeat(std::size_t i)
 {
-	if (i >= num_runners)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
-		pxFail("");
+	if (!CheckRunnerIndex(i))
 		return;
-	}
 
 	runner_heartbeats[i].Set(ALIVE);
 }
 
 bool GSStringQueueIPC::CheckRunnerHeartbeat(std::size_t i)
 {
-	if (i >= num_runners)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
-		pxFail("");
-		return;
-	}
+	if (!CheckRunnerIndex(i))
+		return false;
 
 	return runner_heartbeats[i].Get() == ALIVE;
 }
 
 void GSStringQueueIPC::ResetRunnerHeartbeat(std::size_t i)
 {
-	if (i >= num_runners)
-	{
-		Console.ErrorFmt("GSStringQueueIPC: Runner index out of bounds ({} / {})", i, num_runners);
-		pxFail("");
+	if (!CheckRunnerIndex(i))
 		return;
-	}
 
-	runner_heartbeats[i].Set(DEFAULT);
+	runner_heartbeats[i].Set(DEFAULT_RH);
+}
+
+void GSStringQueueIPC::SetStateChild(std::size_t i, ProcessState state)
+{
+	if (!CheckRunnerIndex(i))
+		return;
+
+	state_child[i].Set(static_cast<GSIntSharedMemory::ValType>(state));
+}
+
+void GSStringQueueIPC::SetStateParent(std::size_t i, ProcessState state)
+{
+	if (!CheckRunnerIndex(i))
+		return;
+
+	state_parent[i].Set(static_cast<GSIntSharedMemory::ValType>(state));
+}
+
+GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateChild(std::size_t i)
+{
+	if (!CheckRunnerIndex(i))
+		return ERROR_PS;
+
+	return static_cast<ProcessState>(state_child[i].Get());
+}
+
+GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateParent(std::size_t i)
+{
+	if (!CheckRunnerIndex(i))
+		return ERROR_PS;
+
+	return static_cast<ProcessState>(state_parent[i].Get());
 }
 
 std::size_t GSStringQueueIPC::GetTotalSize(std::size_t num_strings, std::size_t num_runners)
 {
-	return (string_size + sizeof(GSIntSharedMemory)) * num_strings + sizeof(GSIntSharedMemory) * num_runners;
+	return (string_size + sizeof(GSIntSharedMemory)) * num_strings +
+		3 * sizeof(GSIntSharedMemory) * num_runners;
 }

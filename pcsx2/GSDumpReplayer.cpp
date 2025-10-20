@@ -68,6 +68,7 @@ static std::string s_batch_start_from_dump;
 static bool s_regression_test_send_hwstats = false; // Only send HWSTAT packets if the log is not written.
 static bool s_verbose_logging = false;
 static GSDumpFileLoader s_dump_file_loader; // For batch mode.
+static GSStringQueueIPC* s_batch_runner_buffer = nullptr;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -122,6 +123,11 @@ void GSDumpReplayer::SetVerboseLogging(bool verbose)
 bool GSDumpReplayer::IsVerboseLogging()
 {
 	return s_verbose_logging;
+}
+
+void GSDumpReplayer::SetBatchRunnerBuffer(GSStringQueueIPC* buffer)
+{
+	s_batch_runner_buffer = buffer;
 }
 
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
@@ -484,6 +490,17 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 		GSSignalRunnerHeartbeat();
 	}
+	else if (IsBatchMode() && s_batch_runner_buffer)
+	{
+		// FIXME: IN PROGRESS!!!
+		pxAssert(filename == nullptr);
+
+		if (!s_dump_file_loader.Started())
+		{
+			s_dump_file_loader.Start(s_dump_file_list);
+
+		}
+	}
 	else if (IsBatchMode())
 	{
 		// Batch mode but not regression testing; asynchronous dump loading.
@@ -495,16 +512,13 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			s_dump_file_loader.Start(s_dump_file_list);
 		}
 
-		std::string filename;
-		std::string error;
-		double block_time;
-		double load_time;
+		GSDumpFileLoader::DumpInfo dump;
 
 		// Get/read the next available ready dump, skipping any that errored.
 		while (true)
 		{
 			// This reads the dump file as well.
-			GSDumpFileLoader::ReturnValue ret = s_dump_file_loader.Get(s_dump_file, &filename, &error, &block_time, &load_time);
+			GSDumpFileLoader::ReturnValue ret = s_dump_file_loader.Get(s_dump_file, &dump);
 
 			if (ret == GSDumpFileLoader::SUCCESS)
 			{
@@ -516,7 +530,7 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 			}
 			else if (ret == GSDumpFileLoader::ERROR_)
 			{
-				MTGS::RunOnGSThread([error]() {
+				MTGS::RunOnGSThread([error = dump.error]() {
 					Console.ErrorFmt("(GSRunner/{}) Error loading/reading dump: {}.", GetRunnerName(),
 						error.empty() ? std::string("Unspecified reason") : error);
 				});
@@ -529,7 +543,12 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 		s_dump_name = Path::GetFileName(filename);
 
-		MTGS::RunOnGSThread([name = s_dump_name, block_time, load_time, size = s_dump_file->GetFileSize()]() {
+		MTGS::RunOnGSThread(
+			[name = s_dump_name,
+			block_time = dump.block_time,
+			load_time = dump.block_time,
+			size = s_dump_file->GetFileSize()]() {
+
 			Console.WriteLnFmt("(GSRunner/{}) Loaded dump '{}' (size: {:.2} MB; block time: {:.2} seconds; load time: {:.2} seconds)",
 				GetRunnerName(), name, static_cast<double>(size) / _1mb, block_time, load_time);
 		});

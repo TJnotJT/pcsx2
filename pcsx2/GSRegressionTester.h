@@ -430,11 +430,19 @@ struct GSStringQueueIPC
 {
 	static constexpr std::size_t string_size = 8192;
 
-	// For runner heartbeat.
 	enum RunnerHeartbeat : GSIntSharedMemory::ValType
 	{
-		DEFAULT,
+		DEFAULT_RH = 0,
 		ALIVE
+	};
+
+	enum ProcessState : GSIntSharedMemory::ValType
+	{
+		DEFAULT_PS = 0,
+		RUNNING,
+		DONE,
+		EXIT,
+		ERROR_PS
 	};
 
 	// For file status.
@@ -443,7 +451,7 @@ struct GSStringQueueIPC
 		NOT_STARTED = 0,
 		STARTED,
 		COMPLETED,
-		ERROR_
+		ERROR_FS
 	};
 
 	GSSharedMemoryFile shm;
@@ -455,7 +463,9 @@ struct GSStringQueueIPC
 
 	GSIntSharedMemory* file_status;
 	
-	GSIntSharedMemory* runner_heartbeats;
+	GSIntSharedMemory* state_parent;
+	GSIntSharedMemory* state_child;
+	GSIntSharedMemory* runner_heartbeats; // FIXME: change to state_child_heartbeat
 	std::size_t num_runners;
 
 	// Private - only call once after creating/opening shared memory.
@@ -474,10 +484,18 @@ struct GSStringQueueIPC
 	// Private - only call by owner of slot.
 	std::string GetString(std::size_t i);
 
-	// Call any time by that runner.
-	void SignalRunnerHeartbeat(std::size_t i);
-	bool CheckRunnerHeartbeat(std::size_t i);
-	void ResetRunnerHeartbeat(std::size_t i);
+	// Call any time.
+	void SignalRunnerHeartbeat(std::size_t i); // Child only.
+	bool CheckRunnerHeartbeat(std::size_t i); // Parent only.
+	void ResetRunnerHeartbeat(std::size_t i); // Parent only.
+	void SetStateParent(std::size_t i, ProcessState state); // Parent only.
+	void SetStateChild(std::size_t i, ProcessState state); // Child only.
+	ProcessState GetStateParent(std::size_t i); // Child only.
+	ProcessState GetStateChild(std::size_t i); // Parent only.
+
+	// Private - helper.
+	bool CheckRunnerIndex(std::size_t i);
+	bool CheckFileIndex(std::size_t i);
 
 	// Static.
 	static std::size_t GetTotalSize(std::size_t num_strings, std::size_t num_runners);
