@@ -1200,6 +1200,7 @@ bool GSEvent::Reset() const
 void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num_runners)
 {
 	std::size_t head_offset;
+	std::size_t file_status_offset;
 	std::size_t strings_offset;
 	std::size_t state_parent_offset;
 	std::size_t state_child_offset;
@@ -1210,6 +1211,9 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 
 	head_offset = curr_offset;
 	curr_offset += sizeof(GSIntSharedMemory);
+
+	file_status_offset = curr_offset;
+	curr_offset += num_strings * sizeof(GSIntSharedMemory);
 
 	strings_offset = curr_offset;
 	curr_offset += num_strings * string_size;
@@ -1225,7 +1229,8 @@ void GSStringQueueIPC::SetSizesPointers(std::size_t num_strings, std::size_t num
 
 	pxAssert(curr_offset - start_offset == GetTotalSize(num_strings, num_runners));
 
-	head = reinterpret_cast<GSIntSharedMemory*>(&shm.data);
+	head = reinterpret_cast<GSIntSharedMemory*>(head_offset);
+	file_status = reinterpret_cast<GSIntSharedMemory*>(file_status_offset);
 	strings = reinterpret_cast<char*>(strings_offset);
 	state_parent = reinterpret_cast<GSIntSharedMemory*>(state_parent_offset);
 	state_child = reinterpret_cast<GSIntSharedMemory*>(state_child_offset);
@@ -1241,6 +1246,8 @@ bool GSStringQueueIPC::CreateFile_(const std::string& name, std::size_t num_stri
 		return false;
 
 	SetSizesPointers(num_strings, num_runners);
+
+	Init();
 	return true;
 }
 
@@ -1250,11 +1257,17 @@ bool GSStringQueueIPC::OpenFile_(const std::string& name, std::size_t num_string
 		return false;
 
 	SetSizesPointers(num_strings, num_runners);
+	return true;
 }
 
 void GSStringQueueIPC::Init()
 {
 	head->Init();
+
+	for (std::size_t i = 0; i < num_strings; i++)
+	{
+		file_status[i].Init();
+	}
 
 	for (std::size_t i = 0; i < num_runners; i++)
 	{
@@ -1404,6 +1417,7 @@ GSStringQueueIPC::ProcessState GSStringQueueIPC::GetStateParent(std::size_t i)
 
 std::size_t GSStringQueueIPC::GetTotalSize(std::size_t num_strings, std::size_t num_runners)
 {
-	return (string_size + sizeof(GSIntSharedMemory)) * num_strings +
-		3 * sizeof(GSIntSharedMemory) * num_runners;
+	return
+		(string_size + sizeof(GSIntSharedMemory)) * num_strings + // File status and names.
+		sizeof(GSIntSharedMemory) * (3 * num_runners + 1); // Runner parent/child/child-heartbeat status and head.
 }

@@ -413,15 +413,16 @@ struct GSDumpFileLoader
 	// Call any time by consumer.
 	bool Started();
 	bool Finished();
+	bool IsFull();
 	void AddFile(const std::string& file);
 
 	// Private - call only with mut locked.
-	bool Full();
-	bool Empty();
-	bool DoneWrite();
-	bool DoneRead();
-	bool Stopped();
-	void DebugCheck();
+	bool _Full();
+	bool _Empty();
+	bool _DoneWrite();
+	bool _DoneRead();
+	bool _Stopped();
+	void _DebugCheck();
 
 	// Unsafe
 	void DebugPrint();

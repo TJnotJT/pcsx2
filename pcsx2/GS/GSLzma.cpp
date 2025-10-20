@@ -883,7 +883,14 @@ bool GSDumpFileLoader::Finished()
 {
 	std::unique_lock lock(mut);
 
-	return DoneRead();
+	return _DoneRead();
+}
+
+bool GSDumpFileLoader::IsFull()
+{
+	std::unique_lock lock(mut);
+
+	return _Full();
 }
 
 void GSDumpFileLoader::AddFile(const std::string& file)
@@ -896,7 +903,7 @@ void GSDumpFileLoader::AddFile(const std::string& file)
 	cond_write.notify_one();
 }
 
-void GSDumpFileLoader::DebugCheck()
+void GSDumpFileLoader::_DebugCheck()
 {
 	// Must have mutex locked!
 	pxAssertRel(
@@ -907,43 +914,43 @@ void GSDumpFileLoader::DebugCheck()
 		"Dump loader is in an inconsistent state.");
 }
 
-bool GSDumpFileLoader::Full()
+bool GSDumpFileLoader::_Full()
 {
 	// Must have mutex locked!
 
-	DebugCheck();
+	_DebugCheck();
 
 	return write >= read + num_dumps_buffered;
 }
 
-bool GSDumpFileLoader::Empty()
+bool GSDumpFileLoader::_Empty()
 {
 	// Must have mutex locked!
 
-	DebugCheck();
+	_DebugCheck();
 
 	return read == write || (read < write && dump_list[read].state == WRITEABLE);
 }
 
-bool GSDumpFileLoader::DoneRead()
+bool GSDumpFileLoader::_DoneRead()
 {
 	// Must have mutex locked!
 
-	DebugCheck();
+	_DebugCheck();
 
 	return read >= dump_list.size();
 }
 
-bool GSDumpFileLoader::DoneWrite()
+bool GSDumpFileLoader::_DoneWrite()
 {
 	// Must have mutex locked!
 
-	DebugCheck();
+	_DebugCheck();
 
 	return write >= dump_list.size();
 }
 
-bool GSDumpFileLoader::Stopped()
+bool GSDumpFileLoader::_Stopped()
 {
 	return stopped;
 }
@@ -961,16 +968,16 @@ GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get(T& dst, DumpInfo* info_out, 
 	{
 		std::unique_lock<std::mutex> lock(mut);
 
-		cond_read.wait(lock, [&]() { return !block || !Empty() || DoneRead() || Stopped(); });
+		cond_read.wait(lock, [&]() { return !block || !_Empty() || _DoneRead() || _Stopped(); });
 
-		if (DoneRead() || Stopped())
+		if (_DoneRead() || _Stopped())
 		{
 			cond_write.notify_all();
 
 			return FINISHED;
 		}
 
-		if (Empty())
+		if (_Empty())
 		{
 			return EMPTY;
 		}
@@ -1068,10 +1075,13 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 		{
 			std::unique_lock<std::mutex> lock(parent->mut);
 
-			parent->cond_write.wait(lock, [&]() { return !parent->Full() || parent->DoneWrite() || parent->Stopped(); });
+			parent->cond_write.wait(lock, [&]() { return !parent->_Full() || parent->_DoneWrite() || parent->_Stopped(); });
 
-			if (parent->DoneWrite() || parent->Stopped())
+			if (parent->_Stopped())
 				return;
+
+			if (parent->_DoneWrite())
+				continue; // Stay waiting for new dumps added to list.
 
 			i = parent->write;
 			dump = parent->dump_list[i];

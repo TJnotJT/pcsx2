@@ -69,6 +69,7 @@ static bool s_regression_test_send_hwstats = false; // Only send HWSTAT packets 
 static bool s_verbose_logging = false;
 static GSDumpFileLoader s_dump_file_loader; // For batch mode.
 static GSStringQueueIPC* s_batch_runner_buffer = nullptr;
+static s64 s_batch_runner_index = -1;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -128,6 +129,11 @@ bool GSDumpReplayer::IsVerboseLogging()
 void GSDumpReplayer::SetBatchRunnerBuffer(GSStringQueueIPC* buffer)
 {
 	s_batch_runner_buffer = buffer;
+}
+
+void GSDumpReplayer::SetBatchRunnerIndex(std::size_t index)
+{
+	s_batch_runner_index = static_cast<s64>(index);
 }
 
 void GSDumpReplayer::SetIsBatchMode(bool batch_mode)
@@ -334,6 +340,12 @@ bool GSDumpReplayer::Initialize(const char* filename)
 		if (!ChangeDump())
 			return false;
 	}
+	else if (s_batch_runner_buffer)
+	{
+		// FIXME: Make a better check for batch running from memory.
+		if (!ChangeDump())
+			return false;
+	}
 	else if (IsBatchMode())
 	{
 		if (!GetDumpFileList(filename, s_dump_file_list, s_num_batches, s_batch_id, s_batch_start_from_dump))
@@ -492,14 +504,65 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 	}
 	else if (IsBatchMode() && s_batch_runner_buffer)
 	{
-		// FIXME: IN PROGRESS!!!
 		pxAssert(filename == nullptr);
 
 		if (!s_dump_file_loader.Started())
 		{
-			s_dump_file_loader.Start(s_dump_file_list);
-
+			s_dump_file_loader.Start(std::vector<std::string>());
 		}
+
+		GSDumpFileLoader::DumpInfo dump;
+
+		// FIXME: Code duplication with other batch mode....
+		// Get/read the next available ready dump, skipping any that errored.
+		while (true)
+		{
+			// Fill up the queue.
+			while (!s_dump_file_loader.IsFull())
+			{
+				std::string file_str;
+				if (s_batch_runner_buffer->AcquireString(file_str))
+					s_dump_file_loader.AddFile(file_str);
+				else
+					break;
+			}
+
+			// This reads the dump file as well.
+			GSDumpFileLoader::ReturnValue ret = s_dump_file_loader.Get(s_dump_file, &dump);
+
+			if (ret == GSDumpFileLoader::SUCCESS)
+			{
+				break;
+			}
+			else if (ret == GSDumpFileLoader::FINISHED)
+			{
+				return false;
+			}
+			else if (ret == GSDumpFileLoader::ERROR_)
+			{
+				MTGS::RunOnGSThread([error = dump.error]() {
+					Console.ErrorFmt("(GSRunner/{}) Error loading/reading dump: {}.", GetRunnerName(),
+						error.empty() ? std::string("Unspecified reason") : error);
+				});
+			}
+			else
+			{
+				pxFail("Unknown return value."); // Impossible.
+			}
+		}
+
+		s_dump_name = Path::GetFileName(dump.filename);
+
+		MTGS::RunOnGSThread(
+			[name = s_dump_name,
+				block_time = dump.block_time,
+				load_time = dump.loading_time,
+				size = s_dump_file->GetFileSize()]() {
+				Console.WriteLnFmt("(GSRunner/{}) Loaded dump '{}' (size: {:.2} MB; block time: {:.2} seconds; load time: {:.2} seconds)",
+					GetRunnerName(), name, static_cast<double>(size) / _1mb, block_time, load_time);
+			});
+
+		s_batch_runner_buffer->SignalRunnerHeartbeat(s_batch_runner_index);
 	}
 	else if (IsBatchMode())
 	{
