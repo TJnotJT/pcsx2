@@ -367,8 +367,9 @@ struct GSDumpFileLoader
 	{
 		std::string filename;
 		DumpState state = WRITEABLE;
-		double loading_time = 0.0;
-		double block_time = 0.0;
+		double load_time = 0.0;
+		double block_time_read = 0.0;
+		double block_time_write = 0.0;
 		std::string error;
 		std::vector<u8>* data = nullptr;
 	};
@@ -413,7 +414,7 @@ struct GSDumpFileLoader
 	// Call any time by consumer.
 	bool Started();
 	bool Finished();
-	bool IsFull();
+	size_t DumpsRemaining();
 	void AddFile(const std::string& file);
 
 	// Private - call only with mut locked.

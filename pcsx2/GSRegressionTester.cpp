@@ -11,6 +11,7 @@
 
 static GSRegressionBuffer* regression_buffer; // Used by GS runner processes.
 static GSBatchRunBuffer* batch_run_buffer; // Used by GS runner processes.
+static std::size_t batch_run_index; // What number child this is in a batch run.
 
 __forceinline static void CopyStringToBuffer(char* dst, std::size_t dst_size, const std::string& src)
 {
@@ -1210,6 +1211,18 @@ bool GSBatchRunBuffer::CloseFile()
 	return true;
 }
 
+bool GSBatchRunBuffer::Reset(std::size_t i)
+{
+	if (!CheckRunnerIndex(i))
+		return false;
+
+	state_parent[i].Init();
+	state_runner[i].Init();
+	state_runner_heartbeat[i].Init();
+
+	return true;
+}
+
 void GSBatchRunBuffer::Init()
 {
 	head->Init();
@@ -1397,7 +1410,6 @@ bool GSStartRegressionTest(
 		num_dumps,
 		dump_size))
 	{
-		pxFail("Unable to start regression test.");
 		return false;
 	}
 
@@ -1480,18 +1492,25 @@ bool GSStartBatchRun(
 	GSBatchRunBuffer* bbp,
 	const std::string& fn,
 	std::size_t num_files,
-	std::size_t num_runners)
+	std::size_t num_runners,
+	std::size_t runner_index)
 {
+	if (runner_index >= num_runners)
+	{
+		Console.ErrorFmt("Runner index out of range ({} / {})", runner_index, num_runners);
+		return false;
+	}
+
 	if (!bbp->OpenFile(fn, num_files, num_runners))
 	{
 		Console.ErrorFmt("Unable to open {} for batch running.", fn);
-		pxFail("");
 		return false;
 	}
 
 	Console.WriteLnFmt("Opened {} for batch running.", fn);
 
 	batch_run_buffer = bbp;
+	batch_run_index = runner_index;
 
 	return true;
 }
@@ -1511,7 +1530,7 @@ void GSEndBatchRun()
 	}
 }
 
-bool GSCheckParentStatus_BatchRun(std::size_t i)
+bool GSCheckParentStatus_BatchRun()
 {
 	if (!batch_run_buffer)
 	{
@@ -1519,19 +1538,22 @@ bool GSCheckParentStatus_BatchRun(std::size_t i)
 		return false;
 	}
 
-	if (!GSProcess::IsParentRunning())
-		return false;
-
-	if (batch_run_buffer->GetStateParent(i) == GSBatchRunBuffer::EXIT)
-		return false;
-
-	return true;
+	return !GSProcess::IsParentRunning() ||
+		batch_run_buffer->GetStateParent(batch_run_index) == GSBatchRunBuffer::EXIT;
 }
 
-void GSSignalRunnerHeartbeat_BatchRun(std::size_t i)
+void GSSignalRunnerHeartbeat_BatchRun()
 {
 	if (batch_run_buffer)
-		batch_run_buffer->SignalRunnerHeartbeat(i);
+		batch_run_buffer->SignalRunnerHeartbeat(batch_run_index);
+	else
+		Console.ErrorFmt("Not batch running.");
+}
+
+void GSSetChildState_BatchRun(GSBatchRunBuffer::ProcessState state)
+{
+	if (batch_run_buffer)
+		batch_run_buffer->SetStateChild(batch_run_index, state);
 	else
 		Console.ErrorFmt("Not batch running.");
 }

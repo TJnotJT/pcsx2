@@ -886,11 +886,11 @@ bool GSDumpFileLoader::Finished()
 	return _DoneRead();
 }
 
-bool GSDumpFileLoader::IsFull()
+size_t GSDumpFileLoader::DumpsRemaining()
 {
 	std::unique_lock lock(mut);
 
-	return _Full();
+	return dump_list.size() - read;
 }
 
 void GSDumpFileLoader::AddFile(const std::string& file)
@@ -959,12 +959,11 @@ template <typename T>
 	requires GSDumpFileLoader_IsDstType<T>
 GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get(T& dst, DumpInfo* info_out, bool block)
 {
-	Common::Timer block_timer;
-
 	size_t i; // Copy of read index.
 	DumpInfo dump; // Copy of dump info.
 	
 	// Acquire the slot.
+	Common::Timer block_timer;
 	{
 		std::unique_lock<std::mutex> lock(mut);
 
@@ -987,8 +986,7 @@ GSDumpFileLoader::ReturnValue GSDumpFileLoader::Get(T& dst, DumpInfo* info_out, 
 
 		pxAssert(dump.state == READABLE);
 	}
-
-	dump.block_time = block_timer.GetTimeSeconds();
+	dump.block_time_read = block_timer.GetTimeSeconds();
 	
 	ReturnValue ret;
 
@@ -1072,16 +1070,14 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 		DumpInfo dump; // Copy of dump info.
 
 		// Acquire the slot.
+		Common::Timer block_timer;
 		{
 			std::unique_lock<std::mutex> lock(parent->mut);
 
-			parent->cond_write.wait(lock, [&]() { return !parent->_Full() || parent->_DoneWrite() || parent->_Stopped(); });
+			parent->cond_write.wait(lock, [&]() { return (!parent->_Full() && !parent->_DoneWrite()) || parent->_Stopped(); });
 
 			if (parent->_Stopped())
 				return;
-
-			if (parent->_DoneWrite())
-				continue; // Stay waiting for new dumps added to list.
 
 			i = parent->write;
 			dump = parent->dump_list[i];
@@ -1092,9 +1088,9 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 
 			pxAssert(dump.data->empty()); // Or something went wrong...
 		}
+		dump.block_time_write = block_timer.GetTimeSeconds();
 
 		Common::Timer load_timer;
-
 		Error error;
 		std::unique_ptr<GSDumpFile> dump_file = GSDumpFile::OpenGSDump(dump.filename.c_str(), &error);
 
@@ -1113,7 +1109,7 @@ void GSDumpFileLoader::LoaderFunc(GSDumpFileLoader* parent)
 		}
 		else
 		{
-			dump.loading_time = load_timer.GetTimeSeconds();
+			dump.load_time = load_timer.GetTimeSeconds();
 
 			parent->num_loaded.fetch_add(1, std::memory_order_seq_cst);
 		}

@@ -421,7 +421,7 @@ struct GSBatchRunBuffer
 	{
 		DEFAULT_PS = 0,
 		RUNNING,
-		DONE,
+		DONE_RUNNING,
 		EXIT,
 		ERROR_PS
 	};
@@ -458,6 +458,7 @@ struct GSBatchRunBuffer
 	void DestroySharedMemory(); // Only use by creator.
 	bool CloseFile();
 	void Init(); // Private
+	bool Reset(std::size_t i); // Only use by parent.
 	bool PopulateFilenames(const std::vector<std::string>& filenames);
 	bool AcquireFile(std::string& filename);
 	
@@ -508,10 +509,12 @@ bool GSStartBatchRun(
 	GSBatchRunBuffer* buffer,
 	const std::string& fn,
 	std::size_t num_files,
-	std::size_t num_runners
+	std::size_t num_runners,
+	std::size_t runner_index
 );
 void GSEndBatchRun();
 GSBatchRunBuffer* GetBatchRunBuffer();
-bool GSCheckParentStatus_BatchRun(bool exit);
-void GSSignalRunnerHeartbeat_BatchRun(std::size_t i);
+bool GSCheckParentStatus_BatchRun();
+void GSSignalRunnerHeartbeat_BatchRun();
+void GSSetChildState_BatchRun(GSBatchRunBuffer::ProcessState state);
 bool GSBatchRunAcquireFile(std::string& filename);
