@@ -9,6 +9,8 @@
 
 #ifdef __WIN32__
 #include <windows.h>
+#else
+#include <sys/types.h>
 #endif
 
 // Atomic integer for inter-process shared memory since std::atomic is not guaranteed across processes.
@@ -176,10 +178,12 @@ struct GSSharedMemoryFile
 	void* data = nullptr;
 	std::size_t size;
 #ifdef __WIN32__
-	HANDLE handle; // Handle to shared memory.
+	using Handle_t = HANDLE;
 #else
-	// Not implemented.
+	bool main = false;
+	using Handle_t = int;
 #endif
+	Handle_t handle; // Shared memory file handle.
 
 	// Windows defines CreateFile as a macro so use CreateFile_.
 	bool CreateFile_(const std::string& name, std::size_t size);
@@ -376,9 +380,9 @@ struct GSProcess
 	using Time_t = DWORD;
 	static constexpr double infinite = static_cast<double>(0xFFFFFFFF);
 #else
-	using PID_t = int;
-	using Handle_t = int;
-	using Time_t = u32;
+	using PID_t = pid_t;
+	using Handle_t = pid_t;
+	using Time_t = time_t;
 	static constexpr double infinite = static_cast<double>(0x7FFFFFFF);
 #endif
 
@@ -391,20 +395,20 @@ struct GSProcess
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
 #else
-	// Not implemented.
+	PID_t pid = 0;
 #endif
-	static bool IsRunning(Handle_t handle, double seconds = 0.0); // private
+	static bool IsRunning(Handle_t handle); // private
 	
-	bool Start(const std::string& command, bool detached);
+	bool Start(const std::vector<std::string>& commands, bool detached);
 
-	bool IsRunning(double seconds = 0.0);
-	bool WaitForExit(double seconds = infinite);
+	bool IsRunning();
+	bool ExitedNormally();
 	bool Close();
 	void Terminate();
 	PID_t GetPID();
 	static bool SetParentPID(PID_t pid);
 	static PID_t GetParentPID();
-	static bool IsParentRunning(double seconds = 0.0);
+	static bool IsParentRunning();
 	static PID_t GetCurrentPID();
 };
 

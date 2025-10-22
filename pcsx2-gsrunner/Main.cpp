@@ -75,6 +75,17 @@ static constexpr const char* LIST_ITEM = "- ";
 static constexpr const char* OPEN_LIST = "[";
 static constexpr const char* CLOSE_LIST = "]";
 
+__forceinline static std::string VecToString(const std::vector<std::string>& v) {
+	std::string str;
+	for (std::size_t i = 0; i < v.size(); i++)
+	{
+		if (i > 0)
+			str += ", ";
+		str += "\"" + v[i] + "\"";
+	}
+	return "{ " + str + " }";
+};
+
 struct GSTester
 {
 	struct DumpInfo
@@ -145,11 +156,11 @@ struct GSTester
 	std::string regression_dump_last_completed;
 	std::string regression_output_dir;
 	std::string regression_output_dir_runner[2];
-	std::string regression_runner_args;
+	std::vector<std::string> regression_runner_args;
 	GSRegressionBuffer regression_buffer[2];
 	GSEvent regression_event_tester;
 	std::string regression_runner_path[2];
-	std::string regression_runner_command[2];
+	std::vector<std::string> regression_runner_command[2];
 	std::string regression_runner_name[2];
 	std::string regression_shared_file[2];
 	std::string regression_dump_dir;
@@ -258,7 +269,7 @@ namespace GSRunnerBatch
 {
 	static void PrintCommandLineHelp(const char* progname);
 	static bool ParseCommandLineArgs(int argc, const char* argv[]);
-	static void GetRunnerArgs(std::size_t i, std::vector<std::string>& args, bool quote);
+	static void GetRunnerArgs(std::size_t i, std::vector<std::string>& args);
 	static bool StartRunner(std::size_t i, bool restart = false);
 	static void EndRunner(std::size_t i);
 	static bool StartRunnersAll();
@@ -271,7 +282,7 @@ namespace GSRunnerBatch
 	static std::string batch_runner_path;
 	static std::size_t batch_num_threads = 1;
 	static std::vector<std::string> batch_runner_args;
-	static std::vector<std::string> batch_runner_command;
+	static std::vector<std::vector<std::string>> batch_runner_command;
 	static std::string batch_shared_file;
 	static std::vector<std::string> batch_dump_list;
 	static GSBatchRunBuffer batch_runner_buffer;
@@ -1141,6 +1152,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, const char* argv[], VMBootParamete
 			else if (CHECK_ARG_PARAM("-batch-runner-ppid"))
 			{
 				s_batch_runner_ppid = StringUtil::FromChars<GSProcess::PID_t>(argv[++i]).value_or(0);
+				Console.ErrorFmt("PPID: {} {}", s_batch_runner_ppid, argv[i]);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-batch-runner-index"))
@@ -1582,8 +1594,8 @@ bool GSTester::ParseCommandLineArgs(int argc, const char* argv[])
 		}
 		else
 		{
-			regression_runner_args.append(argv[i]);
-			regression_runner_args.append(" ");
+			// Args passed to the runner.
+			regression_runner_args.push_back(argv[i]);
 			continue;
 		}
 
@@ -2034,7 +2046,7 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 	if (batch_num_threads == 1)
 	{
 		std::vector<std::string> args;
-		GetRunnerArgs(0, args, false);
+		GetRunnerArgs(0, args);
 
 		std::vector<const char*> args_cstr;
 		for (std::size_t i = 0; i < args.size(); i++)
@@ -2161,19 +2173,17 @@ std::string GSTester::GetTesterName()
 	return std::to_string(regression_thread_id);
 }
 
-void GSRunnerBatch::GetRunnerArgs(std::size_t i, std::vector<std::string>& args, bool quote)
+void GSRunnerBatch::GetRunnerArgs(std::size_t i, std::vector<std::string>& args)
 {
-	const auto do_quote = [quote](const std::string& x) { return quote ? "\"" + x + "\"" : x; };
-
 	args.clear();
 
-	args.push_back(do_quote(batch_runner_path));
+	args.push_back(batch_runner_path);
 
 	args.push_back("-batch-runner-ppid");
 	args.push_back(std::to_string(GSProcess::GetCurrentPID()));
 
 	args.push_back(std::string("-batch-runner-shared-file"));
-	args.push_back(do_quote(batch_shared_file));
+	args.push_back(batch_shared_file);
 
 	args.push_back(std::string("-batch-runner-index"));
 	args.push_back(std::to_string(i));
@@ -2194,8 +2204,6 @@ void GSRunnerBatch::GetRunnerArgs(std::size_t i, std::vector<std::string>& args,
 
 bool GSRunnerBatch::StartRunner(std::size_t i, bool restart)
 {
-	const auto quote = [](const std::string& x) { return "\"" + x + "\""; };
-
 	// Start the runners in batch running mode.
 
 	if (restart)
@@ -2206,18 +2214,17 @@ bool GSRunnerBatch::StartRunner(std::size_t i, bool restart)
 	if (batch_runner_command[i].empty())
 	{
 		std::vector<std::string> args;
-		GetRunnerArgs(i, args, true);
-		batch_runner_command[i] = StringUtil::JoinString(args.begin(), args.end(), " ");
+		GetRunnerArgs(i, batch_runner_command[i]);
 	}
 
 	if (!batch_runner_proc[i].Start(batch_runner_command[i], false))
 	{
-		Console.ErrorFmt("(GSRunnerBatch) Unable to start runner: {} (command: {})", i, batch_runner_command[i]);
+		Console.ErrorFmt("(GSRunnerBatch) Unable to start runner: {} (command: {})", i, VecToString(batch_runner_command[i]));
 		return false;
 	}
 
 	Console.WriteLnFmt("(GSRunnerBatch) Created runner process (PID: {}) with command: '{}'",
-		batch_runner_proc[i].GetPID(), batch_runner_command[i]);
+		batch_runner_proc[i].GetPID(), VecToString(batch_runner_command[i]));
 
 	return true;
 }
@@ -2291,8 +2298,6 @@ bool GSRunnerBatch::EndRunnersAll()
 
 bool GSTester::StartRunners()
 {
-	const auto quote = [](const std::string& x) { return "\"" + x + "\""; };
-
 	GSProcess::PID_t pid = GSProcess::GetCurrentPID();
 
 	// Start the runner processes in regression testing mode.
@@ -2300,39 +2305,63 @@ bool GSTester::StartRunners()
 	{
 		if (regression_runner_command[i].empty())
 		{
-			regression_runner_command[i] =
-				quote(regression_runner_path[i]) +
-				std::string(" runner ") +
-				std::string(" -surfaceless ") +
-				std::string(" -noshadercache ") +
-				std::string(" -loop 1 ") +
-				(regression_logging ?
-					std::string(" -logfile ") + quote(regression_output_dir_runner[i]) : "") +
-				std::string(" -regression-test ") + quote(regression_shared_file[i]) +
-				std::string(" -name ") + quote(regression_runner_name[i]) +
-				std::string(" -regression-npackets-buffer ") + std::to_string(regression_num_packets) +
-				std::string(" -regression-packet-size ") + std::to_string(regression_packet_size / _1mb) +
-				std::string(" -batch-ndumps-buffer ") + std::to_string(regression_num_dumps) +
-				std::string(" -regression-dump-size ") + std::to_string(regression_dump_size / _1mb) +
-				std::string(" -regression-ppid ") + std::to_string(pid) +
-				std::string(" -batch ") +
-				std::string(" -nbatches ") + std::to_string(regression_nthreads) +
-				std::string(" -batch-id ") + std::to_string(regression_thread_id) +
-				(regression_verbose_level >= VERBOSE_TESTER_AND_RUNNER ?
-					std::string(" -verbose ") :
-					"") +
-				" " + regression_runner_args;
+			regression_runner_command[i].push_back(regression_runner_path[i]);
+			regression_runner_command[i].push_back("runner");
+			regression_runner_command[i].push_back("-surfaceless");
+			regression_runner_command[i].push_back("-noshadercache");
+			regression_runner_command[i].push_back("-loop 1");
+			if (regression_logging)
+			{
+				regression_runner_command[i].push_back("-logfile");
+				regression_runner_command[i].push_back(regression_output_dir_runner[i]);
+			}
+			regression_runner_command[i].push_back("-regression-test");
+			regression_runner_command[i].push_back(regression_shared_file[i]);
+
+			regression_runner_command[i].push_back("-name");
+			regression_runner_command[i].push_back(regression_runner_name[i]);
+
+			regression_runner_command[i].push_back("-regression-npackets-buffer");
+			regression_runner_command[i].push_back(std::to_string(regression_num_packets));
+
+			regression_runner_command[i].push_back("-regression-packet-size");
+			regression_runner_command[i].push_back(std::to_string(regression_packet_size / _1mb));
+
+			regression_runner_command[i].push_back("-batch-ndumps-buffer");
+			regression_runner_command[i].push_back(std::to_string(regression_num_dumps));
+
+			regression_runner_command[i].push_back("-regression-dump-size");
+			regression_runner_command[i].push_back(std::to_string(regression_dump_size / _1mb));
+
+			regression_runner_command[i].push_back("-regression-ppid");
+			regression_runner_command[i].push_back(std::to_string(pid));
+
+			regression_runner_command[i].push_back("-batch ");
+
+			regression_runner_command[i].push_back("-nbatches ");
+			regression_runner_command[i].push_back(std::to_string(regression_nthreads));
+
+			regression_runner_command[i].push_back("-batch-id ");
+			regression_runner_command[i].push_back(std::to_string(regression_thread_id));
+
+			if (regression_verbose_level >= VERBOSE_TESTER_AND_RUNNER)
+				regression_runner_command[i].push_back(std::string(" -verbose "));
+
+			regression_runner_command[i].insert(
+				regression_runner_command[i].end(),
+				regression_runner_args.begin(),
+				regression_runner_args.end());
 		}
 
 		if (!regression_runner_proc[i].Start(regression_runner_command[i], regression_verbose_level < VERBOSE_TESTER_AND_RUNNER))
 		{
-			Console.ErrorFmt("(GSTester/{}) Unable to start runner: {} (command: {})", GetTesterName(), regression_runner_name[i],
-				regression_runner_command[i]);
+			Console.ErrorFmt("(GSTester/{}) Unable to start runner: {} with args: {}", GetTesterName(), regression_runner_name[i],
+				VecToString(regression_runner_command[i]));
 			return false;
 		}
 
-		Console.WriteLnFmt("(GSTester/{}) Created runner process (PID: {}) with command: '{}'", GetTesterName(),
-			regression_runner_proc[i].GetPID(), regression_runner_command[i]);
+		Console.WriteLnFmt("(GSTester/{}) Created runner process (PID: {}) with args: {}", GetTesterName(),
+			regression_runner_proc[i].GetPID(), VecToString(regression_runner_command[i]));
 	}
 
 	// Wait until the runners initialize and hit the dump waiting loop.
@@ -2774,7 +2803,7 @@ int GSTester::MainThread(int argc, const char* argv[], u32 nthreads, u32 thread_
 
 	for (int i = 0; i < 2; i++)
 	{
-		if (regression_runner_proc[i].WaitForExit() != 0)
+		if (!regression_runner_proc[i].ExitedNormally())
 		{
 			Console.WarningFmt("(GSTester/{}) Runner {} exited abnormally.", GetTesterName(), regression_runner_name[i]);
 		}

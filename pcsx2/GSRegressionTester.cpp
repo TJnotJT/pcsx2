@@ -8,10 +8,35 @@
 
 #include <thread>
 #include <atomic>
+#include <algorithm>
+#include <string>
+
+#ifdef __WIN32__
+#include <windows.h>
+#else
+#include <sys/mman.h> 
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <cerrno>
+#endif
 
 static GSRegressionBuffer* regression_buffer; // Used by GS runner processes.
 static GSBatchRunBuffer* batch_run_buffer; // Used by GS runner processes.
 static std::size_t batch_run_index; // What number child this is in a batch run.
+
+__forceinline static std::string VecToString(const std::vector<std::string>& v) {
+	std::string str;
+	for (std::size_t i = 0; i < v.size(); i++)
+	{
+		if (i > 0)
+			str += ", ";
+		str += "\"" + v[i] + "\"";
+	}
+	return "{ " + str + " }";
+};
 
 __forceinline static void CopyStringToBuffer(char* dst, std::size_t dst_size, const std::string& src)
 {
@@ -58,7 +83,7 @@ GSIntSharedMemory::ValType GSIntSharedMemory::FetchAdd()
 #ifdef __WIN32__
 	return InterlockedIncrement(&val) - 1;
 #else
-	return val::fetch_add(1, std::memory_order_seq_cst) - 1;
+	return val.fetch_add(1, std::memory_order_seq_cst);
 #endif
 }
 
@@ -672,13 +697,23 @@ void GSRegressionBuffer::DebugState()
 	Console.WarningFmt("runner_state={} tester_state={}", STATE_STR.at(state[RUNNER].Get()), STATE_STR.at(state[TESTER].Get()));
 }
 
-bool GSProcess::Start(const std::string& command, bool detached)
+bool GSProcess::Start(const std::vector<std::string>& args, bool detached)
 {
 #ifdef __WIN32__
 	std::memset(&si, 0, sizeof(STARTUPINFO));
 	si.cb = sizeof(STARTUPINFO);
 	std::memset(&pi, 0, sizeof(PROCESS_INFORMATION));
 
+	std::vector<std::string> args_quoted;
+	for (const std::string& arg : args)
+	{
+		// Only quote args with spaces.
+		if (arg.find(' ') != std::string::npos)
+			args_quoted.push_back("\"" + arg + "\"");
+		else
+			args_quoted.push_back(arg);
+	}
+	std::string command = StringUtil::JoinString(args_quoted.begin(), args_quoted.end(), " ");
 	std::wstring wcommand = StringUtil::UTF8StringToWideString(command);
 	std::vector<wchar_t> wcommand_buf(wcommand.begin(), wcommand.end());
 	wcommand_buf.push_back(L'\0');
@@ -715,117 +750,177 @@ bool GSProcess::Start(const std::string& command, bool detached)
 		si.hStdInput = hNull;
 	}
 
-	if (!CreateProcess(
+	if (!CreateProcessW(
 			NULL,
 			wcommand_buf.data(),
 			NULL,
 			NULL,
 			TRUE,
-			(DWORD)0,
+			(detached ? (DETACHED_PROCESS | CREATE_NO_WINDOW) : (DWORD)0),
 			NULL,
 			NULL,
 			&si,
 			&pi))
 	{
-		Console.ErrorFmt("Unable to create runner process with command: '{}'", command);
+		Console.ErrorFmt("Unable to create runner process with args: {}", VecToString(args));
 		return false;
-	}
-
-		
-	if (detached)
-	{
-		// Redirect stdout/err to null.
-
-		HANDLE null = INVALID_HANDLE_VALUE;
-
-		ScopedGuard close_null([&]() {
-			if (null != INVALID_HANDLE_VALUE)
-				CloseHandle(null);
-		});
-
-		null = CreateFileA(
-			"NUL",
-			GENERIC_WRITE,
-			FILE_SHARE_WRITE,
-			NULL,
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL,
-			NULL);
-
-		if (null == INVALID_HANDLE_VALUE)
-		{
-			Console.Error("Unable to open null handle");
-			return false;
-		}
 	}
 
 	this->command = command;
 
 	return true;
 #else
-	// Not implemented.
+	pid = fork();
+	if (pid == -1)
+	{
+		pid = 0;
+		Console.Error("Unable to fork.");
+		return false;
+	}
+	else if (pid == 0)
+	{
+		// Child
+
+		// Detach from console if needed.
+		if (detached)
+		{
+			if (setsid() < 0)
+				Console.ErrorFmt("Unable to detach console.");
+			int fd = open("/dev/null", O_RDWR);
+			if (fd >= 0)
+			{
+				if (dup2(fd, STDIN_FILENO) < 0)
+					Console.ErrorFmt("Failed to redirect stdin to /dev/null.");
+				if (dup2(fd, STDOUT_FILENO) < 0)
+					Console.ErrorFmt("Failed to redirect stdout to /dev/null.");
+				if (dup2(fd, STDERR_FILENO) < 0)
+					Console.ErrorFmt("Failed to redirect stderr to /dev/null.");
+			}
+			else
+			{
+				Console.ErrorFmt("Unable to open /dev/null.");
+			}
+
+			if (fd > STDERR_FILENO)
+				close(fd);
+		}
+
+		// Get args
+		std::vector<const char*> args_cstr;
+		for (const std::string& arg : args)
+			args_cstr.push_back(arg.c_str());
+		args_cstr.push_back(nullptr);
+
+		// Execute
+		if (execvp(args_cstr[0], args_cstr) < 0)
+		{
+			Console.Error("Unable to execute child process with args {}.", VecToString(args));
+			_exit(1);
+		}
+	}
+	else
+	{
+		this->command = args[0];
+		return true;
+	}
 	return false;
 #endif
 }
 
-bool GSProcess::IsRunning(Handle_t handle, double seconds)
+bool GSProcess::IsRunning(Handle_t handle)
 {
 #ifdef __WIN32__
-	DWORD status = WaitForSingleObject(handle, static_cast<DWORD>(seconds * 1000.0));
-
-	if (status == WAIT_FAILED)
+	DWORD ret = WaitForSingleObject(handle, 0);
+	if (ret == WAIT_FAILED)
 	{
-		Console.ErrorFmt("Waiting for process {} failed.", handle);
+		Console.ErrorFmt("WaitForSingleObject for handle failed (error: {}).", GetLastError());
 		return false;
 	}
-
-	return status == WAIT_TIMEOUT;
+	return ret == WAIT_TIMEOUT;
 #else
-	return false; // Not implemented
+	if (kill(handle, 0) == 0)
+		return true;
+	if (errno == ESRCH)
+		Console.ErrorFmt("IsRunning: Process {} does not exist.", handle);
+	else if (errno == EPERM)
+		Console.ErrorFmt("IsRunning: Do not have permissions for process {}.", handle);
+	return false;
 #endif
 }
 
-bool GSProcess::IsRunning(double seconds)
+bool GSProcess::IsRunning()
 {
 #ifdef __WIN32__
 	if (!pi.hProcess)
 	{
-		Console.ErrorFmt("Do not have a valid handle.");
+		Console.ErrorFmt("IsRunning: Do not have a valid handle.");
 		return false;
 	}
-	return IsRunning(pi.hProcess, seconds);
+	return IsRunning(pi.hProcess);
 #else
-	// Not implemented
-	return false;
+	if (!pid)
+	{
+		Console.ErrorFmt("IsRunning: Do not have a valid PID.");
+		return false;
+	}
+	return IsRunning(pid);
 #endif
 }
 
-bool GSProcess::WaitForExit(double seconds)
+bool GSProcess::ExitedNormally()
 {
 #ifdef __WIN32__
-	return IsRunning(pi.hProcess, seconds);
+	DWORD exit_code = 0;
+	if (!GetExitCodeProcess(pi.hProcess, &exit_code))
+	{
+		Console.ErrorFmt("GetExitCodeProcess for process {} failed.", pi.hProcess);
+		return false;
+	}
+	return exit_code == EXIT_SUCCESS;
 #else
-	// Not implemented
-	return false;
+	if (IsRunning())
+		return false;
+	int status;
+	pid_t ret = waitpid(pid, &status, WNOHANG);
+	if (ret < 0)
+	{
+		Console.ErrotFmt("waitpid() for process {} failed.", pid);
+		return false;
+	}
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status) == EXIT_SUCCESS;
+	else
+		return false;
 #endif
 }
 
 bool GSProcess::Close()
 {
 #ifdef __WIN32__
-	return CloseHandle(pi.hProcess) && CloseHandle(pi.hThread);
+	bool b1 = CloseHandle(pi.hProcess);
+	bool b2 = CloseHandle(pi.hThread);
+	pi.hProcess = nullptr;
+	pi.hThread = nullptr;
+	return b1 && b2;
 #else
-	// Not implemented
-	return false;
+	if (waitpid(pid, nullptr, 0) < 0)
+	{
+		Console.ErrorFmt("waitpid() for process {} failed.", pid);
+		return false;
+	}
+	pid = 0;
+	return true;
 #endif
 }
 
 void GSProcess::Terminate()
 {
 #ifdef __WIN32__
-	TerminateProcess(pi.hProcess, EXIT_FAILURE);
+	if (!TerminateProcess(pi.hProcess, EXIT_FAILURE))
+		Console.ErrorFmt("Unable to terminate process {}.", GetPID());
 #else
-	// Not implemented
+	if (kill(pid, SIGKILL) < 0)
+		Console.ErrorFmt("Unable to terminate process {}.", GetPID());
 #endif
 }
 
@@ -834,7 +929,7 @@ GSProcess::PID_t GSProcess::GetPID()
 #ifdef __WIN32__
 	return pi.dwProcessId;
 #else
-	return 0; // Not implemented.
+	return pid;
 #endif
 }
 
@@ -847,9 +942,19 @@ bool GSProcess::SetParentPID(PID_t pid)
 #ifdef __WIN32__
 	parent_pid = pid;
 	parent_h = OpenProcess(SYNCHRONIZE, FALSE, pid);
-	return parent_h != 0;
+
+	if (!parent_h)
+	{
+		Console.ErrorFmt("Unable to open handle to parent PID {}.", parent_pid);
+		parent_pid = 0;
+		return false;
+	}
+
+	return IsRunning(parent_h);
 #else
-	return false; // Not implemented
+	parent_pid = pid;
+	parent_h = pid;
+	return IsRunning(parent_pid);
 #endif
 }
 
@@ -865,20 +970,20 @@ GSProcess::PID_t GSProcess::GetCurrentPID()
 #ifdef __WIN32__
 		current_pid = GetCurrentProcessId();
 #else
-		// Not implemented.
+		current_pid = getpid();
 #endif
 	}
 	return current_pid;
 }
 
-bool GSProcess::IsParentRunning(double seconds)
+bool GSProcess::IsParentRunning()
 {
 	if (!parent_pid || !parent_h)
 	{
 		Console.ErrorFmt("Do not have a valid parent PID and/or handle.");
 		return false;
 	}
-	return IsRunning(parent_h, seconds);
+	return IsRunning(parent_h);
 }
 
 // Windows defines CreateFile as a macro so use CreateFile_.
@@ -895,7 +1000,7 @@ bool GSSharedMemoryFile::CreateFile_(const std::string& name, std::size_t size)
 
 	if (!handle)
 	{
-		Console.ErrorFmt("Failed to create regression packets file: {}", name);
+		Console.ErrorFmt("Failed to create shared memory file: {}", name);
 		return false;
 	}
 
@@ -909,18 +1014,40 @@ bool GSSharedMemoryFile::CreateFile_(const std::string& name, std::size_t size)
 
 	if (!data)
 	{
-		Console.ErrorFmt("Failed to map view of regressions packet file: {}", name);
+		Console.ErrorFmt("Failed to map view of shared memory file: {}", name);
 		CloseHandle(handle);
 		return false;
 	}
+#else
+	handle = shm_open(name.c_str(), O_CREAT | O_RDWR, 0666);
+	if (handle < 0)
+	{
+		Console.ErrorFmt("Failed to create shared memory file: {}", name);
+		return false;
+	}
+	if (ftruncate(handle, size) < 0)
+	{
+		Console.ErrorFmt("Faile to set size of shared memory file: {}", name);
+		close(handle);
+		return false;
+	}
+
+	data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, handle, 0);
+
+	if (data == MAP_FAILED)
+	{
+		Console.ErrorFmt("Failed to map view of shared memory file: {}", name);
+		close(handle);
+		return false;
+	}
+
+	main = true;
+#endif
 
 	this->name = name;
 	this->size = size;
 
 	return true;
-#else
-	// Not implemented.
-#endif
 }
 
 bool GSSharedMemoryFile::OpenFile(const std::string& name, std::size_t size)
@@ -930,66 +1057,103 @@ bool GSSharedMemoryFile::OpenFile(const std::string& name, std::size_t size)
 	handle = OpenFileMappingA(FILE_MAP_WRITE, FALSE, name.c_str());
 	if (!handle)
 	{
-		Console.ErrorFmt("Not able to open file for regression packets: {}", name);
+		Console.ErrorFmt("Failed to open shared memory: {}", name);
 		return false;
 	}
 
 	data = static_cast<GSRegressionPacket*>(MapViewOfFile(handle, FILE_MAP_WRITE, 0, 0, size));
 	if (!data)
 	{
-		Console.ErrorFmt("Unable to map regression packet file to memory: {}", name);
+		Console.ErrorFmt("Failed to map shared memory file: {}", name);
 		CloseHandle(handle);
 		return false;
 	}
 
-	Console.WriteLnFmt("Opened/mapped regression packet file: {}", name);
+	Console.WriteLnFmt("Opened/mapped shared memory file: {}", name);
+#else
+	handle = shm_open(name.c_str(), O_RDWR, 0666);
+	if (handle < 0)
+	{
+		Console.ErrorFmt("Failed to open shared memory file: {}", name);
+		return false;
+	}
+
+	data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, handle, 0);
+
+	if (data == MAP_FAILED)
+	{
+		Console.ErrorFmt("Failed to map shared memory file: {}", name);
+		close(handle);
+		return false;
+	}
+
+	main = false;
+#endif
 
 	this->name = name;
 	this->size = size;
 
 	return true;
-#else
-	return false; // Not implemented.
-#endif
 }
 
 bool GSSharedMemoryFile::CloseFile()
 {
+	bool success = true;
 #ifdef __WIN32__
-	if (!handle)
+	if (data)
 	{
-		Console.Error("There is no handle to close.");
-		return false;
+		if (!UnmapViewOfFile(data))
+		{
+			success = false;
+			Console.Error("Failed to unmap shared memory file: {}", name);
+		}
 	}
 
-	if (!CloseHandle(handle))
+	if (handle)
 	{
-		Console.Error("Failed to close file handle.");
-		return false;
+		if (!CloseHandle(handle))
+		{
+			success = false;
+			Console.Error("Failed to close shared memory file: {}.", name);
+		}
+	}
+#else
+	if (data)
+	{
+		if (munmap(data, size) < 0)
+		{
+			success = false;
+			Console.ErrorFmt("Failed to unmap shared memory file {}", name);
+		}
 	}
 
-	if (!data)
+	if (handle)
 	{
-		Console.Error("There is no file view to unmap.");
-		return false;
+		if (close(handle) < 0)
+		{
+			success = false;
+			Console.Error("Failed to close shared memory file: {}.", name);
+		}
 	}
 
-	if (!UnmapViewOfFile(data))
+	if (main)
 	{
-		Console.Error("Failed to unmap file view.");
-		return false;
+		if (shm_unlink(name.c_str()) < 0)
+		{
+			success = false;
+			Console.Error("Failed to unlink shared memory file: {}.", name);
+		}
+		main = false;
 	}
-
-	Console.WriteLnFmt("Closed/unmapped shared memory file: {}", name);
+#endif
+	if (success)
+		Console.WriteLnFmt("Closed/unmapped shared memory file: {}", name);
 
 	name = "";
 	handle = 0;
 	data = nullptr;
 
-	return true;
-#else
-	return false; // Not implemented.
-#endif
+	return success;
 }
 
 void GSSharedMemoryFile::ResetFile()
