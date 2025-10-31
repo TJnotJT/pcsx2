@@ -2160,6 +2160,8 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 			break;
 		}
 
+		bool EXIT = false;
+
 		// Check for heartbeat signals.
 		for (std::size_t i = 0; i < batch_num_threads; i++)
 		{
@@ -2201,6 +2203,8 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 			{
 				Console.ErrorFmt("(GSRunnerBatch/Parent) Runner {} exited unexpectedly. Attempting restart.", i);
 				batch_runner_exiting[i] = true;
+
+				EXIT = true;
 			}
 			else if (batch_deadlock_timer[i].GetTimeSeconds() >= batch_deadlock_timeout)
 			{
@@ -2210,6 +2214,9 @@ int GSRunnerBatch::main_batch(int argc, const char* argv[])
 				batch_exiting_timer[i].Reset();
 			}
 		}
+
+		if (EXIT)
+			break;
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
