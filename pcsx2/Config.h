@@ -841,7 +841,7 @@ struct Pcsx2Config
 		GSTextureInRtMode UserHacks_TextureInsideRt = GSTextureInRtMode::Disabled;
 		GSBilinearDirtyMode UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
 		u8 UserHacks_SWVariableStepMin = 0;
-		u8 UserHacks_SWVariableStepMax = 3;
+		u8 UserHacks_SWVariableStepMax = 0;
 		TriFiltering TriFilter = TriFiltering::Automatic;
 		s8 OverrideTextureBarriers = -1;
 

@@ -1117,7 +1117,7 @@ void Pcsx2Config::GSOptions::MaskUserHacks()
 	UserHacks_GPUTargetCLUTMode = GSGPUTargetCLUTMode::Disabled;
 	UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
 	UserHacks_SWVariableStepMin = 0;
-	UserHacks_SWVariableStepMax = 3;
+	UserHacks_SWVariableStepMax = 0;
 	SkipDrawStart = 0;
 	SkipDrawEnd = 0;
 }
