@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <string>
 
+#define SCANLINE_LOCAL_DATA_BREAKPOINT
+
 #if _M_SSE >= 0x501
 static constexpr int n_step_sizes = 4;
 static constexpr std::array<int, 9> step_size_index = {-1, 3, 2, -1, 1, -1, -1, -1, 0};
@@ -249,7 +251,7 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i uv_minmax[2];
 		GSVector4i trb, tga;
 		GSVector4i test;
-#if 0
+#ifdef SCANLINE_LOCAL_DATA_BREAKOINT
 		GSVector4i bp; // Breakpoint flag for breaking in JIT code.
 #endif
 	} temp;
