@@ -273,9 +273,9 @@ void GSRasterizer::DrawPoint(const GSVertexSW* vertex, int vertex_count, const u
 			{
 				if (IsOneOfMyScanlines(p.y))
 				{
-					m_setup_prim[step_size_index[vlen]](vertex, index, GSVertexSW::zero(), m_local);
+					m_setup_prim[step_size_index[m_max_step_size]](vertex, index, GSVertexSW::zero(), m_local);
 
-					DrawScanline(1, p.x, p.y, v, vlen);
+					DrawScanline(1, p.x, p.y, v, m_max_step_size);
 				}
 			}
 		}
