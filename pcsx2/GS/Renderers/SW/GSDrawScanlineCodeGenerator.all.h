@@ -174,6 +174,10 @@ private:
 	void RollVec32(const XYm& dst, const XYm& tmp, int roll);
 	void RollVec64(const XYm& dst0, const XYm& dst1, const XYm& tmp, int roll);
 	void RollVecSwitch(const XYm* dsts, int ndsts, const XYm& tmp, const AddressReg& rollreg, const XYm& z0);
+
+#if SCANLINE_LOCAL_DATA_BREAKPOINT
+	void ConditionalBreakpoint(const Xbyak::Reg32& cond, u32 which);
+#endif
 };
 
 MULTI_ISA_UNSHARED_END

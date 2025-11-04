@@ -3711,3 +3711,16 @@ void GSDrawScanlineCodeGenerator::RollVecSwitch(const XYm* dsts, int ndsts, cons
 	};
 	Switch<vecints>(gencase, rollreg);
 }
+
+#if SCANLINE_LOCAL_DATA_BREAKPOINT
+// Invokes a breakpoint if the breakpoint mask has been set in local data
+// and its bitwise and with the given mask register is non-zero.
+void GSDrawScanlineCodeGenerator::ConditionalBreakpoint(const Xbyak::Reg32& cond, u32 which)
+{
+	pxAssert(which < 4);
+	test(_rip_local_offset(temp.bp, 4 * which), cond);
+	je("@f");
+	db(0xCC);
+	L("@@");
+}
+#endif

@@ -252,7 +252,7 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i trb, tga;
 		GSVector4i test;
 #if SCANLINE_LOCAL_DATA_BREAKPOINT
-		GSVector4i bp; // Breakpoint flag for breaking in JIT code.
+		GSVector4i bp; // Breakpoint mask for breaking in JIT code.
 #endif
 	} temp;
 
