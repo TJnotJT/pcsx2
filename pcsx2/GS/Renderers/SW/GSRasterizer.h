@@ -91,7 +91,7 @@ protected:
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_scanline = {};
 	std::array<GSDrawScanline::DrawScanlinePtr, n_step_sizes> m_draw_edge = {};
 
-	__forceinline bool HasEdge() const { return (m_draw_edge[0] != nullptr); }
+	__forceinline bool HasEdge() const { return m_local.gd->sel.aa1; }
 
 	template <bool step_x, bool pos_x, bool pos_y, bool tl, bool side>
 	void DrawEdgeTriangle(const GSVertexSW& v0, const GSVertexSW& v1, const GSVertexSW& dv,
