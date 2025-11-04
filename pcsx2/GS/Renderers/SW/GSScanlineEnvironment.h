@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <string>
 
-#define SCANLINE_LOCAL_DATA_BREAKPOINT
+#define SCANLINE_LOCAL_DATA_BREAKPOINT 1
 
 #if _M_SSE >= 0x501
 static constexpr int n_step_sizes = 4;
@@ -251,7 +251,7 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i uv_minmax[2];
 		GSVector4i trb, tga;
 		GSVector4i test;
-#ifdef SCANLINE_LOCAL_DATA_BREAKOINT
+#if SCANLINE_LOCAL_DATA_BREAKPOINT
 		GSVector4i bp; // Breakpoint flag for breaking in JIT code.
 #endif
 	} temp;

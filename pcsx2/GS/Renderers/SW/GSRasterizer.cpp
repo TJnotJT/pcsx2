@@ -1436,6 +1436,19 @@ void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW&
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
+	// Set breakpoint here if needed.
+	if (SCANLINE_LOCAL_DATA_BREAKPOINT)
+	{
+		if (false)
+		{
+			m_local.temp.bp = GSVector4i(-1); // break
+		}
+		else
+		{
+			m_local.temp.bp = GSVector4i(0); // no break
+		}
+	}
+
 	m_draw_scanline[step_size_index[step_size]](pixels, left, top, scan, m_local);
 }
 

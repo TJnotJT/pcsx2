@@ -860,33 +860,16 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		}
 	}
 
-	//if (step_size != vlen)
-	//{
-	//	const int roll = left & (vlen - 1);
-	//	RollVec32(test, roll);
-	//	if (!sel.zequal)
-	//		RollVec64(z0, z1, roll);
-	//	RollVec32(f, roll);
-	//	RollVec32(s, roll);
-	//	RollVec32(t, roll);
-	//	RollVec32(q, roll);
-	//	RollVec32(uf, roll);
-	//	RollVec32(vf, roll);
-	//	RollVec32(rbf, roll);
-	//	RollVec32(gaf, roll);
-	//	RollVec32(cov, roll);
-	//}
-
 	if (step_size != vlen)
 	{
 		const int roll = left & (vlen - 1);
 		RollVec32(test, roll);
 		if (sel.prim != GS_SPRITE_CLASS)
 		{
-			if (sel.fwrite && sel.fge)
-				RollVec32(f, roll);
 			if (sel.zb && !sel.zequal)
 				RollVec64(z0, z1, roll);
+			if (sel.fwrite && sel.fge)
+				RollVec32(f, roll);
 		}
 		if (sel.fb)
 		{
@@ -2062,24 +2045,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #endif
 		}
 
-		//if (step_size != vlen)
-		//{
-		//	RollVec32(test, left & (vlen - 1));
-		//	if (sel.zb && !sel.zequal)
-		//	{
-		//		RollVec64(z0, z1, step_size);
-		//	}
-		//	RollVec32(f, step_size);
-		//	RollVec32(s, step_size);
-		//	RollVec32(t, step_size);
-		//	RollVec32(q, step_size);
-		//	RollVec32(uf, step_size); // FIXME: Not Needed?
-		//	RollVec32(vf, step_size); // FIXME: Not Needed?
-		//	RollVec32(rbf, step_size);
-		//	RollVec32(gaf, step_size);
-		//	RollVec32(cov, step_size);
-		//}
-		
 		if (step_size != vlen)
 		{
 			if (sel.prim != GS_SPRITE_CLASS)

@@ -934,7 +934,6 @@ void GSDrawScanlineCodeGenerator::Init()
 	if (step_size != vecints)
 	{
 		// const int roll = left & (vlen - 1);
-	
 		mov(rax, _left);
 		and_(rax, vecints - 1);
 
@@ -944,7 +943,8 @@ void GSDrawScanlineCodeGenerator::Init()
 		const XYm& tmp = xym0;
 		const XYm& z0 = xym7;
 		const XYm& tmp_cov = xym1;
-		bool roll_z = false, roll_cov = false;
+		bool roll_z = false;
+		bool roll_cov = false;
 
 		regs[nregs++] = _test;
 		if (m_sel.prim != GS_SPRITE_CLASS)
@@ -952,7 +952,10 @@ void GSDrawScanlineCodeGenerator::Init()
 			if (m_sel.fwrite && m_sel.fge)
 				regs[nregs++] = _f;
 			if (m_sel.zb && !m_sel.zequal)
+			{
 				regs[nregs++] = _z;
+				roll_z = true;
+			}
 		}
 		if (m_sel.fb)
 		{
@@ -1208,23 +1211,6 @@ void GSDrawScanlineCodeGenerator::Step()
 
 	if (step_size != vecints)
 	{
-		// RollVec32(test, left & (vlen - 1));
-
-		// DEBUGGING
-		//Label end;
-		//mov(rax, 0xdeadbeef);
-		//mov(rax, _rip_local(temp.bp));
-		//test(rax, rax);
-		//je(end);
-		//mov(rax, _left);
-		//cmp(rax, 1);
-		//jne(end);
-		//mov(eax, ptr[rsp + _top]);
-		//cmp(eax, 12);
-		//jne(end);
-		//db(0xcc);
-		//L(end);
-
 		mov(rax, _left);
 		and_(rax, vecints - 1);
 
