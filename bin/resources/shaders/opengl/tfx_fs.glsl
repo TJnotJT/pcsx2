@@ -1019,12 +1019,8 @@ float As = As_rgba.a;
 #endif
 }
 
-void ps_main()
+void HandleAccurateLines()
 {
-	FragCoord = gl_FragCoord;
-// FIXME: Make this its own function.
-#if ACCURATE_LINES
-
 	AccurateLineData ld = accurate_line_data[accurate_line_base + accurate_lines_index];
 
 	ivec2 start = ld.start;
@@ -1061,8 +1057,12 @@ void ps_main()
         (major_px == end_px_major && draw_end == 0))
         discard;
 
+	// Total weights is major_end - major_start == d_major
+	int weight_start = major_end - major_px;
+	int weight_end = major_px - major_start;
+
     // Compute minor axis line in fixed-point
-    int minor_line = (major_px - major_start) * minor_end + (major_end - major_px) * minor_start;
+    int minor_line = weight_end * minor_end + weight_start * minor_start;
 
     int alpha_int;
 
@@ -1090,24 +1090,36 @@ void ps_main()
         alpha_int = d_major_scaled; // full coverage
     }
 
-    float alpha = clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
-	alpha *= 255.0 / 256.0; // FIXME: Is this better?
+    float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
 
-	// Interpolate remaining attributes
-	// FIXME: Make weight variables to avoid duplicating.
-
-	// FIXME: Clamp colors, fog, and Z.
-	PSin.t_float = (float(major_px - major_start) * ld.t_float_end + float(major_end - major_px) * ld.t_float_start) / d_major;
-	PSin.t_int = (float(major_px - major_start) * ld.t_int_end + float(major_end - major_px) * ld.t_int_start) / d_major;
-	PSin.c = (float(major_px - major_start) * ld.c_end + float(major_end - major_px) * ld.c_start) / d_major;
-	FragCoord.z = (float(major_px - major_start) * ld.p_end.z + float(major_end - major_px) * ld.p_start.z) / d_major;
+	// Interpolate attributes.
+	float weight_start_f = float(weight_start);
+	float weight_end_f = float(weight_end);
+	float d_major_f = float(d_major);
+	PSin.t_float = (weight_start_f * ld.t_float_end + weight_end_f * ld.t_float_start) / d_major_f;
+	PSin.t_int = (weight_start_f * ld.t_int_end + weight_end_f * ld.t_int_start) / d_major_f;
+	PSin.c = (weight_start_f * ld.c_end + weight_end_f * ld.c_start) / d_major_f;
+	FragCoord.z = (weight_start_f * ld.p_end.z + weight_end_f * ld.p_start.z) / d_major_f;
 	
-	PSin.c.a = alpha;
-	//SV_Target0 = vec4(alpha, alpha, alpha, 1.0);
+	// Clamp attributes. Fog/Z are normalized.
+	PSin.c = clamp(PSin.c, 0.0, 255.0);
+	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
+	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
 
-	//return;
+	// FIXME: Make this a macro.
+	if (accurate_line_aa != 0)
+	{
+		PSin.c.a = alpha;
+	}
+}
+
+void ps_main()
+{
+	FragCoord = gl_FragCoord;
+
+#if ACCURATE_LINES
+	HandleAccurateLines();
 #endif
-
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
@@ -1284,9 +1296,10 @@ void ps_main()
 #endif
 
 #if PS_ZCLAMP
-	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
-#elif ACCURATE_LINES
-	// FIXME: Once clamped above this clause can go first.
+	FragCoord.z = min(FragCoord.z, MaxDepthPS);
+#endif
+
+#if ACCURATE_LINES || PS_ZCLAMP
 	gl_FragDepth = FragCoord.z;
 #endif
 }
