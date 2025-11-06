@@ -14,6 +14,18 @@
 #include "GS/GSExtra.h"
 #include <array>
 
+struct alignas(16) AccurateLineData
+{
+	GSVector2i start; //  0
+	GSVector2i end; //  8
+	GSVector2i d; // 16
+	GSVector2i start_px; // 24
+	GSVector2i end_px; // 32
+	int step_x; // 40
+	int draw_start; // 44
+	int draw_end; // 48
+};
+
 enum class ShaderConvert
 {
 	COPY = 0,
@@ -296,7 +308,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
-				u8 _free : 2;
+				u8 accurate_lines : 1;
+				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -394,6 +407,9 @@ struct alignas(16) GSHWDrawConfig
 
 				// Scan mask
 				u32 scanmsk : 2;
+
+				// Accurate lines
+				u32 accurate_lines : 1;
 			};
 
 			struct
@@ -558,6 +574,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 texture_offset;
 		GSVector2 point_size;
 		GSVector2i max_depth;
+		GSVector2i base_vertex;
 		__fi VSConstantBuffer()
 		{
 			memset(this, 0, sizeof(*this));
@@ -606,6 +623,11 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
+
+		uint accurate_line_base;
+		uint accurate_line_aa;
+		uint _pad0;
+		uint _pad1;
 
 		__fi PSConstantBuffer()
 		{
@@ -756,6 +778,8 @@ struct alignas(16) GSHWDrawConfig
 	ColClipMode colclip_mode;
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
+
+	std::vector<AccurateLineData>* accurate_line_data;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
@@ -821,6 +845,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
+		bool accurate_line        : 1;
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

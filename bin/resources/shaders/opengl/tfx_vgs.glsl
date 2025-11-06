@@ -3,6 +3,10 @@
 
 //#version 420 // Keep it for text editor detection
 
+#if ACCURATE_LINES
+flat out uint accurate_lines_index;
+#endif
+
 layout(std140, binding = 1) uniform cb20
 {
 	vec2  VertexScale;
@@ -14,6 +18,8 @@ layout(std140, binding = 1) uniform cb20
 	vec2  PointSize;
 	uint  MaxDepth;
 	uint  pad_cb20;
+	uint  BaseVertex;
+	uint  pad_cb20_2;
 };
 
 #ifdef VERTEX_SHADER
@@ -82,6 +88,10 @@ void vs_main()
 
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
+	#endif
+
+	#if ACCURATE_LINES
+		accurate_lines_index = (gl_VertexID - BaseVertex) / 6u;
 	#endif
 }
 

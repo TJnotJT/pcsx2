@@ -151,6 +151,7 @@ private:
 
 	std::unique_ptr<GLStreamBuffer> m_vertex_stream_buffer;
 	std::unique_ptr<GLStreamBuffer> m_index_stream_buffer;
+	std::unique_ptr<GLStreamBuffer> m_accurate_line_stream_buffer;
 	GLuint m_expand_ibo = 0;
 	GLuint m_vao = 0;
 	GLuint m_expand_vao = 0;

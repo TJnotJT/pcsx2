@@ -57,6 +57,13 @@ layout(std140, binding = 0) uniform cb21
 
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	uint _pad0;
+	uint _pad1;
+
+	uint accurate_line_base;
+	uint accurate_line_aa;
+	uint _pad2;
+	uint _pad3;
 };
 
 in SHADER
@@ -110,6 +117,28 @@ layout(binding = 3) uniform sampler2D img_prim_min;
 
 // I don't remember why I set this parameter but it is surely useless
 //layout(pixel_center_integer) in vec4 gl_FragCoord;
+#endif
+
+#if ACCURATE_LINES
+
+flat in uint accurate_lines_index;
+
+struct LineData
+{
+	ivec2 start;    //  0
+	ivec2 end;      //  8
+	ivec2 d;        // 16
+	ivec2 start_px; // 24
+	ivec2 end_px;   // 32
+	int step_x;     // 40
+	int draw_start; // 44
+	int draw_end;   // 48
+  // 64 bytes
+};
+
+layout (std140, binding = 3) buffer AccurateLineData {
+	LineData accurate_line_data[];
+};
 #endif
 
 vec4 sample_from_rt()
@@ -969,6 +998,79 @@ float As = As_rgba.a;
 
 void ps_main()
 {
+#if ACCURATE_LINES
+
+	ivec2 start = accurate_line_data[accurate_line_base + accurate_lines_index].start;
+	ivec2 end = accurate_line_data[accurate_line_base + accurate_lines_index].end;
+	ivec2 d = accurate_line_data[accurate_line_base + accurate_lines_index].d;
+	ivec2 start_px = accurate_line_data[accurate_line_base + accurate_lines_index].start_px;
+	ivec2 end_px = accurate_line_data[accurate_line_base + accurate_lines_index].end_px;
+	int step_x = accurate_line_data[accurate_line_base + accurate_lines_index].step_x;
+	int draw_start = accurate_line_data[accurate_line_base + accurate_lines_index].draw_start;
+	int draw_end = accurate_line_data[accurate_line_base + accurate_lines_index].draw_end;
+
+    // 4-bit fixed point: 16 subpixels per pixel
+    ivec2 px = ivec2(16 * (gl_FragCoord.xy - 0.5));
+
+    // Determine major/minor axes
+    int major_start = (step_x != 0) ? start.x : start.y;
+    int major_end   = (step_x != 0) ? end.x   : end.y;
+    int minor_start = (step_x != 0) ? start.y : start.x;
+    int minor_end   = (step_x != 0) ? end.y   : end.x;
+    int major_px    = (step_x != 0) ? px.x    : px.y;
+    int minor_px    = (step_x != 0) ? px.y    : px.x;
+    int d_major     = (step_x != 0) ? d.x     : d.y;
+    int d_major_scaled = 16 * d_major; // scale to fixed-point domain
+
+    int start_px_major = (step_x != 0) ? start_px.x : start_px.y;
+    int end_px_major   = (step_x != 0) ? end_px.x   : end_px.y;
+
+    // Discard if outside line range
+    if (major_px < min(start_px_major, end_px_major) ||
+		major_px > max(start_px_major, end_px_major))
+        discard;
+
+    if ((major_px == start_px_major && draw_start == 0) ||
+        (major_px == end_px_major && draw_end == 0))
+        discard;
+
+    // Compute minor axis line in fixed-point
+    int minor_line = (major_px - major_start) * minor_end + (major_end - major_px) * minor_start;
+
+    int alpha_int;
+
+    if (accurate_line_aa != 0)
+    {
+        // Proper fixed-point AA rounding
+        int minor_px_expected_0 = (minor_line / d_major) & ~0xF;
+        int minor_px_expected_1 = minor_px_expected_0 + 16;
+        int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_px_expected_0);
+        int alpha_int_1 = d_major_scaled - alpha_int_0;
+
+        if (minor_px == minor_px_expected_0)
+            alpha_int = alpha_int_0;
+        else if (minor_px == minor_px_expected_1)
+            alpha_int = alpha_int_1;
+        else
+            discard;
+    }
+    else
+    {
+        // Non-AA: fixed-point rounding and 4-bit alignment
+        int minor_px_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+        if (minor_px != minor_px_expected)
+            discard;
+        alpha_int = d_major_scaled; // full coverage
+    }
+
+    float alpha = clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
+
+	SV_Target0 = vec4(alpha, alpha, alpha, 1.0);
+
+	return;
+#endif
+
+
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))

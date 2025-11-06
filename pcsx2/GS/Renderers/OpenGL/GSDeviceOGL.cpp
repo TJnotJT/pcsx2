@@ -26,6 +26,7 @@ static constexpr u32 g_ps_cb_index        = 0;
 
 static constexpr u32 VERTEX_BUFFER_SIZE = 32 * 1024 * 1024;
 static constexpr u32 INDEX_BUFFER_SIZE = 16 * 1024 * 1024;
+static constexpr u32 ACCURATE_LINE_BUFFER_SIZE = sizeof(AccurateLineData) * 1024 * 1024;
 static constexpr u32 VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 TEXTURE_UPLOAD_BUFFER_SIZE = 128 * 1024 * 1024;
@@ -259,10 +260,12 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		m_vertex_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, VERTEX_BUFFER_SIZE);
 		m_index_stream_buffer = GLStreamBuffer::Create(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE);
+		m_accurate_line_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, ACCURATE_LINE_BUFFER_SIZE); // FIXME; Choose better size. NEED TO DESTROY!
 		m_vertex_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, VERTEX_UNIFORM_BUFFER_SIZE);
 		m_fragment_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, FRAGMENT_UNIFORM_BUFFER_SIZE);
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &m_uniform_buffer_alignment);
-		if (!m_vertex_stream_buffer || !m_index_stream_buffer || !m_vertex_uniform_stream_buffer || !m_fragment_uniform_stream_buffer)
+		if (!m_vertex_stream_buffer || !m_index_stream_buffer || !m_accurate_line_stream_buffer ||
+			!m_vertex_uniform_stream_buffer || !m_fragment_uniform_stream_buffer)
 		{
 			Host::ReportErrorAsync("GS", "Failed to create vertex/index/uniform streaming buffers");
 			return false;
@@ -303,6 +306,11 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_expand_ibo);
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, EXPAND_BUFFER_SIZE, expand_data.get(), GL_STATIC_DRAW);
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, m_vertex_stream_buffer->GetGLBufferId(), 0, VERTEX_BUFFER_SIZE);
+		}
+
+		if (m_features.accurate_line)
+		{
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_line_stream_buffer->GetGLBufferId(), 0, ACCURATE_LINE_BUFFER_SIZE);
 		}
 	}
 
@@ -766,6 +774,9 @@ bool GSDeviceOGL::CheckFeatures(bool& buggy_pbo)
 		m_features.point_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
 		m_features.line_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
 		m_features.vs_expand ? "vertex expanding" : "CPU");
+
+	// FIXME: Use a config option
+	m_features.accurate_line = true;
 
 	return true;
 }
@@ -1327,8 +1338,9 @@ std::string GSDeviceOGL::GetVSSource(VSSelector sel)
 	std::string macro = fmt::format("#define VS_FST {}\n", static_cast<u32>(sel.fst))
 		+ fmt::format("#define VS_IIP {}\n", static_cast<u32>(sel.iip))
 		+ fmt::format("#define VS_POINT_SIZE {}\n", static_cast<u32>(sel.point_size))
-	  + fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand));
-
+	  + fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand))
+	  + fmt::format("#define ACCURATE_LINES {}\n", static_cast<int>(sel.accurate_lines)); // FIXME: Make it VS_ACCURATE_LINES
+;
 	std::string src = GenGlslHeader("vs_main", GL_VERTEX_SHADER, macro);
 	src += m_shader_tfx_vgs;
 	return src;
@@ -1393,6 +1405,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_SCANMSK {}\n", sel.scanmsk)
 		+ fmt::format("#define PS_NO_COLOR {}\n", sel.no_color)
 		+ fmt::format("#define PS_NO_COLOR1 {}\n", sel.no_color1)
+		+ fmt::format("#define ACCURATE_LINES {}\n", sel.accurate_lines) // FIXME: Make it PS_ACCURATE_LINES
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2521,6 +2534,18 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
+
+	if (config.accurate_line_data)
+	{
+		const u32 count = config.accurate_line_data->size();
+		const u32 size = count * sizeof(AccurateLineData);
+		auto res = m_accurate_line_stream_buffer->Map(sizeof(AccurateLineData), size);
+		std::memcpy(res.pointer, config.accurate_line_data->data(), size);
+		m_accurate_line_stream_buffer->Unmap(size);
+		config.cb_vs.base_vertex = m_vertex.start;
+		config.cb_ps.accurate_line_base = res.index_aligned;
+		config.cb_ps.accurate_line_aa = 0;
+	}
 
 	if (config.vs.UseExpandIndexBuffer())
 	{

@@ -205,6 +205,8 @@ private:
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
 
+	std::vector<AccurateLineData> m_accurate_line_data;
+
 public:
 	GSRendererHW();
 	virtual ~GSRendererHW() override;
@@ -221,6 +223,7 @@ public:
 	void Lines2Sprites();
 	bool VerifyIndices();
 	void ExpandLineIndices();
+	void ExpandAccurateLineVertices();
 	void ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);

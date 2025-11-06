@@ -291,6 +291,109 @@ void GSRendererHW::Lines2Sprites()
 	}
 }
 
+static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i& v1, GSVertex* out)
+{
+	float x0 = static_cast<float>(v0.x) / 16.0f;
+	float y0 = static_cast<float>(v0.y) / 16.0f;
+	float x1 = static_cast<float>(v1.x) / 16.0f;
+	float y1 = static_cast<float>(v1.y) / 16.0f;
+
+	float dx = x1 - x0;
+	float dy = y1 - y0;
+	float d_len = std::sqrtf(dx * dx + dy * dy);
+	dx = 2 * dx / d_len;
+	dy = 2 * dy / d_len;
+
+	float nx = -dy;
+	float ny = dx;
+
+	int dxi = static_cast<int>(16.0f * dx);
+	int dyi = static_cast<int>(16.0f * dy);
+	int nxi = static_cast<int>(16.0f * nx);
+	int nyi = static_cast<int>(16.0f * ny);
+
+	GSVertex v[4];
+	std::memset(v, 0, sizeof(v));
+
+	v[0].XYZ.X = v0.x - dxi - nxi;
+	v[0].XYZ.Y = v0.y - dyi - nyi;
+
+	v[1].XYZ.X = v0.x - dxi + nxi;
+	v[1].XYZ.Y = v0.y - dyi + nyi;
+
+	v[2].XYZ.X = v1.x + dxi - nxi;
+	v[2].XYZ.Y = v1.y + dyi - nyi;
+
+	v[3].XYZ.X = v1.x + dxi + nxi;
+	v[3].XYZ.Y = v1.y + dyi + nyi;
+
+	out[0] = v[0];
+	out[1] = v[1];
+	out[2] = v[2];
+
+	out[3] = v[1];
+	out[4] = v[2];
+	out[5] = v[3];
+}
+
+// FIXME: Change name to expandaccuratelinevertices!
+void GSRendererHW::ExpandAccurateLineVertices()
+{
+	const auto ExitRule = [](const GSVector2i& d, bool step_x, bool pos_step) {
+		int dist = std::abs(d.x) + std::abs(d.y);
+		if (dist < 8)
+			return false;
+
+		if (step_x)
+		{
+			bool x_good = pos_step ? (d.x > 0) : (d.x < 0);
+			return x_good && (dist > 8 || d.y >= 0);
+		}
+		else
+		{
+			bool y_good = pos_step ? (d.y > 0) : (d.y < 0);
+			return y_good && (dist > 8 || d.x >= 0);
+		}
+	};
+
+	while (m_vertex.maxcount < 6 * m_index.tail)
+		GrowVertexBuffer();
+
+	m_accurate_line_data.clear();
+
+	GSVector4i scissor = m_context->scissor.xyof;
+
+	for (std::size_t i = 0, j = 0; i < m_index.tail; i += 2, j += 6)
+	{
+		GSVector2i v0 = { m_vertex.buff[m_index.buff[i + 0]].XYZ.X, m_vertex.buff[m_index.buff[i + 0]].XYZ.Y };
+		GSVector2i v1 = { m_vertex.buff[m_index.buff[i + 1]].XYZ.X, m_vertex.buff[m_index.buff[i + 1]].XYZ.Y };
+
+		AccurateLineData data;
+		data.start = GSVector2i(v0.x - scissor.x, v0.y - scissor.y);
+		data.end = GSVector2i(v1.x - scissor.x, v1.y - scissor.y);
+
+		data.d = data.end - data.start;
+		data.start_px = (data.start + 8) & GSVector2i(~0xF);
+		data.end_px = (data.end + 8) & GSVector2i(~0xF);
+		data.step_x = std::abs(data.d.x) >= std::abs(data.d.y);
+		bool pos_step = data.step_x ? data.d.x >= 0 : data.d.y >= 0;
+		data.draw_start = !ExitRule(data.start - data.start_px, data.step_x, pos_step);
+		data.draw_end = ExitRule(data.end - data.end_px, data.step_x, pos_step);
+		m_accurate_line_data.push_back(data);
+
+		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
+	}
+
+	for (std::size_t i = 0; i < 6 * m_index.tail; i++)
+	{
+		m_index.buff[i] = i;
+	}
+	m_index.tail *= 6;
+	m_vertex.next = m_vertex.tail = m_vertex.head = m_index.tail;
+
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+}
+
 void GSRendererHW::ExpandLineIndices()
 {
 	const u32 process_count = (m_index.tail + 7) / 8 * 8;
@@ -5007,21 +5110,34 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_LINE_CLASS:
 			{
-				m_conf.topology = GSHWDrawConfig::Topology::Line;
-				m_conf.indices_per_prim = 2;
-				if (unscale_pt_ln)
+				if (features.accurate_line)
 				{
-					if (features.line_expand)
+					GL_INS("Using accurate lines");
+					ExpandAccurateLineVertices();
+					m_conf.accurate_line_data = &m_accurate_line_data;
+					m_conf.vs.accurate_lines = 1;
+					m_conf.ps.accurate_lines = 1;
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 6;
+				}
+				else
+				{
+					m_conf.topology = GSHWDrawConfig::Topology::Line;
+					m_conf.indices_per_prim = 2;
+					if (unscale_pt_ln)
 					{
-						m_conf.line_expand = true;
-					}
-					else if (features.vs_expand)
-					{
-						m_conf.vs.expand = GSHWDrawConfig::VSExpand::Line;
-						m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
-						m_conf.topology = GSHWDrawConfig::Topology::Triangle;
-						m_conf.indices_per_prim = 6;
-						ExpandLineIndices();
+						if (features.line_expand)
+						{
+							m_conf.line_expand = true;
+						}
+						else if (features.vs_expand)
+						{
+							m_conf.vs.expand = GSHWDrawConfig::VSExpand::Line;
+							m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
+							m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+							m_conf.indices_per_prim = 6;
+							ExpandLineIndices();
+						}
 					}
 				}
 			}
