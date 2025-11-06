@@ -5178,6 +5178,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
 					m_conf.aa_hw = (PRIM->AA1 != 0);
+					// FIXME: Need to multiple the drawlist indices by 6!
 				}
 				else
 				{

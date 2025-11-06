@@ -1094,16 +1094,18 @@ void ps_main()
 	alpha *= 255.0 / 256.0; // FIXME: Is this better?
 
 	// Interpolate remaining attributes
-	// FIXME: Make weight varaibles to avoid duplicating.
+	// FIXME: Make weight variables to avoid duplicating.
+
+	// FIXME: Clamp colors, fog, and Z.
 	PSin.t_float = (float(major_px - major_start) * ld.t_float_end + float(major_end - major_px) * ld.t_float_start) / d_major;
 	PSin.t_int = (float(major_px - major_start) * ld.t_int_end + float(major_end - major_px) * ld.t_int_start) / d_major;
 	PSin.c = (float(major_px - major_start) * ld.c_end + float(major_end - major_px) * ld.c_start) / d_major;
 	FragCoord.z = (float(major_px - major_start) * ld.p_end.z + float(major_end - major_px) * ld.p_start.z) / d_major;
-	// FIXME: Might ahve to write to gl_FragDepth;
+	
 	PSin.c.a = alpha;
-	SV_Target0 = vec4(alpha, alpha, alpha, 1.0);
+	//SV_Target0 = vec4(alpha, alpha, alpha, 1.0);
 
-	return;
+	//return;
 #endif
 
 
@@ -1283,5 +1285,8 @@ void ps_main()
 
 #if PS_ZCLAMP
 	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+#elif ACCURATE_LINES
+	// FIXME: Once clamped above this clause can go first.
+	gl_FragDepth = FragCoord.z;
 #endif
 }
