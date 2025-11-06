@@ -3,7 +3,7 @@
 
 //#version 420 // Keep it for text editor detection
 
-#if ACCURATE_LINES
+#if VS_ACCURATE_LINES
 flat out uint accurate_lines_index;
 #endif
 
@@ -90,7 +90,7 @@ void vs_main()
 		gl_PointSize = PointSize.x;
 	#endif
 
-	#if ACCURATE_LINES
+	#if VS_ACCURATE_LINES
 		accurate_lines_index = (gl_VertexID - BaseVertex) / 6u;
 	#endif
 }

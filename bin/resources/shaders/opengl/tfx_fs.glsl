@@ -68,7 +68,7 @@ layout(std140, binding = 0) uniform cb21
 	uint _pad3;
 };
 
-#if ACCURATE_LINES
+#if PS_ACCURATE_LINES
 struct
 {
 	vec4 t_float;
@@ -88,9 +88,9 @@ struct AccurateLineData
 	int step_x;     // 40
 	int draw_start; // 44
 	int draw_end;   // 48
-	int _pad0; // 52
-	int _pad1; // 56
-	int _pad2; // 60
+	int _pad0;      // 52
+	int _pad1;      // 56
+	int _pad2;      // 60
 
 	// Interpolated attributes
 	vec4 t_float_start; // 64
@@ -1117,7 +1117,7 @@ void ps_main()
 {
 	FragCoord = gl_FragCoord;
 
-#if ACCURATE_LINES
+#if PS_ACCURATE_LINES
 	HandleAccurateLines();
 #endif
 
@@ -1299,7 +1299,7 @@ void ps_main()
 	FragCoord.z = min(FragCoord.z, MaxDepthPS);
 #endif
 
-#if ACCURATE_LINES || PS_ZCLAMP
+#if PS_ACCURATE_LINES || PS_ZCLAMP
 	gl_FragDepth = FragCoord.z;
 #endif
 }

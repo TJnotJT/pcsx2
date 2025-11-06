@@ -1338,9 +1338,9 @@ std::string GSDeviceOGL::GetVSSource(VSSelector sel)
 	std::string macro = fmt::format("#define VS_FST {}\n", static_cast<u32>(sel.fst))
 		+ fmt::format("#define VS_IIP {}\n", static_cast<u32>(sel.iip))
 		+ fmt::format("#define VS_POINT_SIZE {}\n", static_cast<u32>(sel.point_size))
-	  + fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand))
-	  + fmt::format("#define ACCURATE_LINES {}\n", static_cast<int>(sel.accurate_lines)); // FIXME: Make it VS_ACCURATE_LINES
-;
+		+ fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand))
+		+ fmt::format("#define VS_ACCURATE_LINES {}\n", static_cast<int>(sel.accurate_lines))
+	;
 	std::string src = GenGlslHeader("vs_main", GL_VERTEX_SHADER, macro);
 	src += m_shader_tfx_vgs;
 	return src;
@@ -1405,7 +1405,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_SCANMSK {}\n", sel.scanmsk)
 		+ fmt::format("#define PS_NO_COLOR {}\n", sel.no_color)
 		+ fmt::format("#define PS_NO_COLOR1 {}\n", sel.no_color1)
-		+ fmt::format("#define ACCURATE_LINES {}\n", sel.accurate_lines) // FIXME: Make it PS_ACCURATE_LINES
+		+ fmt::format("#define PS_ACCURATE_LINES {}\n", sel.accurate_lines)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
