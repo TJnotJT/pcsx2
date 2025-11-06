@@ -5170,7 +5170,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 			{
 				if (features.accurate_line)
 				{
-					GL_INS("Using accurate lines");
+					GL_INS("SetupIA: Using accurate lines");
 					ExpandAccurateLineVertices();
 					m_conf.accurate_line_data = &m_accurate_line_data;
 					m_conf.vs.accurate_lines = 1;
@@ -5178,7 +5178,15 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
 					m_conf.aa_hw = (PRIM->AA1 != 0);
-					// FIXME: Need to multiple the drawlist indices by 6!
+					
+					// The drawlist should be computed by this point.
+					if (!m_drawlist.empty())
+					{
+						for (std::size_t i = 0; i < m_drawlist.size(); i++)
+						{
+							m_drawlist[i] *= 2; // Each line expanded to 2 triangles.
+						}
+					}
 				}
 				else
 				{
@@ -8165,6 +8173,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.require_full_barrier = false;
 	}
 
+	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
+	{
+		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
 	// rs
 	const GSVector4i hacked_scissor = m_channel_shuffle ? GSVector4i::cxpr(0, 0, 1024, 1024) : m_context->scissor.in;
 	const GSVector4i scissor(GSVector4i(GSVector4(rtscale) * GSVector4(hacked_scissor)).rintersect(GSVector4i::loadh(rtsize)));
@@ -8259,14 +8274,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.cb_ps.FogColor_AREF.a = m_conf.alpha_second_pass.ps_aref;
 		m_conf.alpha_second_pass.enable = false;
 	}
-
-	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
-	{
-		ComputeDrawlistGetSize(rt->m_scale);
-		m_conf.drawlist = &m_drawlist;
-		m_conf.drawlist_bbox = &m_drawlist_bbox;
-	}
-
+	
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else
