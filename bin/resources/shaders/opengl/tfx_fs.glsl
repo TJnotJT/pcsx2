@@ -29,6 +29,8 @@
 #define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)))
 #define NEEDS_TEX (PS_TFX != 4)
 
+vec4 FragCoord;
+
 layout(std140, binding = 0) uniform cb21
 {
 	vec3 FogColor;
@@ -66,6 +68,48 @@ layout(std140, binding = 0) uniform cb21
 	uint _pad3;
 };
 
+#if ACCURATE_LINES
+struct
+{
+	vec4 t_float;
+	vec4 t_int;
+	vec4 c;
+} PSin;
+
+flat in uint accurate_lines_index;
+
+struct AccurateLineData
+{
+	ivec2 start;    //  0
+	ivec2 end;      //  8
+	ivec2 d;        // 16
+	ivec2 start_px; // 24
+	ivec2 end_px;   // 32
+	int step_x;     // 40
+	int draw_start; // 44
+	int draw_end;   // 48
+	int _pad0; // 52
+	int _pad1; // 56
+	int _pad2; // 60
+
+	// Interpolated attributes
+	vec4 t_float_start; // 64
+	vec4 t_float_end; // 80
+	vec4 t_int_start; // 96
+	vec4 t_int_end; // 112
+	vec4 c_start; // 128
+	vec4 c_end; // 144
+	vec4 p_start; // 160
+	vec4 p_end; // 176
+
+	// 192 bytes
+};
+
+layout (std140, binding = 3) buffer AccurateLineDataBuffer {
+	AccurateLineData accurate_line_data[];
+};
+
+#else
 in SHADER
 {
 	vec4 t_float;
@@ -77,6 +121,7 @@ in SHADER
 		flat vec4 c;
 	#endif
 } PSin;
+#endif
 
 #define TARGET_0_QUALIFIER out
 
@@ -119,28 +164,6 @@ layout(binding = 3) uniform sampler2D img_prim_min;
 //layout(pixel_center_integer) in vec4 gl_FragCoord;
 #endif
 
-#if ACCURATE_LINES
-
-flat in uint accurate_lines_index;
-
-struct LineData
-{
-	ivec2 start;    //  0
-	ivec2 end;      //  8
-	ivec2 d;        // 16
-	ivec2 start_px; // 24
-	ivec2 end_px;   // 32
-	int step_x;     // 40
-	int draw_start; // 44
-	int draw_end;   // 48
-  // 64 bytes
-};
-
-layout (std140, binding = 3) buffer AccurateLineData {
-	LineData accurate_line_data[];
-};
-#endif
-
 vec4 sample_from_rt()
 {
 #if !NEEDS_RT
@@ -148,7 +171,7 @@ vec4 sample_from_rt()
 #elif HAS_FRAMEBUFFER_FETCH
 	return LAST_FRAG_COLOR;
 #else
-	return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0);
+	return texelFetch(RtSampler, ivec2(FragCoord.xy), 0);
 #endif
 }
 
@@ -344,7 +367,7 @@ int fetch_raw_depth()
 #if PS_TEX_IS_FB == 1
 	return int(sample_from_rt().r * multiplier);
 #else
-	return int(texelFetch(TextureSampler, ivec2(gl_FragCoord.xy), 0).r * multiplier);
+	return int(texelFetch(TextureSampler, ivec2(FragCoord.xy), 0).r * multiplier);
 #endif
 }
 
@@ -353,7 +376,7 @@ vec4 fetch_raw_color()
 #if PS_TEX_IS_FB == 1
 	return sample_from_rt();
 #else
-	return texelFetch(TextureSampler, ivec2(gl_FragCoord.xy), 0);
+	return texelFetch(TextureSampler, ivec2(FragCoord.xy), 0);
 #endif
 }
 
@@ -753,9 +776,9 @@ void ps_dither(inout vec3 C, float As)
 {
 #if PS_DITHER > 0 && PS_DITHER < 3
 	#if PS_DITHER == 2
-		ivec2 fpos = ivec2(gl_FragCoord.xy);
+		ivec2 fpos = ivec2(FragCoord.xy);
 	#else
-		ivec2 fpos = ivec2(gl_FragCoord.xy * RcpScaleFactor);
+		ivec2 fpos = ivec2(FragCoord.xy * RcpScaleFactor);
 	#endif
 		float value = DitherMatrix[fpos.y&3][fpos.x&3];
 
@@ -998,19 +1021,23 @@ float As = As_rgba.a;
 
 void ps_main()
 {
+	FragCoord = gl_FragCoord;
+// FIXME: Make this its own function.
 #if ACCURATE_LINES
 
-	ivec2 start = accurate_line_data[accurate_line_base + accurate_lines_index].start;
-	ivec2 end = accurate_line_data[accurate_line_base + accurate_lines_index].end;
-	ivec2 d = accurate_line_data[accurate_line_base + accurate_lines_index].d;
-	ivec2 start_px = accurate_line_data[accurate_line_base + accurate_lines_index].start_px;
-	ivec2 end_px = accurate_line_data[accurate_line_base + accurate_lines_index].end_px;
-	int step_x = accurate_line_data[accurate_line_base + accurate_lines_index].step_x;
-	int draw_start = accurate_line_data[accurate_line_base + accurate_lines_index].draw_start;
-	int draw_end = accurate_line_data[accurate_line_base + accurate_lines_index].draw_end;
+	AccurateLineData ld = accurate_line_data[accurate_line_base + accurate_lines_index];
+
+	ivec2 start = ld.start;
+	ivec2 end = ld.end;
+	ivec2 d = ld.d;
+	ivec2 start_px = ld.start_px;
+	ivec2 end_px = ld.end_px;
+	int step_x = ld.step_x;
+	int draw_start = ld.draw_start;
+	int draw_end = ld.draw_end;
 
     // 4-bit fixed point: 16 subpixels per pixel
-    ivec2 px = ivec2(16 * (gl_FragCoord.xy - 0.5));
+    ivec2 px = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
 
     // Determine major/minor axes
     int major_start = (step_x != 0) ? start.x : start.y;
@@ -1064,7 +1091,16 @@ void ps_main()
     }
 
     float alpha = clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
+	alpha *= 255.0 / 256.0; // FIXME: Is this better?
 
+	// Interpolate remaining attributes
+	// FIXME: Make weight varaibles to avoid duplicating.
+	PSin.t_float = (float(major_px - major_start) * ld.t_float_end + float(major_end - major_px) * ld.t_float_start) / d_major;
+	PSin.t_int = (float(major_px - major_start) * ld.t_int_end + float(major_end - major_px) * ld.t_int_start) / d_major;
+	PSin.c = (float(major_px - major_start) * ld.c_end + float(major_end - major_px) * ld.c_start) / d_major;
+	FragCoord.z = (float(major_px - major_start) * ld.p_end.z + float(major_end - major_px) * ld.p_start.z) / d_major;
+	// FIXME: Might ahve to write to gl_FragDepth;
+	PSin.c.a = alpha;
 	SV_Target0 = vec4(alpha, alpha, alpha, 1.0);
 
 	return;
@@ -1073,7 +1109,7 @@ void ps_main()
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
-	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
+	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
 
@@ -1109,7 +1145,7 @@ void ps_main()
 #endif
 
 #if PS_DATE == 3
-	int stencil_ceil = int(texelFetch(img_prim_min, ivec2(gl_FragCoord.xy), 0).r);
+	int stencil_ceil = int(texelFetch(img_prim_min, ivec2(FragCoord.xy), 0).r);
 	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
 	// the bad alpha value so we must keep it.
 
@@ -1246,6 +1282,6 @@ void ps_main()
 #endif
 
 #if PS_ZCLAMP
-	gl_FragDepth = min(gl_FragCoord.z, MaxDepthPS);
+	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
 #endif
 }

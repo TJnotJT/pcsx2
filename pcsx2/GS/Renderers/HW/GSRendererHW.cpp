@@ -361,16 +361,19 @@ void GSRendererHW::ExpandAccurateLineVertices()
 
 	m_accurate_line_data.clear();
 
-	GSVector4i scissor = m_context->scissor.xyof;
+	GSVector4i xyof = m_context->scissor.xyof;
 
 	for (std::size_t i = 0, j = 0; i < m_index.tail; i += 2, j += 6)
 	{
-		GSVector2i v0 = { m_vertex.buff[m_index.buff[i + 0]].XYZ.X, m_vertex.buff[m_index.buff[i + 0]].XYZ.Y };
-		GSVector2i v1 = { m_vertex.buff[m_index.buff[i + 1]].XYZ.X, m_vertex.buff[m_index.buff[i + 1]].XYZ.Y };
+		const GSVertex& vtx0 = m_vertex.buff[m_index.buff[i + 0]];
+		const GSVertex& vtx1 = m_vertex.buff[m_index.buff[i + 1]];
+
+		GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
+		GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
 
 		AccurateLineData data;
-		data.start = GSVector2i(v0.x - scissor.x, v0.y - scissor.y);
-		data.end = GSVector2i(v1.x - scissor.x, v1.y - scissor.y);
+		data.start = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
+		data.end = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
 
 		data.d = data.end - data.start;
 		data.start_px = (data.start + 8) & GSVector2i(~0xF);
@@ -379,6 +382,61 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		bool pos_step = data.step_x ? data.d.x >= 0 : data.d.y >= 0;
 		data.draw_start = !ExitRule(data.start - data.start_px, data.step_x, pos_step);
 		data.draw_end = ExitRule(data.end - data.end_px, data.step_x, pos_step);
+
+		// Interpolated attributes - mimicks transformations done in vertex shader.
+		GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;
+		GSVector2 uv1 = GSVector2(static_cast<float>(vtx1.U), static_cast<float>(vtx1.V)) - m_conf.cb_vs.texture_offset;
+		GSVector2 uv0_scale = uv0 * m_conf.cb_vs.texture_scale;
+		GSVector2 uv1_scale = uv1 * m_conf.cb_vs.texture_scale;
+		GSVector2 st0 = GSVector2(vtx0.ST.S, vtx0.ST.T) - m_conf.cb_vs.texture_offset;
+		GSVector2 st1 = GSVector2(vtx1.ST.S, vtx1.ST.T) - m_conf.cb_vs.texture_offset;
+		GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
+		GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
+
+		data.t_float_start = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
+		data.t_float_end = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
+		data.t_int_start = GSVector4(uv0_scale.x, uv0_scale.y);
+		data.t_int_end = GSVector4(uv1_scale.x, uv1_scale.y);
+
+		if (m_conf.vs.fst)
+		{
+			data.t_int_start.z = uv0.x;
+			data.t_int_start.w = uv0.y;
+			data.t_int_end.z = uv1.x;
+			data.t_int_end.w = uv1.y;
+		}
+		else
+		{
+			data.t_int_start.z = st0_scale.x;
+			data.t_int_start.w = st0_scale.y;
+			data.t_int_end.z = st1_scale.x;
+			data.t_int_end.w = st1_scale.y;
+		}
+
+		constexpr float exp_min32 = 0x1p-32f;
+		float z0 = static_cast<float>(std::min(vtx0.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+		float z1 = static_cast<float>(std::min(vtx1.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+
+		GSVector2 xy0 = GSVector2(static_cast<float>(vtx0.XYZ.X), static_cast<float>(vtx0.XYZ.X)) - GSVector2(0.05f);
+		GSVector2 xy1 = GSVector2(static_cast<float>(vtx1.XYZ.X), static_cast<float>(vtx1.XYZ.X)) - GSVector2(0.05f);
+
+		xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+		xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+
+		data.p_start = GSVector4(xy0.x, xy0.y, z0 * exp_min32, 1.0f);
+		data.p_end = GSVector4(xy1.x, xy1.y, z1 * exp_min32, 1.0f);
+
+		data.c_start = GSVector4(
+			static_cast<float>(vtx0.RGBAQ.R),
+			static_cast<float>(vtx0.RGBAQ.G),
+			static_cast<float>(vtx0.RGBAQ.B),
+			static_cast<float>(vtx0.RGBAQ.A));
+		data.c_end = GSVector4(
+			static_cast<float>(vtx1.RGBAQ.R),
+			static_cast<float>(vtx1.RGBAQ.G),
+			static_cast<float>(vtx1.RGBAQ.B),
+			static_cast<float>(vtx1.RGBAQ.A));
+
 		m_accurate_line_data.push_back(data);
 
 		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
@@ -5119,6 +5177,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.ps.accurate_lines = 1;
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
+					m_conf.aa_hw = (PRIM->AA1 != 0);
 				}
 				else
 				{
@@ -7760,7 +7819,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// AA1: Set alpha source to coverage 128 when there is no alpha blending.
-	m_conf.ps.fixed_one_a = IsCoverageAlpha();
+	m_conf.ps.fixed_one_a = IsCoverageAlpha() && !features.accurate_line; // FIXME: Change to another feature for accurate AA1?
 
 	if ((!IsOpaque() || m_context->ALPHA.IsBlack()) && rt && ((m_conf.colormask.wrgba & 0x7) || (m_texture_shuffle && !m_copy_16bit_to_target_shuffle && !m_same_group_texture_shuffle)))
 	{

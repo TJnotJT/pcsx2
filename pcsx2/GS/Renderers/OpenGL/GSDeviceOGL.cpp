@@ -2535,6 +2535,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
+	// FIXME: Make a separate function.
 	if (config.accurate_line_data)
 	{
 		const u32 count = config.accurate_line_data->size();
@@ -2544,7 +2545,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		m_accurate_line_stream_buffer->Unmap(size);
 		config.cb_vs.base_vertex = m_vertex.start;
 		config.cb_ps.accurate_line_base = res.index_aligned;
-		config.cb_ps.accurate_line_aa = 0;
+		config.cb_ps.accurate_line_aa = config.aa_hw;
 	}
 
 	if (config.vs.UseExpandIndexBuffer())

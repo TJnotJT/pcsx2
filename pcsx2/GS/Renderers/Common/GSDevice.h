@@ -14,6 +14,9 @@
 #include "GS/GSExtra.h"
 #include <array>
 
+// FIXME: Change start/end to v0,v1.
+// Same for shader struct.
+// FIXME: Put the 16-byte attributes first to pack better.
 struct alignas(16) AccurateLineData
 {
 	GSVector2i start; //  0
@@ -24,7 +27,24 @@ struct alignas(16) AccurateLineData
 	int step_x; // 40
 	int draw_start; // 44
 	int draw_end; // 48
+	int _pad0; // 52
+	int _pad1; // 56
+	int _pad2; // 60
+
+	// Interpolated attributes
+	GSVector4 t_float_start; // 64
+	GSVector4 t_float_end; // 80
+	GSVector4 t_int_start; // 96
+	GSVector4 t_int_end; // 112
+	GSVector4 c_start; // 128
+	GSVector4 c_end; // 144
+	GSVector4 p_start; // 160
+	GSVector4 p_end; // 176
+
+	// Total 192
 };
+
+static_assert(sizeof(AccurateLineData) == 192);
 
 enum class ShaderConvert
 {
@@ -780,6 +800,7 @@ struct alignas(16) GSHWDrawConfig
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
 	std::vector<AccurateLineData>* accurate_line_data;
+	bool aa_hw: 1;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
