@@ -395,6 +395,32 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		}
 	}
 
+	if (m_features.accurate_prims)
+	{
+		bd.ByteWidth = ACCURATE_PRIMS_BUFFER_SIZE;
+		bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		bd.StructureByteStride = sizeof(AccuratePrimsEdgeData);
+		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+
+		if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_accurate_prims_b.put())))
+		{
+			Console.Error("D3D11: Failed to create accurate prims buffer.");
+			return false;
+		}
+
+		const CD3D11_SHADER_RESOURCE_VIEW_DESC accurate_prims_b_srv_desc(
+			D3D11_SRV_DIMENSION_BUFFER, DXGI_FORMAT_UNKNOWN, 0, ACCURATE_PRIMS_BUFFER_SIZE / sizeof(AccuratePrimsEdgeData));
+		if (FAILED(m_dev->CreateShaderResourceView(m_accurate_prims_b.get(), &accurate_prims_b_srv_desc, m_accurate_prims_b_srv.put())))
+		{
+			Console.Error("D3D11: Failed to create accurate prims buffer SRV.");
+			return false;
+		}
+
+		// If MAX_TEXTURES changes, please change the register for this buffer in the shader.
+		static_assert(MAX_TEXTURES == 4);
+		m_ctx->PSSetShaderResources(MAX_TEXTURES, 1, m_accurate_prims_b_srv.addressof());
+	}
+
 	// rasterizer
 
 	memset(&rd, 0, sizeof(rd));
@@ -541,6 +567,8 @@ void GSDevice11::Destroy()
 	m_expand_vb_srv.reset();
 	m_expand_vb.reset();
 	m_expand_ib.reset();
+	m_accurate_prims_b.reset();
+	m_accurate_prims_b_srv.reset();
 
 	m_vs.clear();
 	m_vs_cb.reset();
@@ -599,6 +627,8 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 	m_max_texture_size = (m_feature_level >= D3D_FEATURE_LEVEL_11_0) ?
 	                         D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION :
 	                         D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+
+	m_features.accurate_prims = true;
 }
 
 bool GSDevice11::HasSurface() const
@@ -1674,6 +1704,7 @@ void GSDevice11::SetupVS(VSSelector sel, const GSHWDrawConfig::VSConstantBuffer*
 		sm.AddMacro("VS_FST", sel.fst);
 		sm.AddMacro("VS_IIP", sel.iip);
 		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+		sm.AddMacro("VS_ACCURATE_PRIMS", static_cast<int>(sel.accurate_prims));
 
 		static constexpr const D3D11_INPUT_ELEMENT_DESC layout[] =
 			{
@@ -1775,6 +1806,9 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
 		sm.AddMacro("PS_NO_COLOR", sel.no_color);
 		sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
+		sm.AddMacro("PS_ACCURATE_PRIMS", sel.accurate_prims);
+		sm.AddMacro("PS_ACCURATE_PRIMS_AA", sel.accurate_prims_aa);
+		sm.AddMacro("PS_ACCURATE_PRIMS_AA_ABE", sel.accurate_prims_aa_abe);
 
 		wil::com_ptr_nothrow<ID3D11PixelShader> ps = m_shader_cache.GetPixelShader(m_dev.get(), m_tfx_source, sm.GetPtr(), "ps_main");
 		i = m_ps.try_emplace(sel, std::move(ps)).first;
@@ -2278,6 +2312,43 @@ bool GSDevice11::IASetExpandVertexBuffer(const void* vertex, u32 stride, u32 cou
 	return true;
 }
 
+bool GSDevice11::SetupAccuratePrims(GSHWDrawConfig& config)
+{
+	if (config.accurate_prims)
+	{
+		const u32 count = config.accurate_prims_edge_data->size();
+		const u32 size = count * sizeof(AccuratePrimsEdgeData);
+
+		if (size > ACCURATE_PRIMS_BUFFER_SIZE)
+			return false;
+
+		D3D11_MAP type = D3D11_MAP_WRITE_NO_OVERWRITE;
+
+		pxAssert(m_accurate_prims_b_pos % sizeof(AccuratePrimsEdgeData) == 0);
+
+		if (m_accurate_prims_b_pos + size > ACCURATE_PRIMS_BUFFER_SIZE)
+		{
+			m_accurate_prims_b_pos = 0;
+			type = D3D11_MAP_WRITE_DISCARD;
+		}
+
+		D3D11_MAPPED_SUBRESOURCE m;
+		if (FAILED(m_ctx->Map(m_accurate_prims_b.get(), 0, type, 0, &m)))
+			return false;
+
+		void* map = static_cast<u8*>(m.pData) + m_accurate_prims_b_pos;
+
+		GSVector4i::storent(map, config.accurate_prims_edge_data->data(), size);
+
+		m_ctx->Unmap(m_accurate_prims_b.get(), 0);
+
+		config.cb_ps.accurate_prims_base_index.x = m_accurate_prims_b_pos / sizeof(AccuratePrimsEdgeData);
+		
+		m_accurate_prims_b_pos += size;
+	}
+	return true;
+}
+
 u16* GSDevice11::IAMapIndexBuffer(u32 count)
 {
 	if (count > (INDEX_BUFFER_SIZE / sizeof(u16)))
@@ -2661,7 +2732,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 			return;
 		}
 
-		config.cb_vs.max_depth.y = m_vertex.start;
+		config.cb_vs.base_vertex = m_vertex.start;
 	}
 	else
 	{
@@ -2670,6 +2741,12 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 			Console.Error("D3D11: Failed to upload vertices (%u)", config.nverts);
 			return;
 		}
+	}
+
+	if (!SetupAccuratePrims(config))
+	{
+		Console.Error("D3D11: Failed to setup accurate prims");
+		return;
 	}
 
 	if (config.vs.UseExpandIndexBuffer())

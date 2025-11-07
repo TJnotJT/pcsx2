@@ -41,6 +41,7 @@ enum : u32
 
 	VERTEX_BUFFER_SIZE = 32 * 1024 * 1024,
 	INDEX_BUFFER_SIZE = 16 * 1024 * 1024,
+	ACCURATE_PRIMS_BUFFER_SIZE = 32 * 1024 * 1024,
 	VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024,
 	FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024,
 	TEXTURE_BUFFER_SIZE = 64 * 1024 * 1024,
@@ -932,7 +933,7 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 {
 	static constexpr const VkDescriptorPoolSize pool_sizes[] = {
 		{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 2},
-		{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
+		{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
 	};
 
 	VkDescriptorPoolCreateInfo pool_create_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr,
@@ -2679,6 +2680,8 @@ bool GSDeviceVK::CheckFeatures()
 
 	m_max_texture_size = m_device_properties.limits.maxImageDimension2D;
 
+	m_features.accurate_prims = GSConfig.HWAccuratePrims;
+
 	return true;
 }
 
@@ -3377,6 +3380,31 @@ void GSDeviceVK::IASetIndexBuffer(const void* index, size_t count)
 	SetIndexBuffer(m_index_stream_buffer.GetBuffer());
 }
 
+void GSDeviceVK::SetupAccuratePrims(GSHWDrawConfig& config)
+{
+	if (config.accurate_prims)
+	{
+		const u32 count = config.accurate_prims_edge_data->size();
+		const u32 size = count * sizeof(AccuratePrimsEdgeData);
+
+		if (!m_accurate_prims_stream_buffer.ReserveMemory(size, sizeof(AccuratePrimsEdgeData)))
+		{
+			ExecuteCommandBufferAndRestartRenderPass(false, "Uploading bytes to accurate prims buffer");
+			if (!m_accurate_prims_stream_buffer.ReserveMemory(size, sizeof(AccuratePrimsEdgeData)))
+				pxFailRel("Failed to reserve space for accurate prims");
+		}
+
+		config.cb_vs.base_vertex = m_vertex.start;
+		config.cb_ps.accurate_prims_base_index.x = m_accurate_prims_stream_buffer.GetCurrentOffset() / sizeof(AccuratePrimsEdgeData);
+
+		SetVSConstantBuffer(config.cb_vs);
+		SetPSConstantBuffer(config.cb_ps);
+
+		std::memcpy(m_accurate_prims_stream_buffer.GetCurrentHostPointer(), config.accurate_prims_edge_data->data(), size);
+		m_accurate_prims_stream_buffer.CommitMemory(size);
+	}
+}
+
 void GSDeviceVK::OMSetRenderTargets(
 	GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, FeedbackLoopFlag feedback_loop)
 {
@@ -3689,6 +3717,15 @@ bool GSDeviceVK::CreateBuffers()
 		return false;
 	}
 
+	if (m_features.accurate_prims)
+	{
+		if (!m_accurate_prims_stream_buffer.Create(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, ACCURATE_PRIMS_BUFFER_SIZE))
+		{
+			Host::ReportErrorAsync("GS", "Failed to allocate accurate prims buffer");
+			return false;
+		}
+	}
+
 	if (!m_vertex_uniform_stream_buffer.Create(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VERTEX_UNIFORM_BUFFER_SIZE))
 	{
 		Host::ReportErrorAsync("GS", "Failed to allocate vertex uniform buffer");
@@ -3748,6 +3785,8 @@ bool GSDeviceVK::CreatePipelineLayouts()
 	dslb.AddBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 	if (m_features.vs_expand)
 		dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
+	if (m_features.accurate_prims)
+		dslb.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 	if ((m_tfx_ubo_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
 		return false;
 	Vulkan::SetObjectName(dev, m_tfx_ubo_ds_layout, "TFX UBO descriptor layout");
@@ -4617,6 +4656,7 @@ void GSDeviceVK::DestroyResources()
 	m_fragment_uniform_stream_buffer.Destroy(false);
 	m_vertex_uniform_stream_buffer.Destroy(false);
 	m_index_stream_buffer.Destroy(false);
+	m_accurate_prims_stream_buffer.Destroy(false);
 	m_vertex_stream_buffer.Destroy(false);
 	if (m_expand_index_buffer != VK_NULL_HANDLE)
 		vmaDestroyBuffer(m_allocator, m_expand_index_buffer, m_expand_index_buffer_allocation);
@@ -4684,6 +4724,7 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_POINT_SIZE", sel.point_size);
 	AddMacro(ss, "VS_EXPAND", static_cast<int>(sel.expand));
 	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
+	AddMacro(ss, "VS_ACCURATE_PRIMS", static_cast<int>(sel.accurate_prims));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(ss.str());
@@ -4758,6 +4799,9 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_TEX_IS_FB", sel.tex_is_fb);
 	AddMacro(ss, "PS_NO_COLOR", sel.no_color);
 	AddMacro(ss, "PS_NO_COLOR1", sel.no_color1);
+	AddMacro(ss, "PS_ACCURATE_PRIMS", sel.accurate_prims);
+	AddMacro(ss, "PS_ACCURATE_PRIMS_AA", sel.accurate_prims_aa);
+	AddMacro(ss, "PS_ACCURATE_PRIMS_AA_ABE", sel.accurate_prims_aa_abe);
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
@@ -4958,6 +5002,11 @@ bool GSDeviceVK::CreatePersistentDescriptorSets()
 	{
 		dsub.AddBufferDescriptorWrite(m_tfx_ubo_descriptor_set, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			m_vertex_stream_buffer.GetBuffer(), 0, VERTEX_BUFFER_SIZE);
+	}
+	if (m_features.accurate_prims)
+	{
+		dsub.AddBufferDescriptorWrite(m_tfx_ubo_descriptor_set, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			m_accurate_prims_stream_buffer.GetBuffer(), 0, ACCURATE_PRIMS_BUFFER_SIZE);
 	}
 	dsub.Update(dev);
 	Vulkan::SetObjectName(dev, m_tfx_ubo_descriptor_set, "Persistent TFX UBO set");
@@ -6006,7 +6055,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
 }
 
-void GSDeviceVK::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)
+void GSDeviceVK::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 {
 	IASetVertexBuffer(config.verts, sizeof(GSVertex), config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
@@ -6021,6 +6070,8 @@ void GSDeviceVK::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)
 	{
 		IASetIndexBuffer(config.indices, config.nindices);
 	}
+
+	SetupAccuratePrims(config);
 }
 
 VkImageMemoryBarrier GSDeviceVK::GetColorBufferBarrier(GSTextureVK* rt) const
