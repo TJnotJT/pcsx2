@@ -269,6 +269,27 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
+struct alignas(16) AccurateLinesData
+{
+	// Interpolated attributes
+	GSVector4 t_float0; // 0
+	GSVector4 t_float1; // 16
+	GSVector4 t_int0; // 32
+	GSVector4 t_int1; // 48
+	GSVector4 c0; // 64
+	GSVector4 c1; // 80
+	GSVector4 p0; // 96
+	GSVector4 p1; // 112
+	GSVector2i xy0; // 128
+	GSVector2i xy1; // 136
+	u32 step_x; // 144
+	u32 draw0; // 148
+	u32 draw1; // 152
+	// Total 160
+};
+
+static_assert(sizeof(AccurateLinesData) == 160);
+
 struct alignas(16) GSHWDrawConfig
 {
 	enum class Topology: u8
@@ -296,7 +317,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
-				u8 _free : 2;
+				u8 accurate_lines : 1;
+				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -394,6 +416,10 @@ struct alignas(16) GSHWDrawConfig
 
 				// Scan mask
 				u32 scanmsk : 2;
+
+				// Accurate lines
+				u32 accurate_lines : 1;
+				u32 accurate_lines_aa : 1;
 			};
 
 			struct
@@ -558,6 +584,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 texture_offset;
 		GSVector2 point_size;
 		GSVector2i max_depth;
+		GSVector2i base_vertex;
 		__fi VSConstantBuffer()
 		{
 			memset(this, 0, sizeof(*this));
@@ -606,6 +633,11 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
+
+		uint accurate_line_base;
+		uint _pad0;
+		uint _pad1;
+		uint _pad2;
 
 		__fi PSConstantBuffer()
 		{
@@ -756,6 +788,8 @@ struct alignas(16) GSHWDrawConfig
 	ColClipMode colclip_mode;
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
+
+	std::vector<AccurateLinesData>* accurate_lines_data;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
@@ -821,6 +855,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
+		bool accurate_lines       : 1;
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

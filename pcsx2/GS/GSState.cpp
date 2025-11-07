@@ -4957,10 +4957,8 @@ void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)
 
 	if (IsCoverageAlpha())
 	{
-		// HW renderer doesn't currently support AA, so its min is 128.
-		// If we add AA support to the HW renderer, this will need to be changed.
-		// (Will probably only be supported with ROV/FBFetch so we would want to check for that.)
-		min = GSIsHardwareRenderer() ? 128 : 0;
+		// If HW renderer doesn't support AA1, assume alpha is constant 128.
+		min = HasAA1Support() ? 0 : 128;
 		max = 128;
 	}
 	else
