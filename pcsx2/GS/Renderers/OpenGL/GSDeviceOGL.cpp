@@ -775,8 +775,7 @@ bool GSDeviceOGL::CheckFeatures(bool& buggy_pbo)
 		m_features.line_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
 		m_features.vs_expand ? "vertex expanding" : "CPU");
 
-	// FIXME: Use a config option
-	m_features.accurate_lines = true;
+	m_features.accurate_lines = GSConfig.HWAccurateLines;
 
 	return true;
 }
