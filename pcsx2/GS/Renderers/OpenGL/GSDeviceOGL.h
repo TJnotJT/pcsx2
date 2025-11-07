@@ -151,6 +151,7 @@ private:
 
 	std::unique_ptr<GLStreamBuffer> m_vertex_stream_buffer;
 	std::unique_ptr<GLStreamBuffer> m_index_stream_buffer;
+	std::unique_ptr<GLStreamBuffer> m_accurate_lines_stream_buffer;
 	GLuint m_expand_ibo = 0;
 	GLuint m_vao = 0;
 	GLuint m_expand_vao = 0;
@@ -342,6 +343,8 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr);
 	void PSSetSamplerState(GLuint ss);
 	void ClearSamplerCache() override;
+
+	void SetupAccurateLines(GSHWDrawConfig& config);
 
 	void OMSetDepthStencilState(GSDepthStencilOGL* dss);
 	void OMSetBlendState(bool enable = false, GLenum src_factor = GL_ONE, GLenum dst_factor = GL_ZERO, GLenum op = GL_FUNC_ADD,

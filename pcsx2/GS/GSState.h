@@ -207,6 +207,7 @@ protected:
 	bool IsCoverageAlpha();
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
+	virtual bool HasAA1Support() { return false; }
 
 public:
 	struct GSUploadQueue

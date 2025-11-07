@@ -291,6 +291,167 @@ void GSRendererHW::Lines2Sprites()
 	}
 }
 
+static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i& v1, GSVertex* out)
+{
+	float x0 = static_cast<float>(v0.x) / 16.0f;
+	float y0 = static_cast<float>(v0.y) / 16.0f;
+	float x1 = static_cast<float>(v1.x) / 16.0f;
+	float y1 = static_cast<float>(v1.y) / 16.0f;
+
+	float dx = x1 - x0;
+	float dy = y1 - y0;
+	float d_len = std::sqrtf(dx * dx + dy * dy);
+	dx = 2 * dx / d_len;
+	dy = 2 * dy / d_len;
+
+	float nx = -dy;
+	float ny = dx;
+
+	int dxi = static_cast<int>(16.0f * dx);
+	int dyi = static_cast<int>(16.0f * dy);
+	int nxi = static_cast<int>(16.0f * nx);
+	int nyi = static_cast<int>(16.0f * ny);
+
+	GSVertex v[4];
+	std::memset(v, 0, sizeof(v));
+
+	v[0].XYZ.X = v0.x - dxi - nxi;
+	v[0].XYZ.Y = v0.y - dyi - nyi;
+
+	v[1].XYZ.X = v0.x - dxi + nxi;
+	v[1].XYZ.Y = v0.y - dyi + nyi;
+
+	v[2].XYZ.X = v1.x + dxi - nxi;
+	v[2].XYZ.Y = v1.y + dyi - nyi;
+
+	v[3].XYZ.X = v1.x + dxi + nxi;
+	v[3].XYZ.Y = v1.y + dyi + nyi;
+
+	out[0] = v[0];
+	out[1] = v[1];
+	out[2] = v[2];
+
+	out[3] = v[1];
+	out[4] = v[2];
+	out[5] = v[3];
+}
+
+// FIXME: Change name to expandaccuratelinevertices!
+void GSRendererHW::ExpandAccurateLineVertices()
+{
+	const auto ExitRule = [](const GSVector2i& d, bool step_x, bool pos_step) {
+		int dist = std::abs(d.x) + std::abs(d.y);
+		if (dist < 8)
+			return false;
+
+		if (step_x)
+		{
+			bool x_good = pos_step ? (d.x > 0) : (d.x < 0);
+			return x_good && (dist > 8 || d.y >= 0);
+		}
+		else
+		{
+			bool y_good = pos_step ? (d.y > 0) : (d.y < 0);
+			return y_good && (dist > 8 || d.x >= 0);
+		}
+	};
+
+	while (m_vertex.maxcount < 6 * m_index.tail)
+		GrowVertexBuffer();
+
+	m_accurate_lines_data.clear();
+
+	GSVector4i xyof = m_context->scissor.xyof;
+
+	for (std::size_t i = 0, j = 0; i < m_index.tail; i += 2, j += 6)
+	{
+		const GSVertex& vtx0 = m_vertex.buff[m_index.buff[i + 0]];
+		const GSVertex& vtx1 = m_vertex.buff[m_index.buff[i + 1]];
+
+		GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
+		GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
+
+		AccurateLineData data;
+		data.start = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
+		data.end = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
+
+		data.d = data.end - data.start;
+		data.start_px = (data.start + 8) & GSVector2i(~0xF);
+		data.end_px = (data.end + 8) & GSVector2i(~0xF);
+		data.step_x = std::abs(data.d.x) >= std::abs(data.d.y);
+		bool pos_step = data.step_x ? data.d.x >= 0 : data.d.y >= 0;
+		data.draw_start = !ExitRule(data.start - data.start_px, data.step_x, pos_step);
+		data.draw_end = ExitRule(data.end - data.end_px, data.step_x, pos_step);
+
+		// Interpolated attributes - mimicks transformations done in vertex shader.
+		GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;
+		GSVector2 uv1 = GSVector2(static_cast<float>(vtx1.U), static_cast<float>(vtx1.V)) - m_conf.cb_vs.texture_offset;
+		GSVector2 uv0_scale = uv0 * m_conf.cb_vs.texture_scale;
+		GSVector2 uv1_scale = uv1 * m_conf.cb_vs.texture_scale;
+		GSVector2 st0 = GSVector2(vtx0.ST.S, vtx0.ST.T) - m_conf.cb_vs.texture_offset;
+		GSVector2 st1 = GSVector2(vtx1.ST.S, vtx1.ST.T) - m_conf.cb_vs.texture_offset;
+		GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
+		GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
+
+		data.t_float_start = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
+		data.t_float_end = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
+		data.t_int_start = GSVector4(uv0_scale.x, uv0_scale.y);
+		data.t_int_end = GSVector4(uv1_scale.x, uv1_scale.y);
+
+		if (m_conf.vs.fst)
+		{
+			data.t_int_start.z = uv0.x;
+			data.t_int_start.w = uv0.y;
+			data.t_int_end.z = uv1.x;
+			data.t_int_end.w = uv1.y;
+		}
+		else
+		{
+			data.t_int_start.z = st0_scale.x;
+			data.t_int_start.w = st0_scale.y;
+			data.t_int_end.z = st1_scale.x;
+			data.t_int_end.w = st1_scale.y;
+		}
+
+		constexpr float exp_min32 = 0x1p-32f;
+		float z0 = static_cast<float>(std::min(vtx0.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+		float z1 = static_cast<float>(std::min(vtx1.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+
+		GSVector2 xy0 = GSVector2(static_cast<float>(vtx0.XYZ.X), static_cast<float>(vtx0.XYZ.X)) - GSVector2(0.05f);
+		GSVector2 xy1 = GSVector2(static_cast<float>(vtx1.XYZ.X), static_cast<float>(vtx1.XYZ.X)) - GSVector2(0.05f);
+
+		xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+		xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+
+		data.p_start = GSVector4(xy0.x, xy0.y, z0 * exp_min32, 1.0f);
+		data.p_end = GSVector4(xy1.x, xy1.y, z1 * exp_min32, 1.0f);
+
+		data.c_start = GSVector4(
+			static_cast<float>(vtx0.RGBAQ.R),
+			static_cast<float>(vtx0.RGBAQ.G),
+			static_cast<float>(vtx0.RGBAQ.B),
+			static_cast<float>(vtx0.RGBAQ.A));
+		data.c_end = GSVector4(
+			static_cast<float>(vtx1.RGBAQ.R),
+			static_cast<float>(vtx1.RGBAQ.G),
+			static_cast<float>(vtx1.RGBAQ.B),
+			static_cast<float>(vtx1.RGBAQ.A));
+
+		m_accurate_lines_data.push_back(data);
+
+		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
+	}
+
+	for (std::size_t i = 0; i < 6 * m_index.tail; i++)
+	{
+		m_index.buff[i] = i;
+	}
+	m_index.tail *= 6;
+	m_vertex.next = m_vertex.tail = m_vertex.head = m_index.tail;
+
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+}
+
 void GSRendererHW::ExpandLineIndices()
 {
 	const u32 process_count = (m_index.tail + 7) / 8 * 8;
@@ -5007,21 +5168,44 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_LINE_CLASS:
 			{
-				m_conf.topology = GSHWDrawConfig::Topology::Line;
-				m_conf.indices_per_prim = 2;
-				if (unscale_pt_ln)
+				if (features.accurate_lines)
 				{
-					if (features.line_expand)
+					GL_INS("SetupIA: Using accurate lines");
+					ExpandAccurateLineVertices();
+					m_conf.accurate_lines_data = &m_accurate_lines_data;
+					m_conf.vs.accurate_lines = 1;
+					m_conf.ps.accurate_lines = 1;
+					m_conf.ps.accurate_lines_aa = (PRIM->AA1 != 0);
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 6;
+					
+					// The drawlist should be computed by this point.
+					if (!m_drawlist.empty())
 					{
-						m_conf.line_expand = true;
+						for (std::size_t i = 0; i < m_drawlist.size(); i++)
+						{
+							m_drawlist[i] *= 2; // Each line expanded to 2 triangles.
+						}
 					}
-					else if (features.vs_expand)
+				}
+				else
+				{
+					m_conf.topology = GSHWDrawConfig::Topology::Line;
+					m_conf.indices_per_prim = 2;
+					if (unscale_pt_ln)
 					{
-						m_conf.vs.expand = GSHWDrawConfig::VSExpand::Line;
-						m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
-						m_conf.topology = GSHWDrawConfig::Topology::Triangle;
-						m_conf.indices_per_prim = 6;
-						ExpandLineIndices();
+						if (features.line_expand)
+						{
+							m_conf.line_expand = true;
+						}
+						else if (features.vs_expand)
+						{
+							m_conf.vs.expand = GSHWDrawConfig::VSExpand::Line;
+							m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
+							m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+							m_conf.indices_per_prim = 6;
+							ExpandLineIndices();
+						}
 					}
 				}
 			}
@@ -7644,7 +7828,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// AA1: Set alpha source to coverage 128 when there is no alpha blending.
-	m_conf.ps.fixed_one_a = IsCoverageAlpha();
+	m_conf.ps.fixed_one_a = IsCoverageAlpha() && !HasAA1Support();
 
 	if ((!IsOpaque() || m_context->ALPHA.IsBlack()) && rt && ((m_conf.colormask.wrgba & 0x7) || (m_texture_shuffle && !m_copy_16bit_to_target_shuffle && !m_same_group_texture_shuffle)))
 	{
@@ -7989,6 +8173,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.require_full_barrier = false;
 	}
 
+	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
+	{
+		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
 	// rs
 	const GSVector4i hacked_scissor = m_channel_shuffle ? GSVector4i::cxpr(0, 0, 1024, 1024) : m_context->scissor.in;
 	const GSVector4i scissor(GSVector4i(GSVector4(rtscale) * GSVector4(hacked_scissor)).rintersect(GSVector4i::loadh(rtsize)));
@@ -8083,14 +8274,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.cb_ps.FogColor_AREF.a = m_conf.alpha_second_pass.ps_aref;
 		m_conf.alpha_second_pass.enable = false;
 	}
-
-	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
-	{
-		ComputeDrawlistGetSize(rt->m_scale);
-		m_conf.drawlist = &m_drawlist;
-		m_conf.drawlist_bbox = &m_drawlist_bbox;
-	}
-
+	
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else
