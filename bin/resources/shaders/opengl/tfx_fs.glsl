@@ -63,9 +63,9 @@ layout(std140, binding = 0) uniform cb21
 	uint _pad1;
 
 	uint accurate_line_base;
-	uint accurate_line_aa;
 	uint _pad2;
 	uint _pad3;
+	uint _pad4;
 };
 
 #if PS_ACCURATE_LINES
@@ -106,7 +106,7 @@ struct AccurateLineData
 };
 
 layout (std140, binding = 3) buffer AccurateLineDataBuffer {
-	AccurateLineData accurate_line_data[];
+	AccurateLineData accurate_lines_data[];
 };
 
 #else
@@ -1021,7 +1021,7 @@ float As = As_rgba.a;
 
 void HandleAccurateLines()
 {
-	AccurateLineData ld = accurate_line_data[accurate_line_base + accurate_lines_index];
+	AccurateLineData ld = accurate_lines_data[accurate_line_base + accurate_lines_index];
 
 	ivec2 start = ld.start;
 	ivec2 end = ld.end;
@@ -1066,30 +1066,26 @@ void HandleAccurateLines()
 
     int alpha_int;
 
-    if (accurate_line_aa != 0)
-    {
-        // Proper fixed-point AA rounding
-        int minor_px_expected_0 = (minor_line / d_major) & ~0xF;
-        int minor_px_expected_1 = minor_px_expected_0 + 16;
-        int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_px_expected_0);
-        int alpha_int_1 = d_major_scaled - alpha_int_0;
+#if PS_ACCURATE_LINES_AA
+    // Proper fixed-point AA rounding
+    int minor_px_expected_0 = (minor_line / d_major) & ~0xF;
+    int minor_px_expected_1 = minor_px_expected_0 + 16;
+    int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_px_expected_0);
+    int alpha_int_1 = d_major_scaled - alpha_int_0;
 
-        if (minor_px == minor_px_expected_0)
-            alpha_int = alpha_int_0;
-        else if (minor_px == minor_px_expected_1)
-            alpha_int = alpha_int_1;
-        else
-            discard;
-    }
+    if (minor_px == minor_px_expected_0)
+        alpha_int = alpha_int_0;
+    else if (minor_px == minor_px_expected_1)
+        alpha_int = alpha_int_1;
     else
-    {
-        // Non-AA: fixed-point rounding and 4-bit alignment
-        int minor_px_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
-        if (minor_px != minor_px_expected)
-            discard;
-        alpha_int = d_major_scaled; // full coverage
-    }
-
+        discard;
+#else
+    // Non-AA: fixed-point rounding and 4-bit alignment
+    int minor_px_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+    if (minor_px != minor_px_expected)
+        discard;
+    alpha_int = d_major_scaled; // full coverage
+#endif
     float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
 
 	// Interpolate attributes.
@@ -1106,11 +1102,9 @@ void HandleAccurateLines()
 	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
 	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
 
-	// FIXME: Make this a macro.
-	if (accurate_line_aa != 0)
-	{
-		PSin.c.a = alpha;
-	}
+#if PS_ACCURATE_LINES_AA
+	PSin.c.a = alpha;
+#endif
 }
 
 void ps_main()

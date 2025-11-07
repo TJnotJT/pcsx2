@@ -430,6 +430,7 @@ struct alignas(16) GSHWDrawConfig
 
 				// Accurate lines
 				u32 accurate_lines : 1;
+				u32 accurate_lines_aa : 1;
 			};
 
 			struct
@@ -645,9 +646,9 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 ScaleFactor;
 
 		uint accurate_line_base;
-		uint accurate_line_aa;
 		uint _pad0;
 		uint _pad1;
+		uint _pad2;
 
 		__fi PSConstantBuffer()
 		{
@@ -799,8 +800,7 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
-	std::vector<AccurateLineData>* accurate_line_data;
-	bool aa_hw: 1;
+	std::vector<AccurateLineData>* accurate_lines_data;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
@@ -866,7 +866,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool accurate_line        : 1;
+		bool accurate_lines       : 1;
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

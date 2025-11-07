@@ -359,7 +359,7 @@ void GSRendererHW::ExpandAccurateLineVertices()
 	while (m_vertex.maxcount < 6 * m_index.tail)
 		GrowVertexBuffer();
 
-	m_accurate_line_data.clear();
+	m_accurate_lines_data.clear();
 
 	GSVector4i xyof = m_context->scissor.xyof;
 
@@ -437,7 +437,7 @@ void GSRendererHW::ExpandAccurateLineVertices()
 			static_cast<float>(vtx1.RGBAQ.B),
 			static_cast<float>(vtx1.RGBAQ.A));
 
-		m_accurate_line_data.push_back(data);
+		m_accurate_lines_data.push_back(data);
 
 		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
 	}
@@ -5168,16 +5168,16 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_LINE_CLASS:
 			{
-				if (features.accurate_line)
+				if (features.accurate_lines)
 				{
 					GL_INS("SetupIA: Using accurate lines");
 					ExpandAccurateLineVertices();
-					m_conf.accurate_line_data = &m_accurate_line_data;
+					m_conf.accurate_lines_data = &m_accurate_lines_data;
 					m_conf.vs.accurate_lines = 1;
 					m_conf.ps.accurate_lines = 1;
+					m_conf.ps.accurate_lines_aa = (PRIM->AA1 != 0);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
-					m_conf.aa_hw = (PRIM->AA1 != 0);
 					
 					// The drawlist should be computed by this point.
 					if (!m_drawlist.empty())
@@ -7828,7 +7828,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// AA1: Set alpha source to coverage 128 when there is no alpha blending.
-	m_conf.ps.fixed_one_a = IsCoverageAlpha() && !features.accurate_line; // FIXME: Change to another feature for accurate AA1?
+	m_conf.ps.fixed_one_a = IsCoverageAlpha() && !HasAA1Support();
 
 	if ((!IsOpaque() || m_context->ALPHA.IsBlack()) && rt && ((m_conf.colormask.wrgba & 0x7) || (m_texture_shuffle && !m_copy_16bit_to_target_shuffle && !m_same_group_texture_shuffle)))
 	{

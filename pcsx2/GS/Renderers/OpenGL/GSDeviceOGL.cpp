@@ -308,7 +308,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, m_vertex_stream_buffer->GetGLBufferId(), 0, VERTEX_BUFFER_SIZE);
 		}
 
-		if (m_features.accurate_line)
+		if (m_features.accurate_lines)
 		{
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_line_stream_buffer->GetGLBufferId(), 0, ACCURATE_LINE_BUFFER_SIZE);
 		}
@@ -776,7 +776,7 @@ bool GSDeviceOGL::CheckFeatures(bool& buggy_pbo)
 		m_features.vs_expand ? "vertex expanding" : "CPU");
 
 	// FIXME: Use a config option
-	m_features.accurate_line = true;
+	m_features.accurate_lines = true;
 
 	return true;
 }
@@ -1406,6 +1406,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_NO_COLOR {}\n", sel.no_color)
 		+ fmt::format("#define PS_NO_COLOR1 {}\n", sel.no_color1)
 		+ fmt::format("#define PS_ACCURATE_LINES {}\n", sel.accurate_lines)
+		+ fmt::format("#define PS_ACCURATE_LINES_AA {}\n", sel.accurate_lines_aa)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2536,16 +2537,15 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
 	// FIXME: Make a separate function.
-	if (config.accurate_line_data)
+	if (config.accurate_lines_data)
 	{
-		const u32 count = config.accurate_line_data->size();
+		const u32 count = config.accurate_lines_data->size();
 		const u32 size = count * sizeof(AccurateLineData);
 		auto res = m_accurate_line_stream_buffer->Map(sizeof(AccurateLineData), size);
-		std::memcpy(res.pointer, config.accurate_line_data->data(), size);
+		std::memcpy(res.pointer, config.accurate_lines_data->data(), size);
 		m_accurate_line_stream_buffer->Unmap(size);
 		config.cb_vs.base_vertex = m_vertex.start;
 		config.cb_ps.accurate_line_base = res.index_aligned;
-		config.cb_ps.accurate_line_aa = config.aa_hw;
 	}
 
 	if (config.vs.UseExpandIndexBuffer())
