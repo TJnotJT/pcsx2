@@ -378,6 +378,7 @@ private:
 
 	VKStreamBuffer m_vertex_stream_buffer;
 	VKStreamBuffer m_index_stream_buffer;
+	VKStreamBuffer m_accurate_prims_stream_buffer;
 	VKStreamBuffer m_vertex_uniform_stream_buffer;
 	VKStreamBuffer m_fragment_uniform_stream_buffer;
 	VKStreamBuffer m_texture_stream_buffer;
@@ -560,6 +561,8 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
+	void SetupAccuratePrims(GSHWDrawConfig& config);
+
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None);
 
@@ -569,7 +572,7 @@ public:
 
 	void RenderHW(GSHWDrawConfig& config) override;
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe);
-	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
+	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferBarrier(GSTextureVK* rt) const;
 	VkDependencyFlags GetColorBufferBarrierFlags() const;
 	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,

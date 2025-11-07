@@ -164,6 +164,8 @@ protected:
 		u32 tail;
 	} m_draw_index = {};
 
+	int m_vertex_expansion_factor = 1;
+
 	void UpdateContext();
 	void UpdateScissor();
 
@@ -205,6 +207,9 @@ protected:
 	bool IsMipMapDraw();
 	bool IsMipMapActive();
 	bool IsCoverageAlpha();
+	bool IsCoverageAlphaFixedOne();
+	virtual bool IsCoverageAlphaSupported();
+	bool UsingAccuratePrims();
 	void CalcAlphaMinMax(const int tex_min, const int tex_max);
 	void CorrectATEAlphaMinMax(const u32 atst, const int aref);
 
@@ -308,6 +313,7 @@ public:
 		VSYNC  = 1 << 13,
 		GSREOPEN = 1 << 14,
 		VERTEXCOUNT = 1 << 15,
+		VERTEXCOUNTEXPANDED = 1 << 16,
 	};
 
 	GSFlushReason m_state_flush_reason = UNKNOWN;
