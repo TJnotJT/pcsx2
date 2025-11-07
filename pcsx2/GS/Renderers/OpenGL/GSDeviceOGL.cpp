@@ -2022,6 +2022,21 @@ void GSDeviceOGL::ClearSamplerCache()
 	}
 }
 
+void GSDeviceOGL::SetupAccurateLines(GSHWDrawConfig& config)
+{
+	if (config.accurate_lines_data)
+	{
+		const u32 count = config.accurate_lines_data->size();
+		const u32 size = count * sizeof(AccurateLineData);
+		auto res = m_accurate_line_stream_buffer->Map(sizeof(AccurateLineData), size);
+		std::memcpy(res.pointer, config.accurate_lines_data->data(), size);
+		m_accurate_line_stream_buffer->Unmap(size);
+		
+		config.cb_vs.base_vertex = m_vertex.start;
+		config.cb_ps.accurate_line_base = res.index_aligned;
+	}
+}
+
 bool GSDeviceOGL::CreateCASPrograms()
 {
 	std::optional<std::string> cas_source = ReadShaderSource("shaders/opengl/cas.glsl");
@@ -2536,17 +2551,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
-	// FIXME: Make a separate function.
-	if (config.accurate_lines_data)
-	{
-		const u32 count = config.accurate_lines_data->size();
-		const u32 size = count * sizeof(AccurateLineData);
-		auto res = m_accurate_line_stream_buffer->Map(sizeof(AccurateLineData), size);
-		std::memcpy(res.pointer, config.accurate_lines_data->data(), size);
-		m_accurate_line_stream_buffer->Unmap(size);
-		config.cb_vs.base_vertex = m_vertex.start;
-		config.cb_ps.accurate_line_base = res.index_aligned;
-	}
+	SetupAccurateLines(config);
 
 	if (config.vs.UseExpandIndexBuffer())
 	{

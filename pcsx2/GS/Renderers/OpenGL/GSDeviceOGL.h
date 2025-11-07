@@ -344,6 +344,8 @@ public:
 	void PSSetSamplerState(GLuint ss);
 	void ClearSamplerCache() override;
 
+	void SetupAccurateLines(GSHWDrawConfig& config);
+
 	void OMSetDepthStencilState(GSDepthStencilOGL* dss);
 	void OMSetBlendState(bool enable = false, GLenum src_factor = GL_ONE, GLenum dst_factor = GL_ZERO, GLenum op = GL_FUNC_ADD,
 		GLenum src_factor_alpha = GL_ONE, GLenum dst_factor_alpha = GL_ZERO, bool is_constant = false, u8 constant = 0);
