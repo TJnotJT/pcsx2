@@ -78,35 +78,30 @@ struct
 
 flat in uint accurate_lines_index;
 
-struct AccurateLineData
+struct AccurateLinesData
 {
-	ivec2 start;    //  0
-	ivec2 end;      //  8
-	ivec2 d;        // 16
-	ivec2 start_px; // 24
-	ivec2 end_px;   // 32
-	int step_x;     // 40
-	int draw_start; // 44
-	int draw_end;   // 48
-	int _pad0;      // 52
-	int _pad1;      // 56
-	int _pad2;      // 60
-
 	// Interpolated attributes
-	vec4 t_float_start; // 64
-	vec4 t_float_end; // 80
-	vec4 t_int_start; // 96
-	vec4 t_int_end; // 112
-	vec4 c_start; // 128
-	vec4 c_end; // 144
-	vec4 p_start; // 160
-	vec4 p_end; // 176
-
-	// 192 bytes
+	vec4 t_float0; // 0
+	vec4 t_float1; // 16
+	vec4 t_int0; // 32
+	vec4 t_int1; // 48
+	vec4 c0; // 64
+	vec4 c1; // 80
+	vec4 p0; // 96
+	vec4 p1; // 112
+	ivec2 xy0; // 128
+	ivec2 xy1; // 136
+	ivec2 dxy; // 144
+	ivec2 xy0_i; // 152
+	ivec2 xy1_i; // 160
+	uint step_x; // 168
+	uint draw0; // 172
+	uint draw1; // 176
+	// Total 192
 };
 
-layout (std140, binding = 3) buffer AccurateLineDataBuffer {
-	AccurateLineData accurate_lines_data[];
+layout (std140, binding = 3) buffer AccurateLinesDataBuffer {
+	AccurateLinesData accurate_lines_data[];
 };
 
 #else
@@ -1019,83 +1014,83 @@ float As = As_rgba.a;
 #endif
 }
 
+#if PS_ACCURATE_LINES
 void HandleAccurateLines()
 {
-	AccurateLineData ld = accurate_lines_data[accurate_line_base + accurate_lines_index];
+	AccurateLinesData ld = accurate_lines_data[accurate_line_base + accurate_lines_index];
 
-	ivec2 start = ld.start;
-	ivec2 end = ld.end;
-	ivec2 d = ld.d;
-	ivec2 start_px = ld.start_px;
-	ivec2 end_px = ld.end_px;
-	int step_x = ld.step_x;
-	int draw_start = ld.draw_start;
-	int draw_end = ld.draw_end;
+	ivec2 xy0 = ld.xy0;
+	ivec2 xy1 = ld.xy1;
+	ivec2 dxy = ld.dxy;
+	ivec2 xy0_i = ld.xy0_i;
+	ivec2 xy1_i = ld.xy1_i;
+	uint step_x = ld.step_x;
+	uint draw0 = ld.draw0;
+	uint draw1 = ld.draw1;
 
     // 4-bit fixed point: 16 subpixels per pixel
-    ivec2 px = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
+    ivec2 xyi = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
 
     // Determine major/minor axes
-    int major_start = (step_x != 0) ? start.x : start.y;
-    int major_end   = (step_x != 0) ? end.x   : end.y;
-    int minor_start = (step_x != 0) ? start.y : start.x;
-    int minor_end   = (step_x != 0) ? end.y   : end.x;
-    int major_px    = (step_x != 0) ? px.x    : px.y;
-    int minor_px    = (step_x != 0) ? px.y    : px.x;
-    int d_major     = (step_x != 0) ? d.x     : d.y;
-    int d_major_scaled = 16 * d_major; // scale to fixed-point domain
+    int major0 = (step_x != 0) ? xy0.x : xy0.y;
+    int major1 = (step_x != 0) ? xy1.x : xy1.y;
+    int minor0 = (step_x != 0) ? xy0.y : xy0.x;
+    int minor1 = (step_x != 0) ? xy1.y : xy1.x;
+    int major_i = (step_x != 0) ? xyi.x : xyi.y;
+    int minor_i = (step_x != 0) ? xyi.y : xyi.x;
+    int d_major = (step_x != 0) ? dxy.x : dxy.y;
+    int d_major_scaled = 16 * d_major;
 
-    int start_px_major = (step_x != 0) ? start_px.x : start_px.y;
-    int end_px_major   = (step_x != 0) ? end_px.x   : end_px.y;
+    int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
+    int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
 
     // Discard if outside line range
-    if (major_px < min(start_px_major, end_px_major) ||
-		major_px > max(start_px_major, end_px_major))
+    if (major_i < min(major0_i, major1_i) ||
+		major_i > max(major0_i, major1_i))
         discard;
 
-    if ((major_px == start_px_major && draw_start == 0) ||
-        (major_px == end_px_major && draw_end == 0))
+    if ((major_i == major0_i && draw0 == 0) ||
+        (major_i == major1_i && draw1 == 0))
         discard;
 
-	// Total weights is major_end - major_start == d_major
-	int weight_start = major_end - major_px;
-	int weight_end = major_px - major_start;
+	int weight0 = major1 - major_i;
+	int weight1 = major_i - major0;
 
     // Compute minor axis line in fixed-point
-    int minor_line = weight_end * minor_end + weight_start * minor_start;
+    int minor_line = weight1 * minor1 + weight0 * minor0;
 
     int alpha_int;
 
 #if PS_ACCURATE_LINES_AA
     // Proper fixed-point AA rounding
-    int minor_px_expected_0 = (minor_line / d_major) & ~0xF;
-    int minor_px_expected_1 = minor_px_expected_0 + 16;
-    int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_px_expected_0);
+    int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
+    int minor_i_expected_1 = minor_i_expected_0 + 16;
+    int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
     int alpha_int_1 = d_major_scaled - alpha_int_0;
 
-    if (minor_px == minor_px_expected_0)
+    if (minor_i == minor_i_expected_0)
         alpha_int = alpha_int_0;
-    else if (minor_px == minor_px_expected_1)
+    else if (minor_i == minor_i_expected_1)
         alpha_int = alpha_int_1;
     else
         discard;
 #else
     // Non-AA: fixed-point rounding and 4-bit alignment
-    int minor_px_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
-    if (minor_px != minor_px_expected)
+    int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+    if (minor_i != minor_i_expected)
         discard;
     alpha_int = d_major_scaled; // full coverage
 #endif
     float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
 
 	// Interpolate attributes.
-	float weight_start_f = float(weight_start);
-	float weight_end_f = float(weight_end);
+	float weight0_f = float(weight0);
+	float weight1_f = float(weight1);
 	float d_major_f = float(d_major);
-	PSin.t_float = (weight_start_f * ld.t_float_end + weight_end_f * ld.t_float_start) / d_major_f;
-	PSin.t_int = (weight_start_f * ld.t_int_end + weight_end_f * ld.t_int_start) / d_major_f;
-	PSin.c = (weight_start_f * ld.c_end + weight_end_f * ld.c_start) / d_major_f;
-	FragCoord.z = (weight_start_f * ld.p_end.z + weight_end_f * ld.p_start.z) / d_major_f;
+	PSin.t_float = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
+	PSin.t_int = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
+	PSin.c = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+	FragCoord.z = (weight1_f * ld.p1.z + weight0_f * ld.p0.z) / d_major_f;
 	
 	// Clamp attributes. Fog/Z are normalized.
 	PSin.c = clamp(PSin.c, 0.0, 255.0);
@@ -1106,6 +1101,7 @@ void HandleAccurateLines()
 	PSin.c.a = alpha;
 #endif
 }
+#endif
 
 void ps_main()
 {

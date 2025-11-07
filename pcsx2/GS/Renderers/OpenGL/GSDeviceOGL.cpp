@@ -26,7 +26,7 @@ static constexpr u32 g_ps_cb_index        = 0;
 
 static constexpr u32 VERTEX_BUFFER_SIZE = 32 * 1024 * 1024;
 static constexpr u32 INDEX_BUFFER_SIZE = 16 * 1024 * 1024;
-static constexpr u32 ACCURATE_LINE_BUFFER_SIZE = sizeof(AccurateLineData) * 1024 * 1024;
+static constexpr u32 ACCURATE_LINE_BUFFER_SIZE = sizeof(AccurateLinesData) * 1024 * 1024;
 static constexpr u32 VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 TEXTURE_UPLOAD_BUFFER_SIZE = 128 * 1024 * 1024;
@@ -2027,8 +2027,8 @@ void GSDeviceOGL::SetupAccurateLines(GSHWDrawConfig& config)
 	if (config.accurate_lines_data)
 	{
 		const u32 count = config.accurate_lines_data->size();
-		const u32 size = count * sizeof(AccurateLineData);
-		auto res = m_accurate_lines_stream_buffer->Map(sizeof(AccurateLineData), size);
+		const u32 size = count * sizeof(AccurateLinesData);
+		auto res = m_accurate_lines_stream_buffer->Map(sizeof(AccurateLinesData), size);
 		std::memcpy(res.pointer, config.accurate_lines_data->data(), size);
 		m_accurate_lines_stream_buffer->Unmap(size);
 		

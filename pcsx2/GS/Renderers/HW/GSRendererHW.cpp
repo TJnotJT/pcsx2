@@ -336,7 +336,6 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	out[5] = v[3];
 }
 
-// FIXME: Change name to expandaccuratelinevertices!
 void GSRendererHW::ExpandAccurateLineVertices()
 {
 	const auto ExitRule = [](const GSVector2i& d, bool step_x, bool pos_step) {
@@ -371,17 +370,16 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
 		GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
 
-		AccurateLineData data;
-		data.start = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
-		data.end = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
-
-		data.d = data.end - data.start;
-		data.start_px = (data.start + 8) & GSVector2i(~0xF);
-		data.end_px = (data.end + 8) & GSVector2i(~0xF);
-		data.step_x = std::abs(data.d.x) >= std::abs(data.d.y);
-		bool pos_step = data.step_x ? data.d.x >= 0 : data.d.y >= 0;
-		data.draw_start = !ExitRule(data.start - data.start_px, data.step_x, pos_step);
-		data.draw_end = ExitRule(data.end - data.end_px, data.step_x, pos_step);
+		AccurateLinesData data;
+		data.xy0 = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
+		data.xy1 = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
+		data.dxy = data.xy1 - data.xy0;
+		data.xy0_i = (data.xy0 + 8) & GSVector2i(~0xF);
+		data.xy1_i = (data.xy1 + 8) & GSVector2i(~0xF);
+		data.step_x = std::abs(data.dxy.x) >= std::abs(data.dxy.y);
+		bool pos_step = data.step_x ? data.dxy.x >= 0 : data.dxy.y >= 0;
+		data.draw0 = !ExitRule(data.xy0 - data.xy0_i, data.step_x, pos_step);
+		data.draw1 = ExitRule(data.xy1 - data.xy1_i, data.step_x, pos_step);
 
 		// Interpolated attributes - mimicks transformations done in vertex shader.
 		GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;
@@ -393,24 +391,24 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
 		GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
 
-		data.t_float_start = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
-		data.t_float_end = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
-		data.t_int_start = GSVector4(uv0_scale.x, uv0_scale.y);
-		data.t_int_end = GSVector4(uv1_scale.x, uv1_scale.y);
+		data.t_float0 = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
+		data.t_float1 = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
+		data.t_int0 = GSVector4(uv0_scale.x, uv0_scale.y);
+		data.t_int1 = GSVector4(uv1_scale.x, uv1_scale.y);
 
 		if (m_conf.vs.fst)
 		{
-			data.t_int_start.z = uv0.x;
-			data.t_int_start.w = uv0.y;
-			data.t_int_end.z = uv1.x;
-			data.t_int_end.w = uv1.y;
+			data.t_int0.z = uv0.x;
+			data.t_int0.w = uv0.y;
+			data.t_int1.z = uv1.x;
+			data.t_int1.w = uv1.y;
 		}
 		else
 		{
-			data.t_int_start.z = st0_scale.x;
-			data.t_int_start.w = st0_scale.y;
-			data.t_int_end.z = st1_scale.x;
-			data.t_int_end.w = st1_scale.y;
+			data.t_int0.z = st0_scale.x;
+			data.t_int0.w = st0_scale.y;
+			data.t_int1.z = st1_scale.x;
+			data.t_int1.w = st1_scale.y;
 		}
 
 		constexpr float exp_min32 = 0x1p-32f;
@@ -423,15 +421,15 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
 		xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
 
-		data.p_start = GSVector4(xy0.x, xy0.y, z0 * exp_min32, 1.0f);
-		data.p_end = GSVector4(xy1.x, xy1.y, z1 * exp_min32, 1.0f);
+		data.p0 = GSVector4(xy0.x, xy0.y, z0 * exp_min32, 1.0f);
+		data.p1 = GSVector4(xy1.x, xy1.y, z1 * exp_min32, 1.0f);
 
-		data.c_start = GSVector4(
+		data.c0 = GSVector4(
 			static_cast<float>(vtx0.RGBAQ.R),
 			static_cast<float>(vtx0.RGBAQ.G),
 			static_cast<float>(vtx0.RGBAQ.B),
 			static_cast<float>(vtx0.RGBAQ.A));
-		data.c_end = GSVector4(
+		data.c1 = GSVector4(
 			static_cast<float>(vtx1.RGBAQ.R),
 			static_cast<float>(vtx1.RGBAQ.G),
 			static_cast<float>(vtx1.RGBAQ.B),

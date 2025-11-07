@@ -205,7 +205,7 @@ private:
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
 
-	std::vector<AccurateLineData> m_accurate_lines_data;
+	std::vector<AccurateLinesData> m_accurate_lines_data;
 
 public:
 	GSRendererHW();

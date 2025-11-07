@@ -14,38 +14,6 @@
 #include "GS/GSExtra.h"
 #include <array>
 
-// FIXME: Change start/end to v0,v1.
-// Same for shader struct.
-// FIXME: Put the 16-byte attributes first to pack better.
-struct alignas(16) AccurateLineData
-{
-	GSVector2i start; //  0
-	GSVector2i end; //  8
-	GSVector2i d; // 16
-	GSVector2i start_px; // 24
-	GSVector2i end_px; // 32
-	int step_x; // 40
-	int draw_start; // 44
-	int draw_end; // 48
-	int _pad0; // 52
-	int _pad1; // 56
-	int _pad2; // 60
-
-	// Interpolated attributes
-	GSVector4 t_float_start; // 64
-	GSVector4 t_float_end; // 80
-	GSVector4 t_int_start; // 96
-	GSVector4 t_int_end; // 112
-	GSVector4 c_start; // 128
-	GSVector4 c_end; // 144
-	GSVector4 p_start; // 160
-	GSVector4 p_end; // 176
-
-	// Total 192
-};
-
-static_assert(sizeof(AccurateLineData) == 192);
-
 enum class ShaderConvert
 {
 	COPY = 0,
@@ -300,6 +268,30 @@ struct HWBlend
 	BlendOp op;
 	BlendFactor src, dst;
 };
+
+struct alignas(16) AccurateLinesData
+{
+	// Interpolated attributes
+	GSVector4 t_float0; // 0
+	GSVector4 t_float1; // 16
+	GSVector4 t_int0; // 32
+	GSVector4 t_int1; // 48
+	GSVector4 c0; // 64
+	GSVector4 c1; // 80
+	GSVector4 p0; // 96
+	GSVector4 p1; // 112
+	GSVector2i xy0; // 128
+	GSVector2i xy1; // 136
+	GSVector2i dxy; // 144
+	GSVector2i xy0_i; // 152
+	GSVector2i xy1_i; // 160
+	u32 step_x; // 168
+	u32 draw0; // 172
+	u32 draw1; // 176
+	// Total 192
+};
+
+static_assert(sizeof(AccurateLinesData) == 192);
 
 struct alignas(16) GSHWDrawConfig
 {
@@ -800,7 +792,7 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
-	std::vector<AccurateLineData>* accurate_lines_data;
+	std::vector<AccurateLinesData>* accurate_lines_data;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
