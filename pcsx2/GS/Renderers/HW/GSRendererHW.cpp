@@ -373,13 +373,13 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		AccurateLinesData data;
 		data.xy0 = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
 		data.xy1 = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
-		data.dxy = data.xy1 - data.xy0;
-		data.xy0_i = (data.xy0 + 8) & GSVector2i(~0xF);
-		data.xy1_i = (data.xy1 + 8) & GSVector2i(~0xF);
-		data.step_x = std::abs(data.dxy.x) >= std::abs(data.dxy.y);
-		bool pos_step = data.step_x ? data.dxy.x >= 0 : data.dxy.y >= 0;
-		data.draw0 = !ExitRule(data.xy0 - data.xy0_i, data.step_x, pos_step);
-		data.draw1 = ExitRule(data.xy1 - data.xy1_i, data.step_x, pos_step);
+		GSVector2i dxy = data.xy1 - data.xy0;
+		GSVector2i xy0_i = (data.xy0 + 8) & GSVector2i(~0xF);
+		GSVector2i xy1_i = (data.xy1 + 8) & GSVector2i(~0xF);
+		data.step_x = std::abs(dxy.x) >= std::abs(dxy.y);
+		bool pos_step = data.step_x ? dxy.x >= 0 : dxy.y >= 0;
+		data.draw0 = !ExitRule(data.xy0 - xy0_i, data.step_x, pos_step);
+		data.draw1 = ExitRule(data.xy1 - xy1_i, data.step_x, pos_step);
 
 		// Interpolated attributes - mimicks transformations done in vertex shader.
 		GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;

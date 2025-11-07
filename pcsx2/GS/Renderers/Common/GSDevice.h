@@ -282,16 +282,13 @@ struct alignas(16) AccurateLinesData
 	GSVector4 p1; // 112
 	GSVector2i xy0; // 128
 	GSVector2i xy1; // 136
-	GSVector2i dxy; // 144
-	GSVector2i xy0_i; // 152
-	GSVector2i xy1_i; // 160
-	u32 step_x; // 168
-	u32 draw0; // 172
-	u32 draw1; // 176
-	// Total 192
+	u32 step_x; // 144
+	u32 draw0; // 148
+	u32 draw1; // 152
+	// Total 160
 };
 
-static_assert(sizeof(AccurateLinesData) == 192);
+static_assert(sizeof(AccurateLinesData) == 160);
 
 struct alignas(16) GSHWDrawConfig
 {

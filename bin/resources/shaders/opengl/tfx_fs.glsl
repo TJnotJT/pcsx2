@@ -91,13 +91,10 @@ struct AccurateLinesData
 	vec4 p1; // 112
 	ivec2 xy0; // 128
 	ivec2 xy1; // 136
-	ivec2 dxy; // 144
-	ivec2 xy0_i; // 152
-	ivec2 xy1_i; // 160
-	uint step_x; // 168
-	uint draw0; // 172
-	uint draw1; // 176
-	// Total 192
+	uint step_x; // 144
+	uint draw0; // 148
+	uint draw1; // 152
+	// Total 160
 };
 
 layout (std140, binding = 3) buffer AccurateLinesDataBuffer {
@@ -1021,67 +1018,67 @@ void HandleAccurateLines()
 
 	ivec2 xy0 = ld.xy0;
 	ivec2 xy1 = ld.xy1;
-	ivec2 dxy = ld.dxy;
-	ivec2 xy0_i = ld.xy0_i;
-	ivec2 xy1_i = ld.xy1_i;
+	ivec2 dxy = xy1 - xy0;
+	ivec2 xy0_i = (xy0 + 8) & ~0xF;
+	ivec2 xy1_i = (xy1 + 8) & ~0xF;
 	uint step_x = ld.step_x;
 	uint draw0 = ld.draw0;
 	uint draw1 = ld.draw1;
 
-    // 4-bit fixed point: 16 subpixels per pixel
-    ivec2 xyi = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
+	// 4-bit fixed point: 16 subpixels per pixel
+	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
 
-    // Determine major/minor axes
-    int major0 = (step_x != 0) ? xy0.x : xy0.y;
-    int major1 = (step_x != 0) ? xy1.x : xy1.y;
-    int minor0 = (step_x != 0) ? xy0.y : xy0.x;
-    int minor1 = (step_x != 0) ? xy1.y : xy1.x;
-    int major_i = (step_x != 0) ? xyi.x : xyi.y;
-    int minor_i = (step_x != 0) ? xyi.y : xyi.x;
-    int d_major = (step_x != 0) ? dxy.x : dxy.y;
-    int d_major_scaled = 16 * d_major;
+	// Determine major/minor axes
+	int major0 = (step_x != 0) ? xy0.x : xy0.y;
+	int major1 = (step_x != 0) ? xy1.x : xy1.y;
+	int minor0 = (step_x != 0) ? xy0.y : xy0.x;
+	int minor1 = (step_x != 0) ? xy1.y : xy1.x;
+	int major_i = (step_x != 0) ? xy_i.x : xy_i.y;
+	int minor_i = (step_x != 0) ? xy_i.y : xy_i.x;
+	int d_major = (step_x != 0) ? dxy.x : dxy.y;
+	int d_major_scaled = 16 * d_major;
 
-    int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
-    int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
+	int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
+	int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
 
-    // Discard if outside line range
-    if (major_i < min(major0_i, major1_i) ||
+	// Discard if outside line range
+	if (major_i < min(major0_i, major1_i) ||
 		major_i > max(major0_i, major1_i))
-        discard;
+		discard;
 
-    if ((major_i == major0_i && draw0 == 0) ||
-        (major_i == major1_i && draw1 == 0))
-        discard;
+	if ((major_i == major0_i && draw0 == 0) ||
+		(major_i == major1_i && draw1 == 0))
+		discard;
 
 	int weight0 = major1 - major_i;
 	int weight1 = major_i - major0;
 
-    // Compute minor axis line in fixed-point
-    int minor_line = weight1 * minor1 + weight0 * minor0;
+	// Compute minor axis line in fixed-point
+	int minor_line = weight1 * minor1 + weight0 * minor0;
 
-    int alpha_int;
+	int alpha_int;
 
 #if PS_ACCURATE_LINES_AA
-    // Proper fixed-point AA rounding
-    int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
-    int minor_i_expected_1 = minor_i_expected_0 + 16;
-    int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
-    int alpha_int_1 = d_major_scaled - alpha_int_0;
+	// Proper fixed-point AA rounding
+	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
+	int minor_i_expected_1 = minor_i_expected_0 + 16;
+	int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
+	int alpha_int_1 = d_major_scaled - alpha_int_0;
 
-    if (minor_i == minor_i_expected_0)
-        alpha_int = alpha_int_0;
-    else if (minor_i == minor_i_expected_1)
-        alpha_int = alpha_int_1;
-    else
-        discard;
+	if (minor_i == minor_i_expected_0)
+		alpha_int = alpha_int_0;
+	else if (minor_i == minor_i_expected_1)
+		alpha_int = alpha_int_1;
+	else
+		discard;
 #else
-    // Non-AA: fixed-point rounding and 4-bit alignment
-    int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
-    if (minor_i != minor_i_expected)
-        discard;
-    alpha_int = d_major_scaled; // full coverage
+	// Non-AA: fixed-point rounding and 4-bit alignment
+	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+	if (minor_i != minor_i_expected)
+		discard;
+	alpha_int = d_major_scaled; // full coverage
 #endif
-    float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
+	float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
 
 	// Interpolate attributes.
 	float weight0_f = float(weight0);
