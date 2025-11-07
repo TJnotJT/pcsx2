@@ -62,7 +62,7 @@ layout(std140, binding = 0) uniform cb21
 	uint _pad0;
 	uint _pad1;
 
-	uint accurate_line_base;
+	uint accurate_lines_base;
 	uint _pad2;
 	uint _pad3;
 	uint _pad4;
@@ -1014,7 +1014,7 @@ float As = As_rgba.a;
 #if PS_ACCURATE_LINES
 void HandleAccurateLines()
 {
-	AccurateLinesData ld = accurate_lines_data[accurate_line_base + accurate_lines_index];
+	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
 
 	ivec2 xy0 = ld.xy0;
 	ivec2 xy1 = ld.xy1;
@@ -1056,29 +1056,29 @@ void HandleAccurateLines()
 	// Compute minor axis line in fixed-point
 	int minor_line = weight1 * minor1 + weight0 * minor0;
 
-	int alpha_int;
+	float alpha_coverage;
 
 #if PS_ACCURATE_LINES_AA
 	// Proper fixed-point AA rounding
 	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
 	int minor_i_expected_1 = minor_i_expected_0 + 16;
-	int alpha_int_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
-	int alpha_int_1 = d_major_scaled - alpha_int_0;
+	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
+	int alpha_i_1 = d_major_scaled - alpha_i_0;
 
+	int alpha_i;
 	if (minor_i == minor_i_expected_0)
-		alpha_int = alpha_int_0;
+		alpha_i = alpha_i_0;
 	else if (minor_i == minor_i_expected_1)
-		alpha_int = alpha_int_1;
+		alpha_i = alpha_i_1;
 	else
 		discard;
+	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
 	if (minor_i != minor_i_expected)
 		discard;
-	alpha_int = d_major_scaled; // full coverage
 #endif
-	float alpha = 128.0 * clamp(float(alpha_int) / float(d_major_scaled), 0.0, 1.0);
 
 	// Interpolate attributes.
 	float weight0_f = float(weight0);
@@ -1099,7 +1099,8 @@ void HandleAccurateLines()
 	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
 
 #if PS_ACCURATE_LINES_AA
-	PSin.c.a = alpha;
+	if ((PS_ACCURATE_LINES_AA_ABE == 0) || (PSin.c.a >= 128.0))
+		PSin.c.a = alpha_coverage;
 #endif
 }
 #endif

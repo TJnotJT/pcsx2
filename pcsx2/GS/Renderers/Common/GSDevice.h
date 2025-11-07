@@ -420,6 +420,7 @@ struct alignas(16) GSHWDrawConfig
 				// Accurate lines
 				u32 accurate_lines : 1;
 				u32 accurate_lines_aa : 1;
+				u32 accurate_lines_aa_abe : 1;
 			};
 
 			struct
@@ -634,7 +635,7 @@ struct alignas(16) GSHWDrawConfig
 
 		GSVector4 ScaleFactor;
 
-		uint accurate_line_base;
+		uint accurate_lines_base;
 		uint _pad0;
 		uint _pad1;
 		uint _pad2;

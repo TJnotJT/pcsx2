@@ -1407,6 +1407,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_NO_COLOR1 {}\n", sel.no_color1)
 		+ fmt::format("#define PS_ACCURATE_LINES {}\n", sel.accurate_lines)
 		+ fmt::format("#define PS_ACCURATE_LINES_AA {}\n", sel.accurate_lines_aa)
+		+ fmt::format("#define PS_ACCURATE_LINES_AA_ABE {}\n", sel.accurate_lines_aa_abe)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2033,7 +2034,7 @@ void GSDeviceOGL::SetupAccurateLines(GSHWDrawConfig& config)
 		m_accurate_lines_stream_buffer->Unmap(size);
 		
 		config.cb_vs.base_vertex = m_vertex.start;
-		config.cb_ps.accurate_line_base = res.index_aligned;
+		config.cb_ps.accurate_lines_base = res.index_aligned;
 	}
 }
 

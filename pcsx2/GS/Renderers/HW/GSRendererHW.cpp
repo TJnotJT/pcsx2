@@ -5174,6 +5174,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.vs.accurate_lines = 1;
 					m_conf.ps.accurate_lines = 1;
 					m_conf.ps.accurate_lines_aa = (PRIM->AA1 != 0);
+					m_conf.ps.accurate_lines_aa_abe = (PRIM->ABE != 0);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
 					
