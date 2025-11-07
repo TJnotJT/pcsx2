@@ -4955,10 +4955,15 @@ void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)
 	// Limit max to 255 as we send 500 when we don't know, makes calculating 24/16bit easier.
 	int min = tex_alpha_min, max = std::min(tex_alpha_max, 255);
 
-	if (IsCoverageAlpha())
+	if (IsCoverageAlphaFixedOne())
 	{
-		// If HW renderer doesn't support AA1, assume alpha is constant 128.
-		min = HasAA1Support() ? 0 : 128;
+		// HW renderer doesn't support AA1, assume alpha is constant 128.
+		min = 128;
+		max = 128;
+	}
+	else if (IsCoverageAlphaSupported())
+	{
+		min = 0;
 		max = 128;
 	}
 	else
@@ -5253,7 +5258,17 @@ bool GSState::IsMipMapActive()
 
 bool GSState::IsCoverageAlpha()
 {
-	return !PRIM->ABE && PRIM->AA1 && (m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS);
+	return PRIM->AA1 && (m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS);
+}
+
+bool GSState::IsCoverageAlphaFixedOne()
+{
+	return IsCoverageAlpha() && !PRIM->ABE && !IsCoverageAlphaSupported();
+}
+
+bool GSState::IsCoverageAlphaSupported()
+{
+	return false;
 }
 
 GIFRegTEX0 GSState::GetTex0Layer(u32 lod)

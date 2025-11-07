@@ -82,7 +82,7 @@ protected:
 	template <u32 primclass>
 	void RewriteVerticesIfSTOverflow();
 
-	bool HasAA1Support() override { return true; }
+	bool IsCoverageAlphaSupported() override { return true; }
 
 public:
 	GSRendererSW(int threads);
