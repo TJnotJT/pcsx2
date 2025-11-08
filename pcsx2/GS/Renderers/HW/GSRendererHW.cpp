@@ -301,8 +301,8 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	float dx = x1 - x0;
 	float dy = y1 - y0;
 	float d_len = std::sqrtf(dx * dx + dy * dy);
-	dx = 2 * dx / d_len;
-	dy = 2 * dy / d_len;
+	dx = 2.0f * dx / d_len;
+	dy = 2.0f * dy / d_len;
 
 	float nx = -dy;
 	float ny = dx;
@@ -315,17 +315,17 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	GSVertex v[4];
 	std::memset(v, 0, sizeof(v));
 
-	v[0].XYZ.X = v0.x - dxi - nxi;
-	v[0].XYZ.Y = v0.y - dyi - nyi;
+	v[0].XYZ.X = static_cast<u32>(std::clamp<int>(v0.x - dxi - nxi, 0, 0xFFFF));
+	v[0].XYZ.Y = static_cast<u32>(std::clamp<int>(v0.y - dyi - nyi, 0, 0xFFFF));
 
-	v[1].XYZ.X = v0.x - dxi + nxi;
-	v[1].XYZ.Y = v0.y - dyi + nyi;
+	v[1].XYZ.X = static_cast<u32>(std::clamp<int>(v0.x - dxi + nxi, 0, 0xFFFF));
+	v[1].XYZ.Y = static_cast<u32>(std::clamp<int>(v0.y - dyi + nyi, 0, 0xFFFF));
 
-	v[2].XYZ.X = v1.x + dxi - nxi;
-	v[2].XYZ.Y = v1.y + dyi - nyi;
+	v[2].XYZ.X = static_cast<u32>(std::clamp<int>(v1.x + dxi - nxi, 0, 0xFFFF));
+	v[2].XYZ.Y = static_cast<u32>(std::clamp<int>(v1.y + dyi - nyi, 0, 0xFFFF));
 
-	v[3].XYZ.X = v1.x + dxi + nxi;
-	v[3].XYZ.Y = v1.y + dyi + nyi;
+	v[3].XYZ.X = static_cast<u32>(std::clamp<int>(v1.x + dxi + nxi, 0, 0xFFFF));
+	v[3].XYZ.Y = static_cast<u32>(std::clamp<int>(v1.y + dyi + nyi, 0, 0xFFFF));
 
 	out[0] = v[0];
 	out[1] = v[1];
@@ -440,11 +440,11 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
 	}
 
-	for (std::size_t i = 0; i < 6 * m_index.tail; i++)
+	m_index.tail *= 3;
+	for (std::size_t i = 0; i < m_index.tail; i++)
 	{
 		m_index.buff[i] = i;
 	}
-	m_index.tail *= 6;
 	m_vertex.next = m_vertex.tail = m_vertex.head = m_index.tail;
 
 	std::swap(m_vertex.buff, m_vertex.buff_copy);

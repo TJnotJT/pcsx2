@@ -26,7 +26,7 @@ static constexpr u32 g_ps_cb_index        = 0;
 
 static constexpr u32 VERTEX_BUFFER_SIZE = 32 * 1024 * 1024;
 static constexpr u32 INDEX_BUFFER_SIZE = 16 * 1024 * 1024;
-static constexpr u32 ACCURATE_LINE_BUFFER_SIZE = sizeof(AccurateLinesData) * 1024 * 1024;
+static constexpr u32 ACCURATE_LINES_BUFFER_SIZE = sizeof(AccurateLinesData) * 1024 * 1024;
 static constexpr u32 VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 TEXTURE_UPLOAD_BUFFER_SIZE = 128 * 1024 * 1024;
@@ -260,7 +260,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		m_vertex_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, VERTEX_BUFFER_SIZE);
 		m_index_stream_buffer = GLStreamBuffer::Create(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE);
-		m_accurate_lines_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, ACCURATE_LINE_BUFFER_SIZE); // FIXME; Choose better size. NEED TO DESTROY!
+		m_accurate_lines_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, ACCURATE_LINES_BUFFER_SIZE);
 		m_vertex_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, VERTEX_UNIFORM_BUFFER_SIZE);
 		m_fragment_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, FRAGMENT_UNIFORM_BUFFER_SIZE);
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &m_uniform_buffer_alignment);
@@ -310,7 +310,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		if (m_features.accurate_lines)
 		{
-			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_lines_stream_buffer->GetGLBufferId(), 0, ACCURATE_LINE_BUFFER_SIZE);
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_lines_stream_buffer->GetGLBufferId(), 0, ACCURATE_LINES_BUFFER_SIZE);
 		}
 	}
 
