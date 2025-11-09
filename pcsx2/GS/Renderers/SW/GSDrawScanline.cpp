@@ -125,8 +125,8 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 {
 	const GSScanlineGlobalData& global = data.global;
 
-	const int max_index = std::clamp(static_cast<int>(GSConfig.UserHacks_SWVariableStepMax), 0, n_step_sizes - 1);
-	const int min_index = std::clamp(static_cast<int>(GSConfig.UserHacks_SWVariableStepMin), 0, n_step_sizes - 1);
+	const int max_index = std::clamp(static_cast<int>(GSConfig.SWVariableStepMax), 0, n_step_sizes - 1);
+	const int min_index = std::clamp(static_cast<int>(GSConfig.SWVariableStepMin), 0, n_step_sizes - 1);
 	data.min_step_size = step_size_order[max_index];
 	data.max_step_size = step_size_order[min_index];
 
