@@ -1012,7 +1012,7 @@ float As = As_rgba.a;
 }
 
 #if PS_ACCURATE_LINES
-void HandleAccurateLines()
+void HandleAccurateLines(out float alpha_coverage)
 {
 	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
 
@@ -1056,8 +1056,6 @@ void HandleAccurateLines()
 	// Compute minor axis line in fixed-point
 	int minor_line = weight1 * minor1 + weight0 * minor0;
 
-	float alpha_coverage;
-
 #if PS_ACCURATE_LINES_AA
 	// Proper fixed-point AA rounding
 	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
@@ -1097,11 +1095,6 @@ void HandleAccurateLines()
 	PSin.c = clamp(PSin.c, 0.0, 255.0);
 	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
 	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
-
-#if PS_ACCURATE_LINES_AA
-	if ((PS_ACCURATE_LINES_AA_ABE == 0) || (PSin.c.a >= 128.0))
-		PSin.c.a = alpha_coverage;
-#endif
 }
 #endif
 
@@ -1110,7 +1103,8 @@ void ps_main()
 	FragCoord = gl_FragCoord;
 
 #if PS_ACCURATE_LINES
-	HandleAccurateLines();
+	float alpha_coverage;
+	HandleAccurateLines(alpha_coverage);
 #endif
 
 #if PS_SCANMSK & 2
@@ -1161,18 +1155,25 @@ void ps_main()
 #endif
 
 	vec4 C = ps_color();
+
+#if PS_FIXED_ONE_A
+	// AA (Fixed one) will output a coverage of 1.0 as alpha
+	C.a = 128.0f;
+#elif PS_ACCURATE_LINES_AA
+	// AA: coverage is computed in alpha_coverage
+	#if PS_ACCURATE_LINES_AA_ABE
+		if (floor(PSin.c.a) == 128.0)
+			C.a = alpha_coverage;
+	#else
+		C.a = alpha_coverage;
+	#endif
+#endif
+
 	bool atst_pass = atst(C);
 
 #if PS_AFAIL == 0 // KEEP or ATST off
 	if (!atst_pass)
 		discard;
-#endif
-
-	// Must be done before alpha correction
-
-	// AA (Fixed one) will output a coverage of 1.0 as alpha
-#if PS_FIXED_ONE_A
-	C.a = 128.0f;
 #endif
 
 #if SW_AD_TO_HW
