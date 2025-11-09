@@ -1078,16 +1078,21 @@ void HandleAccurateLines(out float alpha_coverage)
 		discard;
 #endif
 
-	// Interpolate attributes.
+	// Interpolate attributes
 	float weight0_f = float(weight0);
 	float weight1_f = float(weight1);
 	float d_major_f = float(d_major);
-	PSin.t_float = (ld.t_float1 == ld.t_float0) ? ld.t_float1 :
-		(weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
-	PSin.t_int = (ld.t_int1 == ld.t_int0) ? ld.t_int1 :
-		(weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
-	PSin.c = (ld.c1 == ld.c0) ? ld.c1 :
-		(weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+
+	vec4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
+	vec4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
+	vec4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+
+	// No interpolation for constant attributes
+	PSin.t_float = mix(t_float_interp, ld.t_float1, equal(ld.t_float1, ld.t_float0));
+	PSin.t_int = mix(t_int_interp, ld.t_int1, equal(ld.t_int1, ld.t_int0));
+	PSin.c = mix(c_interp, ld.c1, equal(ld.c1, ld.c0));
+
+	// Need double precision for Z to avoid Z-fighting.
 	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z :
 		float((double(weight1) * double(ld.p1.z) + double(weight0) * double(ld.p0.z)) / double(d_major));
 	
@@ -1162,7 +1167,7 @@ void ps_main()
 #elif PS_ACCURATE_LINES_AA
 	// AA: coverage is computed in alpha_coverage
 	#if PS_ACCURATE_LINES_AA_ABE
-		if (floor(PSin.c.a) == 128.0)
+		if (floor(C.a) == 128.0)
 			C.a = alpha_coverage;
 	#else
 		C.a = alpha_coverage;
