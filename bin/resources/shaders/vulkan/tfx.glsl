@@ -7,6 +7,10 @@
 
 #if defined(VERTEX_SHADER)
 
+#if VS_ACCURATE_LINES
+layout(location = 7) flat out uint accurate_lines_index;
+#endif
+
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -16,8 +20,11 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	vec2 PointSize;
 	uint MaxDepth;
 	uint pad_cb0;
+	uint BaseVertex;
+	uint pad_cb0_2;
 };
 
+#if VS_ACCURATE_LINES == 0
 layout(location = 0) out VSOutput
 {
 	vec4 t;
@@ -29,6 +36,7 @@ layout(location = 0) out VSOutput
 		flat vec4 c;
 	#endif
 } vsOut;
+#endif
 
 #if VS_EXPAND == 0
 
@@ -55,35 +63,39 @@ void main()
 	gl_Position.z *= exp2(-32.0f);		// integer->float depth
 	gl_Position.y = -gl_Position.y;
 
-	#if VS_TME
-		vec2 uv = a_uv - TextureOffset;
-		vec2 st = a_st - TextureOffset;
+	#if VS_ACCURATE_LINES
+		accurate_lines_index = (gl_VertexIndex - BaseVertex) / 6u;
+	#else
+		#if VS_TME
+			vec2 uv = a_uv - TextureOffset;
+			vec2 st = a_st - TextureOffset;
 
-		// Integer nomalized
-		vsOut.ti.xy = uv * TextureScale;
+			// Integer nomalized
+			vsOut.ti.xy = uv * TextureScale;
 
-		#if VS_FST
-			// Integer integral
-			vsOut.ti.zw = uv;
+			#if VS_FST
+				// Integer integral
+				vsOut.ti.zw = uv;
+			#else
+				// float for post-processing in some games
+				vsOut.ti.zw = st / TextureScale;
+			#endif
+
+			// Float coords
+			vsOut.t.xy = st;
+			vsOut.t.w = a_q;
 		#else
-			// float for post-processing in some games
-			vsOut.ti.zw = st / TextureScale;
+			vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			vsOut.ti = vec4(0.0f);
 		#endif
 
-		// Float coords
-		vsOut.t.xy = st;
-		vsOut.t.w = a_q;
-	#else
-		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
-		vsOut.ti = vec4(0.0f);
-	#endif
+		#if VS_POINT_SIZE
+			gl_PointSize = PointSize.x;
+		#endif
 
-	#if VS_POINT_SIZE
-		gl_PointSize = PointSize.x;
+		vsOut.c = vec4(a_c);
+		vsOut.t.z = a_f.r;
 	#endif
-
-	vsOut.c = vec4(a_c);
-	vsOut.t.z = a_f.r;
 }
 
 #else // VS_EXPAND
@@ -301,6 +313,8 @@ void main()
 
 #define NEEDS_TEX (PS_TFX != 4)
 
+vec4 FragCoord;
+
 layout(std140, set = 0, binding = 1) uniform cb1
 {
 	vec3 FogColor;
@@ -320,7 +334,49 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	mat4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	uint _pad0;
+	uint _pad1;
+
+	uint accurate_lines_base;
+	uint _pad2;
+	uint _pad3;
+	uint _pad4;
 };
+
+#if PS_ACCURATE_LINES
+struct
+{
+	vec4 t;
+	vec4 ti;
+	vec4 c;
+} vsIn;
+
+layout(location = 7) flat in uint accurate_lines_index;
+
+struct AccurateLinesData
+{
+	// Interpolated attributes
+	vec4 t_float0; // 0
+	vec4 t_float1; // 16
+	vec4 t_int0; // 32
+	vec4 t_int1; // 48
+	vec4 c0; // 64
+	vec4 c1; // 80
+	vec4 p0; // 96
+	vec4 p1; // 112
+	ivec2 xy0; // 128
+	ivec2 xy1; // 136
+	uint step_x; // 144
+	uint draw0; // 148
+	uint draw1; // 152
+	// Total 160
+};
+
+layout (std140, set = 0, binding = 3) readonly buffer AccurateLinesDataBuffer {
+	AccurateLinesData accurate_lines_data[];
+};
+
+#else // PS_ACCURATE_LINES
 
 layout(location = 0) in VSOutput
 {
@@ -332,6 +388,8 @@ layout(location = 0) in VSOutput
 		flat vec4 c;
 	#endif
 } vsIn;
+
+#endif
 
 #if !PS_NO_COLOR && !PS_NO_COLOR1
 layout(location = 0, index = 0) out vec4 o_col0;
@@ -348,7 +406,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 #if PS_FEEDBACK_LOOP_IS_NEEDED
 	#if defined(DISABLE_TEXTURE_BARRIER) || defined(HAS_FEEDBACK_LOOP_LAYOUT)
 		layout(set = 1, binding = 2) uniform texture2D RtSampler;
-		vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0); }
+		vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(FragCoord.xy), 0); }
 	#else
 		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 		vec4 sample_from_rt() { return subpassLoad(RtSampler); }
@@ -925,19 +983,19 @@ vec4 ps_color()
 #if !NEEDS_TEX
 	vec4 T = vec4(0.0f);
 #elif PS_CHANNEL_FETCH == 1
-	vec4 T = fetch_red(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_red(ivec2(FragCoord.xy));
 #elif PS_CHANNEL_FETCH == 2
-	vec4 T = fetch_green(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_green(ivec2(FragCoord.xy));
 #elif PS_CHANNEL_FETCH == 3
-	vec4 T = fetch_blue(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_blue(ivec2(FragCoord.xy));
 #elif PS_CHANNEL_FETCH == 4
-	vec4 T = fetch_alpha(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_alpha(ivec2(FragCoord.xy));
 #elif PS_CHANNEL_FETCH == 5
-	vec4 T = fetch_rgb(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_rgb(ivec2(FragCoord.xy));
 #elif PS_CHANNEL_FETCH == 6
-	vec4 T = fetch_gXbY(ivec2(gl_FragCoord.xy));
+	vec4 T = fetch_gXbY(ivec2(FragCoord.xy));
 #elif PS_DEPTH_FMT > 0
-	vec4 T = sample_depth(st_int, ivec2(gl_FragCoord.xy));
+	vec4 T = sample_depth(st_int, ivec2(FragCoord.xy));
 #else
 	vec4 T = sample_color(st);
 #endif
@@ -985,9 +1043,9 @@ void ps_dither(inout vec3 C, float As)
 		ivec2 fpos;
 
 		#if PS_DITHER == 2
-			fpos = ivec2(gl_FragCoord.xy);
+			fpos = ivec2(FragCoord.xy);
 		#else
-			fpos = ivec2(gl_FragCoord.xy * RcpScaleFactor);
+			fpos = ivec2(FragCoord.xy * RcpScaleFactor);
 		#endif
 
 		float value = DitherMatrix[fpos.y & 3][fpos.x & 3];
@@ -1228,11 +1286,110 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
+#if PS_ACCURATE_LINES
+void HandleAccurateLines(out float alpha_coverage)
+{
+	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
+
+	ivec2 xy0 = ld.xy0;
+	ivec2 xy1 = ld.xy1;
+	ivec2 dxy = xy1 - xy0;
+	ivec2 xy0_i = (xy0 + 8) & ~0xF;
+	ivec2 xy1_i = (xy1 + 8) & ~0xF;
+	uint step_x = ld.step_x;
+	uint draw0 = ld.draw0;
+	uint draw1 = ld.draw1;
+
+	// 4-bit fixed point: 16 subpixels per pixel
+	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
+
+	// Determine major/minor axes
+	int major0 = (step_x != 0) ? xy0.x : xy0.y;
+	int major1 = (step_x != 0) ? xy1.x : xy1.y;
+	int minor0 = (step_x != 0) ? xy0.y : xy0.x;
+	int minor1 = (step_x != 0) ? xy1.y : xy1.x;
+	int major_i = (step_x != 0) ? xy_i.x : xy_i.y;
+	int minor_i = (step_x != 0) ? xy_i.y : xy_i.x;
+	int d_major = (step_x != 0) ? dxy.x : dxy.y;
+	int d_major_scaled = 16 * d_major;
+
+	int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
+	int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
+
+	// Discard if outside line range
+	if (major_i < min(major0_i, major1_i) ||
+		major_i > max(major0_i, major1_i))
+		discard;
+
+	if ((major_i == major0_i && draw0 == 0) ||
+		(major_i == major1_i && draw1 == 0))
+		discard;
+
+	int weight0 = major1 - major_i;
+	int weight1 = major_i - major0;
+
+	// Compute minor axis line in fixed-point
+	int minor_line = weight1 * minor1 + weight0 * minor0;
+
+#if PS_ACCURATE_LINES_AA
+	// Proper fixed-point AA rounding
+	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
+	int minor_i_expected_1 = minor_i_expected_0 + 16;
+	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
+	int alpha_i_1 = d_major_scaled - alpha_i_0;
+
+	int alpha_i;
+	if (minor_i == minor_i_expected_0)
+		alpha_i = alpha_i_0;
+	else if (minor_i == minor_i_expected_1)
+		alpha_i = alpha_i_1;
+	else
+		discard;
+	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
+#else
+	// Non-AA: fixed-point rounding and 4-bit alignment
+	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+	if (minor_i != minor_i_expected)
+		discard;
+#endif
+
+	// Interpolate attributes
+	float weight0_f = float(weight0);
+	float weight1_f = float(weight1);
+	float d_major_f = float(d_major);
+
+	vec4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
+	vec4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
+	vec4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+
+	// No interpolation for constant attributes
+	vsIn.t = mix(t_float_interp, ld.t_float1, equal(ld.t_float1, ld.t_float0));
+	vsIn.ti = mix(t_int_interp, ld.t_int1, equal(ld.t_int1, ld.t_int0));
+	vsIn.c = mix(c_interp, ld.c1, equal(ld.c1, ld.c0));
+
+	// Need double precision for Z to avoid Z-fighting.
+	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z :
+		float((double(weight1) * double(ld.p1.z) + double(weight0) * double(ld.p0.z)) / double(d_major));
+
+	// Clamp attributes. Fog/Z are normalized.
+	vsIn.c = clamp(vsIn.c, 0.0, 255.0);
+	vsIn.t.z = clamp(vsIn.t.z, 0.0, 1.0);
+	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
+}
+#endif
+
 void main()
 {
+	FragCoord = gl_FragCoord;
+
+#if PS_ACCURATE_LINES
+	float alpha_coverage;
+	HandleAccurateLines(alpha_coverage);
+#endif
+
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
-	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
+	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
 #if PS_DATE >= 5
@@ -1267,7 +1424,7 @@ void main()
 #endif		// PS_DATE >= 5
 
 #if PS_DATE == 3
-	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(gl_FragCoord.xy), 0).r);
+	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(FragCoord.xy), 0).r);
 	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
 	// the bad alpha value so we must keep it.
 
@@ -1277,18 +1434,25 @@ void main()
 #endif
 
 	vec4 C = ps_color();
+
+#if PS_FIXED_ONE_A
+	// AA (Fixed one) will output a coverage of 1.0 as alpha
+	C.a = 128.0f;
+#elif PS_ACCURATE_LINES_AA
+	// AA: coverage is computed in alpha_coverage
+	#if PS_ACCURATE_LINES_AA_ABE
+		if (floor(C.a) == 128.0)
+			C.a = alpha_coverage;
+	#else
+		C.a = alpha_coverage;
+	#endif
+#endif
+
 	bool atst_pass = atst(C);
 
 #if PS_AFAIL == 0 // KEEP or ATST off
 	if (!atst_pass)
 		discard;
-#endif
-
-	// Must be done before alpha correction
-
-	// AA (Fixed one) will output a coverage of 1.0 as alpha
-#if PS_FIXED_ONE_A
-	C.a = 128.0f;
 #endif
 
 #if SW_AD_TO_HW
@@ -1401,7 +1565,7 @@ void main()
 	#endif
 
 	#if PS_ZCLAMP
-		gl_FragDepth = min(gl_FragCoord.z, MaxDepthPS);
+		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
 	#endif
 
 #endif // PS_DATE

@@ -5177,15 +5177,6 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.ps.accurate_lines_aa_abe = (PRIM->ABE != 0);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
-					
-					// The drawlist should be computed by this point.
-					if (!m_drawlist.empty())
-					{
-						for (std::size_t i = 0; i < m_drawlist.size(); i++)
-						{
-							m_drawlist[i] *= 2; // Each line expanded to 2 triangles.
-						}
-					}
 				}
 				else
 				{
