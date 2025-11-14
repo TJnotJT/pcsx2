@@ -1361,15 +1361,13 @@ void HandleAccurateLines(out float alpha_coverage)
 	vec4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
 	vec4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
 	vec4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+	float z_interp = (weight1_f * ld.p1.z + weight0_f * ld.p0.z) / d_major_f;
 
 	// No interpolation for constant attributes
 	vsIn.t = mix(t_float_interp, ld.t_float1, equal(ld.t_float1, ld.t_float0));
 	vsIn.ti = mix(t_int_interp, ld.t_int1, equal(ld.t_int1, ld.t_int0));
 	vsIn.c = mix(c_interp, ld.c1, equal(ld.c1, ld.c0));
-
-	// Need double precision for Z to avoid Z-fighting.
-	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z :
-		float((double(weight1) * double(ld.p1.z) + double(weight0) * double(ld.p0.z)) / double(d_major));
+	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z : z_interp;
 
 	// Clamp attributes. Fog/Z are normalized.
 	vsIn.c = clamp(vsIn.c, 0.0, 255.0);
@@ -1565,9 +1563,12 @@ void main()
 	#endif
 
 	#if PS_ZCLAMP
-		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+		FragCoord.z = min(FragCoord.z, MaxDepthPS);
 	#endif
 
+	#if PS_ACCURATE_LINES || PS_ZCLAMP
+		gl_FragDepth = FragCoord.z;
+	#endif
 #endif // PS_DATE
 }
 
