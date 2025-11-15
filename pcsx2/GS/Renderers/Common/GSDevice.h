@@ -285,6 +285,7 @@ struct alignas(16) AccurateLinesData
 	u32 step_x; // 144
 	u32 draw0; // 148
 	u32 draw1; // 152
+	u32 _pad0; // 156
 	// Total 160
 };
 

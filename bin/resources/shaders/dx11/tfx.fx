@@ -94,6 +94,9 @@ struct VS_INPUT
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
 	float4 f : COLOR1;
+#ifdef VS_ACCURATE_LINES
+	uint vertex_id : SV_VertexID;
+#endif
 };
 
 struct VS_OUTPUT
@@ -106,6 +109,9 @@ struct VS_OUTPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
+#endif
+#if VS_ACCURATE_LINES
+	nointerpolation uint accurate_lines_index : TEXCOORD3;
 #endif
 };
 
@@ -122,6 +128,29 @@ struct PS_INPUT
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
 #endif
+#if PS_ACCURATE_LINES
+	nointerpolation uint accurate_lines_index : TEXCOORD3;
+#endif
+};
+
+struct AccurateLinesData
+{
+	// Interpolated attributes
+	float4 t_float0; // 0
+	float4 t_float1; // 16
+	float4 t_int0; // 32
+	float4 t_int1; // 48
+	float4 c0; // 64
+	float4 c1; // 80
+	float4 p0; // 96
+	float4 p1; // 112
+	int2 xy0; // 128
+	int2 xy1; // 136
+	uint step_x; // 144
+	uint draw0; // 148
+	uint draw1; // 152
+	uint _pad0; // 156
+	// Total 160
 };
 
 #ifdef PIXEL_SHADER
@@ -138,7 +167,7 @@ struct PS_OUTPUT
 #endif
 #endif
 #endif
-#if PS_ZCLAMP
+#if PS_ACCURATE_LINES || PS_ZCLAMP
 	float depth : SV_Depth;
 #endif
 };
@@ -148,6 +177,10 @@ Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
 SamplerState TextureSampler : register(s0);
+
+#if PS_ACCURATE_LINES
+StructuredBuffer<AccurateLinesData> accurate_lines_data : register(t4);
+#endif
 
 #ifdef DX12
 cbuffer cb1 : register(b1)
@@ -172,6 +205,12 @@ cbuffer cb1
 	float4x4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	uint _pad0;
+	uint _pad1;
+	uint accurate_lines_base;
+	uint _pad2;
+	uint _pad3;
+	uint _pad4;
 };
 
 float4 sample_c(float2 uv, float uv_w, int2 xy)
@@ -1015,9 +1054,122 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 	}
 }
 
+#if PS_ACCURATE_LINES
+void HandleAccurateLines(inout PS_INPUT input, out float alpha_coverage)
+{
+	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + input.accurate_lines_index];
+
+	int2 xy0 = ld.xy0;
+	int2 xy1 = ld.xy1;
+	int2 dxy = xy1 - xy0;
+	int2 xy0_i = (xy0 + 8) & ~0xF;
+	int2 xy1_i = (xy1 + 8) & ~0xF;
+	uint step_x = ld.step_x;
+	uint draw0 = ld.draw0;
+	uint draw1 = ld.draw1;
+
+	// 4-bit fixed point: 16 subpixels per pixel
+	int2 xy_i = 16 * int2(floor(input.p.xy)); // Subtract half-integer pixel center.
+
+	// Determine major/minor axes
+	int major0 = (step_x != 0) ? xy0.x : xy0.y;
+	int major1 = (step_x != 0) ? xy1.x : xy1.y;
+	int minor0 = (step_x != 0) ? xy0.y : xy0.x;
+	int minor1 = (step_x != 0) ? xy1.y : xy1.x;
+	int major_i = (step_x != 0) ? xy_i.x : xy_i.y;
+	int minor_i = (step_x != 0) ? xy_i.y : xy_i.x;
+	int d_major = (step_x != 0) ? dxy.x : dxy.y;
+	int d_major_scaled = 16 * d_major;
+
+	int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
+	int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
+
+	// Discard if outside line range
+	if (major_i < min(major0_i, major1_i) ||
+		major_i > max(major0_i, major1_i))
+		discard;
+
+	if ((major_i == major0_i && draw0 == 0) ||
+		(major_i == major1_i && draw1 == 0))
+		discard;
+
+	int weight0 = major1 - major_i;
+	int weight1 = major_i - major0;
+
+	// Compute minor axis line in fixed-point
+	int minor_line = weight1 * minor1 + weight0 * minor0;
+
+#if PS_ACCURATE_LINES_AA
+	// Proper fixed-point AA rounding.
+	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
+	int minor_i_expected_1 = minor_i_expected_0 + 16;
+	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
+	int alpha_i_1 = d_major_scaled - alpha_i_0;
+
+	int alpha_i;
+	if (minor_i == minor_i_expected_0)
+		alpha_i = alpha_i_0;
+	else if (minor_i == minor_i_expected_1)
+		alpha_i = alpha_i_1;
+	else
+	{
+		alpha_i = 0; // Prevent uninitialized compiler warning.
+		discard;
+	}
+	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
+#else
+	// Non-AA: fixed-point rounding and 4-bit alignment.
+	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
+	if (minor_i != minor_i_expected)
+		discard;
+	alpha_coverage = 0.0; // Satisfy the compiler - should be ignored.
+#endif
+
+	// Interpolate attributes
+	float weight0_f = float(weight0);
+	float weight1_f = float(weight1);
+	float d_major_f = float(d_major);
+
+	float4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
+	float4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
+	float4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
+	float z_interp = (weight1_f * ld.p1.z + weight0_f * ld.p0.z) / d_major_f;
+
+	// No interpolation for constant attributes
+	input.t = lerp(t_float_interp, ld.t_float1, float4(ld.t_float1 == ld.t_float0));
+	input.ti = lerp(t_int_interp, ld.t_int1, float4(ld.t_int1 == ld.t_int0));
+	input.c = lerp(c_interp, ld.c1, float4(ld.c1 == ld.c0));
+	input.p.z = (ld.p1.z == ld.p0.z) ? ld.p1.z : z_interp;
+
+	// Clamp attributes. Fog/Z are normalized.
+	input.c = clamp(input.c, 0.0, 255.0);
+	input.t.z = clamp(input.t.z, 0.0, 1.0);
+	input.p.z = clamp(input.p.z, 0.0, 1.0);
+}
+#endif
+
 PS_OUTPUT ps_main(PS_INPUT input)
 {
+#if PS_ACCURATE_LINES
+	float alpha_coverage;
+	HandleAccurateLines(input, alpha_coverage);
+#endif
+
 	float4 C = ps_color(input);
+
+#if PS_FIXED_ONE_A
+	// AA (Fixed one) will output a coverage of 1.0 as alpha
+	C.a = 128.0f;
+#elif PS_ACCURATE_LINES_AA
+	// AA: coverage is computed in alpha_coverage
+	#if PS_ACCURATE_LINES_AA_ABE
+		if (floor(C.a) == 128.0f)
+			C.a = alpha_coverage;
+	#else
+		C.a = alpha_coverage;
+	#endif
+#endif
+
 	bool atst_pass = atst(C);
 
 #if PS_AFAIL == 0 // KEEP or ATST off
@@ -1032,14 +1184,6 @@ PS_OUTPUT ps_main(PS_INPUT input)
 		// fail depth test on prohibited lines
 		if ((int(input.p.y) & 1) == (PS_SCANMSK & 1))
 			discard;
-	}
-
-	// Must be done before alpha correction
-
-	// AA (Fixed one) will output a coverage of 1.0 as alpha
-	if (PS_FIXED_ONE_A)
-	{
-		C.a = 128.0f;
 	}
 
 	float4 alpha_blend = (float4)0.0f;
@@ -1210,7 +1354,11 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);
+	input.p.z = min(input.p.z, MaxDepthPS);
+#endif
+
+#if PS_ACCURATE_LINES || PS_ZCLAMP
+	output.depth = input.p.z;
 #endif
 
 	return output;
@@ -1236,7 +1384,9 @@ cbuffer cb0
 	float2 TextureOffset;
 	float2 PointSize;
 	uint MaxDepth;
-	uint BaseVertex; // Only used in DX11.
+	uint pad_cb0;
+	uint BaseVertex;
+	uint pad_cb0_2;
 };
 
 VS_OUTPUT vs_main(VS_INPUT input)
@@ -1287,6 +1437,10 @@ VS_OUTPUT vs_main(VS_INPUT input)
 
 	output.c = input.c;
 	output.t.z = input.f.r;
+
+#if VS_ACCURATE_LINES
+	output.accurate_lines_index = input.vertex_id / 6u;
+#endif
 
 	return output;
 }

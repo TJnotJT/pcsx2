@@ -94,6 +94,7 @@ struct AccurateLinesData
 	uint step_x; // 144
 	uint draw0; // 148
 	uint draw1; // 152
+	uint _pad0; // 156
 	// Total 160
 };
 

@@ -339,12 +339,11 @@ public:
 	void IASetPrimitiveTopology(GLenum topology);
 	void IASetVertexBuffer(const void* vertices, size_t count, size_t align_multiplier = 1);
 	void IASetIndexBuffer(const void* index, size_t count);
+	void SetupAccurateLines(GSHWDrawConfig& config);
 
 	void PSSetShaderResource(int i, GSTexture* sr);
 	void PSSetSamplerState(GLuint ss);
 	void ClearSamplerCache() override;
-
-	void SetupAccurateLines(GSHWDrawConfig& config);
 
 	void OMSetDepthStencilState(GSDepthStencilOGL* dss);
 	void OMSetBlendState(bool enable = false, GLenum src_factor = GL_ONE, GLenum dst_factor = GL_ZERO, GLenum op = GL_FUNC_ADD,

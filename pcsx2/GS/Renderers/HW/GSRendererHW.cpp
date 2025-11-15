@@ -421,8 +421,10 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
 		xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
 
-		data.p0 = GSVector4(xy0.x, xy0.y, z0 * exp_min32, 1.0f);
-		data.p1 = GSVector4(xy1.x, xy1.y, z1 * exp_min32, 1.0f);
+		GSRendererType renderer = GSGetCurrentRenderer();
+		float y_sign = (renderer == GSRendererType::DX11 || renderer == GSRendererType::DX12) ? -1.0f : 1.0f;
+		data.p0 = GSVector4(xy0.x, y_sign * xy0.y, z0 * exp_min32, 1.0f);
+		data.p1 = GSVector4(xy1.x, y_sign * xy1.y, z1 * exp_min32, 1.0f);
 
 		data.c0 = GSVector4(
 			static_cast<float>(vtx0.RGBAQ.R),
