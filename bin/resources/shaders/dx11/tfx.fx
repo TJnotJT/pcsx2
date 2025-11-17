@@ -167,7 +167,7 @@ struct PS_OUTPUT
 #endif
 #endif
 #endif
-#if PS_ACCURATE_LINES || PS_ZCLAMP
+#if PS_ZCLAMP
 	float depth : SV_Depth;
 #endif
 };
@@ -176,11 +176,8 @@ Texture2D<float4> Texture : register(t0);
 Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
-SamplerState TextureSampler : register(s0);
-
-#if PS_ACCURATE_LINES
 StructuredBuffer<AccurateLinesData> accurate_lines_data : register(t4);
-#endif
+SamplerState TextureSampler : register(s0);
 
 #ifdef DX12
 cbuffer cb1 : register(b1)
@@ -1354,11 +1351,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	input.p.z = min(input.p.z, MaxDepthPS);
-#endif
-
-#if PS_ACCURATE_LINES || PS_ZCLAMP
-	output.depth = input.p.z;
+	output.depth = min(input.p.z, MaxDepthPS);
 #endif
 
 	return output;
