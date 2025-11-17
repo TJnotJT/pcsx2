@@ -1293,10 +1293,6 @@ void ps_main()
 #endif
 
 #if PS_ZCLAMP
-	FragCoord.z = min(FragCoord.z, MaxDepthPS);
-#endif
-
-#if PS_ACCURATE_LINES || PS_ZCLAMP
-	gl_FragDepth = FragCoord.z;
+	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
 #endif
 }

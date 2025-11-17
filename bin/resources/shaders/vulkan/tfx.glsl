@@ -1490,7 +1490,7 @@ void main()
 #else
 	ps_blend(C, alpha_blend);
 
-#if PS_SHUFFLE
+	#if PS_SHUFFLE
 		#if !PS_READ16_SRC && !PS_SHUFFLE_SAME && !(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE)
 			uvec4 denorm_c_after = uvec4(C);
 			#if (PS_PROCESS_BA & SHUFFLE_READ)
@@ -1564,11 +1564,7 @@ void main()
 	#endif
 
 	#if PS_ZCLAMP
-		FragCoord.z = min(FragCoord.z, MaxDepthPS);
-	#endif
-
-	#if PS_ACCURATE_LINES || PS_ZCLAMP
-		gl_FragDepth = FragCoord.z;
+		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
 	#endif
 #endif // PS_DATE
 }

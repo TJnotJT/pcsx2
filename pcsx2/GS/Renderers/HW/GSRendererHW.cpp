@@ -5297,25 +5297,26 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 
 	// Accurate lines requires a manual depth interpolation in the pixel shader.
 	// Piggy-back on Z clamp to avoid creating more pipeline combinations.
-	bool accurate_lines = g_gs_device->Features().accurate_lines && (m_vt.m_primclass == GS_LINE_CLASS);
-	accurate_lines = false;
+	bool accurate_lines_clamp_z =
+		g_gs_device->Features().accurate_lines && (m_vt.m_primclass == GS_LINE_CLASS) &&
+		(m_conf.depth.zwe || m_conf.depth.ztst != ZTST_ALWAYS);
 
 	// On the real GS we appear to do clamping on the max z value the format allows.
 	// Clamping is done after rasterization.
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
-	const bool clamp_z = (static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z) || accurate_lines;
+	const bool clamp_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
 
 	m_conf.cb_vs.max_depth = GSVector2i(0xFFFFFFFF);
 	//ps_cb.MaxDepth = GSVector4(0.0f, 0.0f, 0.0f, 1.0f);
 	m_conf.ps.zclamp = 0;
 
-	if (clamp_z)
+	if (clamp_z || accurate_lines_clamp_z)
 	{
 		if (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS)
 		{
 			m_conf.cb_vs.max_depth = GSVector2i(max_z);
 		}
-		else if (!m_cached_ctx.ZBUF.ZMSK)
+		else if (!m_cached_ctx.ZBUF.ZMSK || accurate_lines_clamp_z)
 		{
 			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 			m_conf.ps.zclamp = 1;
