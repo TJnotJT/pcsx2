@@ -758,6 +758,8 @@ struct alignas(16) GSHWDrawConfig
 	SetDATM datm : 2;
 	bool line_expand : 1;
 
+	std::vector<AccurateLinesData>* accurate_lines_data;
+
 	struct AlphaPass
 	{
 		alignas(8) PSSelector ps;
@@ -790,8 +792,6 @@ struct alignas(16) GSHWDrawConfig
 	ColClipMode colclip_mode;
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
-
-	std::vector<AccurateLinesData>* accurate_lines_data;
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
