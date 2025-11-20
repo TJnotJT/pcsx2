@@ -1250,7 +1250,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 		DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing_supported, sizeof(allow_tearing_supported));
 	m_allow_tearing_supported = (SUCCEEDED(hr) && allow_tearing_supported == TRUE);
 
-	m_features.accurate_lines = GSConfig.HWAccurateLines;
+	m_features.accurate_prims = GSConfig.HWAccuratePrims;
 
 	return true;
 }
@@ -2192,30 +2192,30 @@ void GSDevice12::IASetIndexBuffer(const void* index, size_t count)
 	m_index_stream_buffer.CommitMemory(size);
 }
 
-void GSDevice12::SetupAccurateLines(GSHWDrawConfig& config)
+void GSDevice12::SetupAccuratePrims(GSHWDrawConfig& config)
 {
-	if (config.accurate_lines_data)
+	if (config.accurate_prims)
 	{
-		m_dirty_flags |= DIRTY_FLAG_PS_ACCURATE_LINES_BUFFER_BINDING;
+		m_dirty_flags |= DIRTY_FLAG_PS_ACCURATE_PRIMS_BUFFER_BINDING;
 
-		const u32 count = config.accurate_lines_data->size();
-		const u32 size = count * sizeof(AccurateLinesData);
+		const u32 count = config.accurate_prims_edge_data->size();
+		const u32 size = count * sizeof(AccuratePrimsEdgeData);
 
-		if (!m_accurate_lines_stream_buffer.ReserveMemory(size, sizeof(AccurateLinesData)))
+		if (!m_accurate_prims_stream_buffer.ReserveMemory(size, sizeof(AccuratePrimsEdgeData)))
 		{
-			ExecuteCommandListAndRestartRenderPass(false, "Uploading bytes to accurate lines buffer");
-			if (!m_accurate_lines_stream_buffer.ReserveMemory(size, sizeof(AccurateLinesData)))
-				pxFailRel("Failed to reserve space for accurate lines");
+			ExecuteCommandListAndRestartRenderPass(false, "Uploading bytes to accurate prims buffer");
+			if (!m_accurate_prims_stream_buffer.ReserveMemory(size, sizeof(AccuratePrimsEdgeData)))
+				pxFailRel("Failed to reserve space for accurate prims");
 		}
 
 		config.cb_vs.base_vertex = m_vertex.start;
-		config.cb_ps.accurate_lines_base = m_accurate_lines_stream_buffer.GetCurrentOffset() / sizeof(AccurateLinesData);
+		config.cb_ps.accurate_prims_base = m_accurate_prims_stream_buffer.GetCurrentOffset() / sizeof(AccuratePrimsEdgeData);
 
 		SetVSConstantBuffer(config.cb_vs);
 		SetPSConstantBuffer(config.cb_ps);
 
-		std::memcpy(m_accurate_lines_stream_buffer.GetCurrentHostPointer(), config.accurate_lines_data->data(), size);
-		m_accurate_lines_stream_buffer.CommitMemory(size);
+		std::memcpy(m_accurate_prims_stream_buffer.GetCurrentHostPointer(), config.accurate_prims_edge_data->data(), size);
+		m_accurate_prims_stream_buffer.CommitMemory(size);
 	}
 }
 
@@ -2406,26 +2406,27 @@ bool GSDevice12::CreateBuffers()
 		return false;
 	}
 
-	if (!m_accurate_lines_stream_buffer.Create(ACCURATE_LINES_BUFFER_SIZE))
+	if (!m_accurate_prims_stream_buffer.Create(ACCURATE_PRIMS_BUFFER_SIZE))
 	{
-		Host::ReportErrorAsync("GS", "Failed to allocate accurate lines buffer");
+		Host::ReportErrorAsync("GS", "Failed to allocate accurate prims buffer");
 		return false;
 	}
 
-	if (!m_descriptor_heap_manager.Allocate(&m_accurate_lines_srv_descriptor_cpu))
+	if (!m_descriptor_heap_manager.Allocate(&m_accurate_prims_srv_descriptor_cpu))
 	{
-		Console.Error("Failed to allocate accurate lines CPU descriptor");
+		Console.Error("Failed to allocate accurate prims CPU descriptor");
 		return false;
 	}
 
-	// Create the shader resource view for the accurate lines buffer.
+	// Create the shader resource view for the accurate prims buffer.
 	{
 		D3D12_SHADER_RESOURCE_VIEW_DESC desc = {
 			DXGI_FORMAT_UNKNOWN, D3D12_SRV_DIMENSION_BUFFER, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING};
 		desc.Buffer.FirstElement = 0;
-		desc.Buffer.NumElements = ACCURATE_LINES_BUFFER_SIZE / sizeof(AccurateLinesData);
-		desc.Buffer.StructureByteStride = sizeof(AccurateLinesData);
-		m_device->CreateShaderResourceView(m_accurate_lines_stream_buffer.GetBuffer(), &desc, m_accurate_lines_srv_descriptor_cpu.cpu_handle);
+		desc.Buffer.NumElements = ACCURATE_PRIMS_BUFFER_SIZE / sizeof(AccuratePrimsEdgeData);
+		desc.Buffer.StructureByteStride = sizeof(AccuratePrimsEdgeData);
+		m_device->CreateShaderResourceView(m_accurate_prims_stream_buffer.GetBuffer(), &desc,
+			m_accurate_prims_srv_descriptor_cpu.cpu_handle);
 	}
 
 	if (!m_vertex_constant_buffer.Create(VERTEX_UNIFORM_BUFFER_SIZE))
@@ -2870,7 +2871,7 @@ void GSDevice12::DestroyResources()
 	m_vertex_constant_buffer.Destroy(false);
 	m_index_stream_buffer.Destroy(false);
 	m_vertex_stream_buffer.Destroy(false);
-	m_accurate_lines_stream_buffer.Destroy(false);
+	m_accurate_prims_stream_buffer.Destroy(false);
 
 	m_utility_root_signature.reset();
 	m_tfx_root_signature.reset();
@@ -2884,7 +2885,7 @@ void GSDevice12::DestroyResources()
 	m_shader_cache.Close();
 
 	m_descriptor_heap_manager.Free(&m_null_srv_descriptor);
-	m_descriptor_heap_manager.Free(&m_accurate_lines_srv_descriptor_cpu);
+	m_descriptor_heap_manager.Free(&m_accurate_prims_srv_descriptor_cpu);
 	m_timestamp_query_buffer.reset();
 	m_timestamp_query_allocation.reset();
 	m_sampler_heap_manager.Destroy();
@@ -2918,7 +2919,7 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
 	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-	sm.AddMacro("VS_ACCURATE_LINES", static_cast<int>(sel.accurate_lines));
+	sm.AddMacro("VS_ACCURATE_PRIMS", static_cast<int>(sel.accurate_prims));
 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
@@ -2990,9 +2991,9 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
 	sm.AddMacro("PS_NO_COLOR", sel.no_color);
 	sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
-	sm.AddMacro("PS_ACCURATE_LINES", sel.accurate_lines);
-	sm.AddMacro("PS_ACCURATE_LINES_AA", sel.accurate_lines_aa);
-	sm.AddMacro("PS_ACCURATE_LINES_AA_ABE", sel.accurate_lines_aa_abe);
+	sm.AddMacro("PS_ACCURATE_PRIMS", sel.accurate_prims);
+	sm.AddMacro("PS_ACCURATE_PRIMS_AA", sel.accurate_prims_aa);
+	sm.AddMacro("PS_ACCURATE_PRIMS_AA_ABE", sel.accurate_prims_aa_abe);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
@@ -3730,18 +3731,18 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootShaderResourceView(TFX_ROOT_SIGNATURE_PARAM_VS_SRV,
 			m_vertex_stream_buffer.GetGPUPointer() + m_vertex.start * sizeof(GSVertex));
 	}
-	if (flags & DIRTY_FLAG_PS_ACCURATE_LINES_BUFFER_BINDING)
+	if (flags & DIRTY_FLAG_PS_ACCURATE_PRIMS_BUFFER_BINDING)
 	{
-		if (!GetDescriptorAllocator().Allocate(1, &m_accurate_lines_srv_descriptor_gpu))
+		if (!GetDescriptorAllocator().Allocate(1, &m_accurate_prims_srv_descriptor_gpu))
 		{
-			Console.Error("Failed to allocate accurate lines GPU descriptor");
+			Console.Error("Failed to allocate accurate prims GPU descriptor");
 			return false;
 		}
 
 		m_device.get()->CopyDescriptorsSimple(
-			1, m_accurate_lines_srv_descriptor_gpu, m_accurate_lines_srv_descriptor_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+			1, m_accurate_prims_srv_descriptor_gpu, m_accurate_prims_srv_descriptor_cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_ACCURATE_LINES_DATA_SRV, m_accurate_lines_srv_descriptor_gpu);
+		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_ACCURATE_PRIMS_SRV, m_accurate_prims_srv_descriptor_gpu);
 		
 	}
 	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE)
@@ -4279,5 +4280,5 @@ void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 		IASetIndexBuffer(config.indices, config.nindices);
 	}
 
-	SetupAccurateLines(config);
+	SetupAccuratePrims(config);
 }

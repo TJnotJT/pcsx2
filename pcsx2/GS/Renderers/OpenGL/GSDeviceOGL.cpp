@@ -26,7 +26,7 @@ static constexpr u32 g_ps_cb_index        = 0;
 
 static constexpr u32 VERTEX_BUFFER_SIZE = 32 * 1024 * 1024;
 static constexpr u32 INDEX_BUFFER_SIZE = 16 * 1024 * 1024;
-static constexpr u32 ACCURATE_LINES_BUFFER_SIZE = sizeof(AccurateLinesData) * 1024 * 1024;
+static constexpr u32 ACCURATE_PRIMS_BUFFER_SIZE = sizeof(AccuratePrimsEdgeData) * 1024 * 1024;
 static constexpr u32 VERTEX_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 FRAGMENT_UNIFORM_BUFFER_SIZE = 8 * 1024 * 1024;
 static constexpr u32 TEXTURE_UPLOAD_BUFFER_SIZE = 128 * 1024 * 1024;
@@ -260,11 +260,11 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		m_vertex_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, VERTEX_BUFFER_SIZE);
 		m_index_stream_buffer = GLStreamBuffer::Create(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE);
-		m_accurate_lines_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, ACCURATE_LINES_BUFFER_SIZE);
+		m_accurate_prims_stream_buffer = GLStreamBuffer::Create(GL_ARRAY_BUFFER, ACCURATE_PRIMS_BUFFER_SIZE);
 		m_vertex_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, VERTEX_UNIFORM_BUFFER_SIZE);
 		m_fragment_uniform_stream_buffer = GLStreamBuffer::Create(GL_UNIFORM_BUFFER, FRAGMENT_UNIFORM_BUFFER_SIZE);
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &m_uniform_buffer_alignment);
-		if (!m_vertex_stream_buffer || !m_index_stream_buffer || !m_accurate_lines_stream_buffer ||
+		if (!m_vertex_stream_buffer || !m_index_stream_buffer || !m_accurate_prims_stream_buffer ||
 			!m_vertex_uniform_stream_buffer || !m_fragment_uniform_stream_buffer)
 		{
 			Host::ReportErrorAsync("GS", "Failed to create vertex/index/uniform streaming buffers");
@@ -308,9 +308,9 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, m_vertex_stream_buffer->GetGLBufferId(), 0, VERTEX_BUFFER_SIZE);
 		}
 
-		if (m_features.accurate_lines)
+		if (m_features.accurate_prims)
 		{
-			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_lines_stream_buffer->GetGLBufferId(), 0, ACCURATE_LINES_BUFFER_SIZE);
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 3, m_accurate_prims_stream_buffer->GetGLBufferId(), 0, ACCURATE_PRIMS_BUFFER_SIZE);
 		}
 	}
 
@@ -775,7 +775,7 @@ bool GSDeviceOGL::CheckFeatures(bool& buggy_pbo)
 		m_features.line_expand ? "hardware" : (m_features.vs_expand ? "vertex expanding" : "UNSUPPORTED"),
 		m_features.vs_expand ? "vertex expanding" : "CPU");
 
-	m_features.accurate_lines = GSConfig.HWAccurateLines;
+	m_features.accurate_prims = GSConfig.HWAccuratePrims;
 
 	return true;
 }
@@ -847,7 +847,7 @@ void GSDeviceOGL::DestroyResources()
 
 	m_fragment_uniform_stream_buffer.reset();
 	m_vertex_uniform_stream_buffer.reset();
-	m_accurate_lines_stream_buffer.reset();
+	m_accurate_prims_stream_buffer.reset();
 
 	glBindVertexArray(0);
 	if (m_expand_ibo != 0)
@@ -1339,7 +1339,7 @@ std::string GSDeviceOGL::GetVSSource(VSSelector sel)
 		+ fmt::format("#define VS_IIP {}\n", static_cast<u32>(sel.iip))
 		+ fmt::format("#define VS_POINT_SIZE {}\n", static_cast<u32>(sel.point_size))
 		+ fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand))
-		+ fmt::format("#define VS_ACCURATE_LINES {}\n", static_cast<int>(sel.accurate_lines))
+		+ fmt::format("#define VS_ACCURATE_PRIMS {}\n", static_cast<int>(sel.accurate_prims))
 	;
 	std::string src = GenGlslHeader("vs_main", GL_VERTEX_SHADER, macro);
 	src += m_shader_tfx_vgs;
@@ -1405,9 +1405,9 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_SCANMSK {}\n", sel.scanmsk)
 		+ fmt::format("#define PS_NO_COLOR {}\n", sel.no_color)
 		+ fmt::format("#define PS_NO_COLOR1 {}\n", sel.no_color1)
-		+ fmt::format("#define PS_ACCURATE_LINES {}\n", sel.accurate_lines)
-		+ fmt::format("#define PS_ACCURATE_LINES_AA {}\n", sel.accurate_lines_aa)
-		+ fmt::format("#define PS_ACCURATE_LINES_AA_ABE {}\n", sel.accurate_lines_aa_abe)
+		+ fmt::format("#define PS_ACCURATE_PRIMS {}\n", sel.accurate_prims)
+		+ fmt::format("#define PS_ACCURATE_PRIMS_AA {}\n", sel.accurate_prims_aa)
+		+ fmt::format("#define PS_ACCURATE_PRIMS_AA_ABE {}\n", sel.accurate_prims_aa_abe)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2023,18 +2023,18 @@ void GSDeviceOGL::ClearSamplerCache()
 	}
 }
 
-void GSDeviceOGL::SetupAccurateLines(GSHWDrawConfig& config)
+void GSDeviceOGL::SetupAccuratePrims(GSHWDrawConfig& config)
 {
-	if (config.accurate_lines_data)
+	if (config.accurate_prims)
 	{
-		const u32 count = config.accurate_lines_data->size();
-		const u32 size = count * sizeof(AccurateLinesData);
-		auto res = m_accurate_lines_stream_buffer->Map(sizeof(AccurateLinesData), size);
-		std::memcpy(res.pointer, config.accurate_lines_data->data(), size);
-		m_accurate_lines_stream_buffer->Unmap(size);
+		const u32 count = config.accurate_prims_edge_data->size();
+		const u32 size = count * sizeof(AccuratePrimsEdgeData);
+		auto res = m_accurate_prims_stream_buffer->Map(sizeof(AccuratePrimsEdgeData), size);
+		std::memcpy(res.pointer, config.accurate_prims_edge_data->data(), size);
+		m_accurate_prims_stream_buffer->Unmap(size);
 		
-		config.cb_vs.base_vertex = m_vertex.start;
-		config.cb_ps.accurate_lines_base = res.index_aligned;
+		config.cb_vs.base_vertex.x = m_vertex.start;
+		config.cb_ps.accurate_prims_base.x = res.index_aligned;
 	}
 }
 
@@ -2552,7 +2552,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
-	SetupAccurateLines(config);
+	SetupAccuratePrims(config);
 
 	if (config.vs.UseExpandIndexBuffer())
 	{

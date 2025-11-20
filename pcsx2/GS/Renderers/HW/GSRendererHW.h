@@ -137,14 +137,14 @@ private:
 	bool IsUsingCsInBlend();
 	bool IsUsingAsInBlend();
 
-	void GetAccurateLinesVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccurateLinesData& data);
-	void ExpandAccurateTriangleEdge(
+	void GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccuratePrimsEdgeData& data);
+	void ExpandAccurateTrianglesEdge(
 		const GSVertex& vtx0,
 		const GSVertex& vtx1,
 		const GSVector4i& edge0,
 		const GSVector4i& edge1,
 		bool top_left,
-		AccurateLinesData& data,
+		AccuratePrimsEdgeData& data,
 		GSVertex* vertex_out);
 
 	// We modify some of the context registers to optimize away unnecessary operations.
@@ -215,7 +215,7 @@ private:
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
 
-	std::vector<AccurateLinesData> m_accurate_lines_data;
+	std::vector<AccuratePrimsEdgeData> m_accurate_prims_edge_data;
 
 public:
 	GSRendererHW();

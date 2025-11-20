@@ -336,8 +336,7 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	out[5] = v[3];
 }
 
-// FIXME: Rename to AccuratePrims!
-void GSRendererHW::GetAccurateLinesVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccurateLinesData& data)
+void GSRendererHW::GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccuratePrimsEdgeData& data)
 {
 	GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
 	GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
@@ -399,13 +398,13 @@ void GSRendererHW::GetAccurateLinesVertexAttributes(const GSVertex& vtx0, const 
 		static_cast<float>(vtx1.RGBAQ.A));
 }
 
-void GSRendererHW::ExpandAccurateTriangleEdge(
+void GSRendererHW::ExpandAccurateTrianglesEdge(
 	const GSVertex& vtx0,
 	const GSVertex& vtx1,
 	const GSVector4i& edge0,
 	const GSVector4i& edge1,
 	bool top_left,
-	AccurateLinesData& data,
+	AccuratePrimsEdgeData& data,
 	GSVertex* vertex_out)
 {
 	const GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
@@ -423,7 +422,7 @@ void GSRendererHW::ExpandAccurateTriangleEdge(
 	data.step_x = std::abs(dxy.x) >= std::abs(dxy.y);
 	data.side = top_left != (data.step_x && (dxy.y != 0) && (pos_x == pos_y));
 
-	GetAccurateLinesVertexAttributes(vtx0, vtx1, data);
+	GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, data);
 
 	GetCoveringQuad(v0, v1, vertex_out);
 }
@@ -448,13 +447,14 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 	while (m_vertex.maxcount < static_cast<u32>(prims * verts_per_prim))
 		GrowVertexBuffer();
 
-	m_accurate_lines_data.clear();
-	m_accurate_lines_data.resize(3 * prims);
+	m_accurate_prims_edge_data.clear();
+	m_accurate_prims_edge_data.resize(3 * prims);
 
 	const GSVector4i& xyof = m_context->scissor.xyof;
 
 	for (std::size_t i = 0; i < prims; i++)
 	{
+		// Code from SW GSRasterizer
 		const GSVertex& vtx0_orig = m_vertex.buff[m_index.buff[3 * i + 0]];
 		const GSVertex& vtx1_orig = m_vertex.buff[m_index.buff[3 * i + 1]];
 		const GSVertex& vtx2_orig = m_vertex.buff[m_index.buff[3 * i + 2]];
@@ -529,11 +529,11 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		m_vertex.buff_copy[verts_per_prim * i + 1] = vtx1;
 		m_vertex.buff_copy[verts_per_prim * i + 2] = vtx2;
 
-		ExpandAccurateTriangleEdge(vtx0, vtx1, edge1, edge2, tl0, m_accurate_lines_data[3 * i + 0],
+		ExpandAccurateTrianglesEdge(vtx0, vtx1, edge1, edge2, tl0, m_accurate_prims_edge_data[3 * i + 0],
 			&m_vertex.buff_copy[verts_per_prim * i + 3]);
-		ExpandAccurateTriangleEdge(vtx0, vtx2, edge2, edge0, tl1, m_accurate_lines_data[3 * i + 1],
+		ExpandAccurateTrianglesEdge(vtx0, vtx2, edge2, edge0, tl1, m_accurate_prims_edge_data[3 * i + 1],
 			&m_vertex.buff_copy[verts_per_prim * i + 9]);
-		ExpandAccurateTriangleEdge(vtx1, vtx2, edge0, edge1, tl2, m_accurate_lines_data[3 * i + 2],
+		ExpandAccurateTrianglesEdge(vtx1, vtx2, edge0, edge1, tl2, m_accurate_prims_edge_data[3 * i + 2],
 			&m_vertex.buff_copy[verts_per_prim * i + 15]);
 	}
 
@@ -572,8 +572,8 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 	while (m_vertex.maxcount < static_cast<u32>(verts_per_prim * prims))
 		GrowVertexBuffer();
 
-	m_accurate_lines_data.clear();
-	m_accurate_lines_data.resize(prims);
+	m_accurate_prims_edge_data.clear();
+	m_accurate_prims_edge_data.resize(prims);
 
 	const GSVector4i& xyof = m_context->scissor.xyof;
 
@@ -585,7 +585,7 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 		const GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
 		const GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
 
-		AccurateLinesData& data = m_accurate_lines_data[i];
+		AccuratePrimsEdgeData& data = m_accurate_prims_edge_data[i];
 
 		data.xy0 = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
 		data.xy1 = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
@@ -597,7 +597,7 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 		data.draw0 = !ExitRule(data.xy0 - xy0_i, data.step_x, pos_step);
 		data.draw1 = ExitRule(data.xy1 - xy1_i, data.step_x, pos_step);
 
-		GetAccurateLinesVertexAttributes(vtx0, vtx1, data);
+		GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, data);
 
 		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[i * verts_per_prim]);
 	}
@@ -5328,15 +5328,16 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_LINE_CLASS:
 			{
-				if (features.accurate_lines)
+				if (features.accurate_prims)
 				{
 					GL_INS("HW: Using accurate lines");
 					ExpandAccurateLinesVertices();
-					m_conf.accurate_lines_data = &m_accurate_lines_data;
-					m_conf.vs.accurate_lines = true;
-					m_conf.ps.accurate_lines = true;
-					m_conf.ps.accurate_lines_aa = (PRIM->AA1 != 0);
-					m_conf.ps.accurate_lines_aa_abe = (PRIM->ABE != 0);
+					m_conf.accurate_prims = true;
+					m_conf.accurate_prims_edge_data = &m_accurate_prims_edge_data;
+					m_conf.vs.accurate_prims = ACCURATE_PRIMS_LINE;
+					m_conf.ps.accurate_prims = ACCURATE_PRIMS_LINE;
+					m_conf.ps.accurate_prims_aa = (PRIM->AA1 != 0);
+					m_conf.ps.accurate_prims_aa_abe = (PRIM->ABE != 0);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
 				}
@@ -5401,14 +5402,16 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 			break;
 
 		case GS_TRIANGLE_CLASS:
-			if (features.accurate_lines && PRIM->AA1)
+			if (features.accurate_prims && PRIM->AA1)
 			{
 				GL_INS("HW: Using accurate triangles");
 				ExpandAccurateTrianglesVertices();
-				m_conf.accurate_lines_data = &m_accurate_lines_data; // FIXME: Change accurate lines data to accurate_prims_data
-				m_conf.vs.accurate_triangles = true;
-				m_conf.ps.accurate_triangles = true;
-				m_conf.ps.accurate_lines_aa_abe = (PRIM->ABE != 0); // FIXME: Change to accurate_prims_aa_abe
+				m_conf.accurate_prims = true;
+				m_conf.accurate_prims_edge_data = &m_accurate_prims_edge_data;
+				m_conf.vs.accurate_prims = ACCURATE_PRIMS_TRIANGLE;
+				m_conf.ps.accurate_prims = ACCURATE_PRIMS_TRIANGLE;
+				m_conf.ps.accurate_prims_aa = (PRIM->AA1 != 0);
+				m_conf.ps.accurate_prims_aa_abe = (PRIM->ABE != 0);
 				m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 				m_conf.indices_per_prim = 21;
 			}
@@ -5467,10 +5470,11 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
-	// Accurate lines requires a manual depth interpolation in the pixel shader.
+	// Accurate prims requires a manual depth interpolation in the pixel shader.
 	// Piggy-back on Z clamp to avoid creating more pipeline combinations.
-	bool accurate_lines_clamp_z =
-		g_gs_device->Features().accurate_lines && (m_vt.m_primclass == GS_LINE_CLASS) &&
+	bool accurate_prims_clamp_z =
+		g_gs_device->Features().accurate_prims &&
+		(m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) &&
 		(m_conf.depth.zwe || m_conf.depth.ztst != ZTST_ALWAYS);
 
 	// On the real GS we appear to do clamping on the max z value the format allows.
@@ -5482,13 +5486,13 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	//ps_cb.MaxDepth = GSVector4(0.0f, 0.0f, 0.0f, 1.0f);
 	m_conf.ps.zclamp = 0;
 
-	if (clamp_z || accurate_lines_clamp_z)
+	if (clamp_z || accurate_prims_clamp_z)
 	{
 		if (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS)
 		{
 			m_conf.cb_vs.max_depth = GSVector2i(max_z);
 		}
-		else if (!m_cached_ctx.ZBUF.ZMSK || accurate_lines_clamp_z)
+		else if (!m_cached_ctx.ZBUF.ZMSK || accurate_prims_clamp_z)
 		{
 			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 			m_conf.ps.zclamp = 1;
@@ -9889,5 +9893,6 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 bool GSRendererHW::IsCoverageAlphaSupported()
 {
 	return IsCoverageAlpha() &&
-		((m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) && g_gs_device->Features().accurate_lines);
+	       ((m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) &&
+			   g_gs_device->Features().accurate_prims);
 }

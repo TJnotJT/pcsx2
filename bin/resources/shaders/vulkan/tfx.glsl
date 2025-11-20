@@ -1417,7 +1417,7 @@ void HandleAccurateLines(out float alpha_coverage)
 #endif
 
 #if PS_ACCURATE_TRIANGLES
-void HandleAccurateTriangleEdge(out float alpha_coverage)
+void HandleAccurateTrianglesEdge(out float alpha_coverage)
 {
 	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
 
@@ -1514,7 +1514,7 @@ void main()
 	}
 	else
 	{
-		HandleAccurateTriangleEdge(alpha_coverage);
+		HandleAccurateTrianglesEdge(alpha_coverage);
 	}
 #endif
 

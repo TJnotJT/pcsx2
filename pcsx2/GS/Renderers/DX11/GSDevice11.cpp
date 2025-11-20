@@ -395,30 +395,30 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		}
 	}
 
-	if (m_features.accurate_lines)
+	if (m_features.accurate_prims)
 	{
-		bd.ByteWidth = ACCURATE_LINES_BUFFER_SIZE;
+		bd.ByteWidth = ACCURATE_PRIMS_BUFFER_SIZE;
 		bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-		bd.StructureByteStride = sizeof(AccurateLinesData);
+		bd.StructureByteStride = sizeof(AccuratePrimsEdgeData);
 		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 
-		if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_accurate_lines_b.put())))
+		if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_accurate_prims_b.put())))
 		{
-			Console.Error("D3D11: Failed to create accurate lines buffer.");
+			Console.Error("D3D11: Failed to create accurate prims buffer.");
 			return false;
 		}
 
-		const CD3D11_SHADER_RESOURCE_VIEW_DESC accurate_lines_b_srv_desc(
-			D3D11_SRV_DIMENSION_BUFFER, DXGI_FORMAT_UNKNOWN, 0, ACCURATE_LINES_BUFFER_SIZE / sizeof(AccurateLinesData));
-		if (FAILED(m_dev->CreateShaderResourceView(m_accurate_lines_b.get(), &accurate_lines_b_srv_desc, m_accurate_lines_b_srv.put())))
+		const CD3D11_SHADER_RESOURCE_VIEW_DESC accurate_prims_b_srv_desc(
+			D3D11_SRV_DIMENSION_BUFFER, DXGI_FORMAT_UNKNOWN, 0, ACCURATE_PRIMS_BUFFER_SIZE / sizeof(AccuratePrimsEdgeData));
+		if (FAILED(m_dev->CreateShaderResourceView(m_accurate_prims_b.get(), &accurate_prims_b_srv_desc, m_accurate_prims_b_srv.put())))
 		{
-			Console.Error("D3D11: Failed to create accurate lines buffer SRV.");
+			Console.Error("D3D11: Failed to create accurate prims buffer SRV.");
 			return false;
 		}
 
 		// If MAX_TEXTURES changes, please change the register for this buffer in the shader.
 		static_assert(MAX_TEXTURES == 4);
-		m_ctx->PSSetShaderResources(MAX_TEXTURES, 1, m_accurate_lines_b_srv.addressof());
+		m_ctx->PSSetShaderResources(MAX_TEXTURES, 1, m_accurate_prims_b_srv.addressof());
 	}
 
 	// rasterizer
@@ -626,7 +626,7 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 	                         D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION :
 	                         D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 
-	m_features.accurate_lines = true;
+	m_features.accurate_prims = true;
 }
 
 bool GSDevice11::HasSurface() const
@@ -1702,7 +1702,7 @@ void GSDevice11::SetupVS(VSSelector sel, const GSHWDrawConfig::VSConstantBuffer*
 		sm.AddMacro("VS_FST", sel.fst);
 		sm.AddMacro("VS_IIP", sel.iip);
 		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-		sm.AddMacro("VS_ACCURATE_LINES", static_cast<int>(sel.accurate_lines));
+		sm.AddMacro("VS_ACCURATE_PRIMS", static_cast<int>(sel.accurate_prims));
 
 		static constexpr const D3D11_INPUT_ELEMENT_DESC layout[] =
 			{
@@ -1804,9 +1804,9 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
 		sm.AddMacro("PS_NO_COLOR", sel.no_color);
 		sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
-		sm.AddMacro("PS_ACCURATE_LINES", sel.accurate_lines);
-		sm.AddMacro("PS_ACCURATE_LINES_AA", sel.accurate_lines_aa);
-		sm.AddMacro("PS_ACCURATE_LINES_AA_ABE", sel.accurate_lines_aa_abe);
+		sm.AddMacro("PS_ACCURATE_PRIMS", sel.accurate_prims);
+		sm.AddMacro("PS_ACCURATE_PRIMS_AA", sel.accurate_prims_aa);
+		sm.AddMacro("PS_ACCURATE_PRIMS_AA_ABE", sel.accurate_prims_aa_abe);
 
 		wil::com_ptr_nothrow<ID3D11PixelShader> ps = m_shader_cache.GetPixelShader(m_dev.get(), m_tfx_source, sm.GetPtr(), "ps_main");
 		i = m_ps.try_emplace(sel, std::move(ps)).first;
@@ -2310,39 +2310,39 @@ bool GSDevice11::IASetExpandVertexBuffer(const void* vertex, u32 stride, u32 cou
 	return true;
 }
 
-bool GSDevice11::SetupAccurateLines(GSHWDrawConfig& config)
+bool GSDevice11::SetupAccuratePrims(GSHWDrawConfig& config)
 {
-	if (config.accurate_lines_data)
+	if (config.accurate_prims)
 	{
-		const u32 count = config.accurate_lines_data->size();
-		const u32 size = count * sizeof(AccurateLinesData);
+		const u32 count = config.accurate_prims_edge_data->size();
+		const u32 size = count * sizeof(AccuratePrimsEdgeData);
 
-		if (size > ACCURATE_LINES_BUFFER_SIZE)
+		if (size > ACCURATE_PRIMS_BUFFER_SIZE)
 			return false;
 
 		D3D11_MAP type = D3D11_MAP_WRITE_NO_OVERWRITE;
 
-		pxAssert(m_accurate_lines_b_pos % sizeof(AccurateLinesData) == 0);
+		pxAssert(m_accurate_prims_b_pos % sizeof(AccuratePrimsEdgeData) == 0);
 
-		if (m_accurate_lines_b_pos + size > ACCURATE_LINES_BUFFER_SIZE)
+		if (m_accurate_prims_b_pos + size > ACCURATE_PRIMS_BUFFER_SIZE)
 		{
-			m_accurate_lines_b_pos = 0;
+			m_accurate_prims_b_pos = 0;
 			type = D3D11_MAP_WRITE_DISCARD;
 		}
 
 		D3D11_MAPPED_SUBRESOURCE m;
-		if (FAILED(m_ctx->Map(m_accurate_lines_b.get(), 0, type, 0, &m)))
+		if (FAILED(m_ctx->Map(m_accurate_prims_b.get(), 0, type, 0, &m)))
 			return false;
 
-		void* map = static_cast<u8*>(m.pData) + m_accurate_lines_b_pos;
+		void* map = static_cast<u8*>(m.pData) + m_accurate_prims_b_pos;
 
-		GSVector4i::storent(map, config.accurate_lines_data->data(), size);
+		GSVector4i::storent(map, config.accurate_prims_edge_data->data(), size);
 
-		m_ctx->Unmap(m_accurate_lines_b.get(), 0);
+		m_ctx->Unmap(m_accurate_prims_b.get(), 0);
 
-		config.cb_ps.accurate_lines_base = m_accurate_lines_b_pos / sizeof(AccurateLinesData);
+		config.cb_ps.accurate_prims_base = m_accurate_prims_b_pos / sizeof(AccuratePrimsEdgeData);
 		
-		m_accurate_lines_b_pos += size;
+		m_accurate_prims_b_pos += size;
 	}
 	return true;
 }
@@ -2741,9 +2741,9 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	if (!SetupAccurateLines(config))
+	if (!SetupAccuratePrims(config))
 	{
-		Console.Error("D3D11: Failed to setup accurate lines");
+		Console.Error("D3D11: Failed to setup accurate prims");
 		return;
 	}
 

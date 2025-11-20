@@ -378,7 +378,7 @@ private:
 
 	VKStreamBuffer m_vertex_stream_buffer;
 	VKStreamBuffer m_index_stream_buffer;
-	VKStreamBuffer m_accurate_lines_stream_buffer;
+	VKStreamBuffer m_accurate_prims_stream_buffer;
 	VKStreamBuffer m_vertex_uniform_stream_buffer;
 	VKStreamBuffer m_fragment_uniform_stream_buffer;
 	VKStreamBuffer m_texture_stream_buffer;
@@ -561,8 +561,7 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
-	// FIXME change to SetupAccuratePrims();
-	void SetupAccurateLines(GSHWDrawConfig& config);
+	void SetupAccuratePrims(GSHWDrawConfig& config);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None);

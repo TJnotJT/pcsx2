@@ -269,7 +269,7 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
-struct alignas(16) AccurateLinesData
+struct alignas(16) AccuratePrimsEdgeData
 {
 	// Interpolated attributes
 	GSVector4 t_float0; // 0
@@ -295,7 +295,14 @@ struct alignas(16) AccurateLinesData
 	// Total 208
 };
 
-static_assert(sizeof(AccurateLinesData) == 208);
+static_assert(sizeof(AccuratePrimsEdgeData) == 208);
+
+enum
+{
+	ACCURATE_PRIMS_DISABLE = 0,
+	ACCURATE_PRIMS_LINE = 1,
+	ACCURATE_PRIMS_TRIANGLE = 2
+};
 
 struct alignas(16) GSHWDrawConfig
 {
@@ -324,8 +331,7 @@ struct alignas(16) GSHWDrawConfig
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
-				u8 accurate_lines : 1;
-				u8 accurate_triangles : 1;
+				u8 accurate_prims : 2; // 0 - disables; 1 - lines; 2 - triangles.
 			};
 			u8 key;
 		};
@@ -425,10 +431,9 @@ struct alignas(16) GSHWDrawConfig
 				u32 scanmsk : 2;
 
 				// Accurate lines
-				u32 accurate_lines : 1;
-				u32 accurate_lines_aa : 1;
-				u32 accurate_lines_aa_abe : 1; // FIXME: Rename to accurate_abe
-				u32 accurate_triangles : 1;
+				u32 accurate_prims : 2; // 0 - disabled; 1 - lines; 2 - triangles
+				u32 accurate_prims_aa : 1;
+				u32 accurate_prims_aa_abe : 1;
 			};
 
 			struct
@@ -643,10 +648,7 @@ struct alignas(16) GSHWDrawConfig
 
 		GSVector4 ScaleFactor;
 
-		uint accurate_lines_base;
-		uint _pad0;
-		uint _pad1;
-		uint _pad2;
+		GSVector4i accurate_prims_base;
 
 		__fi PSConstantBuffer()
 		{
@@ -765,7 +767,8 @@ struct alignas(16) GSHWDrawConfig
 	SetDATM datm : 2;
 	bool line_expand : 1;
 
-	std::vector<AccurateLinesData>* accurate_lines_data;
+	bool accurate_prims;
+	std::vector<AccuratePrimsEdgeData>* accurate_prims_edge_data;
 
 	struct AlphaPass
 	{
@@ -864,7 +867,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool accurate_lines       : 1; // FIXME: Change to 'accurate_prims'
+		bool accurate_prims       : 1; ///< Supports AA1 triangles/lines and accurate lines shaders.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
