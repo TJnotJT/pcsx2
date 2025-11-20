@@ -648,7 +648,7 @@ struct alignas(16) GSHWDrawConfig
 
 		GSVector4 ScaleFactor;
 
-		GSVector4i accurate_prims_base;
+		GSVector4i accurate_prims_base_index;
 
 		__fi PSConstantBuffer()
 		{

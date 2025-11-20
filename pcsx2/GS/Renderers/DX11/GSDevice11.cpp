@@ -2340,7 +2340,7 @@ bool GSDevice11::SetupAccuratePrims(GSHWDrawConfig& config)
 
 		m_ctx->Unmap(m_accurate_prims_b.get(), 0);
 
-		config.cb_ps.accurate_prims_base = m_accurate_prims_b_pos / sizeof(AccuratePrimsEdgeData);
+		config.cb_ps.accurate_prims_base_index.x = m_accurate_prims_b_pos / sizeof(AccuratePrimsEdgeData);
 		
 		m_accurate_prims_b_pos += size;
 	}

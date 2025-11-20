@@ -12,7 +12,7 @@
 #if defined(VERTEX_SHADER)
 
 #if VS_ACCURATE_PRIMS
-layout(location = 7) flat out uint accurate_prims_edge_index;
+layout(location = 7) flat out uint accurate_prims_index;
 #if VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 layout(location = 8) flat out uint accurate_triangles_interior;
 #endif
@@ -69,7 +69,7 @@ void main()
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_ACCURATE_PRIMS == ACCURATE_LINES
-		accurate_prims_edge_index = (gl_VertexIndex - BaseVertex) / 6u;
+		accurate_prims_index = (gl_VertexIndex - BaseVertex) / 6u;
 		return; // Don't send line vertex attributes - they are interpolated manually in the fragment shader.
 	#elif VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 		uint vertex_id = gl_VertexIndex - BaseVertex;
@@ -78,7 +78,7 @@ void main()
 		if (!bool(accurate_triangles_interior))
 		{
 			uint edge = (vertex_id - 21 * prim_id - 3) / 6; // Each group of 6 vertices after first 3 is one edge.
-			accurate_prims_edge_index = 3 * prim_id + edge;
+			accurate_prims_index = 3 * prim_id + edge;
 			return; // Don't send edge vertex attributes - they are interpolated manually in the fragment shader.
 		}
 		// Send the interior vertex attributes for fixed function interpolation.
@@ -368,7 +368,7 @@ struct
 	vec4 c;
 } vsIn;
 
-layout(location = 7) flat in uint accurate_prims_edge_index;
+layout(location = 7) flat in uint accurate_prims_index;
 #if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 layout(location = 8) flat in uint accurate_triangles_interior;
 #endif
@@ -1353,7 +1353,7 @@ void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int we
 #if PS_ACCURATE_PRIMS == ACCURATE_LINES
 void HandleAccurateLines(out float alpha_coverage)
 {
-	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_edge_index];
+	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_index];
 
 	ivec2 xy0 = data.xy0;
 	ivec2 xy1 = data.xy1;
@@ -1426,7 +1426,7 @@ void HandleAccurateLines(out float alpha_coverage)
 #if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 void HandleAccurateTrianglesEdge(out float alpha_coverage)
 {
-	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_edge_index];
+	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_index];
 
 	ivec2 xy0 = data.xy0;
 	ivec2 xy1 = data.xy1;

@@ -2209,7 +2209,7 @@ void GSDevice12::SetupAccuratePrims(GSHWDrawConfig& config)
 		}
 
 		config.cb_vs.base_vertex = m_vertex.start;
-		config.cb_ps.accurate_prims_base = m_accurate_prims_stream_buffer.GetCurrentOffset() / sizeof(AccuratePrimsEdgeData);
+		config.cb_ps.accurate_prims_base_index.x = m_accurate_prims_stream_buffer.GetCurrentOffset() / sizeof(AccuratePrimsEdgeData);
 
 		SetVSConstantBuffer(config.cb_vs);
 		SetPSConstantBuffer(config.cb_ps);

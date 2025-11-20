@@ -2034,7 +2034,7 @@ void GSDeviceOGL::SetupAccuratePrims(GSHWDrawConfig& config)
 		m_accurate_prims_stream_buffer->Unmap(size);
 		
 		config.cb_vs.base_vertex.x = m_vertex.start;
-		config.cb_ps.accurate_prims_base.x = res.index_aligned;
+		config.cb_ps.accurate_prims_base_index.x = res.index_aligned;
 	}
 }
 
