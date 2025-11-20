@@ -88,7 +88,7 @@ void vs_main()
 	gl_Position.w = 1.0f;
 
 	#if VS_ACCURATE_PRIMS == ACCURATE_LINES
-		accurate_prims_index = (gl_VertexID - BaseVertex) / 6u;
+		accurate_prims_index = (gl_VertexID - BaseVertex) / 6;
 		return; // Don't send line vertex attributes - they are interpolated manually in the fragment shader.
 	#elif VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 		uint vertex_id = gl_VertexID - BaseVertex;

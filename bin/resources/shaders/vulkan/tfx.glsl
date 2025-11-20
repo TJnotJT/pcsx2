@@ -69,7 +69,7 @@ void main()
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_ACCURATE_PRIMS == ACCURATE_LINES
-		accurate_prims_index = (gl_VertexIndex - BaseVertex) / 6u;
+		accurate_prims_index = (gl_VertexIndex - BaseVertex) / 6;
 		return; // Don't send line vertex attributes - they are interpolated manually in the fragment shader.
 	#elif VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 		uint vertex_id = gl_VertexIndex - BaseVertex;
@@ -1410,7 +1410,7 @@ void HandleAccurateLines(out float alpha_coverage)
 	else
 		discard;
 	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
@@ -1497,8 +1497,8 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 		discard;
 	
 #if PS_ACCURATE_PRIMS_AA
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
 #endif
 
 	// Interpolate attributes
@@ -1517,7 +1517,7 @@ void main()
 #elif PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 	if (bool(accurate_triangles_interior))
 	{
-		alpha_coverage = 128.0;
+		alpha_coverage = 128.0f;
 		vsIn.t = vsInReal.t;
 		vsIn.ti = vsInReal.ti;
 		vsIn.c = vsInReal.c;
@@ -1583,7 +1583,7 @@ void main()
 #elif PS_ACCURATE_PRIMS_AA
 	// AA: coverage is computed in alpha_coverage
 	#if PS_ACCURATE_LINES_AA_ABE
-		if (floor(C.a) == 128.0) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
+		if (floor(C.a) == 128.0f) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
 			C.a = alpha_coverage;
 	#else
 		C.a = alpha_coverage;
