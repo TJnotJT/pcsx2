@@ -1086,9 +1086,9 @@ void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int we
 	input.p.z = (data.p1.z == data.p0.z) ? data.p1.z : z_interp;
 
 	// Clamp attributes. Fog/Z are normalized.
-	input.c = clamp(input.c, 0.0, 255.0);
-	input.t.z = clamp(input.t.z, 0.0, 1.0);
-	input.p.z = clamp(input.p.z, 0.0, 1.0);
+	input.c = clamp(input.c, 0.0f, 255.0f);
+	input.t.z = clamp(input.t.z, 0.0f, 1.0f);
+	input.p.z = clamp(input.p.z, 0.0f, 1.0f);
 }
 #endif
 
@@ -1154,13 +1154,14 @@ void HandleAccurateLines(inout PS_INPUT input, out float alpha_coverage)
 		alpha_i = 0; // Prevent compiler warning.
 		discard;
 	}
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
 	if (minor_i != minor_i_expected)
 		discard;
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes
@@ -1216,7 +1217,6 @@ void HandleAccurateTrianglesEdge(inout PS_INPUT input, out float alpha_coverage)
 	int minor_i_expected = minor_line / d_major;
 	int minor_i_expected_0 = minor_i_expected & ~0xF;
 	int minor_i_expected_1 = minor_i_expected_0 + 16;
-	bool minor_i_pixel_center = ((minor_line - d_major * minor_i_expected_0) & 0xF) == 0;
 	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
 	int alpha_i_1 = d_major_scaled - alpha_i_0;
 
@@ -1242,8 +1242,10 @@ void HandleAccurateTrianglesEdge(inout PS_INPUT input, out float alpha_coverage)
 		discard;
 
 #if PS_ACCURATE_PRIMS_AA
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
+#else
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes
@@ -1260,7 +1262,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #elif PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 	if (bool(input.accurate_triangles_interior))
 	{
-		alpha_coverage = 128.0;
+		alpha_coverage = 128.0f;
 	}
 	else
 	{

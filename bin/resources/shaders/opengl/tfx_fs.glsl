@@ -1056,9 +1056,9 @@ void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int we
 	FragCoord.z = (data.p1.z == data.p0.z) ? data.p1.z : z_interp;
 
 	// Clamp attributes. Fog/Z are normalized.
-	PSin.c = clamp(PSin.c, 0.0, 255.0);
-	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
-	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
+	PSin.c = clamp(PSin.c, 0.0f, 255.0f);
+	PSin.t_float.z = clamp(PSin.t_float.z, 0.0f, 1.0f);
+	FragCoord.z = clamp(FragCoord.z, 0.0f, 1.0f);
 }
 #endif
 
@@ -1121,13 +1121,14 @@ void HandleAccurateLines(out float alpha_coverage)
 		alpha_i = alpha_i_1;
 	else
 		discard;
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
 	if (minor_i != minor_i_expected)
 		discard;
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes
@@ -1209,8 +1210,10 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 		discard;
 	
 #if PS_ACCURATE_PRIMS_AA
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
+#else
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes

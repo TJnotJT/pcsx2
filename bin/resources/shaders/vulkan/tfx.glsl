@@ -1344,9 +1344,9 @@ void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int we
 	FragCoord.z = (data.p1.z == data.p0.z) ? data.p1.z : z_interp;
 
 	// Clamp attributes. Fog/Z are normalized.
-	vsIn.c = clamp(vsIn.c, 0.0, 255.0);
-	vsIn.t.z = clamp(vsIn.t.z, 0.0, 1.0);
-	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
+	vsIn.c = clamp(vsIn.c, 0.0f, 255.0f);
+	vsIn.t.z = clamp(vsIn.t.z, 0.0f, 1.0f);
+	FragCoord.z = clamp(FragCoord.z, 0.0f, 1.0f);
 }
 #endif
 
@@ -1409,13 +1409,14 @@ void HandleAccurateLines(out float alpha_coverage)
 		alpha_i = alpha_i_1;
 	else
 		discard;
-	// Make sure that the output alpha is always <= 127.0 for AA.
-	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
+	// Make sure that the output alpha is always <= 127 for AA.
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
 	if (minor_i != minor_i_expected)
 		discard;
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes
@@ -1471,7 +1472,6 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 	int minor_i_expected = minor_line / d_major;
 	int minor_i_expected_0 = minor_i_expected & ~0xF;
 	int minor_i_expected_1 = minor_i_expected_0 + 16;
-	bool minor_i_pixel_center = ((minor_line - d_major * minor_i_expected_0) & 0xF) == 0;
 	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
 	int alpha_i_1 = d_major_scaled - alpha_i_0;
 
@@ -1498,7 +1498,9 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 	
 #if PS_ACCURATE_PRIMS_AA
 	// Make sure that the output alpha is always <= 127 for AA.
-	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0, 127.0f));
+	alpha_coverage = floor(clamp(128.0f * float(alpha_i) / float(d_major_scaled), 0.0f, 127.0f));
+#else
+	alpha_coverage = 128.0f;
 #endif
 
 	// Interpolate attributes
