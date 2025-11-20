@@ -561,6 +561,7 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
+	// FIXME change to SetupAccuratePrims();
 	void SetupAccurateLines(GSHWDrawConfig& config);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,

@@ -137,6 +137,16 @@ private:
 	bool IsUsingCsInBlend();
 	bool IsUsingAsInBlend();
 
+	void GetAccurateLinesVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccurateLinesData& data);
+	void ExpandAccurateTriangleEdge(
+		const GSVertex& vtx0,
+		const GSVertex& vtx1,
+		const GSVector4i& edge0,
+		const GSVector4i& edge1,
+		bool top_left,
+		AccurateLinesData& data,
+		GSVertex* vertex_out);
+
 	// We modify some of the context registers to optimize away unnecessary operations.
 	// Instead of messing with the real context, we copy them and use those instead.
 	struct HWCachedCtx
@@ -223,7 +233,8 @@ public:
 	void Lines2Sprites();
 	bool VerifyIndices();
 	void ExpandLineIndices();
-	void ExpandAccurateLineVertices();
+	void ExpandAccurateLinesVertices();
+	void ExpandAccurateTrianglesVertices();
 	void ConvertSpriteTextureShuffle(u32& process_rg, u32& process_ba, bool& shuffle_across, GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
 	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);

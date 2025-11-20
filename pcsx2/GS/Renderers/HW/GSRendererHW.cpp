@@ -336,8 +336,222 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	out[5] = v[3];
 }
 
-void GSRendererHW::ExpandAccurateLineVertices()
+// FIXME: Rename to AccuratePrims!
+void GSRendererHW::GetAccurateLinesVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccurateLinesData& data)
 {
+	GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
+	GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
+
+	// Interpolated attributes - mimicks transformations done in vertex shader.
+	GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;
+	GSVector2 uv1 = GSVector2(static_cast<float>(vtx1.U), static_cast<float>(vtx1.V)) - m_conf.cb_vs.texture_offset;
+	GSVector2 uv0_scale = uv0 * m_conf.cb_vs.texture_scale;
+	GSVector2 uv1_scale = uv1 * m_conf.cb_vs.texture_scale;
+	GSVector2 st0 = GSVector2(vtx0.ST.S, vtx0.ST.T) - m_conf.cb_vs.texture_offset;
+	GSVector2 st1 = GSVector2(vtx1.ST.S, vtx1.ST.T) - m_conf.cb_vs.texture_offset;
+	GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
+	GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
+
+	data.t_float0 = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
+	data.t_float1 = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
+	data.t_int0 = GSVector4(uv0_scale.x, uv0_scale.y);
+	data.t_int1 = GSVector4(uv1_scale.x, uv1_scale.y);
+
+	if (m_conf.vs.fst)
+	{
+		data.t_int0.z = uv0.x;
+		data.t_int0.w = uv0.y;
+		data.t_int1.z = uv1.x;
+		data.t_int1.w = uv1.y;
+	}
+	else
+	{
+		data.t_int0.z = st0_scale.x;
+		data.t_int0.w = st0_scale.y;
+		data.t_int1.z = st1_scale.x;
+		data.t_int1.w = st1_scale.y;
+	}
+
+	constexpr float exp_min32 = 0x1p-32f;
+	float z0 = static_cast<float>(std::min(vtx0.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+	float z1 = static_cast<float>(std::min(vtx1.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
+
+	GSVector2 xy0 = GSVector2(v0.x, v0.y) - GSVector2(0.05f);
+	GSVector2 xy1 = GSVector2(v1.x, v1.y) - GSVector2(0.05f);
+
+	xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+	xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
+
+	GSRendererType renderer = GSGetCurrentRenderer();
+	float y_sign = (renderer == GSRendererType::DX11 || renderer == GSRendererType::DX12) ? -1.0f : 1.0f;
+	data.p0 = GSVector4(xy0.x, y_sign * xy0.y, z0 * exp_min32, 1.0f);
+	data.p1 = GSVector4(xy1.x, y_sign * xy1.y, z1 * exp_min32, 1.0f);
+
+	data.c0 = GSVector4(
+		static_cast<float>(vtx0.RGBAQ.R),
+		static_cast<float>(vtx0.RGBAQ.G),
+		static_cast<float>(vtx0.RGBAQ.B),
+		static_cast<float>(vtx0.RGBAQ.A));
+	data.c1 = GSVector4(
+		static_cast<float>(vtx1.RGBAQ.R),
+		static_cast<float>(vtx1.RGBAQ.G),
+		static_cast<float>(vtx1.RGBAQ.B),
+		static_cast<float>(vtx1.RGBAQ.A));
+}
+
+void GSRendererHW::ExpandAccurateTriangleEdge(
+	const GSVertex& vtx0,
+	const GSVertex& vtx1,
+	const GSVector4i& edge0,
+	const GSVector4i& edge1,
+	bool top_left,
+	AccurateLinesData& data,
+	GSVertex* vertex_out)
+{
+	const GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
+	const GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
+
+	const GSVector4i& xyof = m_context->scissor.xyof;
+
+	data.xy0 = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
+	data.xy1 = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
+	const GSVector2i dxy = data.xy1 - data.xy0;
+	const bool pos_x = dxy.x >= 0;
+	const bool pos_y = dxy.y >= 0;
+	data.edge0 = edge0;
+	data.edge1 = edge1;
+	data.step_x = std::abs(dxy.x) >= std::abs(dxy.y);
+	data.side = top_left != (data.step_x && (dxy.y != 0) && (pos_x == pos_y));
+
+	GetAccurateLinesVertexAttributes(vtx0, vtx1, data);
+
+	GetCoveringQuad(v0, v1, vertex_out);
+}
+
+static const u8 s_ysort[8][4] =
+{
+	{0, 1, 2, 0}, // y0 <= y1 <= y2
+	{1, 0, 2, 0}, // y1 < y0 <= y2
+	{0, 0, 0, 0},
+	{1, 2, 0, 0}, // y1 <= y2 < y0
+	{0, 2, 1, 0}, // y0 <= y2 < y1
+	{0, 0, 0, 0},
+	{2, 0, 1, 0}, // y2 < y0 <= y1
+	{2, 1, 0, 0}, // y2 < y1 < y0
+};
+
+void GSRendererHW::ExpandAccurateTrianglesVertices()
+{
+	constexpr int verts_per_prim = 21; // 3 verts for triangle interior; 3 x 6 verts for the edges.
+	const int prims = m_index.tail / 3;
+
+	while (m_vertex.maxcount < static_cast<u32>(prims * verts_per_prim))
+		GrowVertexBuffer();
+
+	m_accurate_lines_data.clear();
+	m_accurate_lines_data.resize(3 * prims);
+
+	const GSVector4i& xyof = m_context->scissor.xyof;
+
+	for (std::size_t i = 0; i < prims; i++)
+	{
+		const GSVertex& vtx0_orig = m_vertex.buff[m_index.buff[3 * i + 0]];
+		const GSVertex& vtx1_orig = m_vertex.buff[m_index.buff[3 * i + 1]];
+		const GSVertex& vtx2_orig = m_vertex.buff[m_index.buff[3 * i + 2]];
+
+		const GSVector2i v0_orig = { static_cast<int>(vtx0_orig.XYZ.X) - xyof.x, static_cast<int>(vtx0_orig.XYZ.Y) - xyof.y };
+		const GSVector2i v1_orig = { static_cast<int>(vtx1_orig.XYZ.X) - xyof.x, static_cast<int>(vtx1_orig.XYZ.Y) - xyof.y };
+		const GSVector2i v2_orig = { static_cast<int>(vtx2_orig.XYZ.X) - xyof.x, static_cast<int>(vtx2_orig.XYZ.Y) - xyof.y };
+
+		GSVector4i y0011(v0_orig.y, v0_orig.y, v1_orig.y, v1_orig.y);
+		GSVector4i y1221(v1_orig.y, v2_orig.y, v2_orig.y, v1_orig.y);
+
+		int m1 = GSVector4::cast(y0011 > y1221).mask() & 7;
+
+		const u8* idx = s_ysort[m1];
+
+		const GSVertex* vtx[3] = { &vtx0_orig, &vtx1_orig, &vtx2_orig };
+		const GSVector2i* v[3] = { &v0_orig, &v1_orig, &v2_orig };
+
+		const GSVertex& vtx0 = *vtx[idx[0]];
+		const GSVertex& vtx1 = *vtx[idx[1]];
+		const GSVertex& vtx2 = *vtx[idx[2]];
+
+		const GSVector2i& v0 = *v[idx[0]];
+		const GSVector2i& v1 = *v[idx[1]];
+		const GSVector2i& v2 = *v[idx[2]];
+
+		y0011 = GSVector4i(v0.y, v0.y, v1.y, v1.y);
+		y1221 = GSVector4i(v1.y, v2.y, v2.y, v1.y);
+
+		m1 = (y0011 == y1221).mask() & 7;
+
+		if (m1 == 7)
+			continue; // Degenerate triangle.
+
+		GSVector2i dv0 = v1 - v0;
+		GSVector2i dv1 = v2 - v0;
+		GSVector2i dv2 = v2 - v1;
+
+		int cross = dv0.y * dv1.x - dv0.x * dv1.y;
+
+		if (cross == 0)
+			continue; // Degenerate triangle
+
+		bool m2 = cross < 0;
+
+		const bool tl0 = (v0.y == v1.y) || !m2;
+		const bool tl1 = m2;
+		const bool tl2 = (v1.y != v2.y) && !m2;
+
+		GSVector4i edge0 = GSVector4i( dv0.y, -dv0.x, 0, 0);
+		GSVector4i edge1 = GSVector4i(-dv1.y,  dv1.x, 0, 0);
+		GSVector4i edge2 = GSVector4i( dv2.y, -dv2.x, 0, 0);
+
+		edge0.z = v1.x * v0.y - v0.x * v1.y;
+		edge1.z = v0.x * v2.y - v2.x * v0.y;
+		edge2.z = v2.x * v1.y - v1.x * v2.y;
+
+		if (m2)
+		{
+			edge0 = GSVector4i(0) - edge0;
+			edge1 = GSVector4i(0) - edge1;
+			edge2 = GSVector4i(0) - edge2;
+		}
+
+		// Bias for top-left edges.
+		edge0.z += tl0 ? 1 : 0;
+		edge1.z += tl1 ? 1 : 0;
+		edge2.z += tl2 ? 1 : 0;
+
+		// Interior triangle
+		m_vertex.buff_copy[verts_per_prim * i + 0] = vtx0;
+		m_vertex.buff_copy[verts_per_prim * i + 1] = vtx1;
+		m_vertex.buff_copy[verts_per_prim * i + 2] = vtx2;
+
+		ExpandAccurateTriangleEdge(vtx0, vtx1, edge1, edge2, tl0, m_accurate_lines_data[3 * i + 0],
+			&m_vertex.buff_copy[verts_per_prim * i + 3]);
+		ExpandAccurateTriangleEdge(vtx0, vtx2, edge2, edge0, tl1, m_accurate_lines_data[3 * i + 1],
+			&m_vertex.buff_copy[verts_per_prim * i + 9]);
+		ExpandAccurateTriangleEdge(vtx1, vtx2, edge0, edge1, tl2, m_accurate_lines_data[3 * i + 2],
+			&m_vertex.buff_copy[verts_per_prim * i + 15]);
+	}
+
+	m_index.tail = prims * verts_per_prim;
+	for (std::size_t i = 0; i < m_index.tail; i++)
+	{
+		m_index.buff[i] = i;
+	}
+	m_vertex.next = m_vertex.tail = m_vertex.head = m_index.tail;
+
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+}
+
+void GSRendererHW::ExpandAccurateLinesVertices()
+{
+	constexpr int verts_per_prim = 6; // 6 verts to form quad covering each line.
+	const int prims = m_index.tail / 2;
+
 	const auto ExitRule = [](const GSVector2i& d, bool step_x, bool pos_step) {
 		int dist = std::abs(d.x) + std::abs(d.y);
 		if (dist < 8)
@@ -355,94 +569,40 @@ void GSRendererHW::ExpandAccurateLineVertices()
 		}
 	};
 
-	while (m_vertex.maxcount < 6 * m_index.tail)
+	while (m_vertex.maxcount < static_cast<u32>(verts_per_prim * prims))
 		GrowVertexBuffer();
 
 	m_accurate_lines_data.clear();
+	m_accurate_lines_data.resize(prims);
 
-	GSVector4i xyof = m_context->scissor.xyof;
+	const GSVector4i& xyof = m_context->scissor.xyof;
 
-	for (std::size_t i = 0, j = 0; i < m_index.tail; i += 2, j += 6)
+	for (int i = 0; i < prims; i++)
 	{
-		const GSVertex& vtx0 = m_vertex.buff[m_index.buff[i + 0]];
-		const GSVertex& vtx1 = m_vertex.buff[m_index.buff[i + 1]];
+		const GSVertex& vtx0 = m_vertex.buff[m_index.buff[2 * i + 0]];
+		const GSVertex& vtx1 = m_vertex.buff[m_index.buff[2 * i + 1]];
 
-		GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
-		GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
+		const GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
+		const GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
 
-		AccurateLinesData data;
+		AccurateLinesData& data = m_accurate_lines_data[i];
+
 		data.xy0 = GSVector2i(v0.x - xyof.x, v0.y - xyof.y);
 		data.xy1 = GSVector2i(v1.x - xyof.x, v1.y - xyof.y);
-		GSVector2i dxy = data.xy1 - data.xy0;
-		GSVector2i xy0_i = (data.xy0 + 8) & GSVector2i(~0xF);
-		GSVector2i xy1_i = (data.xy1 + 8) & GSVector2i(~0xF);
+		const GSVector2i dxy = data.xy1 - data.xy0;
+		const GSVector2i xy0_i = (data.xy0 + 8) & GSVector2i(~0xF);
+		const GSVector2i xy1_i = (data.xy1 + 8) & GSVector2i(~0xF);
 		data.step_x = std::abs(dxy.x) >= std::abs(dxy.y);
 		bool pos_step = data.step_x ? dxy.x >= 0 : dxy.y >= 0;
 		data.draw0 = !ExitRule(data.xy0 - xy0_i, data.step_x, pos_step);
 		data.draw1 = ExitRule(data.xy1 - xy1_i, data.step_x, pos_step);
 
-		// Interpolated attributes - mimicks transformations done in vertex shader.
-		GSVector2 uv0 = GSVector2(static_cast<float>(vtx0.U), static_cast<float>(vtx0.V)) - m_conf.cb_vs.texture_offset;
-		GSVector2 uv1 = GSVector2(static_cast<float>(vtx1.U), static_cast<float>(vtx1.V)) - m_conf.cb_vs.texture_offset;
-		GSVector2 uv0_scale = uv0 * m_conf.cb_vs.texture_scale;
-		GSVector2 uv1_scale = uv1 * m_conf.cb_vs.texture_scale;
-		GSVector2 st0 = GSVector2(vtx0.ST.S, vtx0.ST.T) - m_conf.cb_vs.texture_offset;
-		GSVector2 st1 = GSVector2(vtx1.ST.S, vtx1.ST.T) - m_conf.cb_vs.texture_offset;
-		GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
-		GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
+		GetAccurateLinesVertexAttributes(vtx0, vtx1, data);
 
-		data.t_float0 = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
-		data.t_float1 = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
-		data.t_int0 = GSVector4(uv0_scale.x, uv0_scale.y);
-		data.t_int1 = GSVector4(uv1_scale.x, uv1_scale.y);
-
-		if (m_conf.vs.fst)
-		{
-			data.t_int0.z = uv0.x;
-			data.t_int0.w = uv0.y;
-			data.t_int1.z = uv1.x;
-			data.t_int1.w = uv1.y;
-		}
-		else
-		{
-			data.t_int0.z = st0_scale.x;
-			data.t_int0.w = st0_scale.y;
-			data.t_int1.z = st1_scale.x;
-			data.t_int1.w = st1_scale.y;
-		}
-
-		constexpr float exp_min32 = 0x1p-32f;
-		float z0 = static_cast<float>(std::min(vtx0.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
-		float z1 = static_cast<float>(std::min(vtx1.XYZ.Z, static_cast<u32>(m_conf.cb_vs.max_depth.x)));
-
-		GSVector2 xy0 = GSVector2(static_cast<float>(vtx0.XYZ.X), static_cast<float>(vtx0.XYZ.X)) - GSVector2(0.05f);
-		GSVector2 xy1 = GSVector2(static_cast<float>(vtx1.XYZ.X), static_cast<float>(vtx1.XYZ.X)) - GSVector2(0.05f);
-
-		xy0 = xy0 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
-		xy1 = xy1 * m_conf.cb_vs.vertex_scale - m_conf.cb_vs.vertex_offset;
-
-		GSRendererType renderer = GSGetCurrentRenderer();
-		float y_sign = (renderer == GSRendererType::DX11 || renderer == GSRendererType::DX12) ? -1.0f : 1.0f;
-		data.p0 = GSVector4(xy0.x, y_sign * xy0.y, z0 * exp_min32, 1.0f);
-		data.p1 = GSVector4(xy1.x, y_sign * xy1.y, z1 * exp_min32, 1.0f);
-
-		data.c0 = GSVector4(
-			static_cast<float>(vtx0.RGBAQ.R),
-			static_cast<float>(vtx0.RGBAQ.G),
-			static_cast<float>(vtx0.RGBAQ.B),
-			static_cast<float>(vtx0.RGBAQ.A));
-		data.c1 = GSVector4(
-			static_cast<float>(vtx1.RGBAQ.R),
-			static_cast<float>(vtx1.RGBAQ.G),
-			static_cast<float>(vtx1.RGBAQ.B),
-			static_cast<float>(vtx1.RGBAQ.A));
-
-		m_accurate_lines_data.push_back(data);
-
-		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[j]);
+		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[i * verts_per_prim]);
 	}
 
-	m_index.tail *= 3;
+	m_index.tail = prims * verts_per_prim;
 	for (std::size_t i = 0; i < m_index.tail; i++)
 	{
 		m_index.buff[i] = i;
@@ -5170,8 +5330,8 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 			{
 				if (features.accurate_lines)
 				{
-					GL_INS("SetupIA: Using accurate lines");
-					ExpandAccurateLineVertices();
+					GL_INS("HW: Using accurate lines");
+					ExpandAccurateLinesVertices();
 					m_conf.accurate_lines_data = &m_accurate_lines_data;
 					m_conf.vs.accurate_lines = true;
 					m_conf.ps.accurate_lines = true;
@@ -5241,6 +5401,18 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 			break;
 
 		case GS_TRIANGLE_CLASS:
+			if (features.accurate_lines && PRIM->AA1)
+			{
+				GL_INS("HW: Using accurate triangles");
+				ExpandAccurateTrianglesVertices();
+				m_conf.accurate_lines_data = &m_accurate_lines_data; // FIXME: Change accurate lines data to accurate_prims_data
+				m_conf.vs.accurate_triangles = true;
+				m_conf.ps.accurate_triangles = true;
+				m_conf.ps.accurate_lines_aa_abe = (PRIM->ABE != 0); // FIXME: Change to accurate_prims_aa_abe
+				m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+				m_conf.indices_per_prim = 21;
+			}
+			else
 			{
 				m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 				m_conf.indices_per_prim = 3;
@@ -9716,5 +9888,6 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 
 bool GSRendererHW::IsCoverageAlphaSupported()
 {
-	return IsCoverageAlpha() && (m_vt.m_primclass == GS_LINE_CLASS && g_gs_device->Features().accurate_lines);
+	return IsCoverageAlpha() &&
+		((m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) && g_gs_device->Features().accurate_lines);
 }

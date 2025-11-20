@@ -280,16 +280,22 @@ struct alignas(16) AccurateLinesData
 	GSVector4 c1; // 80
 	GSVector4 p0; // 96
 	GSVector4 p1; // 112
-	GSVector2i xy0; // 128
-	GSVector2i xy1; // 136
-	u32 step_x; // 144
-	u32 draw0; // 148
-	u32 draw1; // 152
-	u32 _pad0; // 156
-	// Total 160
+	GSVector4i edge0; // 128
+	GSVector4i edge1; // 144
+	GSVector2i xy0; // 160
+	GSVector2i xy1; // 168
+	u32 step_x; // 176
+	u32 draw0; // 180
+	u32 draw1; // 184
+	u32 top_left; // 188
+	u32 side; // 192
+	u32 _pad0; // 196
+	u32 _pad1; // 200
+	u32 _pad2; // 204
+	// Total 208
 };
 
-static_assert(sizeof(AccurateLinesData) == 160);
+static_assert(sizeof(AccurateLinesData) == 208);
 
 struct alignas(16) GSHWDrawConfig
 {
@@ -319,7 +325,7 @@ struct alignas(16) GSHWDrawConfig
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
 				u8 accurate_lines : 1;
-				u8 _free : 1;
+				u8 accurate_triangles : 1;
 			};
 			u8 key;
 		};
@@ -421,7 +427,8 @@ struct alignas(16) GSHWDrawConfig
 				// Accurate lines
 				u32 accurate_lines : 1;
 				u32 accurate_lines_aa : 1;
-				u32 accurate_lines_aa_abe : 1;
+				u32 accurate_lines_aa_abe : 1; // FIXME: Rename to accurate_abe
+				u32 accurate_triangles : 1;
 			};
 
 			struct
@@ -857,7 +864,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool accurate_lines       : 1;
+		bool accurate_lines       : 1; // FIXME: Change to 'accurate_prims'
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

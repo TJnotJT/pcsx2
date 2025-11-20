@@ -2680,7 +2680,7 @@ bool GSDeviceVK::CheckFeatures()
 
 	m_max_texture_size = m_device_properties.limits.maxImageDimension2D;
 
-	m_features.accurate_lines = GSConfig.HWAccurateLines;
+	m_features.accurate_lines = GSConfig.HWAccurateLines; // FIXME: Change to HWAccuratePrims
 
 	return true;
 }
@@ -3382,6 +3382,7 @@ void GSDeviceVK::IASetIndexBuffer(const void* index, size_t count)
 
 void GSDeviceVK::SetupAccurateLines(GSHWDrawConfig& config)
 {
+	// FIXME Rename to SetupAccuratePrims
 	if (config.accurate_lines_data)
 	{
 		const u32 count = config.accurate_lines_data->size();
@@ -4725,6 +4726,7 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_EXPAND", static_cast<int>(sel.expand));
 	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
 	AddMacro(ss, "VS_ACCURATE_LINES", static_cast<int>(sel.accurate_lines));
+	AddMacro(ss, "VS_ACCURATE_TRIANGLES", static_cast<int>(sel.accurate_triangles));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(ss.str());
@@ -4802,6 +4804,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ACCURATE_LINES", sel.accurate_lines);
 	AddMacro(ss, "PS_ACCURATE_LINES_AA", sel.accurate_lines_aa);
 	AddMacro(ss, "PS_ACCURATE_LINES_AA_ABE", sel.accurate_lines_aa_abe);
+	AddMacro(ss, "PS_ACCURATE_TRIANGLES", sel.accurate_triangles);
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
