@@ -454,7 +454,7 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 
 	for (std::size_t i = 0; i < prims; i++)
 	{
-		// Code from SW GSRasterizer
+		// Code from GSRasterizer
 		const GSVertex& vtx0_orig = m_vertex.buff[m_index.buff[3 * i + 0]];
 		const GSVertex& vtx1_orig = m_vertex.buff[m_index.buff[3 * i + 1]];
 		const GSVertex& vtx2_orig = m_vertex.buff[m_index.buff[3 * i + 2]];
@@ -498,11 +498,11 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		if (cross == 0)
 			continue; // Degenerate triangle
 
-		bool m2 = cross < 0;
+		bool clockwise = cross < 0;
 
-		const bool tl0 = (v0.y == v1.y) || !m2;
-		const bool tl1 = m2;
-		const bool tl2 = (v1.y != v2.y) && !m2;
+		const bool tl0 = (v0.y == v1.y) || !clockwise;
+		const bool tl1 = clockwise;
+		const bool tl2 = (v1.y != v2.y) && !clockwise;
 
 		GSVector4i edge0 = GSVector4i( dv0.y, -dv0.x, 0, 0);
 		GSVector4i edge1 = GSVector4i(-dv1.y,  dv1.x, 0, 0);
@@ -512,7 +512,7 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		edge1.z = v0.x * v2.y - v2.x * v0.y;
 		edge2.z = v2.x * v1.y - v1.x * v2.y;
 
-		if (m2)
+		if (clockwise)
 		{
 			edge0 = GSVector4i(0) - edge0;
 			edge1 = GSVector4i(0) - edge1;
@@ -529,6 +529,7 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		m_vertex.buff_copy[verts_per_prim * i + 1] = vtx1;
 		m_vertex.buff_copy[verts_per_prim * i + 2] = vtx2;
 
+		// Edges
 		ExpandAccurateTrianglesEdge(vtx0, vtx1, edge1, edge2, tl0, m_accurate_prims_edge_data[3 * i + 0],
 			&m_vertex.buff_copy[verts_per_prim * i + 3]);
 		ExpandAccurateTrianglesEdge(vtx0, vtx2, edge2, edge0, tl1, m_accurate_prims_edge_data[3 * i + 1],

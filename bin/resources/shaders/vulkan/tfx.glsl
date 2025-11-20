@@ -1,15 +1,19 @@
 // SPDX-FileCopyrightText: 2002-2025 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#define ACCURATE_LINES 1
+#define ACCURATE_TRIANGLES 2
+
 //////////////////////////////////////////////////////////////////////
 // Vertex Shader
 //////////////////////////////////////////////////////////////////////
 
+
 #if defined(VERTEX_SHADER)
 
-#if VS_ACCURATE_LINES || VS_ACCURATE_TRIANGLES
-layout(location = 7) flat out uint accurate_lines_index;
-#if VS_ACCURATE_TRIANGLES
+#if VS_ACCURATE_PRIMS
+layout(location = 7) flat out uint accurate_prims_edge_index;
+#if VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 layout(location = 8) flat out uint accurate_triangles_interior;
 #endif
 #endif
@@ -64,19 +68,20 @@ void main()
 	gl_Position.z *= exp2(-32.0f);		// integer->float depth
 	gl_Position.y = -gl_Position.y;
 
-	#if VS_ACCURATE_LINES
-		accurate_lines_index = (gl_VertexIndex - BaseVertex) / 6u;
-		return;
-	#elif VS_ACCURATE_TRIANGLES
+	#if VS_ACCURATE_PRIMS == ACCURATE_LINES
+		accurate_prims_edge_index = (gl_VertexIndex - BaseVertex) / 6u;
+		return; // Don't send line vertex attributes - they are interpolated manually in the fragment shader.
+	#elif VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 		uint vertex_id = gl_VertexIndex - BaseVertex;
 		uint prim_id = vertex_id / 21;
-		accurate_triangles_interior = uint((vertex_id - 21 * prim_id) < 3);
-		if (accurate_triangles_interior == 0)
+		accurate_triangles_interior = uint((vertex_id - 21 * prim_id) < 3); // First 3 vertices in each group of 21 is interior.
+		if (!bool(accurate_triangles_interior))
 		{
-			uint edge = (vertex_id - 21 * prim_id - 3) / 6;
-			accurate_lines_index = 3 * prim_id + edge;
-			return;
+			uint edge = (vertex_id - 21 * prim_id - 3) / 6; // Each group of 6 vertices after first 3 is one edge.
+			accurate_prims_edge_index = 3 * prim_id + edge;
+			return; // Don't send edge vertex attributes - they are interpolated manually in the fragment shader.
 		}
+		// Send the interior vertex attributes for fixed function interpolation.
 	#endif
 
 	#if VS_TME
@@ -349,13 +354,13 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	uint _pad0;
 	uint _pad1;
 
-	uint accurate_lines_base;
+	uint accurate_prims_base_index;
 	uint _pad2;
 	uint _pad3;
 	uint _pad4;
 };
 
-#if PS_ACCURATE_LINES || PS_ACCURATE_TRIANGLES
+#if PS_ACCURATE_PRIMS
 struct
 {
 	vec4 t;
@@ -363,12 +368,12 @@ struct
 	vec4 c;
 } vsIn;
 
-layout(location = 7) flat in uint accurate_lines_index;
-#if PS_ACCURATE_TRIANGLES
+layout(location = 7) flat in uint accurate_prims_edge_index;
+#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 layout(location = 8) flat in uint accurate_triangles_interior;
 #endif
 
-struct AccurateLinesData
+struct AccuratePrimsEdgeData
 {
 	// Interpolated attributes
 	vec4 t_float0; // 0
@@ -394,8 +399,8 @@ struct AccurateLinesData
 	// Total 208
 };
 
-layout (std140, set = 0, binding = 3) readonly buffer AccurateLinesDataBuffer {
-	AccurateLinesData accurate_lines_data[];
+layout (std140, set = 0, binding = 3) readonly buffer AccuratePrimsEdgeDataBuffer {
+	AccuratePrimsEdgeData accurate_prims_edge_data[];
 };
 
 layout(location = 0) in VSOutput
@@ -409,7 +414,7 @@ layout(location = 0) in VSOutput
 	#endif
 } vsInReal;
 
-#else // PS_ACCURATE_LINES || PS_ACCURATE_TRIANGLES
+#else // PS_ACCURATE_PRIMS
 
 layout(location = 0) in VSOutput
 {
@@ -1319,23 +1324,24 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
-#if PS_ACCURATE_LINES || PS_ACCURATE_TRIANGLES
-void InterpolateAttributesManual(AccurateLinesData ld, int weight0, int weight1)
+#if PS_ACCURATE_PRIMS
+// Interpolate vertex attributes over a line/edge manually.
+void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int weight1)
 {
 	float weight0_f = float(weight0);
 	float weight1_f = float(weight1);
 	float weight_total = float(weight0 + weight1);
 
-	vec4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / weight_total;
-	vec4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / weight_total;
-	vec4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / weight_total;
-	float z_interp = (weight1_f * ld.p1.z + weight0_f * ld.p0.z) / weight_total;
+	vec4 t_float_interp = (weight1_f * data.t_float1 + weight0_f * data.t_float0) / weight_total;
+	vec4 t_int_interp = (weight1_f * data.t_int1 + weight0_f * data.t_int0) / weight_total;
+	vec4 c_interp = (weight1_f * data.c1 + weight0_f * data.c0) / weight_total;
+	float z_interp = (weight1_f * data.p1.z + weight0_f * data.p0.z) / weight_total;
 
-	// No interpolation for constant attributes
-	vsIn.t = mix(t_float_interp, ld.t_float1, equal(ld.t_float1, ld.t_float0));
-	vsIn.ti = mix(t_int_interp, ld.t_int1, equal(ld.t_int1, ld.t_int0));
-	vsIn.c = mix(c_interp, ld.c1, equal(ld.c1, ld.c0));
-	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z : z_interp;
+	// No interpolation for constant attributes.
+	vsIn.t = mix(t_float_interp, data.t_float1, equal(data.t_float1, data.t_float0));
+	vsIn.ti = mix(t_int_interp, data.t_int1, equal(data.t_int1, data.t_int0));
+	vsIn.c = mix(c_interp, data.c1, equal(data.c1, data.c0));
+	FragCoord.z = (data.p1.z == data.p0.z) ? data.p1.z : z_interp;
 
 	// Clamp attributes. Fog/Z are normalized.
 	vsIn.c = clamp(vsIn.c, 0.0, 255.0);
@@ -1344,19 +1350,19 @@ void InterpolateAttributesManual(AccurateLinesData ld, int weight0, int weight1)
 }
 #endif
 
-#if PS_ACCURATE_LINES
+#if PS_ACCURATE_PRIMS == ACCURATE_LINES
 void HandleAccurateLines(out float alpha_coverage)
 {
-	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
+	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_edge_index];
 
-	ivec2 xy0 = ld.xy0;
-	ivec2 xy1 = ld.xy1;
+	ivec2 xy0 = data.xy0;
+	ivec2 xy1 = data.xy1;
 	ivec2 dxy = xy1 - xy0;
 	ivec2 xy0_i = (xy0 + 8) & ~0xF;
 	ivec2 xy1_i = (xy1 + 8) & ~0xF;
-	bool step_x = bool(ld.step_x);
-	bool draw0 = bool(ld.draw0);
-	bool draw1 = bool(ld.draw1);
+	bool step_x = bool(data.step_x);
+	bool draw0 = bool(data.draw0);
+	bool draw1 = bool(data.draw1);
 
 	// 4-bit fixed point: 16 subpixels per pixel
 	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
@@ -1389,7 +1395,7 @@ void HandleAccurateLines(out float alpha_coverage)
 	// Compute minor axis line in fixed-point
 	int minor_line = weight1 * minor1 + weight0 * minor0;
 
-#if PS_ACCURATE_LINES_AA
+#if PS_ACCURATE_PRIMS_AA
 	// Proper fixed-point AA rounding
 	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
 	int minor_i_expected_1 = minor_i_expected_0 + 16;
@@ -1403,7 +1409,8 @@ void HandleAccurateLines(out float alpha_coverage)
 		alpha_i = alpha_i_1;
 	else
 		discard;
-	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
+	// Make sure that the output alpha is always <= 127.0 for AA.
+	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
@@ -1412,23 +1419,23 @@ void HandleAccurateLines(out float alpha_coverage)
 #endif
 
 	// Interpolate attributes
-	InterpolateAttributesManual(ld, weight0, weight1);
+	InterpolateAttributesManual(data, weight0, weight1);
 }
 #endif
 
-#if PS_ACCURATE_TRIANGLES
+#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 void HandleAccurateTrianglesEdge(out float alpha_coverage)
 {
-	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
+	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_edge_index];
 
-	ivec2 xy0 = ld.xy0;
-	ivec2 xy1 = ld.xy1;
+	ivec2 xy0 = data.xy0;
+	ivec2 xy1 = data.xy1;
 	ivec2 dxy = xy1 - xy0;
 	ivec2 xy0_i = (xy0 + 8) & ~0xF;
 	ivec2 xy1_i = (xy1 + 8) & ~0xF;
-	bool step_x = bool(ld.step_x);
-	bool side = bool(ld.side);
-	bool top_left = bool(ld.top_left);
+	bool step_x = bool(data.step_x);
+	bool side = bool(data.side);
+	bool top_left = bool(data.top_left);
 
 	// 4-bit fixed point: 16 subpixels per pixel
 	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
@@ -1452,8 +1459,8 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 		discard;
 
 	// Discard if on wrong side of other edges
-	if (dot(ld.edge0, ivec4(xy_i, 1, 0)) <= 0 ||
-		dot(ld.edge1, ivec4(xy_i, 1, 0)) <= 0)
+	if (dot(data.edge0, ivec4(xy_i, 1, 0)) <= 0 ||
+		dot(data.edge1, ivec4(xy_i, 1, 0)) <= 0)
 		discard;
 
 	int weight0 = major1 - major_i;
@@ -1489,10 +1496,13 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 	if (minor_i != minor_i_expected)
 		discard;
 	
-	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
+#if PS_ACCURATE_PRIMS_AA
+	// Make sure that the output alpha is always <= 127.0 for AA.
+	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+#endif
 
 	// Interpolate attributes
-	InterpolateAttributesManual(ld, weight0, weight1);
+	InterpolateAttributesManual(data, weight0, weight1);
 }
 #endif
 
@@ -1500,11 +1510,11 @@ void main()
 {
 	FragCoord = gl_FragCoord;
 
-#if PS_ACCURATE_LINES
+#if PS_ACCURATE_PRIMS
 	float alpha_coverage;
+#if PS_ACCURATE_PRIMS == ACCURATE_LINES
 	HandleAccurateLines(alpha_coverage);
-#elif PS_ACCURATE_TRIANGLES
-	float alpha_coverage;
+#elif PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 	if (bool(accurate_triangles_interior))
 	{
 		alpha_coverage = 128.0;
@@ -1517,6 +1527,7 @@ void main()
 		HandleAccurateTrianglesEdge(alpha_coverage);
 	}
 #endif
+#endif // PS_ACCURATE_PRIMS
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
@@ -1569,10 +1580,10 @@ void main()
 #if PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
 	C.a = 128.0f;
-#elif PS_ACCURATE_LINES_AA || PS_ACCURATE_TRIANGLES
+#elif PS_ACCURATE_PRIMS_AA
 	// AA: coverage is computed in alpha_coverage
 	#if PS_ACCURATE_LINES_AA_ABE
-		if (floor(C.a) == 128.0)
+		if (floor(C.a) == 128.0) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
 			C.a = alpha_coverage;
 	#else
 		C.a = alpha_coverage;
