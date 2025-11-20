@@ -368,6 +368,17 @@ struct
 	vec4 c;
 } vsIn;
 
+layout(location = 0) in VSOutput
+{
+	vec4 t;
+	vec4 ti;
+	#if PS_IIP != 0
+		vec4 c;
+	#else
+		flat vec4 c;
+	#endif
+} vsInReal;
+
 layout(location = 7) flat in uint accurate_prims_index;
 #if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 layout(location = 8) flat in uint accurate_triangles_interior;
@@ -400,19 +411,8 @@ struct AccuratePrimsEdgeData
 };
 
 layout (std140, set = 0, binding = 3) readonly buffer AccuratePrimsEdgeDataBuffer {
-	AccuratePrimsEdgeData accurate_prims_edge_data[];
+	AccuratePrimsEdgeData accurate_prims_data[];
 };
-
-layout(location = 0) in VSOutput
-{
-	vec4 t;
-	vec4 ti;
-	#if PS_IIP != 0
-		vec4 c;
-	#else
-		flat vec4 c;
-	#endif
-} vsInReal;
 
 #else // PS_ACCURATE_PRIMS
 
@@ -1353,7 +1353,7 @@ void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int we
 #if PS_ACCURATE_PRIMS == ACCURATE_LINES
 void HandleAccurateLines(out float alpha_coverage)
 {
-	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_index];
+	AccuratePrimsEdgeData data = accurate_prims_data[accurate_prims_base_index + accurate_prims_index];
 
 	ivec2 xy0 = data.xy0;
 	ivec2 xy1 = data.xy1;
@@ -1426,7 +1426,7 @@ void HandleAccurateLines(out float alpha_coverage)
 #if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 void HandleAccurateTrianglesEdge(out float alpha_coverage)
 {
-	AccuratePrimsEdgeData data = accurate_prims_edge_data[accurate_prims_base_index + accurate_prims_index];
+	AccuratePrimsEdgeData data = accurate_prims_data[accurate_prims_base_index + accurate_prims_index];
 
 	ivec2 xy0 = data.xy0;
 	ivec2 xy1 = data.xy1;

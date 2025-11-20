@@ -3,6 +3,9 @@
 
 //#version 420 // Keep it for text editor detection
 
+#define ACCURATE_LINES 1
+#define ACCURATE_TRIANGLES 2
+
 #define FMT_32 0
 #define FMT_24 1
 #define FMT_16 2
@@ -62,13 +65,13 @@ layout(std140, binding = 0) uniform cb21
 	uint _pad0;
 	uint _pad1;
 
-	uint accurate_lines_base;
+	uint accurate_prims_base_index;
 	uint _pad2;
 	uint _pad3;
 	uint _pad4;
 };
 
-#if PS_ACCURATE_LINES
+#if PS_ACCURATE_PRIMS
 struct
 {
 	vec4 t_float;
@@ -76,9 +79,24 @@ struct
 	vec4 c;
 } PSin;
 
-flat in uint accurate_lines_index;
+in SHADER
+{
+	vec4 t_float;
+	vec4 t_int;
 
-struct AccurateLinesData
+	#if PS_IIP != 0
+		vec4 c;
+	#else
+		flat vec4 c;
+	#endif
+} PSinReal;
+
+flat in uint accurate_prims_index;
+#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+flat in uint accurate_triangles_interior;
+#endif
+
+struct AccuratePrimsEdgeData
 {
 	// Interpolated attributes
 	vec4 t_float0; // 0
@@ -89,17 +107,23 @@ struct AccurateLinesData
 	vec4 c1; // 80
 	vec4 p0; // 96
 	vec4 p1; // 112
-	ivec2 xy0; // 128
-	ivec2 xy1; // 136
-	uint step_x; // 144
-	uint draw0; // 148
-	uint draw1; // 152
-	uint _pad0; // 156
-	// Total 160
+	ivec4 edge0; // 128
+	ivec4 edge1; // 144
+	ivec2 xy0; // 160
+	ivec2 xy1; // 168
+	uint step_x; // 176
+	uint draw0; // 180
+	uint draw1; // 184
+	uint top_left; // 188
+	uint side; // 192
+	uint _pad0; // 196
+	uint _pad1; // 200
+	uint _pad2; // 204
+	// Total 208
 };
 
-layout (std140, binding = 3) buffer AccurateLinesDataBuffer {
-	AccurateLinesData accurate_lines_data[];
+layout (std140, binding = 3) buffer AccuratePrimsEdgeDataBuffer {
+	AccuratePrimsEdgeData accurate_prims_data[];
 };
 
 #else
@@ -1012,43 +1036,69 @@ float As = As_rgba.a;
 #endif
 }
 
-#if PS_ACCURATE_LINES
+#if PS_ACCURATE_PRIMS
+// Interpolate vertex attributes over a line/edge manually.
+void InterpolateAttributesManual(AccuratePrimsEdgeData data, int weight0, int weight1)
+{
+	float weight0_f = float(weight0);
+	float weight1_f = float(weight1);
+	float weight_total = float(weight0 + weight1);
+
+	vec4 t_float_interp = (weight1_f * data.t_float1 + weight0_f * data.t_float0) / weight_total;
+	vec4 t_int_interp = (weight1_f * data.t_int1 + weight0_f * data.t_int0) / weight_total;
+	vec4 c_interp = (weight1_f * data.c1 + weight0_f * data.c0) / weight_total;
+	float z_interp = (weight1_f * data.p1.z + weight0_f * data.p0.z) / weight_total;
+
+	// No interpolation for constant attributes.
+	PSin.t_float = mix(t_float_interp, data.t_float1, equal(data.t_float1, data.t_float0));
+	PSin.t_int = mix(t_int_interp, data.t_int1, equal(data.t_int1, data.t_int0));
+	PSin.c = mix(c_interp, data.c1, equal(data.c1, data.c0));
+	FragCoord.z = (data.p1.z == data.p0.z) ? data.p1.z : z_interp;
+
+	// Clamp attributes. Fog/Z are normalized.
+	PSin.c = clamp(PSin.c, 0.0, 255.0);
+	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
+	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
+}
+#endif
+
+#if PS_ACCURATE_PRIMS == ACCURATE_LINES
 void HandleAccurateLines(out float alpha_coverage)
 {
-	AccurateLinesData ld = accurate_lines_data[accurate_lines_base + accurate_lines_index];
+	AccuratePrimsEdgeData data = accurate_prims_data[accurate_prims_base_index + accurate_prims_index];
 
-	ivec2 xy0 = ld.xy0;
-	ivec2 xy1 = ld.xy1;
+	ivec2 xy0 = data.xy0;
+	ivec2 xy1 = data.xy1;
 	ivec2 dxy = xy1 - xy0;
 	ivec2 xy0_i = (xy0 + 8) & ~0xF;
 	ivec2 xy1_i = (xy1 + 8) & ~0xF;
-	uint step_x = ld.step_x;
-	uint draw0 = ld.draw0;
-	uint draw1 = ld.draw1;
+	bool step_x = bool(data.step_x);
+	bool draw0 = bool(data.draw0);
+	bool draw1 = bool(data.draw1);
 
 	// 4-bit fixed point: 16 subpixels per pixel
 	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
 
 	// Determine major/minor axes
-	int major0 = (step_x != 0) ? xy0.x : xy0.y;
-	int major1 = (step_x != 0) ? xy1.x : xy1.y;
-	int minor0 = (step_x != 0) ? xy0.y : xy0.x;
-	int minor1 = (step_x != 0) ? xy1.y : xy1.x;
-	int major_i = (step_x != 0) ? xy_i.x : xy_i.y;
-	int minor_i = (step_x != 0) ? xy_i.y : xy_i.x;
-	int d_major = (step_x != 0) ? dxy.x : dxy.y;
+	int major0 = step_x ? xy0.x : xy0.y;
+	int major1 = step_x ? xy1.x : xy1.y;
+	int minor0 = step_x ? xy0.y : xy0.x;
+	int minor1 = step_x ? xy1.y : xy1.x;
+	int major_i = step_x ? xy_i.x : xy_i.y;
+	int minor_i = step_x ? xy_i.y : xy_i.x;
+	int d_major = step_x ? dxy.x : dxy.y;
 	int d_major_scaled = 16 * d_major;
 
-	int major0_i = (step_x != 0) ? xy0_i.x : xy0_i.y;
-	int major1_i = (step_x != 0) ? xy1_i.x : xy1_i.y;
+	int major0_i = step_x ? xy0_i.x : xy0_i.y;
+	int major1_i = step_x ? xy1_i.x : xy1_i.y;
 
 	// Discard if outside line range
 	if (major_i < min(major0_i, major1_i) ||
 		major_i > max(major0_i, major1_i))
 		discard;
 
-	if ((major_i == major0_i && draw0 == 0) ||
-		(major_i == major1_i && draw1 == 0))
+	if ((major_i == major0_i && !draw0) ||
+		(major_i == major1_i && !draw1))
 		discard;
 
 	int weight0 = major1 - major_i;
@@ -1057,7 +1107,7 @@ void HandleAccurateLines(out float alpha_coverage)
 	// Compute minor axis line in fixed-point
 	int minor_line = weight1 * minor1 + weight0 * minor0;
 
-#if PS_ACCURATE_LINES_AA
+#if PS_ACCURATE_PRIMS_AA
 	// Proper fixed-point AA rounding
 	int minor_i_expected_0 = (minor_line / d_major) & ~0xF;
 	int minor_i_expected_1 = minor_i_expected_0 + 16;
@@ -1071,7 +1121,8 @@ void HandleAccurateLines(out float alpha_coverage)
 		alpha_i = alpha_i_1;
 	else
 		discard;
-	alpha_coverage = 128.0 * clamp(float(alpha_i) / float(d_major_scaled), 0.0, 1.0);
+	// Make sure that the output alpha is always <= 127.0 for AA.
+	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
 #else
 	// Non-AA: fixed-point rounding and 4-bit alignment
 	int minor_i_expected = ((2 * minor_line + d_major_scaled) / (2 * d_major)) & ~0xF;
@@ -1080,25 +1131,90 @@ void HandleAccurateLines(out float alpha_coverage)
 #endif
 
 	// Interpolate attributes
-	float weight0_f = float(weight0);
-	float weight1_f = float(weight1);
-	float d_major_f = float(d_major);
+	InterpolateAttributesManual(data, weight0, weight1);
+}
+#endif
 
-	vec4 t_float_interp = (weight1_f * ld.t_float1 + weight0_f * ld.t_float0) / d_major_f;
-	vec4 t_int_interp = (weight1_f * ld.t_int1 + weight0_f * ld.t_int0) / d_major_f;
-	vec4 c_interp = (weight1_f * ld.c1 + weight0_f * ld.c0) / d_major_f;
-	float z_interp = (weight1_f * ld.p1.z + weight0_f * ld.p0.z) / d_major_f;
+#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+void HandleAccurateTrianglesEdge(out float alpha_coverage)
+{
+	AccuratePrimsEdgeData data = accurate_prims_data[accurate_prims_base_index + accurate_prims_index];
 
-	// No interpolation for constant attributes
-	PSin.t_float = mix(t_float_interp, ld.t_float1, equal(ld.t_float1, ld.t_float0));
-	PSin.t_int = mix(t_int_interp, ld.t_int1, equal(ld.t_int1, ld.t_int0));
-	PSin.c = mix(c_interp, ld.c1, equal(ld.c1, ld.c0));
-	FragCoord.z = (ld.p1.z == ld.p0.z) ? ld.p1.z : z_interp;
+	ivec2 xy0 = data.xy0;
+	ivec2 xy1 = data.xy1;
+	ivec2 dxy = xy1 - xy0;
+	ivec2 xy0_i = (xy0 + 8) & ~0xF;
+	ivec2 xy1_i = (xy1 + 8) & ~0xF;
+	bool step_x = bool(data.step_x);
+	bool side = bool(data.side);
+	bool top_left = bool(data.top_left);
+
+	// 4-bit fixed point: 16 subpixels per pixel
+	ivec2 xy_i = 16 * ivec2(floor(FragCoord.xy)); // Subtract half-integer pixel center.
+
+	// Determine major/minor axes
+	int major0 = step_x ? xy0.x : xy0.y;
+	int major1 = step_x ? xy1.x : xy1.y;
+	int minor0 = step_x ? xy0.y : xy0.x;
+	int minor1 = step_x ? xy1.y : xy1.x;
+	int major_i = step_x ? xy_i.x : xy_i.y;
+	int minor_i = step_x ? xy_i.y : xy_i.x;
+	int d_major = step_x ? dxy.x : dxy.y;
+	int d_major_scaled = 16 * d_major;
+
+	int major0_i = step_x ? xy0_i.x : xy0_i.y;
+	int major1_i = step_x ? xy1_i.x : xy1_i.y;
+
+	// Discard if outside line range
+	if (major_i < (min(major0_i, major1_i) - 16) ||
+		major_i > (max(major0_i, major1_i) + 16))
+		discard;
+
+	// Discard if on wrong side of other edges
+	if (dot(data.edge0, ivec4(xy_i, 1, 0)) <= 0 ||
+		dot(data.edge1, ivec4(xy_i, 1, 0)) <= 0)
+		discard;
+
+	int weight0 = major1 - major_i;
+	int weight1 = major_i - major0;
+
+	// Compute minor axis line in fixed-point
+	int minor_line = weight1 * minor1 + weight0 * minor0;
+	int minor_i_expected = minor_line / d_major;
+	int minor_i_expected_0 = minor_i_expected & ~0xF;
+	int minor_i_expected_1 = minor_i_expected_0 + 16;
+	bool minor_i_pixel_center = ((minor_line - d_major * minor_i_expected_0) & 0xF) == 0;
+	int alpha_i_0 = d_major_scaled - (minor_line - d_major * minor_i_expected_0);
+	int alpha_i_1 = d_major_scaled - alpha_i_0;
+
+	// Proper fixed-point AA rounding
+	int alpha_i;
+	if ((minor_i_expected & 0xF) == 0)
+	{
+		// On a pixel center
+		alpha_i = top_left ? 0 : d_major_scaled;
+		minor_i_expected += top_left ? (side ? -16 : 16) : 0;
+	}
+	else if (side)
+	{
+		minor_i_expected = minor_i_expected_0;
+		alpha_i = alpha_i_0;
+	}
+	else
+	{
+		minor_i_expected = minor_i_expected_1;
+		alpha_i = alpha_i_1;
+	}
+	if (minor_i != minor_i_expected)
+		discard;
 	
-	// Clamp attributes. Fog/Z are normalized.
-	PSin.c = clamp(PSin.c, 0.0, 255.0);
-	PSin.t_float.z = clamp(PSin.t_float.z, 0.0, 1.0);
-	FragCoord.z = clamp(FragCoord.z, 0.0, 1.0);
+#if PS_ACCURATE_PRIMS_AA
+	// Make sure that the output alpha is always <= 127.0 for AA.
+	alpha_coverage = floor(clamp(128.0 * float(alpha_i) / float(d_major_scaled), 0.0, 127.0));
+#endif
+
+	// Interpolate attributes
+	InterpolateAttributesManual(data, weight0, weight1);
 }
 #endif
 
@@ -1106,10 +1222,24 @@ void ps_main()
 {
 	FragCoord = gl_FragCoord;
 
-#if PS_ACCURATE_LINES
+#if PS_ACCURATE_PRIMS
 	float alpha_coverage;
+#if PS_ACCURATE_PRIMS == ACCURATE_LINES
 	HandleAccurateLines(alpha_coverage);
+#elif PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+	if (bool(accurate_triangles_interior))
+	{
+		alpha_coverage = 128.0;
+		PSin.t_float = PSinReal.t_float;
+		PSin.t_int = PSinReal.t_int;
+		PSin.c = PSinReal.c;
+	}
+	else
+	{
+		HandleAccurateTrianglesEdge(alpha_coverage);
+	}
 #endif
+#endif // PS_ACCURATE_PRIMS
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
@@ -1163,10 +1293,10 @@ void ps_main()
 #if PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
 	C.a = 128.0f;
-#elif PS_ACCURATE_LINES_AA
+#elif PS_ACCURATE_PRIMS_AA
 	// AA: coverage is computed in alpha_coverage
 	#if PS_ACCURATE_LINES_AA_ABE
-		if (floor(C.a) == 128.0)
+		if (floor(C.a) == 128.0) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
 			C.a = alpha_coverage;
 	#else
 		C.a = alpha_coverage;
