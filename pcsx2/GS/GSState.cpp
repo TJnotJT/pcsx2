@@ -428,6 +428,10 @@ const char* GSState::GetFlushReasonString(GSFlushReason reason)
 			return "VSYNC";
 		case GSFlushReason::GSREOPEN:
 			return "GS REOPEN";
+		case GSFlushReason::VERTEXCOUNT:
+			return "VERTEX COUNT";
+		case GSFlushReason::VERTEXCOUNTEXPANDED:
+			return "VERTEX COUNT EXPANDED";
 		case GSFlushReason::UNKNOWN:
 		default:
 			return "UNKNOWN";
@@ -3252,6 +3256,20 @@ void GSState::UpdateVertexKick()
 
 	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZF2] = m_fpGIFPackedRegHandlerSTQRGBAXYZF2[prim];
 	m_fpGIFPackedRegHandlersC[GIF_REG_STQRGBAXYZ2] = m_fpGIFPackedRegHandlerSTQRGBAXYZ2[prim];
+
+	if (UsingAccuratePrims())
+	{
+		if (GSUtil::GetPrimClass(prim) == GS_LINE_CLASS)
+			m_vertex_expansion_factor = 3;
+		else if (GSUtil::GetPrimClass(prim) == GS_TRIANGLE_CLASS)
+			m_vertex_expansion_factor = 7;
+		else
+			pxFail("Wrong primitive class."); // Impossible.
+	}
+	else
+	{
+		m_vertex_expansion_factor = 1;
+	}
 }
 
 void GSState::GrowVertexBuffer()
@@ -4619,6 +4637,12 @@ __forceinline void GSState::VertexKick(u32 skip)
 	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
 	if (max_vertices != 0 && m_vertex.tail >= max_vertices)
 		Flush(VERTEXCOUNT);
+	
+	if (m_vertex_expansion_factor != 1)
+	{
+		if (max_vertices != 0 && (m_vertex_expansion_factor * m_index.tail) >= max_vertices)
+			Flush(VERTEXCOUNTEXPANDED);
+	}
 }
 
 /// Checks if region repeat is used (applying it does something to at least one of the values in min...max)
@@ -5269,6 +5293,13 @@ bool GSState::IsCoverageAlphaFixedOne()
 bool GSState::IsCoverageAlphaSupported()
 {
 	return false;
+}
+
+bool GSState::UsingAccuratePrims()
+{
+	return g_gs_device->Features().accurate_prims &&
+	       (GSUtil::GetPrimClass(PRIM->PRIM) == GS_LINE_CLASS ||
+			   (GSUtil::GetPrimClass(PRIM->PRIM) == GS_TRIANGLE_CLASS && PRIM->AA1));
 }
 
 GIFRegTEX0 GSState::GetTex0Layer(u32 lod)
