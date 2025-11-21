@@ -89,6 +89,9 @@ void vs_main()
 
 	#if VS_ACCURATE_PRIMS == ACCURATE_LINES
 		accurate_prims_index = (gl_VertexID - BaseVertex) / 6;
+		VSout.t_float = vec4(0.0f);
+		VSout.t_int = vec4(0.0f);
+		VSout.c = vec4(0.0f);
 		return; // Don't send line vertex attributes - they are interpolated manually in the fragment shader.
 	#elif VS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
 		uint vertex_id = gl_VertexID - BaseVertex;
@@ -98,6 +101,9 @@ void vs_main()
 		{
 			uint edge = (vertex_id - 21 * prim_id - 3) / 6; // Each group of 6 vertices after first 3 is one edge.
 			accurate_prims_index = 3 * prim_id + edge;
+			VSout.t_float = vec4(0.0f);
+			VSout.t_int = vec4(0.0f);
+			VSout.c = vec4(0.0f);
 			return; // Don't send edge vertex attributes - they are interpolated manually in the fragment shader.
 		}
 		// Send the interior vertex attributes for fixed function interpolation.
