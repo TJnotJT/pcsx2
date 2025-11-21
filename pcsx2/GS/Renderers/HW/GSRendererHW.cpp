@@ -484,7 +484,7 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		y0011 = GSVector4i(v0.y, v0.y, v1.y, v1.y);
 		y1221 = GSVector4i(v1.y, v2.y, v2.y, v1.y);
 
-		m1 = (y0011 == y1221).mask() & 7;
+		m1 = GSVector4::cast(y0011 == y1221).mask() & 7;
 
 		if (m1 == 7)
 			continue; // Degenerate triangle.
@@ -5473,10 +5473,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 
 	// Accurate prims requires a manual depth interpolation in the pixel shader.
 	// Piggy-back on Z clamp to avoid creating more pipeline combinations.
-	bool accurate_prims_clamp_z =
-		g_gs_device->Features().accurate_prims &&
-		(m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) &&
-		(m_conf.depth.zwe || m_conf.depth.ztst != ZTST_ALWAYS);
+	bool accurate_prims_clamp_z = UsingAccuratePrims() && (m_conf.depth.zwe || m_conf.depth.ztst != ZTST_ALWAYS);
 
 	// On the real GS we appear to do clamping on the max z value the format allows.
 	// Clamping is done after rasterization.
