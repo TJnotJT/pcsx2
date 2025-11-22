@@ -1298,7 +1298,7 @@ void ps_main()
 	C.a = 128.0f;
 #elif PS_ACCURATE_PRIMS_AA
 	// AA: coverage is computed in alpha_coverage
-	#if PS_ACCURATE_LINES_AA_ABE
+	#if PS_ACCURATE_PRIMS_AA_ABE
 		if (floor(C.a) == 128.0f) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
 			C.a = alpha_coverage;
 	#else
