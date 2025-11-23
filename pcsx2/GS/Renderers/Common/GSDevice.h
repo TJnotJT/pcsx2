@@ -369,6 +369,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 date : 3;
 				u32 atst : 3;
 				u32 afail : 2;
+				u32 ztst : 2;
 				// Color sampling
 				u32 fst : 1; // Investigate to do it on the VS
 				u32 tfx : 3;
@@ -453,6 +454,16 @@ struct alignas(16) GSHWDrawConfig
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
 			return channel_fb || tex_is_fb || fbmask || (date > 0 && date != 3) || sw_blend_needs_rt;
+		}
+
+		__fi bool IsFeedbackLoopDepth() const
+		{
+			// Note: Manual depth testing/interpolation for accurate prims is bundled with zclamp to reduce pipeline combinations.
+			// The zclamp is used to indicate that either Z write of Z testing is enabled.
+			// Note: We only allow depth feedback loops if color is already a feedback loop because of the way texture are
+			// bound in some of the renderers. As far as I know, there are no cases where we would need depth feedback without
+			// color feedback.
+			return IsFeedbackLoop() && accurate_prims && zclamp;
 		}
 
 		/// Disables color output from the pixel shader, this is done when all channels are masked.

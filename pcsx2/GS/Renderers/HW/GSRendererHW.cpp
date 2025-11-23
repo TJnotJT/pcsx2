@@ -5494,6 +5494,13 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		{
 			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 			m_conf.ps.zclamp = 1;
+			if (accurate_prims_clamp_z && m_vt.m_primclass == GS_TRIANGLE_CLASS && PRIM->AA1 &&
+				m_cached_ctx.TEST.ZTE && (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER))
+			{
+				// For HW AA1 with triangles we must do Z test in the shader to get proper
+				// updating of the Z buffer (interior triangle points update the Z buffer but edges should not).
+				m_conf.ps.ztst = m_conf.depth.ztst;
+			}
 		}
 	}
 }
@@ -8341,6 +8348,16 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		// These shouldn't be enabled if texture barriers aren't supported, make sure they are off.
 		m_conf.ps.write_rg = 0;
 		m_conf.require_full_barrier = false;
+	}
+
+	if ((features.texture_barrier || features.multidraw_fb_copy) && UsingAccuratePrims() &&
+		(m_vt.m_primclass == GS_TRIANGLE_CLASS) && PRIM->AA1 && m_conf.ps.zclamp)
+	{
+		// Manual depth test in the shader requires full barrier.
+		if (m_prim_overlap == PRIM_OVERLAP_NO)
+			m_conf.require_one_barrier = true;
+		else
+			m_conf.require_full_barrier = true;
 	}
 
 	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
