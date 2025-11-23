@@ -137,10 +137,15 @@ private:
 	bool IsUsingCsInBlend();
 	bool IsUsingAsInBlend();
 
-	void GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccuratePrimsEdgeData& data);
+	void GetAccuratePrimsEdgeVertexAttributes(
+		const GSVertex& vtx0,
+		const GSVertex& vtx1,
+		const GSVertex* vtx_provoking,
+		AccuratePrimsEdgeData& data);
 	void ExpandAccurateTrianglesEdge(
 		const GSVertex& vtx0,
 		const GSVertex& vtx1,
+		const GSVertex* vtx_provoking,
 		const GSVector4i& edge0,
 		const GSVector4i& edge1,
 		bool top_left,

@@ -336,7 +336,7 @@ static __forceinline void GetCoveringQuad(const GSVector2i& v0, const GSVector2i
 	out[5] = v[3];
 }
 
-void GSRendererHW::GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, AccuratePrimsEdgeData& data)
+void GSRendererHW::GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, const GSVertex& vtx1, const GSVertex* vtx_provoking, AccuratePrimsEdgeData& data)
 {
 	GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
 	GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
@@ -351,8 +351,20 @@ void GSRendererHW::GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, co
 	GSVector2 st0_scale = PRIM->TME ? st0 / m_conf.cb_vs.texture_scale : GSVector2(0);
 	GSVector2 st1_scale = PRIM->TME ? st1 / m_conf.cb_vs.texture_scale : GSVector2(0);
 
-	data.t_float0 = GSVector4(st0.x, st0.y, static_cast<float>(vtx0.FOG) / 255.0f, vtx0.RGBAQ.Q);
-	data.t_float1 = GSVector4(st1.x, st1.y, static_cast<float>(vtx1.FOG) / 255.0f, vtx1.RGBAQ.Q);
+	float fog0;
+	float fog1;
+	if (vtx_provoking)
+	{
+		fog0 = fog1 = static_cast<float>(vtx_provoking->FOG) / 255.0f;
+	}
+	else
+	{
+		fog0 = static_cast<float>(vtx0.FOG) / 255.0f;
+		fog1 = static_cast<float>(vtx1.FOG) / 255.0f;
+	}
+
+	data.t_float0 = GSVector4(st0.x, st0.y, fog0, vtx0.RGBAQ.Q);
+	data.t_float1 = GSVector4(st1.x, st1.y, fog1, vtx1.RGBAQ.Q);
 	data.t_int0 = GSVector4(uv0_scale.x, uv0_scale.y);
 	data.t_int1 = GSVector4(uv1_scale.x, uv1_scale.y);
 
@@ -386,21 +398,33 @@ void GSRendererHW::GetAccuratePrimsEdgeVertexAttributes(const GSVertex& vtx0, co
 	data.p0 = GSVector4(xy0.x, y_sign * xy0.y, z0 * exp_min32, 1.0f);
 	data.p1 = GSVector4(xy1.x, y_sign * xy1.y, z1 * exp_min32, 1.0f);
 
-	data.c0 = GSVector4(
-		static_cast<float>(vtx0.RGBAQ.R),
-		static_cast<float>(vtx0.RGBAQ.G),
-		static_cast<float>(vtx0.RGBAQ.B),
-		static_cast<float>(vtx0.RGBAQ.A));
-	data.c1 = GSVector4(
-		static_cast<float>(vtx1.RGBAQ.R),
-		static_cast<float>(vtx1.RGBAQ.G),
-		static_cast<float>(vtx1.RGBAQ.B),
-		static_cast<float>(vtx1.RGBAQ.A));
+	if (vtx_provoking)
+	{
+		data.c0 = data.c1 = GSVector4(
+			static_cast<float>(vtx_provoking->RGBAQ.R),
+			static_cast<float>(vtx_provoking->RGBAQ.G),
+			static_cast<float>(vtx_provoking->RGBAQ.B),
+			static_cast<float>(vtx_provoking->RGBAQ.A));
+	}
+	else
+	{
+		data.c0 = GSVector4(
+			static_cast<float>(vtx0.RGBAQ.R),
+			static_cast<float>(vtx0.RGBAQ.G),
+			static_cast<float>(vtx0.RGBAQ.B),
+			static_cast<float>(vtx0.RGBAQ.A));
+		data.c1 = GSVector4(
+			static_cast<float>(vtx1.RGBAQ.R),
+			static_cast<float>(vtx1.RGBAQ.G),
+			static_cast<float>(vtx1.RGBAQ.B),
+			static_cast<float>(vtx1.RGBAQ.A));
+	}
 }
 
 void GSRendererHW::ExpandAccurateTrianglesEdge(
 	const GSVertex& vtx0,
 	const GSVertex& vtx1,
+	const GSVertex* vtx_provoking,
 	const GSVector4i& edge0,
 	const GSVector4i& edge1,
 	bool top_left,
@@ -422,7 +446,7 @@ void GSRendererHW::ExpandAccurateTrianglesEdge(
 	data.step_x = std::abs(dxy.x) >= std::abs(dxy.y);
 	data.side = top_left != (data.step_x && (dxy.y != 0) && (pos_x == pos_y));
 
-	GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, data);
+	GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, vtx_provoking, data);
 
 	GetCoveringQuad(v0, v1, vertex_out);
 }
@@ -452,6 +476,9 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 
 	const GSVector4i& xyof = m_context->scissor.xyof;
 
+	const bool flat_shade = !PRIM->IIP;
+	const int provoking_offset = g_gs_device->Features().provoking_vertex_last ? 2 : 0;
+
 	for (std::size_t i = 0; i < prims; i++)
 	{
 		// Code from GSRasterizer
@@ -476,6 +503,7 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		const GSVertex& vtx0 = *vtx[idx[0]];
 		const GSVertex& vtx1 = *vtx[idx[1]];
 		const GSVertex& vtx2 = *vtx[idx[2]];
+		const GSVertex* vtx_provoking = flat_shade ? vtx[idx[provoking_offset]] : nullptr;
 
 		const GSVector2i& v0 = *v[idx[0]];
 		const GSVector2i& v1 = *v[idx[1]];
@@ -530,11 +558,11 @@ void GSRendererHW::ExpandAccurateTrianglesVertices()
 		m_vertex.buff_copy[verts_per_prim * i + 2] = vtx2;
 
 		// Edges
-		ExpandAccurateTrianglesEdge(vtx0, vtx1, edge1, edge2, tl0, m_accurate_prims_edge_data[3 * i + 0],
+		ExpandAccurateTrianglesEdge(vtx0, vtx1, vtx_provoking, edge1, edge2, tl0, m_accurate_prims_edge_data[3 * i + 0],
 			&m_vertex.buff_copy[verts_per_prim * i + 3]);
-		ExpandAccurateTrianglesEdge(vtx0, vtx2, edge2, edge0, tl1, m_accurate_prims_edge_data[3 * i + 1],
+		ExpandAccurateTrianglesEdge(vtx0, vtx2, vtx_provoking, edge2, edge0, tl1, m_accurate_prims_edge_data[3 * i + 1],
 			&m_vertex.buff_copy[verts_per_prim * i + 9]);
-		ExpandAccurateTrianglesEdge(vtx1, vtx2, edge0, edge1, tl2, m_accurate_prims_edge_data[3 * i + 2],
+		ExpandAccurateTrianglesEdge(vtx1, vtx2, vtx_provoking, edge0, edge1, tl2, m_accurate_prims_edge_data[3 * i + 2],
 			&m_vertex.buff_copy[verts_per_prim * i + 15]);
 	}
 
@@ -552,6 +580,9 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 {
 	constexpr int verts_per_prim = 6; // 6 verts to form quad covering each line.
 	const int prims = m_index.tail / 2;
+
+	const bool flat_shade = !PRIM->IIP;
+	const int provoking_offset = g_gs_device->Features().provoking_vertex_last ? 1 : 0;
 
 	const auto ExitRule = [](const GSVector2i& d, bool step_x, bool pos_step) {
 		int dist = std::abs(d.x) + std::abs(d.y);
@@ -582,6 +613,7 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 	{
 		const GSVertex& vtx0 = m_vertex.buff[m_index.buff[2 * i + 0]];
 		const GSVertex& vtx1 = m_vertex.buff[m_index.buff[2 * i + 1]];
+		const GSVertex* vtx_provoking = flat_shade ? &m_vertex.buff[m_index.buff[2 * i + provoking_offset]] : nullptr;
 
 		const GSVector2i v0 = { static_cast<int>(vtx0.XYZ.X), static_cast<int>(vtx0.XYZ.Y) };
 		const GSVector2i v1 = { static_cast<int>(vtx1.XYZ.X), static_cast<int>(vtx1.XYZ.Y) };
@@ -598,7 +630,7 @@ void GSRendererHW::ExpandAccurateLinesVertices()
 		data.draw0 = !ExitRule(data.xy0 - xy0_i, data.step_x, pos_step);
 		data.draw1 = ExitRule(data.xy1 - xy1_i, data.step_x, pos_step);
 
-		GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, data);
+		GetAccuratePrimsEdgeVertexAttributes(vtx0, vtx1, vtx_provoking, data);
 
 		GetCoveringQuad(v0, v1, &m_vertex.buff_copy[i * verts_per_prim]);
 	}
@@ -5494,6 +5526,13 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		{
 			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 			m_conf.ps.zclamp = 1;
+			if (accurate_prims_clamp_z && m_vt.m_primclass == GS_TRIANGLE_CLASS && PRIM->AA1 &&
+				m_cached_ctx.TEST.ZTE && (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER))
+			{
+				// For HW AA1 with triangles we must do Z test in the shader to get proper
+				// updating of the Z buffer (interior triangle points update the Z buffer but edges should not).
+				m_conf.ps.ztst = m_conf.depth.ztst;
+			}
 		}
 	}
 }
@@ -8341,6 +8380,16 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		// These shouldn't be enabled if texture barriers aren't supported, make sure they are off.
 		m_conf.ps.write_rg = 0;
 		m_conf.require_full_barrier = false;
+	}
+
+	if ((features.texture_barrier || features.multidraw_fb_copy) && UsingAccuratePrims() &&
+		(m_vt.m_primclass == GS_TRIANGLE_CLASS) && PRIM->AA1 && m_conf.ps.zclamp)
+	{
+		// Manual depth test in the shader requires full barrier.
+		if (m_prim_overlap == PRIM_OVERLAP_NO)
+			m_conf.require_one_barrier = true;
+		else
+			m_conf.require_full_barrier = true;
 	}
 
 	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))

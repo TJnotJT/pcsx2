@@ -280,6 +280,11 @@ void main()
 #define GS_LINE 0
 #endif
 
+#ifndef ZTST_GEQUAL
+#define ZTST_GEQUAL 2
+#define ZTST_GREATER 3
+#endif
+
 #ifndef PS_FST
 #define PS_FST 0
 #define PS_WMS 0
@@ -333,6 +338,7 @@ void main()
 #define AFAIL_NEEDS_RT (PS_AFAIL == 3 && PS_NO_COLOR1)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH ((PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES) && PS_ACCURATE_PRIMS_AA && PS_ZCLAMP)
 
 #define NEEDS_TEX (PS_TFX != 4)
 
@@ -447,13 +453,21 @@ layout(set = 1, binding = 0) uniform sampler2D Texture;
 layout(set = 1, binding = 1) uniform texture2D Palette;
 #endif
 
-#if PS_FEEDBACK_LOOP_IS_NEEDED
+#if PS_FEEDBACK_LOOP_IS_NEEDED || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 	#if defined(DISABLE_TEXTURE_BARRIER) || defined(HAS_FEEDBACK_LOOP_LAYOUT)
 		layout(set = 1, binding = 2) uniform texture2D RtSampler;
 		vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(FragCoord.xy), 0); }
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
+			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0); }
+		#endif
 	#else
 		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 		vec4 sample_from_rt() { return subpassLoad(RtSampler); }
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
+			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
+		#endif
 	#endif
 #endif
 
@@ -1537,6 +1551,20 @@ void main()
 #endif
 #endif // PS_ACCURATE_PRIMS
 
+#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	float current_depth = sample_from_depth().r;
+#endif
+
+#if PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER
+	#if PS_ZTST == ZTST_GEQUAL
+		if (FragCoord.z < current_depth)
+			discard;
+	#elif PS_ZTST == ZTST_GREATER
+		if (FragCoord.z <= current_depth)
+			discard;
+	#endif
+#endif // PS_ZTST
+
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
 	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
@@ -1715,7 +1743,14 @@ void main()
 	#endif
 
 	#if PS_ZCLAMP
-		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+		#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+			if (bool(accurate_triangles_interior))
+				gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+			else
+				gl_FragDepth = current_depth; // No depth update for triangle edges.
+		#else
+			gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+		#endif
 	#endif
 #endif // PS_DATE
 }
