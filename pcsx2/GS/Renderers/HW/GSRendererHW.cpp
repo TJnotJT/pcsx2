@@ -5494,6 +5494,13 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		{
 			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 			m_conf.ps.zclamp = 1;
+			if (accurate_prims_clamp_z && m_vt.m_primclass == GS_TRIANGLE_CLASS && PRIM->AA1 &&
+				m_cached_ctx.TEST.ZTE && (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER))
+			{
+				// For HW AA1 with triangles we must do Z test in the shader to get proper
+				// updating of the Z buffer (interior triangle points update the Z buffer but edges should not).
+				m_conf.ps.ztst = m_conf.depth.ztst;
+			}
 		}
 	}
 }
