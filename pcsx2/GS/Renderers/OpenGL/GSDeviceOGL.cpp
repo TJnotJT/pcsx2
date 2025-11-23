@@ -1408,6 +1408,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_ACCURATE_PRIMS {}\n", sel.accurate_prims)
 		+ fmt::format("#define PS_ACCURATE_PRIMS_AA {}\n", sel.accurate_prims_aa)
 		+ fmt::format("#define PS_ACCURATE_PRIMS_AA_ABE {}\n", sel.accurate_prims_aa_abe)
+		+ fmt::format("#define PS_ZTST {}\n", sel.ztst)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2583,6 +2584,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(2, draw_rt_clone);
 	else if (config.require_one_barrier || config.require_full_barrier)
 		PSSetShaderResource(2, colclip_rt ? colclip_rt : config.rt);
+	if ((config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
+		PSSetShaderResource(4, config.ds);
 
 	SetupSampler(config.sampler);
 
@@ -2687,7 +2690,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	OMSetRenderTargets(draw_rt, draw_ds, &config.scissor);
 	OMSetColorMaskState(config.colormask);
 	SetupOM(config.depth);
-
+	
 	// Clear stencil as close as possible to the RT bind, to avoid framebuffer swaps.
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne && m_features.texture_barrier)
 	{
@@ -2776,7 +2779,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, boo
 	}
 
 #ifdef PCSX2_DEVBUILD
-	if ((one_barrier || full_barrier) && !config.ps.IsFeedbackLoop()) [[unlikely]]
+	if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoop() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("OpenGL: Possible unnecessary barrier detected.");
 #endif
 

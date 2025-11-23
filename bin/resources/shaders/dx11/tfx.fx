@@ -24,6 +24,11 @@
 #define GS_FORWARD_PRIMID 0
 #endif
 
+#ifndef ZTST_GEQUAL
+#define ZTST_GEQUAL 2
+#define ZTST_GREATER 3
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -87,6 +92,7 @@
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define NEEDS_RT_FOR_AFAIL (PS_AFAIL == 3 && PS_NO_COLOR1)
+#define NEEDS_DEPTH ((PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES) && PS_ACCURATE_PRIMS_AA && PS_ZCLAMP)
 
 struct VS_INPUT
 {
@@ -191,7 +197,8 @@ Texture2D<float4> Texture : register(t0);
 Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
-StructuredBuffer<AccuratePrimsEdgeData> accurate_prims_data : register(t4);
+Texture2D<float> DepthTexture : register(t4);
+StructuredBuffer<AccuratePrimsEdgeData> accurate_prims_data : register(t5);
 SamplerState TextureSampler : register(s0);
 
 #ifdef DX12
@@ -1271,6 +1278,20 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif
 #endif // PS_ACCURATE_PRIMS
 
+#if NEEDS_DEPTH
+	float current_depth = DepthTexture.Load(int3(floor(input.p.xy), 0)).r;
+#endif
+
+#if PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER
+	#if PS_ZTST == ZTST_GEQUAL
+		if (input.p.z < current_depth)
+			discard;
+	#elif PS_ZTST == ZTST_GREATER
+	if (input.p.z <= current_depth)
+		discard;
+	#endif
+#endif // PS_ZTST
+
 	float4 C = ps_color(input);
 
 #if PS_FIXED_ONE_A
@@ -1470,7 +1491,14 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);
+	#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+		if (bool(input.accurate_triangles_interior))
+			output.depth = min(input.p.z, MaxDepthPS);
+		else
+			output.depth = current_depth; // No depth update for triangle edges.
+	#else
+		output.depth = min(input.p.z, MaxDepthPS);
+	#endif
 #endif
 
 	return output;

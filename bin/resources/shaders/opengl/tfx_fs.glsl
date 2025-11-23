@@ -14,6 +14,11 @@
 #define SHUFFLE_WRITE 2
 #define SHUFFLE_READWRITE 3
 
+#ifndef ZTST_GEQUAL
+#define ZTST_GEQUAL 2
+#define ZTST_GREATER 3
+#endif
+
 // TEX_COORD_DEBUG output the uv coordinate as color. It is useful
 // to detect bad sampling due to upscaling
 //#define TEX_COORD_DEBUG
@@ -31,6 +36,7 @@
 #define NEEDS_RT_FOR_AFAIL (PS_AFAIL == 3 && PS_NO_COLOR1)
 #define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)))
 #define NEEDS_TEX (PS_TFX != 4)
+#define NEEDS_DEPTH ((PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES) && PS_ACCURATE_PRIMS_AA && PS_ZCLAMP)
 
 vec4 FragCoord;
 
@@ -176,9 +182,10 @@ layout(binding = 2) uniform sampler2D RtSampler; // note 2 already use by the im
 
 #if PS_DATE == 3
 layout(binding = 3) uniform sampler2D img_prim_min;
+#endif
 
-// I don't remember why I set this parameter but it is surely useless
-//layout(pixel_center_integer) in vec4 gl_FragCoord;
+#if NEEDS_DEPTH
+layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
 vec4 sample_from_rt()
@@ -189,6 +196,15 @@ vec4 sample_from_rt()
 	return LAST_FRAG_COLOR;
 #else
 	return texelFetch(RtSampler, ivec2(FragCoord.xy), 0);
+#endif
+}
+
+vec4 sample_from_depth()
+{
+#if !NEEDS_DEPTH
+	return vec4(0.0);
+#else
+	return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0);
 #endif
 }
 
@@ -1244,6 +1260,20 @@ void ps_main()
 #endif
 #endif // PS_ACCURATE_PRIMS
 
+#if NEEDS_DEPTH
+	float current_depth = sample_from_depth().r;
+#endif
+
+#if PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER
+	#if PS_ZTST == ZTST_GEQUAL
+		if (FragCoord.z < current_depth)
+			discard;
+	#elif PS_ZTST == ZTST_GREATER
+		if (FragCoord.z <= current_depth)
+			discard;
+	#endif
+#endif // PS_ZTST
+
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
 	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
@@ -1426,6 +1456,13 @@ void ps_main()
 #endif
 
 #if PS_ZCLAMP
-	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+	#if PS_ACCURATE_PRIMS == ACCURATE_TRIANGLES
+		if (bool(accurate_triangles_interior))
+			gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+		else
+			gl_FragDepth = current_depth; // No depth update for triangle edges.
+	#else
+		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+	#endif
 #endif
 }
