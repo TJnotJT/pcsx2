@@ -331,7 +331,8 @@ public:
 	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, const GSVector2& ds);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, bool full_barrier);
+	void SendHWDraw(const GSHWDrawConfig& config, GSTexture* draw_rt, GSTexture* draw_rt_clone,
+		GSTexture* draw_ds, GSTexture* draw_ds_clone, bool one_barrier, bool full_barrier);
 
 	void SetupDATE(GSTexture* rt, GSTexture* ds, const GSVertexPT1* vertices, SetDATM datm);
 
@@ -342,6 +343,7 @@ public:
 	void SetupAccuratePrims(GSHWDrawConfig& config);
 
 	void PSSetShaderResource(int i, GSTexture* sr);
+	bool PSIsResourceBound(GSTexture* tex);
 	void PSSetSamplerState(GLuint ss);
 	void ClearSamplerCache() override;
 
