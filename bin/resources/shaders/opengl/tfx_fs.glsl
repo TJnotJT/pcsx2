@@ -1182,9 +1182,11 @@ void HandleAccurateTrianglesEdge(out float alpha_coverage)
 	int major0_i = step_x ? xy0_i.x : xy0_i.y;
 	int major1_i = step_x ? xy1_i.x : xy1_i.y;
 
-	// Discard if outside line range
-	if (major_i < (min(major0_i, major1_i) - 16) ||
-		major_i > (max(major0_i, major1_i) + 16))
+	// Discard if outside edge range.
+	// Note: this is not exactly what the SW rasterizer does.
+	// See the note in GSRasterizer::DrawEdgeTriangle() about the asymmetry in X and Y bounds checking.
+	if (major_i < min(major0_i, major1_i) ||
+		major_i > max(major0_i, major1_i))
 		discard;
 
 	// Discard if on wrong side of other edges
