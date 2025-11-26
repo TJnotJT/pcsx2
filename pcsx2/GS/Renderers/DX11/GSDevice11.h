@@ -87,7 +87,11 @@ private:
 		MAX_SAMPLERS = 1,
 		VERTEX_BUFFER_SIZE = 32 * 1024 * 1024,
 		INDEX_BUFFER_SIZE = 16 * 1024 * 1024,
-		ACCURATE_PRIMS_BUFFER_SIZE = sizeof(AccuratePrimsEdgeData) * 1024 * 1024,
+		UPLOAD_BUFFER_SIZE = 64 * 1024 * 1024,
+		//UPLOAD
+		UPLOAD_BUFFER_ALIGN = 16,
+		ACCURATE_PRIMS_NUM_BUFFERS = 4,
+		ACCURATE_PRIMS_BUFFER_SIZE = sizeof(AccuratePrimsEdgeData) * 1024 * 1024 / ACCURATE_PRIMS_NUM_BUFFERS,
 		NUM_TIMESTAMP_QUERIES = 5,
 	};
 
@@ -127,14 +131,18 @@ private:
 	wil::com_ptr_nothrow<ID3D11Buffer> m_expand_vb;
 	wil::com_ptr_nothrow<ID3D11Buffer> m_expand_ib;
 	wil::com_ptr_nothrow<ID3D11ShaderResourceView> m_expand_vb_srv;
-	wil::com_ptr_nothrow<ID3D11Buffer> m_accurate_prims_b;
-	wil::com_ptr_nothrow<ID3D11ShaderResourceView> m_accurate_prims_b_srv;
+	wil::com_ptr_nothrow<ID3D11Buffer> m_upload_b;
+	
+	// D3D11 does not allow per-region hazard tracking for default buffers so we rotate between multiple buffers.
+	std::array<wil::com_ptr_nothrow<ID3D11Buffer>, ACCURATE_PRIMS_NUM_BUFFERS> m_accurate_prims_b{};
+	std::array<wil::com_ptr_nothrow<ID3D11ShaderResourceView>, ACCURATE_PRIMS_NUM_BUFFERS> m_accurate_prims_b_srv{};
+	u32 m_accurate_prims_curr = 0;
 
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_10_0;
 	u32 m_vb_pos = 0; // bytes
 	u32 m_ib_pos = 0; // indices/sizeof(u32)
 	u32 m_structured_vb_pos = 0; // bytes
-	u32 m_accurate_prims_b_pos = 0; // bytes/sizeof(AccuratePrimsEdgeData)
+	u32 m_upload_b_pos = 0; // bytes
 
 	bool m_allow_tearing_supported = false;
 	bool m_using_flip_model_swap_chain = true;
@@ -266,6 +274,8 @@ public:
 	__fi static GSDevice11* GetInstance() { return static_cast<GSDevice11*>(g_gs_device.get()); }
 	__fi ID3D11Device1* GetD3DDevice() const { return m_dev.get(); }
 	__fi ID3D11DeviceContext1* GetD3DContext() const { return m_ctx.get(); }
+
+	ID3D11Buffer* WriteUploadStagingBuffer(u32 size, std::function<void(void*)> write_data, u32& offset_out);
 
 	bool Create(GSVSyncMode vsync_mode, bool allow_present_throttle) override;
 	void Destroy() override;

@@ -398,28 +398,50 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (m_features.accurate_prims)
 	{
+		// The upload buffer is currently only used with the accurate prims feature.
+
+		bd.Usage = D3D11_USAGE_STAGING;
+		bd.ByteWidth = UPLOAD_BUFFER_SIZE;
+		bd.BindFlags = 0;
+		bd.StructureByteStride = 0;
+		bd.MiscFlags = 0;
+
+		if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_upload_b.put())))
+		{
+			Console.Error("D3D11: Failed to create upload buffer.");
+			return false;
+		}
+	}
+
+	bd = {};
+
+	if (m_features.accurate_prims)
+	{
+		bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.CPUAccessFlags = 0;
 		bd.ByteWidth = ACCURATE_PRIMS_BUFFER_SIZE;
 		bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 		bd.StructureByteStride = sizeof(AccuratePrimsEdgeData);
 		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 
-		if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_accurate_prims_b.put())))
-		{
-			Console.Error("D3D11: Failed to create accurate prims buffer.");
-			return false;
-		}
-
 		const CD3D11_SHADER_RESOURCE_VIEW_DESC accurate_prims_b_srv_desc(
 			D3D11_SRV_DIMENSION_BUFFER, DXGI_FORMAT_UNKNOWN, 0, ACCURATE_PRIMS_BUFFER_SIZE / sizeof(AccuratePrimsEdgeData));
-		if (FAILED(m_dev->CreateShaderResourceView(m_accurate_prims_b.get(), &accurate_prims_b_srv_desc, m_accurate_prims_b_srv.put())))
-		{
-			Console.Error("D3D11: Failed to create accurate prims buffer SRV.");
-			return false;
-		}
 
-		// If MAX_TEXTURES changes, please change the register for this buffer in the shader.
-		static_assert(MAX_TEXTURES == 5);
-		m_ctx->PSSetShaderResources(MAX_TEXTURES, 1, m_accurate_prims_b_srv.addressof());
+		for (int i = 0; i < ACCURATE_PRIMS_NUM_BUFFERS; i++)
+		{
+			if (FAILED(m_dev->CreateBuffer(&bd, nullptr, m_accurate_prims_b[i].put())))
+			{
+				Console.Error("D3D11: Failed to create accurate prims buffer.");
+				return false;
+			}
+
+			if (FAILED(m_dev->CreateShaderResourceView(m_accurate_prims_b[i].get(), &accurate_prims_b_srv_desc,
+				m_accurate_prims_b_srv[i].put())))
+			{
+				Console.Error("D3D11: Failed to create accurate prims buffer SRV.");
+				return false;
+			}
+		}
 	}
 
 	// rasterizer
@@ -568,6 +590,11 @@ void GSDevice11::Destroy()
 	m_expand_vb_srv.reset();
 	m_expand_vb.reset();
 	m_expand_ib.reset();
+	m_upload_b.reset();
+	for (auto& buf : m_accurate_prims_b)
+		buf.reset();
+	for (auto& res : m_accurate_prims_b_srv)
+		res.reset();
 
 	m_vs.clear();
 	m_vs_cb.reset();
@@ -2312,6 +2339,35 @@ bool GSDevice11::IASetExpandVertexBuffer(const void* vertex, u32 stride, u32 cou
 	return true;
 }
 
+ID3D11Buffer* GSDevice11::WriteUploadStagingBuffer(u32 size, std::function<void(void*)> write_data, u32& offset_out)
+{
+	if (size == 0 || size > UPLOAD_BUFFER_SIZE)
+		return nullptr;
+
+	D3D11_MAP type = D3D11_MAP_WRITE_NO_OVERWRITE;
+
+	u32 pos = Common::AlignUp(m_upload_b_pos, UPLOAD_BUFFER_ALIGN);
+
+	if (pos + size > UPLOAD_BUFFER_SIZE)
+	{
+		pos = 0;
+		type = D3D11_MAP_WRITE_DISCARD;
+	}
+
+	D3D11_MAPPED_SUBRESOURCE m;
+	if (FAILED(m_ctx->Map(m_upload_b.get(), 0, type, 0, &m)))
+		return nullptr;
+
+	void* map_ptr = static_cast<u8*>(m.pData) + pos;
+	write_data(map_ptr);
+	m_ctx->Unmap(m_upload_b.get(), 0);
+
+	m_upload_b_pos = pos + size;
+
+	offset_out = pos;
+	return m_upload_b.get();
+}
+
 bool GSDevice11::SetupAccuratePrims(GSHWDrawConfig& config)
 {
 	if (config.accurate_prims)
@@ -2322,29 +2378,37 @@ bool GSDevice11::SetupAccuratePrims(GSHWDrawConfig& config)
 		if (size > ACCURATE_PRIMS_BUFFER_SIZE)
 			return false;
 
-		D3D11_MAP type = D3D11_MAP_WRITE_NO_OVERWRITE;
+		/*const auto write_data = [&](void* map_ptr) {
+			std::memcpy(map_ptr, config.accurate_prims_edge_data->data(), size);
+		};
 
-		pxAssert(m_accurate_prims_b_pos % sizeof(AccuratePrimsEdgeData) == 0);
-
-		if (m_accurate_prims_b_pos + size > ACCURATE_PRIMS_BUFFER_SIZE)
-		{
-			m_accurate_prims_b_pos = 0;
-			type = D3D11_MAP_WRITE_DISCARD;
-		}
-
-		D3D11_MAPPED_SUBRESOURCE m;
-		if (FAILED(m_ctx->Map(m_accurate_prims_b.get(), 0, type, 0, &m)))
+		u32 upload_offset;
+		ID3D11Resource* upload_buffer = WriteUploadStagingBuffer(size, write_data, upload_offset);
+		if (!upload_buffer)
 			return false;
 
-		void* map = static_cast<u8*>(m.pData) + m_accurate_prims_b_pos;
+		D3D11_BOX src_region{};
+		src_region.left = upload_offset;
+		src_region.right = upload_offset + size;
+		src_region.top = 0;
+		src_region.bottom = 1;
+		src_region.front = 0;
+		src_region.back = 1;
+		m_ctx->CopySubresourceRegion(m_accurate_prims_b[i].get(), 0, 0, 0, 0, upload_buffer, 0, &src_region);*/
+		D3D11_BOX dst_region{};
+		dst_region.left = 0;
+		dst_region.right = size;
+		dst_region.top = 0;
+		dst_region.bottom = 1;
+		dst_region.front = 0;
+		dst_region.back = 1;
+		m_ctx->UpdateSubresource(m_accurate_prims_b[i].get(), 0, &dst_region, config.accurate_prims_edge_data->data(), size, 0);
 
-		GSVector4i::storent(map, config.accurate_prims_edge_data->data(), size);
+		config.cb_ps.accurate_prims_base_index.x = 0;
 
-		m_ctx->Unmap(m_accurate_prims_b.get(), 0);
-
-		config.cb_ps.accurate_prims_base_index.x = m_accurate_prims_b_pos / sizeof(AccuratePrimsEdgeData);
-		
-		m_accurate_prims_b_pos += size;
+		// If MAX_TEXTURES changes, please change the register for this buffer in the shader.
+		static_assert(MAX_TEXTURES == 5);
+		m_ctx->PSSetShaderResources(5, 1, m_accurate_prims_b_srv[i].addressof());
 	}
 	return true;
 }
