@@ -2306,9 +2306,9 @@ bool GSDevice12::GetTextureGroupDescriptors(
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE dst_handle = *gpu_handle;
-	D3D12_CPU_DESCRIPTOR_HANDLE src_handles[NUM_TFX_TEXTURES];
-	UINT src_sizes[NUM_TFX_TEXTURES];
-	pxAssert(count <= NUM_TFX_TEXTURES);
+	D3D12_CPU_DESCRIPTOR_HANDLE src_handles[NUM_TOTAL_TFX_TEXTURES];
+	UINT src_sizes[NUM_TOTAL_TFX_TEXTURES];
+	pxAssert(count <= NUM_TOTAL_TFX_TEXTURES);
 	for (u32 i = 0; i < count; i++)
 	{
 		src_handles[i] = cpu_handles[i];
@@ -2416,9 +2416,9 @@ bool GSDevice12::CreateRootSignatures()
 	rsb.AddCBVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
 	rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_PIXEL);
 	rsb.AddSRVParameter(0, D3D12_SHADER_VISIBILITY_VERTEX);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL);
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL); // Source / Palette 
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 2, D3D12_SHADER_VISIBILITY_PIXEL);
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 3, D3D12_SHADER_VISIBILITY_PIXEL); // RT / PrimID / Depth
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -2923,6 +2923,9 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
 	sm.AddMacro("PS_NO_COLOR", sel.no_color);
 	sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
+	sm.AddMacro("PS_ZTST", sel.ztst);
+	sm.AddMacro("PS_COLOR_FEEDBACK", sel.color_feedback);
+	sm.AddMacro("PS_DEPTH_FEEDBACK", sel.depth_feedback);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
@@ -3119,6 +3122,7 @@ void GSDevice12::ExecuteCommandListAndRestartRenderPass(bool wait_for_completion
 
 	const bool was_in_render_pass = m_in_render_pass;
 	EndRenderPass();
+
 	ExecuteCommandList(GetWaitType(wait_for_completion, GSConfig.HWSpinCPUForReadbacks));
 	InvalidateCachedState();
 
@@ -3634,7 +3638,7 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 
 	if (flags & DIRTY_FLAG_TFX_RT_TEXTURES)
 	{
-		if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, 2))
+		if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, 3))
 		{
 			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX RT descriptor descriptor groups");
 			return ApplyTFXState(true);
@@ -3847,6 +3851,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
 	GSTexture12* draw_rt_clone = nullptr;
 
+	// FIXME: Add the scoped guard to ensure proper cleanup on early returns.
+
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
@@ -3923,7 +3929,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		SetBlendConstants(config.blend.constant);
 
 	// Depth testing and sampling, bind resource as dsv read only and srv at the same time without the need of a copy.
-	if (config.tex && config.tex == config.ds)
+	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe)
 	{
 		EndRenderPass();
 
@@ -3932,7 +3938,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// Primitive ID tracking DATE setup.
-	GSTexture12* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
 		GSTexture* backup_rt = config.rt;
@@ -4030,6 +4035,16 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		}
 		else
 			Console.Warning("D3D12: Failed to allocate temp texture for RT copy.");
+	}
+
+	if (draw_ds && (config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
+		config.ps.IsFeedbackLoopDepth())
+	{
+		// Requires a copy of the DS.
+		// Used as "bind ds" flag when texture barrier is unsupported for tex is fb.
+		draw_ds_clone = static_cast<GSTexture12*>(CreateTexture(rtsize.x, rtsize.y, 1, draw_ds->GetFormat(), true));
+		if (!draw_rt_clone)
+			Console.Warning("D3D12: Failed to allocate temp texture for DS copy.");
 	}
 
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor);
@@ -4228,7 +4243,7 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.ds = config.ds != nullptr;
 }
 
-void GSDevice12::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)
+void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 {
 	IASetVertexBuffer(config.verts, sizeof(GSVertex), config.nverts);
 
