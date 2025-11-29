@@ -7717,6 +7717,33 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	bool ate_first_pass = m_cached_ctx.TEST.DoFirstPass();
 	bool ate_second_pass = m_cached_ctx.TEST.DoSecondPass();
 
+	// CONTINUE HERE!!! Use the info for 1 pass AFAIL handling.
+	// Check for special cases with fast AFAIL (1 or 2 passes).
+	bool ate_RGBA_then_Z = false;
+	bool ate_RGB_then_Z = false;
+	GL_INS("HW: %sAlpha Test, ATST=%s, AFAIL=%s", (ate_first_pass && ate_second_pass) ? "Complex" : "",
+		GSUtil::GetATSTName(m_cached_ctx.TEST.ATST), GSUtil::GetAFAILName(m_cached_ctx.TEST.AFAIL));
+	if (ate_first_pass && ate_second_pass)
+	{
+		// Commutative depth: no depth test feedback.
+		const bool commutative_depth = (m_conf.depth.ztst == ZTST_GEQUAL && m_vt.m_eq.z) || (m_conf.depth.ztst == ZTST_ALWAYS) || !m_conf.depth.zwe;
+
+		// Commutative alpha: no blending feedback with alpha.
+		const bool commutative_alpha = (m_context->ALPHA.C != 1) || !m_conf.colormask.wa;
+
+		// ate_RGBA_then_Z: we can do exact AFAIL with 2 passes:
+		// 1. Draw RGBA only (Z write disabled).
+		// 2. Draw Z only with shader AFAIL discard (RGBA write disabled).
+		// If Z or Z is not written, this can be done in 1 pass.
+		ate_RGBA_then_Z = (afail_type == AFAIL_FB_ONLY) && commutative_depth;
+
+		// ate_RGB_then_Z: we can do exact AFAIl with 2 passes:
+		// 1. Draw RGB only (Z and A write disabled).
+		// 2. Draw Z and A only with shader AFAIL discard (RGB write disabled).
+		// If Z and RT can be sampled, or Z is not written, this can be done in 1 pass.
+		ate_RGB_then_Z = (afail_type == AFAIL_RGB_ONLY) && commutative_depth && commutative_alpha;
+	}
+
 	// Check if we should force a feedback loop for AFAIL
 	if (ate_first_pass && ate_second_pass && GSConfig.HWAFAILFeedback &&
 		(features.texture_barrier || features.multidraw_fb_copy))
@@ -7751,19 +7778,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				m_conf.depth.ztst = ZTST_ALWAYS;
 			}
 		}
-	}
-
-	bool ate_RGBA_then_Z = false;
-	bool ate_RGB_then_Z = false;
-	GL_INS("HW: %sAlpha Test, ATST=%s, AFAIL=%s", (ate_first_pass && ate_second_pass) ? "Complex" : "",
-		GSUtil::GetATSTName(m_cached_ctx.TEST.ATST), GSUtil::GetAFAILName(m_cached_ctx.TEST.AFAIL));
-	if (ate_first_pass && ate_second_pass)
-	{
-		const bool commutative_depth = (m_conf.depth.ztst == ZTST_GEQUAL && m_vt.m_eq.z) || (m_conf.depth.ztst == ZTST_ALWAYS) || !m_conf.depth.zwe;
-		const bool commutative_alpha = (m_context->ALPHA.C != 1) || !m_conf.colormask.wa; // when either Alpha Src or a constant, or not updating A
-
-		ate_RGBA_then_Z = (afail_type == AFAIL_FB_ONLY) && commutative_depth;
-		ate_RGB_then_Z = (afail_type == AFAIL_RGB_ONLY) && commutative_depth && commutative_alpha;
 	}
 
 	if (ate_RGBA_then_Z)
@@ -8079,6 +8093,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
 
+	// Putting this here because of the barriers.
 	if (ate_second_pass)
 	{
 		pxAssert(!m_conf.ps.pabe);
