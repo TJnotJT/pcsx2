@@ -31,6 +31,15 @@
 #define AFAIL_FB_ONLY 1
 #define AFAIL_ZB_ONLY 2
 #define AFAIL_RGB_ONLY 3
+#define AFAIL_RGB_ONLY_DSB 4
+#endif
+
+#ifndef PS_ATST_NONE
+#define PS_ATST_NONE 0
+#define PS_ATST_LEQUAL 1
+#define PS_ATST_GEQUAL 2
+#define PS_ATST_EQUAL 3
+#define PS_ATST_NOTEQUAL 4
 #endif
 
 #ifndef PS_FST
@@ -99,7 +108,7 @@
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
-#define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || (PS_AFAIL == AFAIL_RGB_ONLY && PS_NO_COLOR1))
+#define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 
 struct VS_INPUT
@@ -155,7 +164,7 @@ struct PS_OUTPUT
 #endif
 #endif
 #endif
-#if PS_ZCLAMP || PS_ZFLOOR || (PS_DEPTH_FEEDBACK && AFAIL_NEEDS_DEPTH)
+#if PS_ZCLAMP || PS_ZFLOOR
 	float depth : SV_Depth;
 #endif
 };
@@ -730,27 +739,27 @@ bool atst(float4 C)
 {
 	float a = C.a;
 
-	if(PS_ATST == 1)
-	{
-		return (a <= AREF);
-	}
-	else if(PS_ATST == 2)
-	{
-		return (a >= AREF);
-	}
-	else if(PS_ATST == 3)
-	{
-		 return (abs(a - AREF) <= 0.5f);
-	}
-	else if(PS_ATST == 4)
-	{
-		return (abs(a - AREF) >= 0.5f);
-	}
-	else
-	{
-		// nothing to do
-		return true;
-	}
+#if PS_ATST == PS_ATST_LEQUAL
+
+	return (a <= AREF);
+
+#elif PS_ATST == PS_ATST_GEQUAL
+
+	return (a >= AREF);
+
+#elif PS_ATST == PS_ATST_EQUAL
+
+	return (abs(a - AREF) <= 0.5f);
+
+#elif PS_ATST == PS_ATST_NOTEQUAL
+
+	return (abs(a - AREF) >= 0.5f);
+
+#else
+
+	return true;
+
+#endif
 }
 
 float4 fog(float4 c, float f)
@@ -1213,7 +1222,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 	ps_fbmask(C, input.p.xy);
 
-#if (PS_AFAIL == AFAIL_RGB_ONLY) && !PS_NO_COLOR1
+#if (PS_AFAIL == AFAIL_RGB_ONLY_DSB) && !PS_NO_COLOR1
 	// Use alpha blend factor to determine whether to update A.
 	alpha_blend.a = float(atst_pass);
 #endif
@@ -1226,7 +1235,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif
 
 	// Alpha test with feedback
-#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK
+#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
 	if (!atst_pass)
 		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r;
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
@@ -1235,10 +1244,10 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #elif (PS_AFAIL == AFAIL_RGB_ONLY)
 	if (!atst_pass)
 	{
-	#if PS_COLOR_FEEDBACK && PS_NO_COLOR1 // No dual src blend
+	#if PS_COLOR_FEEDBACK
 		output.c0.a = RtTexture.Load(int3(input.p.xy, 0)).a;
 	#endif
-	#if PS_DEPTH_FEEDBACK
+	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
 		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r; 
 	#endif
 	}
