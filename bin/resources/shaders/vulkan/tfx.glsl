@@ -257,6 +257,14 @@ void main()
 #define AFAIL_RGB_ONLY 3
 #endif
 
+#ifndef PS_ATST_NONE
+#define PS_ATST_NONE 0
+#define PS_ATST_GEQUAL 1
+#define PS_ATST_LEQUAL 2
+#define PS_ATST_EQUAL 3
+#define PS_ATST_NOTEQUAL 4
+#endif
+
 #ifndef PS_FST
 #define PS_FST 0
 #define PS_WMS 0
@@ -920,19 +928,19 @@ bool atst(vec4 C)
 {
 	float a = C.a;
 
-	#if (PS_ATST == 1)
+	#if (PS_ATST == PS_ATST_LEQUAL)
 	{
 		return (a <= AREF);
 	}
-	#elif (PS_ATST == 2)
+	#elif (PS_ATST == PS_ATST_GEQUAL)
 	{
 		return (a >= AREF);
 	}
-	#elif (PS_ATST == 3)
+	#elif (PS_ATST == PS_ATST_EQUAL)
 	{
 		return (abs(a - AREF) <= 0.5f);
 	}
-	#elif (PS_ATST == 4)
+	#elif (PS_ATST == PS_ATST_NOTEQUAL)
 	{
 		return (abs(a - AREF) >= 0.5f);
 	}

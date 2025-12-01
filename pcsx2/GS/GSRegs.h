@@ -201,6 +201,15 @@ enum GS_AFAIL
 	AFAIL_RGB_ONLY = 3,
 };
 
+enum GS_ALPHA_BITS
+{
+	ALPHA_ABC_CS = 0,
+	ALPHA_ABC_CD = 1,
+	ALPHA_C_AS   = 0,
+	ALPHA_C_AD   = 1,
+	ALPHA_C_FIX  = 2,
+};
+
 enum class GS_MIN_FILTER : uint8_t
 {
 	Nearest                = 0,

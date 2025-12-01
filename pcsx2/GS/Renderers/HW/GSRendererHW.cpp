@@ -7184,47 +7184,51 @@ bool GSRendererHW::CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextu
 	return false;
 }
 
-void GSRendererHW::EmulateATST(float& AREF, GSHWDrawConfig::PSSelector& ps, bool pass_2)
+void GSRendererHW::GetATSTConfig(const u32 atst, const float aref, const bool invert_test, u32& ps_atst_out, float& aref_out)
 {
-	static const u32 inverted_atst[] = {ATST_ALWAYS, ATST_NEVER, ATST_GEQUAL, ATST_GREATER, ATST_NOTEQUAL, ATST_LESS, ATST_LEQUAL, ATST_EQUAL};
+	static const u32 inverted_atst[] = {
+		ATST_ALWAYS,
+		ATST_NEVER,
+		ATST_GEQUAL,
+		ATST_GREATER,
+		ATST_NOTEQUAL,
+		ATST_LESS,
+		ATST_LEQUAL,
+		ATST_EQUAL
+	};
 
-	if (!m_cached_ctx.TEST.ATE)
-		return;
-
-	// Check for pass 2, otherwise do pass 1.
-	const int atst = pass_2 ? inverted_atst[m_cached_ctx.TEST.ATST] : m_cached_ctx.TEST.ATST;
-	const float aref = static_cast<float>(m_cached_ctx.TEST.AREF);
+	const int atst = invert_test ? inverted_atst[atst] : atst;
 
 	switch (atst)
 	{
 		case ATST_LESS:
-			AREF = aref - 0.1f;
-			ps.atst = 1;
+			aref_out = aref - 0.1f;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_LEQUAL;
 			break;
 		case ATST_LEQUAL:
-			AREF = aref - 0.1f + 1.0f;
-			ps.atst = 1;
+			aref_out = aref - 0.1f + 1.0f;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_LEQUAL;
 			break;
 		case ATST_GEQUAL:
-			AREF = aref - 0.1f;
-			ps.atst = 2;
+			aref_out = aref - 0.1f;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_GEQUAL;
 			break;
 		case ATST_GREATER:
-			AREF = aref - 0.1f + 1.0f;
-			ps.atst = 2;
+			aref_out = aref - 0.1f + 1.0f;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_GEQUAL;
 			break;
 		case ATST_EQUAL:
-			AREF = aref;
-			ps.atst = 3;
+			aref_out = aref;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_EQUAL;
 			break;
 		case ATST_NOTEQUAL:
-			AREF = aref;
-			ps.atst = 4;
+			aref_out = aref;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_NOTEQUAL;
 			break;
 		case ATST_NEVER: // Draw won't be done so no need to implement it in shader
 		case ATST_ALWAYS:
 		default:
-			ps.atst = 0;
+			ps_atst_out = GSHWDrawConfig::PS_ATST_NONE;
 			break;
 	}
 }
@@ -7711,11 +7715,330 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		rt->m_alpha_max = rt_new_alpha_max;
 		rt->m_alpha_min = rt_new_alpha_min;
 	}
+
+	const auto DetermineAFAILMethod = [](
+		bool ATE,
+		u32 ATST,
+		u32 AFAIL,
+		u32 ZTST,
+		bool z_equal,
+		bool z_write,
+		u32 ALPHA_C,
+		const GSHWDrawConfig::ColorMaskSelector& rt_colormask,
+		const GSDevice::FeatureSupport& features,
+		bool require_one_barrier,
+		bool require_full_barrier,
+		u32 prim_overlap
+	) {
+		ATSTMethod method{};
+
+		// First make some simplifications
+
+		if (AFAIL == AFAIL_RGB_ONLY && !rt_colormask.wa)
+		{
+			AFAIL = AFAIL_FB_ONLY;
+		}
+
+		if (!z_write && !rt_colormask.wrgba)
+		{
+			ATST = ATST_NEVER;
+		}
+
+		// Failing alpha test is a NOP
+		if ((AFAIL == AFAIL_FB_ONLY && !z_write) ||
+			(AFAIL == AFAIL_RGB_ONLY && !rt_colormask.wa && !z_write) ||
+			(AFAIL == AFAIL_ZB_ONLY && rt_colormask.wrgba))
+		{
+			ATST = ATST_ALWAYS;
+		}
+
+		// Passing alpha test is a NOP
+		if ((AFAIL == AFAIL_FB_ONLY && !rt_colormask.wrgba) ||
+			(AFAIL == AFAIL_RGB_ONLY && (!(rt_colormask.wrgba & 7))) ||
+			(AFAIL == AFAIL_ZB_ONLY && !z_write))
+		{
+			AFAIL = AFAIL_KEEP;
+		}
+
+		if (!ATE || ATST == ATST_NEVER || ATST == ATST_ALWAYS)
+		{
+			return AFAIL_METHOD_NONE;
+		}
+
+		if (AFAIL == AFAIL_KEEP)
+		{
+			return AFAIL_METHOD_ONE_PASS_EXACT_KEEP;
+		}
+
+		// If true, the result of the Z test and output Z does NOT depend on overlapping Z writes to the same pixel.
+		const bool independent_z =
+			(ZTST == ZTST_GEQUAL && z_equal) ||
+			(ZTST == ZTST_ALWAYS) ||
+			!z_write ||
+			(prim_overlap == PRIM_OVERLAP_NO);
+		
+		// If true, the written RGB does NOT depend on overlapping alpha writes to the same pixel
+		const bool independent_rgb =
+			(ALPHA_C != ALPHA_C_AD) ||
+			!rt_colormask.wa ||
+			(prim_overlap == PRIM_OVERLAP_NO);
+
+		// Flags to determine if we can achieve full accuracy with less passes.
+		const bool simple_fb_only = (AFAIL == AFAIL_FB_ONLY) && independent_z;
+		const bool simple_rgb_only = (AFAIL == AFAIL_RGB_ONLY) && independent_z && independent_rgb;
+		const bool simple_zb_only = (AFAIL == AFAIL_ZB_ONLY) && independent_z;
+
+		// Determine whether to use a feedback loop for AFAIL.
+		if (GSConfig.HWAFAILFeedback && (features.texture_barrier || features.multidraw_fb_copy))
+		{
+			const bool afail_needs_rt = (AFAIL == AFAIL_ZB_ONLY) || (AFAIL == AFAIL_RGB_ONLY);
+			const bool afail_needs_depth = (AFAIL == AFAIL_FB_ONLY) || (AFAIL == AFAIL_RGB_ONLY);
+
+			const bool one_pass = simple_fb_only || simple_rgb_only || simple_zb_only;
+
+			if (afail_needs_rt && afail_needs_depth)
+			{
+				return one_pass ?
+					AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH :
+					AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH;
+			}
+			else if (afail_needs_rt)
+			{
+				return one_pass ?
+				    AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT :
+				    AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT;
+			}
+			else if (afail_needs_depth)
+			{
+				return one_pass ?
+					AFAIL_METHOD_ONE_BARRIER_FEEDBACK_DEPTH :
+					AFAIL_METHOD_FULL_BARRIER_FEEDBACK_DEPTH;
+			}
+			else
+			{
+				pxAssert(false); // This should have been optimized out earlier.
+				return AFAIL_METHOD_NONE;
+			}
+		}
+
+		// Determine whether one of the non-barrier exact methods apply.
+		if (simple_fb_only)
+		{
+			return AFAIL_METHOD_TWO_PASS_EXACT_RGBA_THEN_Z;
+		}
+		else if (simple_zb_only)
+		{
+			return AFAIL_METHOD_TWO_PASS_EXACT_Z_THEN_RGBA;
+		}
+		else if (simple_rgb_only)
+		{
+			if ((features.framebuffer_fetch && require_one_barrier) || require_full_barrier)
+			{
+				// We're reading the RT anyways, use it for AFAIL.
+				// This ensures we don't attempt to use fbfetch + blend, which breaks Intel GPUs on Metal.
+				// Setting AFAIL to RGB_ONLY without enabling color1 will enable this mode in the shader, so nothing more to do here.
+				return z_write ?
+				    AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_SAMPLE_RT_THEN_Z:
+				    AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_SAMPLE_RT;
+			}
+			else
+			{
+				// Let A be selected with dual source blending on the first pass.
+				return z_write ?
+					AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_DSB_THEN_Z :
+				    AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_DSB;
+			}
+		}
+		
+		// The approximate pass then fail method.
+		return AFAIL_METHOD_TWO_PASS_APPROXIMATE_PASS_THEN_FAIL;
+	};
+
+	const auto DetermineAFAILMethodConfig = [](
+		u32 ATST,
+		u32 AFAIL,
+		float AREF,
+		AFAILMethodEnum method,
+		GSHWDrawConfig& config,
+		bool& DATE,
+		bool& DATE_one,
+		bool& DATE_barrier
+	) {
+		struct AFAILMethodInfo
+		{
+			bool require_one_barrier;
+			bool require_full_barier;
+			bool dual_source_blend;
+			bool color_feedback;
+			bool depth_feedback;
+			bool ps_atst;
+			bool ps_afail_keep;
+			bool ps_afail;
+		};
+
+		// Determine one barrier
+		switch (method)
+		{
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH:
+				config.require_one_barrier = true;
+				break;
+			default:
+				break;
+		}
+
+		// Determine full barrier
+		switch (method)
+		{
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH:
+				config.require_full_barrier = true;
+				break;
+			default:
+				break;
+		}
+
+		// Determine color feedback
+		switch (method)
+		{
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_SAMPLE_RT_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_SAMPLE_RT:
+				config.ps.color_feedback = true;
+				break;
+			default:
+				break;
+		}
+
+		// Determine pixel shader AFAIL
+		switch (method)
+		{
+			case AFAIL_METHOD_ONE_PASS_EXACT_KEEP:
+			case AFAIL_METHOD_TWO_PASS_APPROXIMATE_PASS_THEN_FAIL:
+				config.ps.afail = AFAIL_KEEP;
+				break;
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH:
+				config.ps.afail = AFAIL;
+				break;
+			default:
+				break;
+		}
+
+		// Determine pixel shader AFAIL and AREF for first pass
+		switch (method)
+		{
+			case AFAIL_METHOD_ONE_PASS_EXACT_KEEP:
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGBA_THEN_Z:
+			case AFAIL_METHOD_TWO_PASS_EXACT_Z_THEN_RGBA:
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_DSB_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_DSB:
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_SAMPLE_RT_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_SAMPLE_RT:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_DEPTH:
+			case AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH:
+			case AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH:
+			case AFAIL_METHOD_TWO_PASS_APPROXIMATE_PASS_THEN_FAIL:
+			{
+				u32 ps_atst;
+				GetATSTConfig(ATST, AREF, false, ps_atst, config.cb_ps.FogColor_AREF.w);
+				config.ps.atst = ps_atst;
+				break;
+			}
+			default:
+				break;
+		}
+
+		// Determine blend state if needed.
+		switch (method)
+		{
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_DSB_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_DSB:
+				if (!config.blend.enable)
+				{
+					config.blend = GSHWDrawConfig::BlendState(
+						true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
+						GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
+				}
+				else if (config.blend_multi_pass.enable)
+				{
+					config.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+					config.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+				}
+				else
+				{
+					config.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+					config.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+				}
+				break;
+			default:
+				break;
+		}
+
+		// Change the DATE method if needed
+		switch (method)
+		{
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_DSB_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_DSB:
+			case AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_SAMPLE_RT_THEN_Z:
+			case AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_SAMPLE_RT:
+				if (DATE && !DATE_BARRIER && features.primitive_id)
+				{
+					if (!DATE_PRIMID)
+						GL_INS("HW: Swap stencil DATE for PrimID, due to AFAIL");
+
+					DATE_one = false;
+					DATE_PRIMID = true;
+				}
+				break;
+			default:
+				break;
+		}
+	};
 	
 	// Alpha test afail configuration
 	// Warning must be done after EmulateZbuffer
 	bool ate_first_pass = m_cached_ctx.TEST.DoFirstPass();
 	bool ate_second_pass = m_cached_ctx.TEST.DoSecondPass();
+
+	// CONTINUE HERE!!! Use the info for 1 pass AFAIL handling.
+	// Check for special cases with fast AFAIL (1 or 2 passes).
+	bool ate_RGBA_then_Z = false;
+	bool ate_RGB_then_Z = false;
+	GL_INS("HW: %sAlpha Test, ATST=%s, AFAIL=%s", (ate_first_pass && ate_second_pass) ? "Complex" : "",
+		GSUtil::GetATSTName(m_cached_ctx.TEST.ATST), GSUtil::GetAFAILName(m_cached_ctx.TEST.AFAIL));
+	if (ate_first_pass && ate_second_pass)
+	{
+		// Commutative depth: no depth test feedback.
+		const bool commutative_depth = (m_conf.depth.ztst == ZTST_GEQUAL && m_vt.m_eq.z) || (m_conf.depth.ztst == ZTST_ALWAYS) || !m_conf.depth.zwe;
+
+		// Commutative alpha: no blending feedback with alpha.
+		const bool commutative_alpha = (m_context->ALPHA.C != 1) || !m_conf.colormask.wa;
+
+		// ate_RGBA_then_Z: we can do exact AFAIL with 2 passes:
+		// 1. Draw RGBA only (Z write disabled).
+		// 2. Draw Z only with shader AFAIL discard (RGBA write disabled).
+		// If Z or Z is not written, this can be done in 1 pass.
+		ate_RGBA_then_Z = (afail_type == AFAIL_FB_ONLY) && commutative_depth;
+
+		// ate_RGB_then_Z: we can do exact AFAIl with 2 passes:
+		// 1. Draw RGB only (Z and A write disabled).
+		// 2. Draw Z and A only with shader AFAIL discard (RGB write disabled).
+		// If Z and RT can be sampled, or Z is not written, this can be done in 1 pass.
+		ate_RGB_then_Z = (afail_type == AFAIL_RGB_ONLY) && commutative_depth && commutative_alpha;
+	}
 
 	// Check if we should force a feedback loop for AFAIL
 	if (ate_first_pass && ate_second_pass && GSConfig.HWAFAILFeedback &&
@@ -7751,19 +8074,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				m_conf.depth.ztst = ZTST_ALWAYS;
 			}
 		}
-	}
-
-	bool ate_RGBA_then_Z = false;
-	bool ate_RGB_then_Z = false;
-	GL_INS("HW: %sAlpha Test, ATST=%s, AFAIL=%s", (ate_first_pass && ate_second_pass) ? "Complex" : "",
-		GSUtil::GetATSTName(m_cached_ctx.TEST.ATST), GSUtil::GetAFAILName(m_cached_ctx.TEST.AFAIL));
-	if (ate_first_pass && ate_second_pass)
-	{
-		const bool commutative_depth = (m_conf.depth.ztst == ZTST_GEQUAL && m_vt.m_eq.z) || (m_conf.depth.ztst == ZTST_ALWAYS) || !m_conf.depth.zwe;
-		const bool commutative_alpha = (m_context->ALPHA.C != 1) || !m_conf.colormask.wa; // when either Alpha Src or a constant, or not updating A
-
-		ate_RGBA_then_Z = (afail_type == AFAIL_FB_ONLY) && commutative_depth;
-		ate_RGB_then_Z = (afail_type == AFAIL_RGB_ONLY) && commutative_depth && commutative_alpha;
 	}
 
 	if (ate_RGBA_then_Z)
@@ -7826,6 +8136,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 			// Swap stencil DATE for PrimID DATE, for both Z on and off cases.
 			// Because we're making some pixels pass, but not update A, the stencil won't be synced.
+
+			// Do this for all the ate RGB then Z methods!!!!
 			if (DATE && !DATE_BARRIER && features.primitive_id)
 			{
 				if (!DATE_PRIMID)

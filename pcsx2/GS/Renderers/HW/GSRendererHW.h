@@ -23,6 +23,65 @@ enum ClearType
 	ClearWithDraw
 };
 
+enum AFAILMethodEnum
+{
+	AFAIL_METHOD_NONE = 0,
+
+	// Discard the failing pixels in the pixel shader.
+	AFAIL_METHOD_ONE_PASS_EXACT_KEEP,
+
+	// Two passes: render RGBA then Z.
+	AFAIL_METHOD_TWO_PASS_EXACT_RGBA_THEN_Z,
+
+	// Two passes: render Z then RGBA.
+	AFAIL_METHOD_TWO_PASS_EXACT_Z_THEN_RGBA,
+
+	// Two passes: render RGBA (A chosen with dual-source blend), then Z.
+	AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_DSB_THEN_Z,
+
+	// One pass: render RGBA (A chosen with dual-source blend). Z is not written.
+	AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_DSB,
+
+	// Two passes: render RGBA (A chosen with RT sample), then Z.
+	AFAIL_METHOD_TWO_PASS_EXACT_RGB_A_SAMPLE_RT_THEN_Z,
+
+	// One pass: render RGBA (A chosen with RT sample). Z is not written.
+	AFAIL_METHOD_ONE_PASS_EXACT_RGB_A_SAMPLE_RT,
+
+	// Full barriers: render while sampling RT.
+	AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT,
+
+	// Single barrier: render while sampling RT.
+	AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT,
+
+	// Full barriers: render while sampling depth.
+	AFAIL_METHOD_FULL_BARRIER_FEEDBACK_DEPTH,
+
+	// Single barrier: render while sampling depth.
+	AFAIL_METHOD_ONE_BARRIER_FEEDBACK_DEPTH,
+
+	// Full barriers: render while sampling RT and depth.
+	AFAIL_METHOD_FULL_BARRIER_FEEDBACK_RT_AND_DEPTH,
+
+	// Single barrier: render while sampling RT and depth.
+	AFAIL_METHOD_ONE_BARRIER_FEEDBACK_RT_AND_DEPTH,
+
+	// Two pass: render passing pixels then failing pixels.
+	AFAIL_METHOD_TWO_PASS_APPROXIMATE_PASS_THEN_FAIL,
+
+	AFAIL_METHOD_N
+};
+
+struct ATSTMethod
+{
+	AFAILMethodEnum afail_method;
+	bool require_full_barrier;
+	bool require_one_barrier;
+	u32 ps_atst;
+	u32 ps_afail;
+	GSHWDrawConfig::BlendState bs;
+};
+
 class GSRendererHW : public GSRenderer
 {
 	MULTI_ISA_FRIEND(GSRendererHWFunctions);
@@ -110,7 +169,7 @@ private:
 		const TextureMinMaxResult& tmm);
 
 	void EmulateZbuffer(const GSTextureCache::Target* ds);
-	void EmulateATST(float& AREF, GSHWDrawConfig::PSSelector& ps, bool pass_2);
+	static void GetATSTConfig(const u32 atst, const float aref, const bool invert_test, u32& ps_atst_out, float& aref_out);
 
 	void SetTCOffset();
 	bool NextDrawColClip() const;
