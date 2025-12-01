@@ -327,6 +327,26 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool UseExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
+
+	enum PSAlphaTest
+	{
+		PS_ATST_NONE = 0,
+		PS_ATST_LEQUAL = 1,
+		PS_ATST_GEQUAL = 2,
+		PS_ATST_EQUAL = 3,
+		PS_ATST_NOTEQUAL = 4
+	};
+
+	// Identical with the usual GS enum except for the RGB_ONLY_DSB
+	enum PSAfail
+	{
+		PS_AFAIL_KEEP = 0,
+		PS_AFAIL_FB_ONLY = 1,
+		PS_AFAIL_ZB_ONLY = 2,
+		PS_AFAIL_RGB_ONLY = 3,
+		PS_AFAIL_RGB_ONLY_DSB = 4 // RGB only with dual source blend.
+	};
+
 #pragma pack(pop)
 #pragma pack(push, 4)
 	struct PSSelector
@@ -353,7 +373,7 @@ struct alignas(16) GSHWDrawConfig
 				// Pixel test
 				u32 date : 3;
 				u32 atst : 3;
-				u32 afail : 2;
+				u32 afail : 3;
 				u32 ztst : 2;
 				// Color sampling
 				u32 fst : 1; // Investigate to do it on the VS
@@ -400,7 +420,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 dither : 2;
 				u32 dither_adjust : 1;
 
-				// Depth clamp
+				// Depth clamp - also indicates SW depth write.
 				u32 zclamp : 1;
 
 				// Hack
