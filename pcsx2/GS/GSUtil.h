@@ -34,8 +34,7 @@ public:
 	static bool HasSharedBits(u32 sbp, u32 spsm, u32 dbp, u32 dpsm);
 	static bool HasCompatibleBits(u32 spsm, u32 dpsm);
 	static bool HasSameSwizzleBits(u32 spsm, u32 dpsm);
-	static u32 GetChannelMask(u32 spsm);
-	static u32 GetChannelMask(u32 spsm, u32 fbmsk);
+	static u32 GetChannelMask(u32 spsm, u32 fbmsk = 0);
 
 	static GSRendererType GetPreferredRenderer();
 

@@ -44,6 +44,8 @@ public:
 
 	void UpdateScissor();
 
+	bool FrameNotWritten() const;
+	bool DepthNotWritten() const;
 	GIFRegTEX0 GetSizeFixedTEX0(const GSVector4& st, bool linear, bool mipmap = false) const;
 
 	void Dump(const std::string& filename);

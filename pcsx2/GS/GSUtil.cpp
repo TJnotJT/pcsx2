@@ -6,6 +6,7 @@
 #include "GS/GSUtil.h"
 #include "MultiISA.h"
 #include "common/StringUtil.h"
+#include "GS/GSLocalMemory.h"
 
 #include <array>
 
@@ -247,30 +248,14 @@ bool GSUtil::HasSameSwizzleBits(u32 spsm, u32 dpsm)
 	return (s_maps.SwizzleField[spsm][dpsm >> 5] & (1 << (dpsm & 0x1f))) != 0;
 }
 
-u32 GSUtil::GetChannelMask(u32 spsm)
-{
-	switch (spsm)
-	{
-		case PSMCT24:
-		case PSMZ24:
-			return 0x7;
-		case PSMT8H:
-		case PSMT4HH: // This sucks, I'm sorry, but we don't have a way to do half channels
-		case PSMT4HL: // So uuhh TODO I guess.
-			return 0x8;
-		default:
-			return 0xf;
-	}
-}
-
 u32 GSUtil::GetChannelMask(u32 spsm, u32 fbmsk)
 {
-	u32 mask = GetChannelMask(spsm);
-	mask &= ((fbmsk & 0xFF) == 0xFF) ? (~0x1 & 0xf) : 0xf;
-	mask &= ((fbmsk & 0xFF00) == 0xFF00) ? (~0x2 & 0xf) : 0xf;
-	mask &= ((fbmsk & 0xFF0000) == 0xFF0000) ? (~0x4 & 0xf) : 0xf;
-	mask &= ((fbmsk & 0xFF000000) == 0xFF000000) ? (~0x8 & 0xf) : 0xf;
-	return mask;
+	const u32 mask = GSLocalMemory::m_psm[spsm].fmsk & ~fbmsk;
+	return
+		((mask & 0xFF)       ? 1 : 0) |
+		((mask & 0xFF00)     ? 2 : 0) |
+		((mask & 0xFF0000)   ? 4 : 0) |
+		((mask & 0xFF000000) ? 8 : 0);
 }
 
 GSRendererType GSUtil::GetPreferredRenderer()

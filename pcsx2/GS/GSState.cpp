@@ -4180,8 +4180,14 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 	if (!PRIM->TME || (GSConfig.UserHacks_AutoFlush == GSHWAutoFlushLevel::SpritesOnly && prim != GS_SPRITE))
 		return false;
 
-	// Not using the same channels.
-	if (!(GSUtil::GetChannelMask(m_context->TEX0.PSM) & GSUtil::GetChannelMask(m_context->FRAME.PSM, m_context->FRAME.FBMSK | ~(GSLocalMemory::m_psm[m_context->FRAME.PSM].fmsk))))
+	// Check whether the frame or depth write can write to texture.
+	const u32 tex_chan = GSUtil::GetChannelMask(m_context->TEX0.PSM);
+	const u32 frame_chan = m_context->FrameNotWritten() ? 0 : GSUtil::GetChannelMask(m_context->FRAME.PSM, m_context->FRAME.FBMSK);
+	const u32 depth_chan = m_context->DepthNotWritten() ? 0 : GSUtil::GetChannelMask(m_context->ZBUF.PSM);
+	const bool frame_write_match = (frame_chan & tex_chan) != 0;
+	const bool depth_write_match = (depth_chan & tex_chan) != 0;
+
+	if (!frame_write_match && !depth_write_match)
 		return false;
 
 	// Try to detect shuffles, because these will not autoflush, they by design clash.
@@ -4191,24 +4197,12 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 	// Check if one of the texture being used is the same as the FRAME or ZBUF.
 	// In the case of possible mip-mapping, we need to check all possible layers.
 	bool frame_addr_hit = false;
-	bool zbuf_addr_hit = false;
-	const bool possible_mip_map = m_context->TEX1.MXL > 0 && m_context->TEX1.MMIN >= 2 && m_context->TEX1.MMIN <= 5;
-	int min_possible_layer = 0;
-	int max_possible_layer = 0;
-	if (possible_mip_map)
-	{
-		if (m_context->TEX1.LCM)
-		{
-			// Fixed LOD.
-			min_possible_layer = std::clamp(m_context->TEX1.K >> 4, 0, static_cast<int>(m_context->TEX1.MXL));
-			max_possible_layer = std::clamp((m_context->TEX1.K + 0xF) >> 4, 0, static_cast<int>(m_context->TEX1.MXL));
-		}
-		else
-		{
-			// Variable LOD based on vertex Q.
-			max_possible_layer = static_cast<int>(m_context->TEX1.MXL);
-		}
-	}
+	bool depth_addr_hit = false;
+	
+	// In case of mipmapping we may need to check multiple mip layers.
+	// If mipmapping is not possible, min and max LOD will just be set to 0.
+	const int min_possible_layer = m_context->TEX1.MinPossibleLOD();
+	const int max_possible_layer = m_context->TEX1.MaxPossibleLOD();
 	
 	GIFRegTEX0 TEX0_hit;
 	for (tex_layer = min_possible_layer; tex_layer <= max_possible_layer; tex_layer++)
@@ -4221,23 +4215,12 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 		}
 		if (TEX0_hit.TBP0 == m_context->ZBUF.Block())
 		{
-			zbuf_addr_hit = true;
+			depth_addr_hit = true;
 			break;
 		}
 	}
 
-	const u32 frame_mask = GSLocalMemory::m_psm[m_context->FRAME.PSM].fmsk;
-	const bool frame_hit = frame_addr_hit && !(m_context->TEST.ATE && m_context->TEST.ATST == 0 && m_context->TEST.AFAIL == 2) && ((m_context->FRAME.FBMSK & frame_mask) != frame_mask);
-	// There's a strange behaviour we need to test on a PS2 here, if the FRAME is a Z format, like Powerdrome something swaps over, and it seems Alpha Fail of "FB Only" writes to the Z.. it's odd.
-	const bool z_needed = !(m_context->TEST.ATE && m_context->TEST.ATST == 0 && m_context->TEST.AFAIL != 2) && !m_context->ZBUF.ZMSK;
-	const bool zbuf_hit = zbuf_addr_hit && z_needed;
-	const u32 frame_z_psm = frame_hit ? m_context->FRAME.PSM : m_context->ZBUF.PSM;
-	const u32 frame_z_bp = frame_hit ? m_context->FRAME.Block() : m_context->ZBUF.Block();
-
-	if ((frame_hit || zbuf_hit) && GSUtil::HasSharedBits(frame_z_bp, frame_z_psm, TEX0_hit.TBP0, TEX0_hit.PSM))
-		return true;
-
-	return false;
+	return (frame_addr_hit && frame_write_match) || (depth_addr_hit && depth_write_match);
 }
 
 static constexpr u32 NumIndicesForPrim(u32 prim)

@@ -290,3 +290,16 @@ void GSDrawingContext::Dump(const std::string& filename)
 
 	fclose(fp);
 }
+
+bool GSDrawingContext::FrameNotWritten() const
+{
+	return (GSLocalMemory::m_psm[FRAME.PSM].fmsk & ~FRAME.FBMSK) == 0 ||
+	       TEST.FrameNotWritten();
+}
+
+bool GSDrawingContext::DepthNotWritten() const
+{
+	// There's a strange behavior we need to test on a PS2 here, if the FRAME is a Z format,
+	// like Powerdrome something swaps over, and it seems Alpha Fail of "FB Only" writes to the Z.. it's odd.
+	return ZBUF.ZMSK || TEST.DepthNotWritten();
+}
