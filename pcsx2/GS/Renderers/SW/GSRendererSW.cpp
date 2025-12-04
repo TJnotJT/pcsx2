@@ -317,7 +317,7 @@ void GSRendererSW::RewriteVerticesIfSTOverflow()
 
 		if (st_overflow)
 		{
-			constexpr int n = GSUtil::GetClassVertexCount(primclass);
+			constexpr int n = GSUtil::GetPrimClassVertexCount(primclass);
 
 			// Make sure the copy buffer is large enough.
 			while (m_vertex.maxcount < m_index.tail)
@@ -483,7 +483,7 @@ void GSRendererSW::Draw()
 
 	if constexpr (LOG && false)
 	{
-		int n = GSUtil::GetVertexCount(PRIM->PRIM);
+		int n = GSUtil::GetPrimVertexCount(PRIM->PRIM);
 
 		for (u32 i = 0, j = 0; i < m_index.tail; i += n, j++)
 		{

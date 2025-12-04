@@ -487,7 +487,7 @@ void GSState::DumpVertices(const std::string& filename)
 	constexpr int SCI_FLOAT_WIDTH = 15;
 	constexpr int STQ_BITS_WIDTH = 10;
 
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	const int n = GSUtil::GetPrimClassVertexCount(m_vt.m_primclass);
 
 	auto WriteVertexIndex = [&file](int index) {
 		file << std::left << std::dec << " # " << index;
@@ -2041,7 +2041,7 @@ void GSState::FlushPrim()
 					ASSUME(0);
 			}
 
-			pxAssert((int)unused < GSUtil::GetVertexCount(PRIM->PRIM));
+			pxAssert((int)unused < GSUtil::GetPrimVertexCount(PRIM->PRIM));
 		}
 
 		// If the PSM format of Z is invalid, but it is masked (no write) and ZTST is set to ALWAYS pass (no test, just allow)
@@ -2126,7 +2126,7 @@ void GSState::FlushPrim()
 			Draw();
 
 		g_perfmon.Put(GSPerfMon::Draw, 1);
-		g_perfmon.Put(GSPerfMon::Prim, m_index.tail / GSUtil::GetVertexCount(PRIM->PRIM));
+		g_perfmon.Put(GSPerfMon::Prim, m_index.tail / GSUtil::GetPrimVertexCount(PRIM->PRIM));
 
 		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 		{
@@ -3710,7 +3710,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 		return bbox;
 	};
 
-	constexpr int n = GSUtil::GetClassVertexCount(primclass);
+	constexpr int n = GSUtil::GetPrimClassVertexCount(primclass);
 
 	// We should should only have to compute the drawlist/bboxes once per draw.
 	pxAssert(!save_drawlist || m_drawlist.empty());
@@ -4223,26 +4223,6 @@ __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 	return (frame_addr_hit && frame_write_match) || (depth_addr_hit && depth_write_match);
 }
 
-static constexpr u32 NumIndicesForPrim(u32 prim)
-{
-	switch (prim)
-	{
-		case GS_POINTLIST:
-		case GS_INVALID:
-			return 1;
-		case GS_LINELIST:
-		case GS_SPRITE:
-		case GS_LINESTRIP:
-			return 2;
-		case GS_TRIANGLELIST:
-		case GS_TRIANGLESTRIP:
-		case GS_TRIANGLEFAN:
-			return 3;
-		default:
-			return 0;
-	}
-}
-
 static constexpr u32 MaxVerticesForPrim(u32 prim)
 {
 	switch (prim)
@@ -4273,7 +4253,7 @@ __forceinline void GSState::CheckCLUTValidity(u32 prim)
 	if (m_mem.m_clut.IsInvalid() & 2)
 		return;
 
-	u32 n = NumIndicesForPrim(prim);
+	u32 n = GSUtil::GetPrimVertexCount(prim);
 
 	const GSDrawingContext& ctx = m_prev_env.CTXT[m_prev_env.PRIM.CTXT];
 	if ((m_index.tail > 0 || (m_vertex.tail == n - 1)) && (GSLocalMemory::m_psm[ctx.TEX0.PSM].pal == 0 || !m_prev_env.PRIM.TME))
@@ -4611,8 +4591,7 @@ __forceinline void GSState::HandleAutoFlush()
 template <u32 prim, bool auto_flush>
 __forceinline void GSState::VertexKick(u32 skip)
 {
-	constexpr u32 n = NumIndicesForPrim(prim);
-	static_assert(n > 0);
+	constexpr u32 n = GSUtil::GetPrimVertexCount(prim);
 
 	pxAssert(m_vertex.tail < m_vertex.maxcount + 3);
 

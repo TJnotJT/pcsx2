@@ -4931,7 +4931,7 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	    m_vt.m_primclass == GS_SPRITE_CLASS)             // drawing sprites (handled by the sprites -> triangles expand shader)
 		return;
 
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	const int n = GSUtil::GetPrimClassVertexCount(m_vt.m_primclass);
 
 	// If all first/last vertices have the same color there is nothing to do.
 	bool first_eq_last = true;

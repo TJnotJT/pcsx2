@@ -58,7 +58,7 @@ public:
 		}
 	}
 
-	static constexpr int GetClassVertexCount(u32 primclass)
+	static constexpr int GetPrimClassVertexCount(u32 primclass)
 	{
 		switch (primclass)
 		{
@@ -70,8 +70,8 @@ public:
 		}
 	}
 
-	static constexpr int GetVertexCount(u32 prim)
+	static constexpr int GetPrimVertexCount(u32 prim)
 	{
-		return GetClassVertexCount(GetPrimClass(prim));
+		return GetPrimClassVertexCount(GetPrimClass(prim));
 	}
 };

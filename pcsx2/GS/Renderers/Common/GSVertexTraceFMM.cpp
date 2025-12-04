@@ -64,7 +64,7 @@ void GSVertexTraceFMM::FindMinMax(GSVertexTrace& vt, const void* vertex, const u
 {
 	const GSDrawingContext* context = vt.m_state->m_context;
 
-	constexpr int n = GSUtil::GetClassVertexCount(primclass);
+	constexpr int n = GSUtil::GetPrimClassVertexCount(primclass);
 
 	GSVector4 tmin = s_minmax.xxxx();
 	GSVector4 tmax = s_minmax.yyyy();
