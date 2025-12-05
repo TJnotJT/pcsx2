@@ -414,6 +414,9 @@ struct alignas(16) GSHWDrawConfig
 
 				// Scan mask
 				u32 scanmsk : 2;
+
+				u32 rov_color : 1;
+				u32 rov_depth : 1;
 			};
 
 			struct

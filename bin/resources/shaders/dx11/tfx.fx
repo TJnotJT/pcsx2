@@ -149,6 +149,9 @@ Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
 SamplerState TextureSampler : register(s0);
 
+RasterizerOrderedTexture2D<float4> RtTextureRov : register(u0);
+RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+
 #ifdef DX12
 cbuffer cb1 : register(b1)
 #else
