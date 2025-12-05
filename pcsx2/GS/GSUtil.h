@@ -38,6 +38,9 @@ public:
 
 	static GSRendererType GetPreferredRenderer();
 
+	static GSVector2i ConvertRangeDepthFormat(const GSVector2i range, const int pg_size);
+	static GSVector4i ConvertBBoxDepthFormat(const GSVector4i bbox, const GSVector2i pg_size);
+
 	static constexpr GS_PRIM_CLASS GetPrimClass(u32 prim)
 	{
 		switch (prim)
