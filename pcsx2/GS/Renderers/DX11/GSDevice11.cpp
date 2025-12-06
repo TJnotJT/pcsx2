@@ -600,6 +600,8 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 	m_max_texture_size = (m_feature_level >= D3D_FEATURE_LEVEL_11_0) ?
 	                         D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION :
 	                         D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+
+	m_features.aa1 = 1;
 }
 
 bool GSDevice11::HasSurface() const
@@ -1770,6 +1772,8 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PS_ZTST", sel.ztst);
 		sm.AddMacro("PS_COLOR_FEEDBACK", sel.color_feedback);
 		sm.AddMacro("PS_DEPTH_FEEDBACK", sel.depth_feedback);
+		sm.AddMacro("PS_AA1", sel.aa1);
+		sm.AddMacro("PS_ABE", sel.abe);
 
 		wil::com_ptr_nothrow<ID3D11PixelShader> ps = m_shader_cache.GetPixelShader(m_dev.get(), m_tfx_source, sm.GetPtr(), "ps_main");
 		i = m_ps.try_emplace(sel, std::move(ps)).first;

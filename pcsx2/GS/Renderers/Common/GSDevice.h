@@ -303,6 +303,7 @@ struct alignas(16) GSHWDrawConfig
 		Point,
 		Line,
 		Sprite,
+		LineAA1,
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -315,8 +316,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 2;
-				u8 _free : 2;
+				VSExpand expand : 3;
+				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -429,6 +430,10 @@ struct alignas(16) GSHWDrawConfig
 				// Feedback
 				u32 color_feedback : 1;
 				u32 depth_feedback : 1;
+
+				// AA1
+				u32 aa1 : 1; // Pixel shader support for AA1. Must be used in conjunction with VS AA1 expand.
+				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE blending interaction.
 			};
 
 			struct
@@ -862,6 +867,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
+		bool aa1                  : 1; ///< Supports the GS AA1 feature.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

@@ -101,6 +101,16 @@
 #define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
+#define PS_AA1 0
+#define PS_ABE 0
+#endif
+
+#ifndef VS_EXPAND_POINT
+#define VS_EXPAND_POINT 1
+#define VS_EXPAND_LINE 2
+#define VS_EXPAND_SPRITE 3
+#define VS_EXPAND_LINE_AA1 4
+#define VS_EXPAND_TRIANGLE_AA1 5
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -131,6 +141,10 @@ struct VS_OUTPUT
 #else
 	nointerpolation float4 c : COLOR0;
 #endif
+
+#if VS_EXPAND == VS_EXPAND_LINE_AA1
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+#endif
 };
 
 struct PS_INPUT
@@ -145,6 +159,9 @@ struct PS_INPUT
 #endif
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
+#endif
+#if PS_AA1
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 #endif
 };
 
@@ -1055,7 +1072,15 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 	float4 C = ps_color(input);
 
-#if PS_FIXED_ONE_A
+#if PS_AA1
+	float cov = clamp(1.0f - abs(input.inv_cov), 0.0f, 1.0f);
+	#if PS_ABE
+		if (floor(C.a) == 128.0f) // According to manual & hardware tests the coverage is only used if the fragment alpha is 128.
+			C.a = 128.0f * cov;
+	#else
+		C.a = 128.0f * cov;
+	#endif
+#elif PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
 	C.a = 128.0f;
 #endif
@@ -1373,7 +1398,7 @@ VS_INPUT load_vertex(uint index)
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 {
-#if VS_EXPAND == 1 // Point
+#if VS_EXPAND == VS_EXPAND_POINT
 
 	VS_OUTPUT vtx = vs_main(load_vertex(vid >> 2));
 
@@ -1382,7 +1407,13 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == 2 // Line
+#elif (VS_EXPAND == VS_EXPAND_LINE) || (VS_EXPAND == VS_EXPAND_LINE_AA1)
+
+	// The difference between EXPAND_LINE and EXPAND_LINE_AA1
+	// is that EXPAND_LINE expands in the perpendicular direction while
+	// EXPAND_LINE_AA1 expands in the Y direction for shallow lines (X dominant)
+	// and the X direction for steep lines (Y dominant).
+	// EXPAND_LINE_AA1 also adds coverage to the output.
 
 	uint vid_base = vid >> 2;
 	bool is_bottom = vid & 2;
@@ -1391,12 +1422,21 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_OUTPUT vtx = vs_main(load_vertex(vid_base));
 	VS_OUTPUT other = vs_main(load_vertex(vid_other));
 
-	float2 line_vector = normalize(vtx.p.xy - other.p.xy);
-	float2 line_normal = float2(line_vector.y, -line_vector.x);
-	float2 line_width = (line_normal * PointSize) / 2;
-	// line_normal is inverted for bottom point
-	float2 offset = (is_bottom ^ is_right) ? line_width : -line_width;
+	// Use bottom minus top for delta regardless of which vertex we are expanding.
+	float2 line_delta = is_bottom ? (vtx.p.xy - other.p.xy) : (other.p.xy - vtx.p.xy);
+	float2 line_vector = normalize(line_delta);
+#if VS_EXPAND == VS_EXPAND_LINE
+	float2 line_expand = float2(line_vector.y, -line_vector.x);
+#elif VS_EXPAND == VS_EXPAND_LINE_AA1
+	float2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? float2(0.0f, 2.0f) : float2(2.0f, 0.0f);
+#endif
+	float2 line_width = (line_expand * PointSize) / 2;
+	float2 offset = is_right ? line_width : -line_width;
 	vtx.p.xy += offset;
+
+#if VS_EXPAND == VS_EXPAND_LINE_AA1
+	vtx.inv_cov = is_right ? 1.0f : -1.0f;
+#endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
 	// This means that both triangles will have a point based off the top line point as their first point
@@ -1404,7 +1444,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == 3 // Sprite
+#elif VS_EXPAND == VS_EXPAND_SPRITE // Sprite
 
 	// Sprite points are always in pairs
 	uint vid_base = vid >> 1;
