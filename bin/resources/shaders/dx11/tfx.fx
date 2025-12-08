@@ -41,6 +41,12 @@
 #define PS_ATST_NOTEQUAL 4
 #endif
 
+#ifndef PS_AA1_NONE
+#define PS_AA1_NONE 0
+#define PS_AA1_LINE 1
+#define PS_AA1_TRIANGLE 2
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -142,8 +148,11 @@ struct VS_OUTPUT
 	nointerpolation float4 c : COLOR0;
 #endif
 
-#if VS_EXPAND == VS_EXPAND_LINE_AA1
+#if (VS_EXPAND == VS_EXPAND_LINE_AA1) || (VS_EXPAND == VS_EXPAND_TRIANGLE_AA1)
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
+#endif
 #endif
 };
 
@@ -162,6 +171,9 @@ struct PS_INPUT
 #endif
 #if PS_AA1
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+#if PS_AA1 == PS_AA1_TRIANGLE
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
+#endif
 #endif
 };
 
@@ -1059,7 +1071,6 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 
 PS_OUTPUT ps_main(PS_INPUT input)
 {
-
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
 		if (input.p.z < DepthTexture.Load(int3(input.p.xy, 0)).r)
@@ -1281,8 +1292,12 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);
+#if PS_DEPTH_FEEDBACK && (PS_AA1 == PS_AA1_TRIANGLE)
+	if (!bool(input.interior))
+		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r; // No depth update for triangle edges.
 #endif
+	output.depth = min(input.p.z, MaxDepthPS);
+#endif // PS_ZCLAMP
 
 	return output;
 }
@@ -1307,7 +1322,9 @@ cbuffer cb0
 	float2 TextureOffset;
 	float2 PointSize;
 	uint MaxDepth;
-	uint BaseVertex; // Only used in DX11.
+	uint _pad0;
+	uint BaseVertex;
+	uint BaseIndex;
 };
 
 VS_OUTPUT vs_main(VS_INPUT input)
@@ -1376,6 +1393,15 @@ struct VS_RAW_INPUT
 };
 
 StructuredBuffer<VS_RAW_INPUT> vertices : register(t0);
+StructuredBuffer<uint> IndexBuffer : register(t5);
+
+uint load_index(uint _i)
+{
+	int i = _i + BaseIndex;
+	// i is even => load lower 16 bits; i odd => load upper 16 bits.
+	int shift = (i & 1) << 4;
+	return (IndexBuffer.Load(i >> 1) >> shift) & 0xFFFF;
+}
 
 VS_INPUT load_vertex(uint index)
 {
@@ -1444,7 +1470,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == VS_EXPAND_SPRITE // Sprite
+#elif VS_EXPAND == VS_EXPAND_SPRITE
 
 	// Sprite points are always in pairs
 	uint vid_base = vid >> 1;
@@ -1464,6 +1490,70 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	vtx.p.y = is_bottom ? lt.p.y : vtx.p.y;
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
+
+	return vtx;
+
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+	// Triangles with AA1 are expanded as follows:
+	// - Vertices 0-2: Interior of triangle (1 triangle).
+	// - Vertices 3-8: First edge expanded (2 triangles).
+	// - Vertices 9-14: Second edge expanded (2 triangles).
+	// - Vertices 15-20: Third edge expanded (2 triangles).
+	uint prim_id = vid / 21;
+	uint prim_offset = vid - 21 * prim_id; // range: 0-20
+	bool interior = prim_offset < 3;
+
+	VS_OUTPUT vtx;
+	if (interior)
+	{
+		vtx = vs_main(load_vertex(load_index(3 * prim_id + prim_offset)));
+		vtx.interior = 1;
+		vtx.inv_cov = 0.0f; // Full coverage
+	}
+	else
+	{
+		// Vertex indices for this edge. We need all 3 for determining exterior/interior.
+		uint prim_offset_edges = prim_offset - 3; // range: 0-17
+		uint i0 = prim_offset_edges / 6;
+		uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+		uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
+		uint edge_offset = prim_offset_edges - 6 * i0; // range: 0-5
+
+		// Note: order of top/bottom, inside/outside order is arbitrary,
+		// as long as it assembles into two triangles forming a quad.
+		bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
+		bool is_outside = edge_offset & 1;
+
+		vtx = vs_main(load_vertex(load_index(3 * prim_id + i0)));
+		VS_OUTPUT other = vs_main(load_vertex(load_index(3 * prim_id + i1)));
+		VS_OUTPUT opposite = vs_main(load_vertex(load_index(3 * prim_id + i2)));
+
+		// Similar expansion to line AA1 except instead of expanding on both sides of
+		// the line we expand on on the side towards the outside of the triangle.
+		float2 line_delta = vtx.p.xy - other.p.xy;
+		float2 line_normal = normalize(float2(line_delta.y, -line_delta.x));
+		float2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? float2(0.0f, 2.0f) : float2(2.0f, 0.0f);
+		if ((dot(line_expand, line_normal) >= 0.0f) == (dot(opposite.p.xy - vtx.p.xy, line_normal) >= 0.0f))
+		{
+			// Expand direction point towards the interior so flip it.
+			line_expand = -line_expand;
+		}
+		float2 line_width = (line_expand * PointSize) / 2;
+
+		if (is_bottom)
+			vtx = other;
+		if (is_outside)
+		{
+			vtx.p.xy += line_width;
+			vtx.inv_cov = 1.0f; // No coverage
+		}
+		else
+		{
+			vtx.inv_cov = 0.0f; // Full coverage
+		}
+
+		vtx.interior = 0;
+	}
 
 	return vtx;
 

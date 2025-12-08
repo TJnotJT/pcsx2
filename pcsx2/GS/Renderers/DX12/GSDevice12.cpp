@@ -4240,7 +4240,7 @@ void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
 		m_dirty_flags |= DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING;
 
-	if (config.vs.UseExpandIndexBuffer())
+	if (config.vs.UseExpandIndexBufferFixed())
 	{
 		m_index.start = 0;
 		m_index.count = config.nindices;

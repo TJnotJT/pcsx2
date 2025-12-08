@@ -304,6 +304,7 @@ struct alignas(16) GSHWDrawConfig
 		Line,
 		Sprite,
 		LineAA1,
+		TriangleAA1,
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -325,7 +326,10 @@ struct alignas(16) GSHWDrawConfig
 		VSSelector(u8 k): key(k) {}
 
 		/// Returns true if the fixed index buffer should be used.
-		__fi bool UseExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
+		__fi bool UseExpandIndexBufferFixed() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
+		
+		/// Return true if the index buffer should be bound as a vertex shader resource.
+		__fi bool UseExpandIndexBufferVertexShader() const { return (expand == VSExpand::TriangleAA1); }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
 
@@ -336,6 +340,13 @@ struct alignas(16) GSHWDrawConfig
 		PS_ATST_GEQUAL = 2,
 		PS_ATST_EQUAL = 3,
 		PS_ATST_NOTEQUAL = 4
+	};
+
+	enum PSAA1Primitive
+	{
+		PS_AA1_NONE = 0,
+		PS_AA1_LINE = 1,
+		PS_AA1_TRIANGLE = 2
 	};
 
 #pragma pack(pop)
@@ -432,8 +443,8 @@ struct alignas(16) GSHWDrawConfig
 				u32 depth_feedback : 1;
 
 				// AA1
-				u32 aa1 : 1; // Pixel shader support for AA1. Must be used in conjunction with VS AA1 expand.
-				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE blending interaction.
+				u32 aa1 : 2; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
+				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE interaction.
 			};
 
 			struct
@@ -604,6 +615,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 texture_offset;
 		GSVector2 point_size;
 		GSVector2i max_depth;
+		GSVector2i base_vertex_index;
 		__fi VSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
@@ -767,8 +779,9 @@ struct alignas(16) GSHWDrawConfig
 	bool require_full_barrier; ///< Require texture barrier between all prims
 
 	DestinationAlphaMode destination_alpha;
-	SetDATM datm : 2;
-	bool line_expand : 1;
+	SetDATM datm;
+	bool line_expand;
+	bool vertex_shader_indexing; ///< The index buffer will be bound as a shader resource and the vertex shader will handle primitive assembly.
 
 	struct AlphaPass
 	{
@@ -810,9 +823,12 @@ static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
 	{
 		case GSHWDrawConfig::VSExpand::Point:
 		case GSHWDrawConfig::VSExpand::Line:
+		case GSHWDrawConfig::VSExpand::LineAA1:
 			return 4;
 		case GSHWDrawConfig::VSExpand::Sprite:
 			return 2;
+		case GSHWDrawConfig::VSExpand::TriangleAA1:
+			return 7;
 		default:
 			return 1;
 	}

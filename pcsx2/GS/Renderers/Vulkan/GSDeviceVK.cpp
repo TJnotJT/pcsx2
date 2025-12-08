@@ -6088,7 +6088,7 @@ void GSDeviceVK::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 	IASetVertexBuffer(config.verts, sizeof(GSVertex), config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
-	if (config.vs.UseExpandIndexBuffer())
+	if (config.vs.UseExpandIndexBufferFixed())
 	{
 		m_index.start = 0;
 		m_index.count = config.nindices;

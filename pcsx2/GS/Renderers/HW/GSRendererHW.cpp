@@ -5028,7 +5028,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 6;
-					m_conf.ps.aa1 = 1;
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1_LINE;
 					m_conf.ps.abe = PRIM->ABE != 0;
 					ExpandLineIndices();
 				}
@@ -5089,8 +5089,36 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_TRIANGLE_CLASS:
 			{
-				m_conf.topology = GSHWDrawConfig::Topology::Triangle;
-				m_conf.indices_per_prim = 3;
+				if (PRIM->AA1 && features.aa1)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 3;
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1_TRIANGLE;
+					m_conf.ps.abe = PRIM->ABE != 0;
+					m_conf.vertex_shader_indexing = true;
+
+					// Force ZClamp so that Z writes can be prevented for edge pixels.
+					if (m_conf.depth.zwe)
+					{
+						GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf);
+						m_conf.ps.depth_feedback = true; // Bind depth as shader resource.
+
+						// Z test must be also done in the shader then.
+						if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
+						{
+							m_conf.ps.ztst = m_conf.depth.ztst; // Enable shader Z test.
+							m_conf.depth.ztst = ZTST_ALWAYS; // Disable HW Z test.
+							m_conf.ps.depth_feedback = true; // Bind depth as shader resource.
+						}
+					}
+				}
+				else
+				{
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 3;
+				}
 
 				// See note above in GS_SPRITE_CLASS.
 				if (m_vt.m_accurate_stq && m_vt.m_eq.stq) [[unlikely]]
