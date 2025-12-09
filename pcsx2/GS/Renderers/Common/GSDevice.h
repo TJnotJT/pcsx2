@@ -326,10 +326,10 @@ struct alignas(16) GSHWDrawConfig
 		VSSelector(u8 k): key(k) {}
 
 		/// Returns true if the fixed index buffer should be used.
-		__fi bool UseExpandIndexBufferFixed() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
+		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
-		__fi bool UseExpandIndexBufferVertexShader() const { return (expand == VSExpand::TriangleAA1); }
+		__fi bool UseVertexShaderExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
 

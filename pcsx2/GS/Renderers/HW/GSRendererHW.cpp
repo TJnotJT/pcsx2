@@ -7412,8 +7412,8 @@ void GSRendererHW::GetAlphaTestConfig(
 			if (cached_ctx.DepthRead())
 			{
 				GL_INS("Enable SW depth testing for depth feedback");
-				config.ps.ztst = cached_ctx.TEST.ZTST;
-				config.depth.ztst = ZTST_ALWAYS;
+				config.ps.ztst = cached_ctx.TEST.ZTST; // Enable SW Z test.
+				config.depth.ztst = ZTST_ALWAYS; // Disable HW Z test.
 			}
 		}
 

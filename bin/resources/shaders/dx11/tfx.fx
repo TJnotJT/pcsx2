@@ -111,7 +111,8 @@
 #define PS_ABE 0
 #endif
 
-#ifndef VS_EXPAND_POINT
+#ifndef VS_EXPAND_NONE
+#define VS_EXPAND_NONE 0
 #define VS_EXPAND_POINT 1
 #define VS_EXPAND_LINE 2
 #define VS_EXPAND_SPRITE 3
@@ -148,12 +149,8 @@ struct VS_OUTPUT
 	nointerpolation float4 c : COLOR0;
 #endif
 
-#if (VS_EXPAND == VS_EXPAND_LINE_AA1) || (VS_EXPAND == VS_EXPAND_TRIANGLE_AA1)
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
-#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-#endif
-#endif
 };
 
 struct PS_INPUT
@@ -169,12 +166,8 @@ struct PS_INPUT
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
 #endif
-#if PS_AA1
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
-#if PS_AA1 == PS_AA1_TRIANGLE
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-#endif
-#endif
 };
 
 #ifdef PIXEL_SHADER
@@ -1379,7 +1372,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	return output;
 }
 
-#if VS_EXPAND != 0
+#if VS_EXPAND != VS_EXPAND_NONE
 
 struct VS_RAW_INPUT
 {
@@ -1397,9 +1390,9 @@ StructuredBuffer<uint> IndexBuffer : register(t5);
 
 uint load_index(uint _i)
 {
-	int i = _i + BaseIndex;
+	uint i = _i + BaseIndex;
 	// i is even => load lower 16 bits; i odd => load upper 16 bits.
-	int shift = (i & 1) << 4;
+	uint shift = (i & 1) << 4;
 	return (IndexBuffer.Load(i >> 1) >> shift) & 0xFFFF;
 }
 
@@ -1454,6 +1447,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 #if VS_EXPAND == VS_EXPAND_LINE
 	float2 line_expand = float2(line_vector.y, -line_vector.x);
 #elif VS_EXPAND == VS_EXPAND_LINE_AA1
+	// Expand in y direction for shallow lines and x direction for steep lines.
 	float2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? float2(0.0f, 2.0f) : float2(2.0f, 0.0f);
 #endif
 	float2 line_width = (line_expand * PointSize) / 2;
@@ -1494,11 +1488,13 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	return vtx;
 
 #elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+
 	// Triangles with AA1 are expanded as follows:
 	// - Vertices 0-2: Interior of triangle (1 triangle).
 	// - Vertices 3-8: First edge expanded (2 triangles).
 	// - Vertices 9-14: Second edge expanded (2 triangles).
 	// - Vertices 15-20: Third edge expanded (2 triangles).
+
 	uint prim_id = vid / 21;
 	uint prim_offset = vid - 21 * prim_id; // range: 0-20
 	bool interior = prim_offset < 3;
@@ -1507,8 +1503,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	if (interior)
 	{
 		vtx = vs_main(load_vertex(load_index(3 * prim_id + prim_offset)));
-		vtx.interior = 1;
 		vtx.inv_cov = 0.0f; // Full coverage
+		vtx.interior = 1;
 	}
 	else
 	{

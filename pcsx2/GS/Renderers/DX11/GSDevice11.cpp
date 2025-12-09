@@ -2769,13 +2769,13 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	if (config.vs.UseExpandIndexBufferFixed())
+	if (config.vs.UseFixedExpandIndexBuffer())
 	{
 		IASetIndexBuffer(m_expand_ib.get());
 		m_index.start = 0;
 		m_index.count = config.nindices;
 	}
-	else if (config.vs.UseExpandIndexBufferVertexShader())
+	else if (config.vs.UseVertexShaderExpandIndexBuffer())
 	{
 		VSSetIndexBuffer(config.indices, config.nindices);
 		IASetVertexBuffer(nullptr, 0); // Unbind the vertex buffer to prevent unwanted fetches.

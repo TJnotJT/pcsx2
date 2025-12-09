@@ -2519,7 +2519,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
-	if (config.vs.UseExpandIndexBufferFixed())
+	if (config.vs.UseFixedExpandIndexBuffer())
 	{
 		IASetVAO(m_expand_vao);
 		m_index.start = 0;

@@ -2393,7 +2393,7 @@ bool GSDevice12::CreateBuffers()
 
 	if (!m_expand_index_stream_buffer.Create(m_features.aa1 ? INDEX_BUFFER_SIZE : 4))
 	{
-		Host::ReportErrorAsync("GS", "Failed to allocate expansion index buffer");
+		Host::ReportErrorAsync("GS", "Failed to allocate expansion index buffer (VS resource)");
 		return false;
 	}
 
@@ -4302,13 +4302,13 @@ void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
 		m_dirty_flags |= DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING;
 
-	if (config.vs.UseExpandIndexBufferFixed())
+	if (config.vs.UseFixedExpandIndexBuffer())
 	{
 		m_index.start = 0;
 		m_index.count = config.nindices;
 		SetIndexBuffer(m_expand_index_buffer->GetGPUVirtualAddress(), EXPAND_BUFFER_SIZE, DXGI_FORMAT_R16_UINT);
 	}
-	else if (config.vs.UseExpandIndexBufferVertexShader())
+	else if (config.vs.UseVertexShaderExpandIndexBuffer())
 	{
 		m_dirty_flags |= DIRTY_FLAG_VS_INDEX_BUFFER_BINDING;
 		VSSetIndexBuffer(config.indices, config.nindices);
