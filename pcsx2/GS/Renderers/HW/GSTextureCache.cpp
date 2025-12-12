@@ -2402,7 +2402,8 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 					i++;
 					continue;
 				}
-				// if It's an old target and it's being completely overwritten, kill it.
+
+				// If it's an old target and it's being completely overwritten, kill it.
 				// Dragon Quest 8 reuses a render-target sized buffer as a single-page buffer, without clearing it. But,
 				// it does dirty it by writing over the 64x64 region. So while we can't use this heuristic for tossing
 				// targets at BW=1 because it breaks other games, we can when the *new* buffer area is completely dirty.
@@ -2413,10 +2414,11 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 					{
 						can_use = false;
 					}
-					else if (!t->m_dirty.empty())
+					
+					// Dirty rect contains the whole size of the target.
+					if (can_use && !t->m_dirty.empty() && t->m_dirty.GetTotalRect(TEX0, size).rcontains(GSVector4i::loadh(size)))
 					{
-						const GSVector4i size_rect = GSVector4i::loadh(size);
-						can_use = !t->m_dirty.GetTotalRect(TEX0, size).rintersect(size_rect).eq(size_rect);
+						can_use = false;
 					}
 				}
 				else if (type == RenderTarget && (fbmask == 0xffffff && !t->m_was_dst_matched && TEX0.TBW != t->m_TEX0.TBW))
@@ -2435,6 +2437,7 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 						break;
 					}
 				}
+
 				// TODO: What might be a nicer solution than this, is to rearrange the targets to match the new layout, however this comes with some caviets:
 				// 1. They can draw wider than the FBW
 				// 2. The dirty+valid rects will need to also be rearranged
@@ -2459,15 +2462,22 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 					const u32 dirty_start = GSLocalMemory::GetStartBlockAddress(t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM, dirty_rect);
 					const u32 dirty_end = GSLocalMemory::GetEndBlockAddress(t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM, dirty_rect);
 
-					if (dirty_end < draw_end || dirty_start > draw_start)
+					if (dirty_end <= draw_end && dirty_start >= draw_start)
 						dirtied_area = false;
 				}
 
-				if (can_use && ((!is_shuffle && dirtied_area) || (is_shuffle && src && GSLocalMemory::m_psm[src->m_TEX0.PSM].bpp == 8 && GSLocalMemory::m_psm[t->m_TEX0.PSM].bpp == 16)) && ((preserve_alpha && preserve_rgb) || (draw_rect.w > GSLocalMemory::m_psm[t->m_TEX0.PSM].pgs.y && !possible_clear)) && TEX0.TBW != t->m_TEX0.TBW)
+				// Cases where we nuke a target at the same BP if the buffer widths are different.
+				if (can_use &&
+					((!is_shuffle && (dirtied_area || !GSUtil::HasSameSwizzleBits(TEX0.PSM, t->m_TEX0.PSM))) ||
+						(is_shuffle && src && GSLocalMemory::m_psm[src->m_TEX0.PSM].bpp == 8 && GSLocalMemory::m_psm[t->m_TEX0.PSM].bpp == 16)) &&
+					((preserve_alpha && preserve_rgb) ||
+						(draw_rect.w > GSLocalMemory::m_psm[t->m_TEX0.PSM].pgs.y && !possible_clear)) &&
+					TEX0.TBW != t->m_TEX0.TBW)
 				{
 					can_use = false;
-				}
-
+				} 
+				
+				// Successful match if we can use; otherwise nuke the old target at the same BP.
 				if (can_use)
 				{
 					if (used)
