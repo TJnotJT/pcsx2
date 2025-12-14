@@ -1478,10 +1478,12 @@ void main()
 	#if PS_ZFLOOR
 		FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
 	#endif
-	
+
 	#if PS_ZCLAMP
-		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
-	#elif PS_ZFLOOR || (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && AFAIL_NEEDS_DEPTH)
+		FragCoord.z = min(FragCoord.z, MaxDepthPS);
+	#endif
+	
+	#if PS_ZCLAMP || PS_ZFLOOR
 		gl_FragDepth = FragCoord.z;
 	#endif
 #endif // PS_DATE
