@@ -13,6 +13,7 @@
 #include "common/Console.h"
 #include "common/Error.h"
 #include "common/StringUtil.h"
+#include "common/ScopedGuard.h"
 
 #include "imgui.h"
 #include "IconsFontAwesome6.h"
@@ -2434,6 +2435,12 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	GSTexture* primid_texture = nullptr;
 	GSTexture* colclip_rt = g_gs_device->GetColorClipTexture();
+	GSTexture* draw_ds_clone = nullptr;
+
+	ScopedGuard recycle_temp_textures([&]() {
+		if (draw_ds_clone)
+			Recycle(draw_ds_clone);
+	});
 
 	if (colclip_rt)
 	{
@@ -2525,6 +2532,15 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("GL: Failed to allocate temp texture for RT copy.");
 	}
 
+	if ((config.require_one_barrier || config.require_full_barrier) && config.ds && config.ps.IsFeedbackLoopDepth())
+	{
+		draw_ds_clone = CreateTexture(rtsize.x, rtsize.y, 1, config.ds->GetFormat(), true);
+		if (draw_ds_clone)
+			GL_INS("GL: Copy DS to temp texture {%d,%d %dx%d}");
+		else
+			Console.Warning("GL: Failed to allocate temp texture for RT copy.");
+	}
+
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
 	m_vertex.start *= GetExpansionFactor(config.vs.expand);
 
@@ -2557,8 +2573,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(2, draw_rt_clone);
 	else if (config.require_one_barrier || config.require_full_barrier)
 		PSSetShaderResource(2, colclip_rt ? colclip_rt : config.rt);
-	if ((config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
-		PSSetShaderResource(4, config.ds);
+	//if ((config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
+	//	PSSetShaderResource(4, config.ds);
 
 	SetupSampler(config.sampler);
 
@@ -2684,7 +2700,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
 
-	SendHWDraw(config, config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(config, config.ds, draw_ds_clone, config.require_one_barrier, config.require_full_barrier);
 
 	if (config.blend_multi_pass.enable)
 	{
@@ -2731,7 +2747,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			OMSetBlendState();
 		}
 		SetupOM(config.alpha_second_pass.depth);
-		SendHWDraw(config, config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(config, config.ds, draw_ds_clone, config.alpha_second_pass.require_one_barrier,
+			config.alpha_second_pass.require_full_barrier);
 	}
 
 	if (primid_texture)
@@ -2757,7 +2774,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	}
 }
 
-void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, bool full_barrier)
+void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, GSTexture* draw_ds, GSTexture* draw_ds_clone, bool one_barrier, bool full_barrier)
 {
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
@@ -2769,6 +2786,14 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, boo
 	if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("OpenGL: Possible unnecessary barrier detected.");
 #endif
+
+	auto IssueBarrierOrCopy = [&](const GSVector4i& drawarea) {
+		glTextureBarrier();
+		if (draw_ds_clone)
+			CopyRect(draw_ds, draw_ds_clone, drawarea, drawarea.left, drawarea.top);
+		if ((one_barrier || full_barrier) && draw_ds_clone)
+			PSSetShaderResource(4, draw_ds_clone);
+	};
 
 	if (full_barrier)
 	{
@@ -2797,7 +2822,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, boo
 		for (u32 n = 0, p = 0; n < draw_list_size; n++)
 		{
 			const u32 count = (*config.drawlist)[n] * indices_per_prim;
-			glTextureBarrier();
+			IssueBarrierOrCopy(config.drawarea);
 			DrawIndexedPrimitive(p, count);
 			p += count;
 		}
@@ -2808,7 +2833,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, bool one_barrier, boo
 	if (one_barrier)
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
-		glTextureBarrier();
+		IssueBarrierOrCopy(config.drawarea);
 	}
 
 	DrawIndexedPrimitive();
