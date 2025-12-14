@@ -2777,6 +2777,7 @@ VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
 		VK_FORMAT_R16G16B16A16_SFLOAT, // ColorHDR
 		VK_FORMAT_R16G16B16A16_UNORM, // ColorClip
 		VK_FORMAT_D32_SFLOAT_S8_UINT, // DepthStencil
+		VK_FORMAT_R32_SFLOAT, // Float32
 		VK_FORMAT_R8_UNORM, // UNorm8
 		VK_FORMAT_R16_UINT, // UInt16
 		VK_FORMAT_R32_UINT, // UInt32
@@ -3982,6 +3983,12 @@ bool GSDeviceVK::CompileConvertPipelines()
 			case ShaderConvert::DATM_1_RTA_CORRECTION:
 			{
 				rp = m_date_setup_render_pass;
+			}
+			break;
+			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
+			{
+				rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::Float32), VK_FORMAT_UNDEFINED,
+					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 			}
 			break;
 			default:
