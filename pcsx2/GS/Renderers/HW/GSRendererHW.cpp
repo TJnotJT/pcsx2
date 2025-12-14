@@ -7353,11 +7353,17 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 		((config.require_one_barrier && feedback_one_pass) || config.require_full_barrier) &&
 		(features.texture_barrier || features.multidraw_fb_copy);
 
-	// This is to prevent us from using dual-source blend with FBfetch, which breaks Intel GPUs on Metal.
-	// Setting afail to RGB_ONLY without enabling color1 will enable this mode in the shader.
-	const bool rgb_only_fbfetch = simple_rgb_only && features.framebuffer_fetch;
-	
-	if (GSConfig.HWAFAILFeedback || already_have_barriers || rgb_only_fbfetch)
+	// Dual source blend comes with some restrictions, so detect and avoid them here.
+	const bool using_dual_source_blend = !config.ps.no_color1;
+
+	// Determines if the method for doing depth feedback uses multiple render targets.
+	// This should not be used in conjunction with dual source blend.
+	const bool depth_as_rt_feedback = afail_needs_depth && features.depth_as_rt_feedback;
+
+	// Also do not use dual source blend with FB-fetch, which breaks Intel GPUs on Metal.
+	const bool avoid_feedback = (features.framebuffer_fetch || depth_as_rt_feedback) && using_dual_source_blend;
+
+	if ((GSConfig.HWAFAILFeedback || already_have_barriers || features.framebuffer_fetch) && !avoid_feedback)
 	{
 		// Use RT and/or depth sampling for accurate AFAIL in the shader.
 		GL_INS("Alpha test with RT/depth feedback (accurate)");
@@ -7369,9 +7375,12 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 		config.ps.color_feedback |= afail_needs_rt;
 		config.ps.depth_feedback |= afail_needs_depth;
 
-		if (!features.framebuffer_fetch || afail_needs_depth)
+		// Whether we can use FB-fetch for both color and/or depth.
+		// In that case, we don't need barriers.
+		const bool use_full_fbfetch = features.framebuffer_fetch &&
+		                              (!afail_needs_depth || features.depth_as_rt_feedback);
+		if (!use_full_fbfetch)
 		{
-			// Only enable barriers if we either do not have FB-fetch or need depth feedback (there's no FB-fetch for depth).
 			config.require_one_barrier |= feedback_one_pass;
 			config.require_full_barrier |= !feedback_one_pass;
 		}
@@ -7385,8 +7394,8 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 			if (cached_ctx.DepthRead())
 			{
 				GL_INS("Enable SW depth testing for depth feedback");
-				config.ps.ztst = cached_ctx.TEST.ZTST;
-				config.depth.ztst = ZTST_ALWAYS;
+				config.ps.ztst = cached_ctx.TEST.ZTST; // Enable SW Z test.
+				config.depth.ztst = ZTST_ALWAYS; // Disable HW Z test.
 			}
 		}
 
@@ -8279,9 +8288,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (m_conf.require_one_barrier || m_conf.require_full_barrier)
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
-		if (!m_conf.ps.IsFeedbackLoopDepth())
+		// If depth feedback can use a color RT, we can use FB fetch.
+		// Otherwise we must keep barriers.
+		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback;
+
+		if (!need_barriers_for_depth)
 		{
-			// Barriers aren't needed with fbfetch for color feedback only.
+			// Barriers aren't needed with fbfetch
 			m_conf.require_one_barrier = false;
 			m_conf.require_full_barrier = false;
 		}
@@ -8307,6 +8320,29 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		ComputeDrawlistGetSize(rt->m_scale);
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	// Create a temporary depth color target
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
+	{
+		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
+
+		pxAssert(m_conf.ps.no_color1); // Should not be dual-source blending with multiple render targets.
+
+		// Disable HW depth
+		m_conf.depth.zwe = 0;
+		m_conf.depth.ztst = ZTST_ALWAYS;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.depth.zwe = 0;
+			m_conf.alpha_second_pass.depth.ztst = 0;
+		}
+		
+		// Create the temporary depth copy
+		m_conf.ds_as_rt = g_gs_device->CreateRenderTarget(m_conf.ds->GetWidth(), m_conf.ds->GetHeight(),
+			GSTexture::Format::Float32, false, true);
+		const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(m_conf.ds->GetWidth()), static_cast<float>(m_conf.ds->GetHeight()));
+		g_gs_device->StretchRect(m_conf.ds, m_conf.ds_as_rt, dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 	}
 
 	// rs
@@ -8341,6 +8377,16 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		g_gs_device->RenderHW(m_conf);
 	else
 		m_last_rt = rt;
+
+	// Resolve temporary depth as color
+	if (m_conf.ds_as_rt)
+	{
+		GL_PUSH("HW: Resolving temporary R32 RT after depth feedback");
+		const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(m_conf.ds->GetWidth()), static_cast<float>(m_conf.ds->GetHeight()));
+		g_gs_device->StretchRect(m_conf.ds_as_rt, m_conf.ds, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+		g_gs_device->Recycle(m_conf.ds_as_rt);
+		m_conf.ds_as_rt = nullptr;
+	}
 }
 
 // If the EE uploaded a new CLUT since the last draw, use that.
