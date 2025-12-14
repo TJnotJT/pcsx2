@@ -121,6 +121,14 @@ in SHADER
 	layout(location = 0) TARGET_0_QUALIFIER vec4 SV_Target0;
 #endif
 
+#if NEEDS_DEPTH && PS_NO_COLOR1
+#if HAS_FRAMEBUFFER_FETCH
+	layout(location = 1, index = 0) inout float SV_Target1;
+#else
+	layout(location = 1, index = 0) out float SV_Target1;
+#endif
+#endif
+
 #if NEEDS_TEX
 layout(binding = 0) uniform sampler2D TextureSampler;
 layout(binding = 1) uniform sampler2D PaletteSampler;
@@ -153,6 +161,8 @@ vec4 sample_from_depth()
 {
 #if !NEEDS_DEPTH
 	return vec4(0.0);
+#elif HAS_FRAMEBUFFER_FETCH
+	return SV_Target1;
 #else
 	return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0);
 #endif
@@ -1218,6 +1228,12 @@ void ps_main()
 #endif
 
 #if PS_ZCLAMP
-	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+	#if NEEDS_DEPTH && PS_NO_COLOR1
+		// Warning: do not write SV_Target1 until the end since the value might be needed for
+		// FB fetch in sample_from_depth().
+		SV_Target1 = min(FragCoord.z, MaxDepthPS);
+	#else
+		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+	#endif
 #endif
 }
