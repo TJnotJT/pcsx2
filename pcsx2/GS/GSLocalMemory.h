@@ -535,6 +535,8 @@ public:
 
 	// address
 
+	using BlockNumberRect = u32 (*)(int, int, int, int, u32, u32);
+
 	static u32 BlockNumberRectStart32(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
 	static u32 BlockNumberRectEnd32(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
 	static u32 BlockNumberRectStart16(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
@@ -553,7 +555,7 @@ public:
 	static u32 BlockNumberRectEnd16SZ(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
 
 	static void TestBlockNumberRect(
-		int w, int h, int step, int blkw, int blkh,
+		u32 bp, u32 bw, int w, int h, int step, int blkw, int blkh,
 		u32 (*BlockNumber)(int, int, u32, u32),
 		u32 (*BlockNumberStart)(int, int, int, int, u32, u32),
 		u32 (*BlockNumberEnd)(int, int, int, int, u32, u32));
@@ -1170,4 +1172,46 @@ constexpr inline GSOffset GSOffset::fromKnownPSM(u32 bp, u32 bw, GS_PSM psm)
 		case PSMZ16S:  return GSOffset(GSLocalMemory::swizzle16SZ, bp, bw, psm);
 	}
 	return GSOffset(GSLocalMemory::swizzle32, bp, bw, psm);
+}
+
+constexpr inline GSLocalMemory::BlockNumberRect GetBlockNumberRectStart(GS_PSM psm)
+{
+	switch (psm)
+	{
+		case PSMCT32:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMCT24:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMCT16:  return GSLocalMemory::BlockNumberRectStart16;
+		case PSMCT16S: return GSLocalMemory::BlockNumberRectStart16S;
+		case PSMT8:    return GSLocalMemory::BlockNumberRectStart8;
+		case PSMT4:    return GSLocalMemory::BlockNumberRectStart4;
+		case PSMT8H:   return GSLocalMemory::BlockNumberRectStart32;
+		case PSMT4HL:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMT4HH:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMZ32:   return GSLocalMemory::BlockNumberRectStart32Z;
+		case PSMZ24:   return GSLocalMemory::BlockNumberRectStart32Z;
+		case PSMZ16:   return GSLocalMemory::BlockNumberRectStart16Z;
+		case PSMZ16S:  return GSLocalMemory::BlockNumberRectStart16SZ;
+		default:       return nullptr;
+	}
+}
+
+constexpr inline GSLocalMemory::BlockNumberRect GetBlockNumberRectEnd(GS_PSM psm)
+{
+	switch (psm)
+	{
+		case PSMCT32:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMCT24:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMCT16:  return GSLocalMemory::BlockNumberRectStart16;
+		case PSMCT16S: return GSLocalMemory::BlockNumberRectStart16S;
+		case PSMT8:    return GSLocalMemory::BlockNumberRectStart8;
+		case PSMT4:    return GSLocalMemory::BlockNumberRectStart4;
+		case PSMT8H:   return GSLocalMemory::BlockNumberRectStart32;
+		case PSMT4HL:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMT4HH:  return GSLocalMemory::BlockNumberRectStart32;
+		case PSMZ32:   return GSLocalMemory::BlockNumberRectStart32Z;
+		case PSMZ24:   return GSLocalMemory::BlockNumberRectStart32Z;
+		case PSMZ16:   return GSLocalMemory::BlockNumberRectStart16Z;
+		case PSMZ16S:  return GSLocalMemory::BlockNumberRectStart16SZ;
+		default:       return nullptr;
+	}
 }

@@ -851,12 +851,12 @@ u32 GSLocalMemory::BlockNumberRectEnd16SZ(int x0, int y0, int x1, int y1, u32 bp
 }
 
 void GSLocalMemory::TestBlockNumberRect(
-	int w, int h, int step, int blkw, int blkh,
+	u32 bp, u32 bw, int w, int h, int step, int blkw, int blkh,
 	u32 (*BlockNumber)(int, int, u32, u32),
 	u32 (*BlockNumberStart)(int, int, int, int, u32, u32),
 	u32 (*BlockNumberEnd)(int, int, int, int, u32, u32))
 {
-	printf("    TestBlockNumberRect: w=%d h=%d step=%d blkw=%d blkh=%d\n", w, h, step, blkw, blkh);
+	printf("    TestBlockNumberRect: bp=%x bw=%d w=%d h=%d step=%d blkw=%d blkh=%d\n", bp, bw, w, h, step, blkw, blkh);
 
 	u32 num_tests = 0;
 	for (int x0 = 0; x0 < w - step; x0 += step)
@@ -874,14 +874,14 @@ void GSLocalMemory::TestBlockNumberRect(
 					{
 						for (int y2 = y0 & ~(blkh - 1); y2 < y1; y2 += blkh)
 						{
-							u32 bp = BlockNumber(x2, y2, 0, 1);
-							start_bp_true = std::min(start_bp_true, bp);
-							end_bp_true = std::max(end_bp_true, bp);
+							u32 bp_tmp = BlockNumber(x2, y2, bp, bw);
+							start_bp_true = std::min(start_bp_true, bp_tmp);
+							end_bp_true = std::max(end_bp_true, bp_tmp);
 						}
 					}
 
-					u32 start_bp_test = BlockNumberStart(x0, y0, x1, y1, 0, 1);
-					u32 end_bp_test = BlockNumberEnd(x0, y0, x1, y1, 0, 1);
+					u32 start_bp_test = BlockNumberStart(x0, y0, x1, y1, bp, bw);
+					u32 end_bp_test = BlockNumberEnd(x0, y0, x1, y1, bp, bw);
 
 					if (start_bp_test != start_bp_true)
 					{
@@ -905,53 +905,58 @@ void GSLocalMemory::TestBlockNumberRect(
 
 void GSLocalMemory::TestBlockNumberRectAll()
 {
-	printf("Testing BlockNumberRectStart16S(), BlockNumberRectEnd16S()\n");
-	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16S, BlockNumberRectStart16S, BlockNumberRectEnd16S);
-	printf("\n");
+	std::array<u32, 11> bp_list = {0, 13, 18, 24, 29, 45, 61, 74, 91, 108, 128};
+	std::array<u32, 10> bw_list = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
-	printf("Testing BlockNumberRectStart32Z(), BlockNumberRectEnd32Z()\n");
-	TestBlockNumberRect(64, 32, 4, 8, 8, BlockNumber32Z, BlockNumberRectStart32Z, BlockNumberRectEnd32Z);
-	printf("\n");
+	for (u32 bp : bp_list)
+	{
+		for (u32 bw : bw_list)
+		{
+			printf("Testing BlockNumberRectStart32(), BlockNumberRectEnd32()\n");
+			TestBlockNumberRect(bp, bw, 64, 32, 4, 8, 8, BlockNumber32, BlockNumberRectStart32, BlockNumberRectEnd32);
+			printf("\n");
 
-	printf("Testing BlockNumberRectStart16Z(), BlockNumberRectEnd16Z()\n");
-	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16Z, BlockNumberRectStart16Z, BlockNumberRectEnd16Z);
-	printf("\n");
+			printf("Testing BlockNumberRectStart16(), BlockNumberRectEnd16()\n");
+			TestBlockNumberRect(bp, bw, 64, 64, 4, 16, 8, BlockNumber16, BlockNumberRectStart16, BlockNumberRectEnd16);
+			printf("\n");
 
-	printf("Testing BlockNumberRectStart16SZ(), BlockNumberRectEnd16SZ()\n");
-	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16SZ, BlockNumberRectStart16SZ, BlockNumberRectEnd16SZ);
-	printf("\n");
+			printf("Testing BlockNumberRectStart16S(), BlockNumberRectEnd16S()\n");
+			TestBlockNumberRect(bp, bw, 64, 64, 4, 16, 8, BlockNumber16S, BlockNumberRectStart16S, BlockNumberRectEnd16S);
+			printf("\n");
+
+			printf("Testing BlockNumberRectStart8(), BlockNumberRectEnd8()\n");
+			TestBlockNumberRect(bp, bw, 128, 64, 4, 16, 16, BlockNumber8, BlockNumberRectStart8, BlockNumberRectEnd8);
+			printf("\n");
+
+			printf("Testing BlockNumberRectStart4(), BlockNumberRectEnd4()\n");
+			TestBlockNumberRect(bp, bw, 128, 128, 4, 32, 16, BlockNumber4, BlockNumberRectStart4, BlockNumberRectEnd4);
+			printf("\n");
+
+			printf("Testing BlockNumberRectStart32Z(), BlockNumberRectEnd32Z()\n");
+			TestBlockNumberRect(bp, bw, 64, 32, 4, 8, 8, BlockNumber32Z, BlockNumberRectStart32Z, BlockNumberRectEnd32Z);
+			printf("\n");
+
+			printf("Testing BlockNumberRectStart16Z(), BlockNumberRectEnd16Z()\n");
+			TestBlockNumberRect(bp, bw, 64, 64, 4, 16, 8, BlockNumber16Z, BlockNumberRectStart16Z, BlockNumberRectEnd16Z);
+			printf("\n");
+
+			printf("Testing BlockNumberRectStart16SZ(), BlockNumberRectEnd16SZ()\n");
+			TestBlockNumberRect(bp, bw, 64, 64, 4, 16, 8, BlockNumber16SZ, BlockNumberRectStart16SZ, BlockNumberRectEnd16SZ);
+			printf("\n");
+		}
+	}
 }
 
 u32 GSLocalMemory::GetStartBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
 {
-	u32 result = m_psm[psm].info.bn(rect.x, rect.y, bp, bw); // Valid only for color formats
-
-	// If rect is page aligned, we can assume it's the start of the page. Z formats don't place block 0
-	// in the top-left, so we have to round them down.
-	const GSVector2i page_size = GSLocalMemory::m_psm[psm].pgs;
-	if ((rect.x & (page_size.x - 1)) == 0 && (rect.y & (page_size.y - 1)) == 0)
-	{
-		constexpr u32 page_mask = (1 << 5) - 1;
-		result &= ~page_mask;
-	}
-
-	return result;
+	BlockNumberRect get_block = GetBlockNumberRectStart((GS_PSM)psm);
+	return get_block(rect.x, rect.y, rect.z, rect.w, bp, bw);
 }
 
 u32 GSLocalMemory::GetEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
 {
-	u32 result = m_psm[psm].info.bn(rect.z - 1, rect.w - 1, bp, bw); // Valid only for color formats
-
-	// If rect is page aligned, we can assume it's the start of the next block-1 as the max block position.
-	// Using real end point for Z formats causes problems because it's a lower value.
-	const GSVector2i page_size = GSLocalMemory::m_psm[psm].pgs;
-	if ((rect.z & (page_size.x - 1)) == 0 && (rect.w & (page_size.y - 1)) == 0)
-	{
-		constexpr u32 page_mask = (1 << 5) - 1;
-		result = (((result + page_mask) & ~page_mask)) - 1;
-	}
-
-	return result;
+	BlockNumberRect get_block = GetBlockNumberRectEnd((GS_PSM)psm);
+	return get_block(rect.x, rect.y, rect.z, rect.w, bp, bw);
 }
 
 u32 GSLocalMemory::GetUnwrappedEndBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)

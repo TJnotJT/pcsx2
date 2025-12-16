@@ -25,6 +25,7 @@
 #include "common/ProgressCallback.h"
 #include "common/SettingsWrapper.h"
 #include "common/StringUtil.h"
+#include "common/Timer.h"
 
 #include "pcsx2/PrecompiledHeader.h"
 
@@ -890,7 +891,56 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	GSLocalMemory::TestBlockNumberRectAll();
+	//GSLocalMemory::TestBlockNumberRectAll();
+
+	Common::Timer timer;
+	std::array<u8, 2048> vals;
+	for (u32 bp = 0; bp < 32; bp++)
+	{
+		for (int x0 = 0; x0 < 4; x0++)
+		{
+			for (int y0 = 0; y0 < 2; y0++)
+			{
+				for (int x1 = x0 + 1; x1 <= 4; x1++)
+				{
+					for (int y1 = y0 + 1; y1 <= 2; y1++)
+					{
+						u32 sbp = UINT32_MAX;
+						u32 ebp = 0;
+
+						int min_x = x0;
+						int min_y = y0;
+						int max_x = x0;
+						int max_y = y0;
+
+						for (int x = 2 * x0; x < 2 * x1; x++)
+						{
+							for (int y = 2 * y0; y < 2 * y1; y++)
+							{
+								u32 bp_tmp = GSLocalMemory::BlockNumber32Z(8 * x, 8 * y, bp, 1);
+								if (bp_tmp < sbp)
+								{
+									min_x = x / 2;
+									min_y = y / 2;
+									sbp = bp_tmp;
+								}
+								if (bp_tmp > ebp)
+								{
+									max_x = x / 2;
+									max_y = y / 2;
+									ebp = bp_tmp;
+								}
+							}
+						}
+
+						vals[(x0 << 0) | (y0 << 2) | (x0 << 3) | (y1 << 5) | (bp << 6)] = min_x | (min_y << 2) | (max_x << 3) | (max_y << 5);
+					}
+				}
+			}
+		}
+	}
+	double d = timer.GetTimeSeconds();
+	printf("%f\n", d);
 
 	VMBootParameters params;
 	if (!GSRunner::ParseCommandLineArgs(argc, argv, params))

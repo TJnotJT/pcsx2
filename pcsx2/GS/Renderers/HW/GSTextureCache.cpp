@@ -4556,11 +4556,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 			Target* t = *j;
 
 			// Don't bother checking any further if the target doesn't overlap with the write/invalidation.
-			if ((bp < t->m_TEX0.TBP0 && end_bp < t->m_TEX0.TBP0) || bp > t->UnwrappedEndBlock())
+			/*if ((bp < t->m_TEX0.TBP0 && end_bp < t->m_TEX0.TBP0) || bp > t->UnwrappedEndBlock())
 			{
 				++i;
 				continue;
-			}
+			}*/
 
 			++i;
 
