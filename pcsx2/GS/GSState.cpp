@@ -1856,6 +1856,8 @@ void GSState::Flush(GSFlushReason reason)
 		}
 		m_state_flush_reason = reason;
 
+		FlushInvalidation();
+
 		// Used to prompt the current draw that it's modifying its own CLUT.
 		CheckCLUTValidity(m_prev_env.PRIM.PRIM);
 
@@ -1899,7 +1901,8 @@ void GSState::FlushWrite()
 
 	r = m_tr.rect;
 
-	InvalidateVideoMem(m_env.BITBLTBUF, r);
+	//InvalidateVideoMem(m_env.BITBLTBUF, r);
+	m_invalidate_queue.push_back({m_env.BITBLTBUF, r});
 
 	const GSLocalMemory::writeImage wi = GSLocalMemory::m_psm[m_env.BITBLTBUF.DPSM].wi;
 
@@ -1911,6 +1914,103 @@ void GSState::FlushWrite()
 	s_transfer_n++;
 	if (m_tr.start >= m_tr.total)
 		m_env.TRXDIR.XDIR = 3;
+}
+
+void GSState::FlushInvalidation()
+{
+	if (m_invalidate_queue.empty())
+		return;
+
+	// Merging together invalidation ranges that are end-to-end (or nearly).
+	u32 start_i = 0;
+	u32 start_bp = 0;
+	u32 last_bp = 0;
+	u32 last_blocks = 0;
+	u32 last_psm = 0;
+	u32 last_bw = 0;
+	bool merging = false;
+
+	// Add a dummy element at the end in case we need to commit a merge range.
+	m_invalidate_queue.push_back({GIFRegBITBLTBUF{}, GSVector4i(0)});
+	
+	for (u32 i = 0; i < m_invalidate_queue.size(); i++)
+	{
+		const GSInvalidateQueue& invalidate = m_invalidate_queue[i];
+
+		const GSVector2i& bs = GSLocalMemory::m_psm[invalidate.blit.DPSM].bs;
+		const GSVector4i& bsmask = GSVector4i(bs).xyxy() - GSVector4i(1);
+
+		const GSVector4i& r = invalidate.rect;
+		const GIFRegBITBLTBUF& blit = invalidate.blit;
+		const u32 bp = blit.DBP;
+		const u32 bw = blit.DBW;
+		const u32 psm = blit.DPSM;
+
+		// Determine if the transfer can be part of a merge sequence.
+		bool merge_aligned = (r.x == 0 && r.y == 0) && // Top-left corner of transfer rect must be (0, 0).
+			((r.z & bsmask.x) == 0 && (r.w & bsmask.y) == 0); // Width/heights must be block aligned.
+
+		// Number of blocks in a mergable transfer.
+		const u32 blocks = merge_aligned ? (invalidate.rect.z / bs.x) * (invalidate.rect.w / bs.y) : 0;
+
+		// Must match the BW and PSM, and stride between BPs must be correct.
+		bool can_merge = merge_aligned && merging && (bw == last_bw) && (psm == last_psm) &&
+		                 (bp == last_bp + last_blocks) && (blocks == last_blocks);
+
+		if (can_merge)
+		{
+			// Append to the last invalidation range.
+			last_bp += last_blocks;
+		}
+		else
+		{
+			if (merging)
+			{
+				// Commit the last merging range.
+
+				last_bp += last_blocks;
+
+				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0) // Merged range must be page aligned.
+				{
+					InvalidateVideoMem(start_bp, last_bp, last_psm, last_bw);
+				}
+				else
+				{
+					// Otherwise fallback to rectangle invalidation.
+					for (u32 j = start_i; j < i; j++)
+						InvalidateVideoMem(m_invalidate_queue[j].blit, m_invalidate_queue[j].rect);
+				}
+
+				// Reset merge state.
+				start_i = 0;
+				start_bp = 0;
+				last_bp = 0;
+				last_blocks = 0;
+				last_psm = 0;
+				last_bw = 0;
+				merging = false;
+			}
+
+			if (merge_aligned && (bp & (GS_BLOCKS_PER_PAGE - 1)) == 0) // Start block must be page aligned.
+			{
+				// Start a new merge range.
+				start_i = i;
+				start_bp = bp;
+				last_bp = bp;
+				last_blocks = blocks;
+				last_psm = psm;
+				last_bw = bw;
+				merging = true;
+			}
+			else
+			{
+				// Not mergable; fallback to rectangle invalidation.
+				InvalidateVideoMem(blit, r);
+			}
+		}
+	}
+
+	m_invalidate_queue.clear();
 }
 
 // This function decides if the context has changed in a way which warrants flushing the draw.
@@ -2389,63 +2489,65 @@ void GSState::Write(const u8* mem, int len)
 			const GSUploadQueue new_transfer = { blit, r, s_n, false, true };
 			m_draw_transfers.push_back(new_transfer);
 
-			auto blk_size = GSLocalMemory::m_psm[blit.DPSM].bs;
-			int blocks = (r.z / blk_size.x) * (r.w / blk_size.y);
-			if (s_n == _s_n && blit.DPSM == _last_psm && blit.DBW == _last_bw &&
-				(_last_diff == 0 || (blit.DBP - _last_bp == _last_diff && blocks == _last_diff)) &&
-				r.x == 0 && r.y == 0)
+			if (0)
 			{
-				_num_elems++;
-				_last_diff = blit.DBP - _last_bp;
-				_last_bp = blit.DBP;
-			}
-			else
-			{
-				if (_num_elems > 1)
+				auto blk_size = GSLocalMemory::m_psm[blit.DPSM].bs;
+				int blocks = (r.z / blk_size.x) * (r.w / blk_size.y);
+				if (s_n == _s_n && blit.DPSM == _last_psm && blit.DBW == _last_bw &&
+					(_last_diff == 0 || (blit.DBP - _last_bp == _last_diff && blocks == _last_diff)) &&
+					r.x == 0 && r.y == 0)
 				{
-					std::string path_to_output = "C:\\Users\\tchan\\Desktop\\ps2_debug\\debug_ffx2_invalid\\" + dump_name + ".txt";
-
-					std::ofstream of;
-					of.open(path_to_output, std::ios_base::app);
-
-					char c[1024];
-					sprintf(c, "%d: %x -> %x by %x PSM=%s BW=%d elems=%d\n", s_n, _start_bp, _last_bp, _last_diff,
-						GSUtil::GetPSMName(_last_psm), _last_bw, _num_elems);
-					of.write(c, strlen(c));
-
-					GIFRegBITBLTBUF blit2{};
-					blit2.DBP = _start_bp;
-					blit2.DPSM = _last_psm;
-					blit2.DBW = _last_bw;
-					int total_blocks = _last_bp - _start_bp + _last_diff;
-
-					auto pg_size = GSLocalMemory::m_psm[_last_psm].pgs;
-					int pages_bw = std::max(_last_bw * 64 / pg_size.x, 1);
-					int total_pages = total_blocks / 32;
-					
-					GSVector4i r2{};
-					r2.z = std::min(total_pages, pages_bw) * pg_size.x;
-					r2.w = (total_pages / pages_bw) * pg_size.y;
-
-					sprintf(c, "    blks: %d; r: %d %d %d %d\n", total_blocks, r2.x, r2.y, r2.z, r2.w);
-
-					of.write(c, strlen(c));
-					of.close();
-
-					if (_num_elems == 832 && s_n==9918)
-						printf("");
-					//InvalidateVideoMem(blit2, r2);
-					InvalidateVideoMem(_start_bp, _start_bp + total_blocks, _last_psm, _last_bw);
+					_num_elems++;
+					_last_diff = blit.DBP - _last_bp;
+					_last_bp = blit.DBP;
 				}
-				
-				_s_n = s_n;
-				_start_bp = blit.DBP;
-				_last_bp = blit.DBP;
-				_last_psm = blit.DPSM;
-				_last_bw = blit.DBW;
-				_last_diff = 0;
-				_num_elems = 1;
+				else
+				{
+					if (_num_elems > 1)
+					{
+						std::string path_to_output = "C:\\Users\\tchan\\Desktop\\ps2_debug\\debug_ffx2_invalid\\" + dump_name + ".txt";
 
+						std::ofstream of;
+						of.open(path_to_output, std::ios_base::app);
+
+						char c[1024];
+						sprintf(c, "%d: %x -> %x by %x PSM=%s BW=%d elems=%d\n", s_n, _start_bp, _last_bp, _last_diff,
+							GSUtil::GetPSMName(_last_psm), _last_bw, _num_elems);
+						of.write(c, strlen(c));
+
+						GIFRegBITBLTBUF blit2{};
+						blit2.DBP = _start_bp;
+						blit2.DPSM = _last_psm;
+						blit2.DBW = _last_bw;
+						int total_blocks = _last_bp - _start_bp + _last_diff;
+
+						auto pg_size = GSLocalMemory::m_psm[_last_psm].pgs;
+						int pages_bw = std::max(_last_bw * 64 / pg_size.x, 1);
+						int total_pages = total_blocks / 32;
+
+						GSVector4i r2{};
+						r2.z = std::min(total_pages, pages_bw) * pg_size.x;
+						r2.w = (total_pages / pages_bw) * pg_size.y;
+
+						sprintf(c, "    blks: %d; r: %d %d %d %d\n", total_blocks, r2.x, r2.y, r2.z, r2.w);
+
+						of.write(c, strlen(c));
+						of.close();
+
+						if (_num_elems == 832 && s_n == 9918)
+							printf("");
+						//InvalidateVideoMem(blit2, r2);
+						InvalidateVideoMem(_start_bp, _start_bp + total_blocks, _last_psm, _last_bw);
+					}
+
+					_s_n = s_n;
+					_start_bp = blit.DBP;
+					_last_bp = blit.DBP;
+					_last_psm = blit.DPSM;
+					_last_bw = blit.DBW;
+					_last_diff = 0;
+					_num_elems = 1;
+				}
 			}
 		}
 
@@ -2457,7 +2559,8 @@ void GSState::Write(const u8* mem, int len)
 		if (len >= m_tr.total)
 		{
 			// received all data in one piece, no need to buffer it
-			InvalidateVideoMem(blit, r);
+			//InvalidateVideoMem(blit, r);
+			m_invalidate_queue.push_back({blit, r});
 
 			psm.wi(m_mem, m_tr.x, m_tr.y, mem, m_tr.total, blit, m_tr.m_pos, m_tr.m_reg);
 
@@ -2585,8 +2688,11 @@ void GSState::Move()
 			 m_env.TRXPOS.DIRX, m_env.TRXPOS.DIRY,
 			 sx, sy, dx, dy, w, h);
 
+	FlushInvalidation();
+
 	InvalidateLocalMem(m_env.BITBLTBUF, GSVector4i(sx, sy, sx + w, sy + h));
-	InvalidateVideoMem(m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h));
+	//InvalidateVideoMem(m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h));
+	//m_invalidate_queue.push_back({m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h)});
 
 	int xinc = 1;
 	int yinc = 1;
@@ -2633,11 +2739,13 @@ void GSState::Move()
 		transfer.draw = s_n;
 		transfer.zero_clear = false;
 		m_draw_transfers.push_back(transfer);
+		m_invalidate_queue.back().rect = transfer.rect;
 	}
 	else
 	{
 		const GSUploadQueue new_transfer = { m_env.BITBLTBUF, r, s_n, false, false };
 		m_draw_transfers.push_back(new_transfer);
+		m_invalidate_queue.push_back({m_env.BITBLTBUF, r});
 	}
 
 	auto copy = [this, sbp, dbp, sx, sy, dx, dy, w, h, yinc, xinc](const GSOffset& dpo, const GSOffset& spo, auto&& pxCopyFn)

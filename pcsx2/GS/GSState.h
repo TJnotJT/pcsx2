@@ -220,6 +220,12 @@ public:
 		bool ee_to_gs;
 	};
 
+	struct GSInvalidateQueue
+	{
+		GIFRegBITBLTBUF blit;
+		GSVector4i rect;
+	};
+
 	enum NoGapsType
 	{
 		Uninitialized = 0,
@@ -258,6 +264,8 @@ public:
 	u32 m_dirty_gs_regs = 0;
 	int m_backed_up_ctx = 0;
 	std::vector<GSUploadQueue> m_draw_transfers;
+	std::vector<GSInvalidateQueue> m_invalidate_queue;
+
 	NoGapsType m_primitive_covers_without_gaps;
 	GSVector4i m_r = {};
 	GSVector4i m_r_no_scissor = {};
@@ -439,6 +447,8 @@ public:
 	void FlushPrim();
 	bool TestDrawChanged();
 	void FlushWrite();
+	void FlushInvalidation();
+	//void QueueTransfer(const GSUploadQueue& upload);
 	virtual void Draw() = 0;
 	virtual void PurgeTextureCache(bool sources, bool targets, bool hash_cache);
 	virtual void ReadbackTextureCache();
