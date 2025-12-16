@@ -437,6 +437,7 @@ public:
 	typedef void (*readImage)(const GSLocalMemory& mem, int& tx, int& ty, u8* dst, int len, GIFRegBITBLTBUF& BITBLTBUF, GIFRegTRXPOS& TRXPOS, GIFRegTRXREG& TRXREG);
 	typedef void (*readTexture)(GSLocalMemory& mem, const GSOffset& off, const GSVector4i& r, u8* dst, int dstpitch, const GIFRegTEXA& TEXA);
 	typedef void (*readTextureBlock)(const GSLocalMemory& mem, u32 bp, u8* dst, int dstpitch, const GIFRegTEXA& TEXA);
+	typedef void (*getRectBlockNum)(u32 x0, u32 y0, u32 x1, u32 y1);
 
 	enum PSM_FMT
 	{
@@ -459,6 +460,7 @@ public:
 		readImage ri;
 		readTexture rtx, rtxP;
 		readTextureBlock rtxb, rtxbP;
+		getRectBlockNum strtBlk, endBlk;
 		u16 bpp, trbpp, pal, fmt;
 		GSVector2i cs, bs, pgs;
 		u8 msk, depth;
@@ -532,6 +534,30 @@ public:
 	static GSVector4i GetRectForPageOffset(u32 base_bp, u32 offset_bp, u32 bw, u32 psm);
 
 	// address
+
+	static u32 BlockNumberRectStart32(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd32(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart16(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd16(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart16S(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart8(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd8(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart4(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd4(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd16S(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart32Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd32Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart16Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd16Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectStart16SZ(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+	static u32 BlockNumberRectEnd16SZ(int x0, int y0, int x1, int y1, u32 bp, u32 bw);
+
+	static void TestBlockNumberRect(
+		int w, int h, int step, int blkw, int blkh,
+		u32 (*BlockNumber)(int, int, u32, u32),
+		u32 (*BlockNumberStart)(int, int, int, int, u32, u32),
+		u32 (*BlockNumberEnd)(int, int, int, int, u32, u32));
+	static void TestBlockNumberRectAll();
 
 	static u32 BlockNumber32(int x, int y, u32 bp, u32 bw)
 	{

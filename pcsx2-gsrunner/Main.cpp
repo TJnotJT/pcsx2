@@ -44,6 +44,7 @@
 #include "pcsx2/SIO/Pad/Pad.h"
 #include "pcsx2/PerformanceMetrics.h"
 #include "pcsx2/VMManager.h"
+#include "pcsx2/GS/GSLocalMemory.h"
 
 #include "svnrev.h"
 
@@ -888,6 +889,8 @@ int main(int argc, char* argv[])
 		Console.Error("Failed to initialize config.");
 		return EXIT_FAILURE;
 	}
+
+	GSLocalMemory::TestBlockNumberRectAll();
 
 	VMBootParameters params;
 	if (!GSRunner::ParseCommandLineArgs(argc, argv, params))

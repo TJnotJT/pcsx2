@@ -460,6 +460,468 @@ bool GSLocalMemory::IsPageAligned(u32 psm, const GSVector4i& rc)
 	return (rc & pgmsk).eq(GSVector4i::zero());
 }
 
+static void BlockNumberRectHelperValidate(int& x0, int& y0, int& x1, int& y1)
+{
+	pxAssert(0 <= x0 && x0 <= x1 && 0 <= y0 && y0 <= y1);
+	x1 = std::max(x0 + 1, x1);
+	y1 = std::max(y0 + 1, y1);
+}
+
+template<u32 pgw, u32 pgh>
+static void BlockNumberRectStartHelperPageOffset(int& x0, int& y0, int& x1, int& y1, u32& bp, u32 bw)
+{
+	int pgx0 = x0 & ~(pgw - 1);
+	int pgy0 = y0 & ~(pgh - 1);
+	int pgx1 = pgx0 + pgw;
+	int pgy1 = pgy0 + pgh;
+	x1 = std::min(x1, pgx1);
+	y1 = std::min(y1, pgy1);
+
+	x0 -= pgx0;
+	y0 -= pgy0;
+	x1 -= pgx0;
+	y1 -= pgy0;
+
+	bp += GS_BLOCKS_PER_PAGE * ((pgx0 / pgw) + ((pgy0 / pgh) * bw));
+}
+
+// FIXME: Take bp as a reference and also simply offset it
+template <u32 pgw, u32 pgh>
+static void BlockNumberRectEndHelperPageOffset(int& x0, int& y0, int& x1, int& y1, u32 bp, u32 bw)
+{
+	int pgx0 = x1 & ~(pgw - 1);
+	int pgy0 = y1 & ~(pgh - 1);
+	int pgx1 = pgx0 + pgw;
+	int pgy1 = pgy0 + pgh;
+	x0 = std::max(x0, pgx0);
+	y0 = std::max(y0, pgy0);
+
+	x0 -= pgx0;
+	y0 -= pgy0;
+	x1 -= pgx0;
+	y1 -= pgy0;
+
+	bp += GS_BLOCKS_PER_PAGE * ((pgx0 / pgw) + ((pgy0 / pgh) * bw));
+}
+
+u32 GSLocalMemory::BlockNumberRectStart32(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber32(x0, y0, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd32(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber32(x1 - 1, y1 - 1, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart16(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber16(x0, y0, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd16(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber16(x1 - 1, y1 - 1, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart16S(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectStartHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (x0 < 32)
+	{
+		x1 = std::min(x1, 32);
+	}
+	else
+	{
+		x0 -= 32;
+		x1 -= 32;
+		bp += 16;
+	}
+
+	if (y0 < 16)
+	{
+		y1 = std::min(y1, 16);
+	}
+	else if (y0 >= 48)
+	{
+		y0 -= 48;
+		y1 -= 48;
+		bp += 12;
+	}
+	else if (y1 > 32)
+	{
+		y0 = std::max(y0, 32) - 32;
+		y1 = std::min(y1, 48) - 32;
+		bp += 4;
+	}
+	else
+	{
+		y0 -= 16;
+		y1 -= 16;
+		bp += 8;
+	}
+
+	return bp + BlockNumber16(x0, y0, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd16S(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectEndHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (x1 > 32)
+	{
+		x0 = std::max(x0, 32) - 32;
+		x1 -= 32;
+		bp += 16;
+	}
+
+	if (y1 > 48)
+	{
+		y0 = std::max(y0, 48) - 48;
+		y1 -= 48;
+		bp += 12;
+	}
+	else if (y1 <= 16)
+	{
+		bp += 0;
+	}
+	else if (y0 < 32)
+	{
+		y0 = std::max(y0, 16) - 16;
+		y1 = std::min(y1, 32) - 16;
+		bp += 8;
+	}
+	else
+	{
+		y0 -= 32;
+		y1 -= 32;
+		bp += 4;
+	}
+
+	return bp + BlockNumber16(x1 - 1, y1 - 1, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart8(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber8(x0, y0, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd8(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber8(x1 - 1, y1 - 1, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart4(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber4(x0, y0, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd4(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+	return BlockNumber4(x1 - 1, y1 - 1, bp, bw);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart32Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectStartHelperPageOffset<64, 32>(x0, y0, x1, y1, bp, bw);
+
+	if (x1 > 32)
+	{
+		x0 = std::max(x0, 32) - 32;
+		x1 -= 32;
+	}
+	else
+	{
+		bp += 16;
+	}
+  
+	if (y1 > 16)
+	{
+		y0 = std::max(y0, 16) - 16;
+		y1 -= 16;
+	}
+	else
+	{
+		bp += 8;
+	}
+
+	return bp + BlockNumber32(x0, y0, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd32Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectEndHelperPageOffset<64, 32>(x0, y0, x1, y1, bp, bw);
+
+	if (x0 < 32)
+	{
+		x1 = std::min(x1, 32);
+		bp += 16;
+	}
+	else
+	{
+		x0 -= 32;
+		x1 -= 32;
+	}
+
+	if (y0 < 16)
+	{
+		y1 = std::min(y1, 16);
+		bp += 8;
+	}
+	else
+	{
+		y0 -= 16;
+		y1 -= 16;
+	}
+
+	return bp + BlockNumber32(x1 - 1, y1 - 1, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart16Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectStartHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (y1 > 32)
+	{
+		y0 = std::max(y0, 32) - 32;
+		y1 -= 32;
+	}
+	else
+	{
+		bp += 16;
+	}
+
+	if (x1 > 32)
+	{
+		x0 = std::max(x0, 32) - 32;
+		x1 -= 32;
+	}
+	else
+	{
+		bp += 8;
+	}
+
+	return bp + BlockNumber16(x0, y0, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd16Z(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectEndHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (y0 < 32)
+	{
+		y1 = std::min(y1, 32);
+		bp += 16;
+	}
+	else
+	{
+		y0 -= 32;
+		y1 -= 32;
+	}
+
+	if (x0 < 32)
+	{
+		x1 = std::min(x1, 32);
+		bp += 8;
+	}
+	else
+	{
+		x0 -= 32;
+		x1 -= 32;
+	}
+
+	return bp + BlockNumber16(x1 - 1, y1 - 1, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectStart16SZ(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectStartHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (x1 > 32)
+	{
+		x0 = std::max(x0, 32) - 32;
+		x1 -= 32;
+	}
+	else
+	{
+		bp += 16;
+	}
+    
+	if (y0 < 32)
+	{
+		if (y1 <= 16)
+		{
+			bp += 8;
+		}
+		else
+		{
+			y0 = std::max(y0, 16) - 16;
+			y1 = std::min(y1, 32) - 16;
+		}
+	}
+	else
+	{
+		if (y1 <= 48)
+		{
+			y0 -= 32;
+			y1 -= 32;
+			bp += 12;
+		}
+		else
+		{
+			y0 = std::max(y0, 48) - 48;
+			y1 -= 48;
+			bp += 4;
+		}
+	}
+  
+	return bp + BlockNumber16(x0, y0, 0, 1);
+}
+
+u32 GSLocalMemory::BlockNumberRectEnd16SZ(int x0, int y0, int x1, int y1, u32 bp, u32 bw)
+{
+	BlockNumberRectHelperValidate(x0, y0, x1, y1);
+
+	BlockNumberRectEndHelperPageOffset<64, 64>(x0, y0, x1, y1, bp, bw);
+
+	if (x0 < 32)
+	{
+		x1 = std::min(x1, 32);
+		bp += 16;
+	}
+	else
+	{
+		x0 -= 32;
+		x1 -= 32;
+	}
+  
+	if (y1 <= 32)
+	{
+		if (y0 < 16)
+		{
+			y1 = std::min(y1, 16);
+			bp += 8;
+		}
+		else
+		{
+			y0 -= 16;
+			y1 -= 16;
+		}
+	}
+	else
+	{
+		if (y0 < 48)
+		{
+			y0 = std::max(y0, 32) - 32;
+			y1 = std::min(y1, 48) - 32;
+			bp += 12;
+		}
+		else
+		{
+			y0 -= 48;
+			y1 -= 48;
+			bp += 4;
+		}
+	}
+
+	return bp + BlockNumber16(x1 - 1, y1 - 1, 0, 1);
+}
+
+void GSLocalMemory::TestBlockNumberRect(
+	int w, int h, int step, int blkw, int blkh,
+	u32 (*BlockNumber)(int, int, u32, u32),
+	u32 (*BlockNumberStart)(int, int, int, int, u32, u32),
+	u32 (*BlockNumberEnd)(int, int, int, int, u32, u32))
+{
+	printf("    TestBlockNumberRect: w=%d h=%d step=%d blkw=%d blkh=%d\n", w, h, step, blkw, blkh);
+
+	u32 num_tests = 0;
+	for (int x0 = 0; x0 < w - step; x0 += step)
+	{
+		for (int y0 = 0; y0 < h - step; y0 += step)
+		{
+			for (int x1 = x0 + step; x1 < w; x1 += step)
+			{
+				for (int y1 = y0 + step; y1 < h; y1 += step)
+				{
+					u32 start_bp_true = UINT32_MAX;
+					u32 end_bp_true = 0;
+
+					for (int x2 = x0 & ~(blkw - 1); x2 < x1; x2 += blkw)
+					{
+						for (int y2 = y0 & ~(blkh - 1); y2 < y1; y2 += blkh)
+						{
+							u32 bp = BlockNumber(x2, y2, 0, 1);
+							start_bp_true = std::min(start_bp_true, bp);
+							end_bp_true = std::max(end_bp_true, bp);
+						}
+					}
+
+					u32 start_bp_test = BlockNumberStart(x0, y0, x1, y1, 0, 1);
+					u32 end_bp_test = BlockNumberEnd(x0, y0, x1, y1, 0, 1);
+
+					if (start_bp_test != start_bp_true)
+					{
+						printf("Start block tested failed at: x0=%d y0=%d x1=%d y1=%d\n", x0, y0, x1, y1);
+						pxFailRel("Start block test failed");
+					}
+
+					if (end_bp_test != end_bp_true)
+					{
+						printf("End block test failed at: x0=%d y0=%d x1=%d y1=%d\n", x0, y0, x1, y1);
+						pxFailRel("End block test failed");
+					}
+
+					num_tests++;
+				}
+			}
+		}
+	}
+	printf("    TestBlockNumberRect: passed %d tests.\n", num_tests);
+}
+
+void GSLocalMemory::TestBlockNumberRectAll()
+{
+	printf("Testing BlockNumberRectStart16S(), BlockNumberRectEnd16S()\n");
+	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16S, BlockNumberRectStart16S, BlockNumberRectEnd16S);
+	printf("\n");
+
+	printf("Testing BlockNumberRectStart32Z(), BlockNumberRectEnd32Z()\n");
+	TestBlockNumberRect(64, 32, 4, 8, 8, BlockNumber32Z, BlockNumberRectStart32Z, BlockNumberRectEnd32Z);
+	printf("\n");
+
+	printf("Testing BlockNumberRectStart16Z(), BlockNumberRectEnd16Z()\n");
+	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16Z, BlockNumberRectStart16Z, BlockNumberRectEnd16Z);
+	printf("\n");
+
+	printf("Testing BlockNumberRectStart16SZ(), BlockNumberRectEnd16SZ()\n");
+	TestBlockNumberRect(64, 64, 4, 16, 8, BlockNumber16SZ, BlockNumberRectStart16SZ, BlockNumberRectEnd16SZ);
+	printf("\n");
+}
+
 u32 GSLocalMemory::GetStartBlockAddress(u32 bp, u32 bw, u32 psm, GSVector4i rect)
 {
 	u32 result = m_psm[psm].info.bn(rect.x, rect.y, bp, bw); // Valid only for color formats
