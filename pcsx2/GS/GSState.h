@@ -443,6 +443,7 @@ public:
 	virtual void PurgeTextureCache(bool sources, bool targets, bool hash_cache);
 	virtual void ReadbackTextureCache();
 	virtual void InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r) {}
+	virtual void InvalidateVideoMem(u32 start_bp, u32 end_bp, u32 psm, u32 bw) {}
 	virtual void InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut = false) {}
 
 	virtual void Move();

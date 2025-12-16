@@ -4418,6 +4418,73 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
 	}
 }
 
+void GSTextureCache::InvalidateSourcesAtPage(u32 page, u32 bp, u32 bw, u32 psm, const GSVector4i* rect,
+	const GSVector2i* bp_range, bool& found)
+{
+	auto& list = m_src.m_map[page];
+	for (auto i = list.begin(); i != list.end();)
+	{
+		Source* s = *i;
+		++i;
+
+		if (GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
+		{
+			bool b = bp == s->m_TEX0.TBP0;
+
+			if (!s->m_target)
+			{
+				found |= b;
+
+				// No point keeping invalidated sources around when the hash cache is active,
+				// we can just re-hash and create a new source from the cached texture.
+				if (s->m_from_hash_cache || (GSConfig.UserHacks_DisablePartialInvalidation && s->m_repeating))
+				{
+					m_src.RemoveAt(s);
+				}
+				else
+				{
+					u32* RESTRICT valid = s->m_valid.get();
+
+					if (valid && !s->CanPreload())
+					{
+						// Invalidate data of input texture
+						if (s->m_repeating)
+						{
+							// Note: very hot path on snowbling engine game
+							for (const GSVector2i& k : s->m_p2t[page])
+							{
+								valid[k.x] &= k.y;
+							}
+						}
+						else
+						{
+							valid[page] = 0;
+						}
+					}
+
+					s->m_complete_layers = 0;
+				}
+			}
+			else
+			{
+				// render target used as input texture
+				b |= bp == s->m_from_target_TEX0.TBP0;
+
+				if (!b)
+				{
+					b = rect ? s->Overlaps(bp, bw, psm, *rect) :
+					           s->Overlaps(bp_range->x, bp_range->y);
+				}
+
+				if (b)
+				{
+					m_src.RemoveAt(s);
+				}
+			}
+		}
+	}
+}
+
 // Goal: invalidate data sent to the GPU when the source (GS memory) is modified
 // Called each time you want to write to the GS memory
 void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target)
@@ -4479,70 +4546,11 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 	GSVector4i r = rect;
 
 	off.loopPages(rect, [this, &rect, bp, bw, psm, &found](u32 page) {
-		auto& list = m_src.m_map[page];
-		for (auto i = list.begin(); i != list.end();)
-		{
-			Source* s = *i;
-			++i;
-
-			if (GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
-			{
-				bool b = bp == s->m_TEX0.TBP0;
-
-				if (!s->m_target)
-				{
-					found |= b;
-
-					// No point keeping invalidated sources around when the hash cache is active,
-					// we can just re-hash and create a new source from the cached texture.
-					if (s->m_from_hash_cache || (GSConfig.UserHacks_DisablePartialInvalidation && s->m_repeating))
-					{
-						m_src.RemoveAt(s);
-					}
-					else
-					{
-						u32* RESTRICT valid = s->m_valid.get();
-
-						if (valid && !s->CanPreload())
-						{
-							// Invalidate data of input texture
-							if (s->m_repeating)
-							{
-								// Note: very hot path on snowbling engine game
-								for (const GSVector2i& k : s->m_p2t[page])
-								{
-									valid[k.x] &= k.y;
-								}
-							}
-							else
-							{
-								valid[page] = 0;
-							}
-						}
-
-						s->m_complete_layers = 0;
-					}
-				}
-				else
-				{
-					// render target used as input texture
-					b |= bp == s->m_from_target_TEX0.TBP0;
-
-					if (!b)
-						b = s->Overlaps(bp, bw, psm, rect);
-
-					if (b)
-					{
-						m_src.RemoveAt(s);
-					}
-				}
-			}
-		}
+		InvalidateSourcesAtPage(page, bp, bw, psm, &rect, nullptr, found);
 	});
 
 	if (!target)
 		return;
-
 
 	RGBAMask rgba;
 	rgba._u32 = GSUtil::GetChannelMask(psm);
@@ -7166,6 +7174,11 @@ bool GSTextureCache::Surface::Inside(u32 bp, u32 bw, u32 psm, const GSVector4i& 
 	return start_block >= m_TEX0.TBP0 && end_block <= UnwrappedEndBlock();
 }
 
+bool GSTextureCache::Surface::Overlaps(u32 start_block, u32 end_block)
+{
+	return GSTextureCache::CheckOverlap(m_TEX0.TBP0, UnwrappedEndBlock(), start_block, end_block);
+}
+
 bool GSTextureCache::Surface::Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i& rect)
 {
 	const GSOffset off(GSLocalMemory::m_psm[psm].info, bp, bw, psm);
@@ -7192,8 +7205,7 @@ bool GSTextureCache::Surface::Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i
 	if (end_block > GS_MAX_BLOCKS && bp < m_end_block && m_end_block < m_TEX0.TBP0)
 		bp += GS_MAX_BLOCKS;
 
-	const bool overlap = GSTextureCache::CheckOverlap(m_TEX0.TBP0, UnwrappedEndBlock(), start_block, end_block);
-	return overlap;
+	return Overlaps(start_block, end_block);
 }
 
 // GSTextureCache::Source

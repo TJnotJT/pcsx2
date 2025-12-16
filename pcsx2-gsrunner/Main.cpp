@@ -878,6 +878,8 @@ static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 	GSRunner::StopPlatformMessagePump();
 }
 
+extern std::string dump_name;
+
 int main(int argc, char* argv[])
 {
 	CrashHandler::Install();
@@ -898,6 +900,8 @@ int main(int argc, char* argv[])
 		Console.Error("Failed to create window.");
 		return EXIT_FAILURE;
 	}
+
+	dump_name = Path::GetFileName(params.filename);
 
 	// Override settings that shouldn't be picked up from defaults or INIs.
 	GSRunner::SettingsOverride();

@@ -158,6 +158,7 @@ public:
 		u32 UnwrappedEndBlock() const { return (m_end_block + (Wraps() ? GS_MAX_BLOCKS : 0)); }
 
 		bool Inside(u32 bp, u32 bw, u32 psm, const GSVector4i& rect);
+		bool Overlaps(u32 start_block, u32 end_block);
 		bool Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i& rect);
 	};
 
@@ -525,6 +526,7 @@ public:
 	void InvalidateContainedTargets(u32 start_bp, u32 end_bp, u32 write_psm = PSMCT32, u32 write_bw = 1);
 	void InvalidateVideoMemType(int type, u32 bp, u32 write_psm = PSMCT32, u32 write_fbmsk = 0, bool dirty_only = false);
 	void InvalidateVideoMemSubTarget(GSTextureCache::Target* rt);
+	void InvalidateSourcesAtPage(u32 page, u32 bp, u32 bw, u32 psm, const GSVector4i* rect, const GSVector2i* bp_range, bool& found);
 	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true);
 	void InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush = false);
 

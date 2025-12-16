@@ -1871,6 +1871,20 @@ void GSRendererHW::InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GS
 		g_texture_cache->InvalidateVideoMem(m_mem.GetOffset(BITBLTBUF.DBP, BITBLTBUF.DBW, BITBLTBUF.DPSM), r);
 }
 
+void GSRendererHW::InvalidateVideoMem(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
+{
+	g_texture_cache->InvalidateContainedTargets(start_bp, end_bp, psm, bw);
+
+	u32 start_page = (start_bp + GS_BLOCKS_PER_PAGE - 1) / GS_BLOCKS_PER_PAGE;
+	u32 end_page = end_bp / GS_BLOCKS_PER_PAGE;
+	GSVector2i block_range(start_bp, end_bp);
+	for (u32 page = start_page; page < end_page; page++)
+	{
+		bool found;
+		g_texture_cache->InvalidateSourcesAtPage(page, start_bp, bw, psm, nullptr, &block_range, found);
+	}
+}
+
 void GSRendererHW::InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut)
 {
 	// printf("HW: [%d] InvalidateLocalMem %d,%d - %d,%d %05x (%d)\n", static_cast<int>(g_perfmon.GetFrame()), r.left, r.top, r.right, r.bottom, static_cast<int>(BITBLTBUF.SBP), static_cast<int>(BITBLTBUF.SPSM));

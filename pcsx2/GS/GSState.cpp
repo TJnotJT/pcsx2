@@ -2341,6 +2341,15 @@ void GSState::CheckWriteOverlap(bool req_write, bool req_read)
 	}
 }
 
+std::string dump_name;
+int _s_n = 0;
+int _start_bp = 0;
+int _last_bp = 0;
+int _last_psm = 0;
+int _last_bw = 0;
+int _last_diff = 0;
+int _num_elems = 0;
+
 void GSState::Write(const u8* mem, int len)
 {
 	if (m_env.TRXDIR.XDIR == 3)
@@ -2379,6 +2388,65 @@ void GSState::Write(const u8* mem, int len)
 		{
 			const GSUploadQueue new_transfer = { blit, r, s_n, false, true };
 			m_draw_transfers.push_back(new_transfer);
+
+			auto blk_size = GSLocalMemory::m_psm[blit.DPSM].bs;
+			int blocks = (r.z / blk_size.x) * (r.w / blk_size.y);
+			if (s_n == _s_n && blit.DPSM == _last_psm && blit.DBW == _last_bw &&
+				(_last_diff == 0 || (blit.DBP - _last_bp == _last_diff && blocks == _last_diff)) &&
+				r.x == 0 && r.y == 0)
+			{
+				_num_elems++;
+				_last_diff = blit.DBP - _last_bp;
+				_last_bp = blit.DBP;
+			}
+			else
+			{
+				if (_num_elems > 1)
+				{
+					std::string path_to_output = "C:\\Users\\tchan\\Desktop\\ps2_debug\\debug_ffx2_invalid\\" + dump_name + ".txt";
+
+					std::ofstream of;
+					of.open(path_to_output, std::ios_base::app);
+
+					char c[1024];
+					sprintf(c, "%d: %x -> %x by %x PSM=%s BW=%d elems=%d\n", s_n, _start_bp, _last_bp, _last_diff,
+						GSUtil::GetPSMName(_last_psm), _last_bw, _num_elems);
+					of.write(c, strlen(c));
+
+					GIFRegBITBLTBUF blit2{};
+					blit2.DBP = _start_bp;
+					blit2.DPSM = _last_psm;
+					blit2.DBW = _last_bw;
+					int total_blocks = _last_bp - _start_bp + _last_diff;
+
+					auto pg_size = GSLocalMemory::m_psm[_last_psm].pgs;
+					int pages_bw = std::max(_last_bw * 64 / pg_size.x, 1);
+					int total_pages = total_blocks / 32;
+					
+					GSVector4i r2{};
+					r2.z = std::min(total_pages, pages_bw) * pg_size.x;
+					r2.w = (total_pages / pages_bw) * pg_size.y;
+
+					sprintf(c, "    blks: %d; r: %d %d %d %d\n", total_blocks, r2.x, r2.y, r2.z, r2.w);
+
+					of.write(c, strlen(c));
+					of.close();
+
+					if (_num_elems == 832 && s_n==9918)
+						printf("");
+					//InvalidateVideoMem(blit2, r2);
+					InvalidateVideoMem(_start_bp, _start_bp + total_blocks, _last_psm, _last_bw);
+				}
+				
+				_s_n = s_n;
+				_start_bp = blit.DBP;
+				_last_bp = blit.DBP;
+				_last_psm = blit.DPSM;
+				_last_bw = blit.DBW;
+				_last_diff = 0;
+				_num_elems = 1;
+
+			}
 		}
 
 		GL_CACHE("Write! %u ...  => 0x%x W:%d F:%s (DIR %d%d), dPos(%d %d) size(%d %d) draw %d", s_transfer_n,
