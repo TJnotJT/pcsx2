@@ -152,19 +152,31 @@ struct PS_INPUT
 
 struct PS_OUTPUT
 {
+#define NUM_RTS 0
 #if !PS_NO_COLOR
 #if PS_DATE == 1 || PS_DATE == 2
 	float c : SV_Target;
 #else
 	float4 c0 : SV_Target0;
+	#undef NUM_RTS
+	#define NUM_RTS 1
 #if !PS_NO_COLOR1
 	float4 c1 : SV_Target1;
 #endif
 #endif
 #endif
 #if PS_ZCLAMP
-	float depth : SV_Depth;
+	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
+		#if NUM_RTS > 0
+			float depth : SV_Target1;
+		#else
+			float depth : SV_Target0;
+		#endif
+	#else
+		float depth : SV_Depth;
+	#endif
 #endif
+#undef NUM_RTS
 };
 
 Texture2D<float4> Texture : register(t0);
@@ -1042,7 +1054,6 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 
 PS_OUTPUT ps_main(PS_INPUT input)
 {
-
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
 		if (input.p.z < DepthTexture.Load(int3(input.p.xy, 0)).r)
@@ -1256,7 +1267,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);
+	output.depth = min(input.p.z, MaxDepthPS);	
 #endif
 
 	return output;
