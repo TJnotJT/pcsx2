@@ -2692,7 +2692,7 @@ void GSState::Move()
 
 	InvalidateLocalMem(m_env.BITBLTBUF, GSVector4i(sx, sy, sx + w, sy + h));
 	//InvalidateVideoMem(m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h));
-	//m_invalidate_queue.push_back({m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h)});
+	m_invalidate_queue.push_back({m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h)});
 
 	int xinc = 1;
 	int yinc = 1;
@@ -2739,13 +2739,13 @@ void GSState::Move()
 		transfer.draw = s_n;
 		transfer.zero_clear = false;
 		m_draw_transfers.push_back(transfer);
-		m_invalidate_queue.back().rect = transfer.rect;
+		//m_invalidate_queue.back().rect = transfer.rect;
 	}
 	else
 	{
 		const GSUploadQueue new_transfer = { m_env.BITBLTBUF, r, s_n, false, false };
 		m_draw_transfers.push_back(new_transfer);
-		m_invalidate_queue.push_back({m_env.BITBLTBUF, r});
+		//m_invalidate_queue.push_back({m_env.BITBLTBUF, r});
 	}
 
 	auto copy = [this, sbp, dbp, sx, sy, dx, dy, w, h, yinc, xinc](const GSOffset& dpo, const GSOffset& spo, auto&& pxCopyFn)

@@ -4266,6 +4266,7 @@ bool GSTextureCache::PrepareDownloadTexture(u32 width, u32 height, GSTexture::Fo
 		}
 	}
 }*/
+
 void GSTextureCache::InvalidateContainedTargets(u32 start_bp, u32 end_bp, u32 write_psm, u32 write_bw)
 {
 	const bool preserve_alpha = (GSLocalMemory::m_psm[write_psm].trbpp == 24);
@@ -4485,8 +4486,109 @@ void GSTextureCache::InvalidateSourcesAtPage(u32 page, u32 bp, u32 bw, u32 psm, 
 	}
 }
 
+// Invalidate targets by giving a page range instead of a rectangle.
+void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
+{
+	for (int type = 0; type < 2; type++)
+	{
+		auto& list = m_dst[type];
+		for (auto i = list.begin(); i != list.end();)
+		{
+			auto j = i;
+			Target* t = *j;
+
+			// Get start/end relative to the base pointer of the target.
+			const int valid_blocks = static_cast<int>(t->UnwrappedEndBlock() - t->m_TEX0.TBP0);
+			int start_valid_bp = Common::AlignUpPow2(
+				std::max(static_cast<int>(start_bp - t->m_TEX0.TBP0), 0), GS_BLOCKS_PER_PAGE);
+			int end_valid_bp = Common::AlignDownPow2(
+				std::min(static_cast<int>(end_bp - t->m_TEX0.TBP0), valid_blocks), GS_BLOCKS_PER_PAGE);
+
+			if (end_valid_bp <= start_valid_bp)
+			{
+				// Invalidation range is empty.
+				++i;
+				continue;
+			}
+
+			++i;
+
+			if (GSUtil::HasSharedBits(psm, t->m_TEX0.PSM))
+			{
+				const GSVector2i& pgs = GSLocalMemory::m_psm[t->m_TEX0.PSM].pgs;
+				const GSVector2i& bs = GSLocalMemory::m_psm[t->m_TEX0.PSM].bs;
+				const int width_blocks = (t->m_TEX0.TBW * 64) / bs.x;
+
+				if ((start_valid_bp % width_blocks) != 0)
+				{
+					// Continue here!!
+					int end_valid_bp_row = std::min(Common::AlignUp(start_valid_bp, width_blocks), end_valid_bp);
+					int pg_y0 = start_valid_bp / width_blocks;
+					int pg_x0 = (start_valid_bp % width_blocks) / GS_BLOCKS_PER_PAGE;
+					int pg_y1 = pg_y0 + 1;
+					int pg_x1 = x0 + ((end_valid_bp_row / GS_BLOCKS_PER_PAGE - (start_valid_bp % width_blocks)) / GS_BLOCKS_PER_PAGE) * pgs.x;
+				}
+
+				// Handle easy cases where formats match closely.
+				if (start_bp == t->m_TEX0.TBP0 && GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) && bw == std::max(t->m_TEX0.TBW, 1U))
+				{
+					GL_CACHE("TC: Dirty Target(%s) (0x%x) r(%d,%d,%d,%d)", to_string(type),
+						t->m_TEX0.TBP0, r.x, r.y, r.z, r.w);
+
+					if (t->m_type == DepthStencil && GetTemporaryZ() != nullptr)
+					{
+						if (GetTemporaryZInfo().ZBP == t->m_TEX0.TBP0)
+							InvalidateTemporaryZ();
+					}
+
+					// If we're dealing with quadrant draws, we need to position them correctly (Final Fantasy X).
+					if (GSLocalMemory::m_psm[psm].depth &&
+						r.width() <= (GSLocalMemory::m_psm[psm].pgs.x >> 1) && r.height() <= (GSLocalMemory::m_psm[psm].pgs.y >> 1))
+						DirtyRectByPage(bp, psm, bw, t, r);
+					else
+						AddDirtyRectTarget(t, r, psm, bw, rgba);
+
+					if (FullRectDirty(t))
+					{
+						InvalidateSourcesFromTarget(t);
+						i = list.erase(j);
+						GL_CACHE("TC: Remove Target(%s) (0x%x)", to_string(type),
+							t->m_TEX0.TBP0);
+						delete t;
+					}
+
+					continue;
+				}
+
+				if (t->Overlaps(bp, bw, psm, r))
+				{
+					// Try the hard way for partial invalidation.
+					DirtyRectByPage(bp, psm, bw, t, r);
+
+					if (FullRectDirty(t, rgba._u32))
+					{
+						InvalidateSourcesFromTarget(t);
+						i = list.erase(j);
+						GL_CACHE("TC: Remove Target(%s) (0x%x)", to_string(type),
+							t->m_TEX0.TBP0);
+						delete t;
+					}
+				}
+			}
+			// This is a situation where it is uploading in to the alpha channel but that is not part of the mask for the target format.
+			// So we need to make sure the alpha is not marked as valid. (Juiced does a shuffle on the Z24 depth, making the alpha valid data).
+			else if (GSUtil::GetChannelMask(psm) == 0x8 && GSUtil::GetChannelMask(t->m_TEX0.PSM) == 0x7 && t->Overlaps(bp, bw, psm, r))
+			{
+				t->m_valid_alpha_high &= !(psm == PSMT8H || psm == PSMT4HH);
+				t->m_valid_alpha_low &= !(psm == PSMT8H || psm == PSMT4HL);
+			}
+		}
+	}
+}
+
 // Goal: invalidate data sent to the GPU when the source (GS memory) is modified
 // Called each time you want to write to the GS memory
+// FIXME: REfactor this into two separate functions for targets and sources.
 void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& rect, bool target)
 {
 	const u32 bp = off.bp();
@@ -4574,37 +4676,35 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 
 			if (GSUtil::HasSharedBits(psm, t->m_TEX0.PSM))
 			{
-				if (bp == t->m_TEX0.TBP0)
+				// Handle easy cases where formats match closely.
+				if (bp == t->m_TEX0.TBP0 && GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) && bw == std::max(t->m_TEX0.TBW, 1U))
 				{
-					if (GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) && bw == std::max(t->m_TEX0.TBW, 1U))
+					GL_CACHE("TC: Dirty Target(%s) (0x%x) r(%d,%d,%d,%d)", to_string(type),
+						t->m_TEX0.TBP0, r.x, r.y, r.z, r.w);
+
+					if (t->m_type == DepthStencil && GetTemporaryZ() != nullptr)
 					{
-						GL_CACHE("TC: Dirty Target(%s) (0x%x) r(%d,%d,%d,%d)", to_string(type),
-							t->m_TEX0.TBP0, r.x, r.y, r.z, r.w);
-
-						if (t->m_type == DepthStencil && GetTemporaryZ() != nullptr)
-						{
-							if (GetTemporaryZInfo().ZBP == t->m_TEX0.TBP0)
-								InvalidateTemporaryZ();
-						}
-
-						// If we're dealing with quadrant draws, we need to position them correctly (Final Fantasy X).
-						if (GSLocalMemory::m_psm[psm].depth &&
-							r.width() <= (GSLocalMemory::m_psm[psm].pgs.x >> 1) && r.height() <= (GSLocalMemory::m_psm[psm].pgs.y >> 1))
-							DirtyRectByPage(bp, psm, bw, t, r);
-						else
-							AddDirtyRectTarget(t, r, psm, bw, rgba);
-
-						if (FullRectDirty(t))
-						{
-							InvalidateSourcesFromTarget(t);
-							i = list.erase(j);
-							GL_CACHE("TC: Remove Target(%s) (0x%x)", to_string(type),
-								t->m_TEX0.TBP0);
-							delete t;
-						}
-
-						continue;
+						if (GetTemporaryZInfo().ZBP == t->m_TEX0.TBP0)
+							InvalidateTemporaryZ();
 					}
+
+					// If we're dealing with quadrant draws, we need to position them correctly (Final Fantasy X).
+					if (GSLocalMemory::m_psm[psm].depth &&
+						r.width() <= (GSLocalMemory::m_psm[psm].pgs.x >> 1) && r.height() <= (GSLocalMemory::m_psm[psm].pgs.y >> 1))
+						DirtyRectByPage(bp, psm, bw, t, r);
+					else
+						AddDirtyRectTarget(t, r, psm, bw, rgba);
+
+					if (FullRectDirty(t))
+					{
+						InvalidateSourcesFromTarget(t);
+						i = list.erase(j);
+						GL_CACHE("TC: Remove Target(%s) (0x%x)", to_string(type),
+							t->m_TEX0.TBP0);
+						delete t;
+					}
+
+					continue;
 				}
 
 				if (t->Overlaps(bp, bw, psm, r))
