@@ -1856,6 +1856,8 @@ void GSState::Flush(GSFlushReason reason)
 		}
 		m_state_flush_reason = reason;
 
+		FlushInvalidation();
+
 		// Used to prompt the current draw that it's modifying its own CLUT.
 		CheckCLUTValidity(m_prev_env.PRIM.PRIM);
 
@@ -1899,7 +1901,7 @@ void GSState::FlushWrite()
 
 	r = m_tr.rect;
 
-	InvalidateVideoMem(m_env.BITBLTBUF, r);
+	m_invalidation_queue.push_back({m_env.BITBLTBUF, r});
 
 	const GSLocalMemory::writeImage wi = GSLocalMemory::m_psm[m_env.BITBLTBUF.DPSM].wi;
 
@@ -1911,6 +1913,103 @@ void GSState::FlushWrite()
 	s_transfer_n++;
 	if (m_tr.start >= m_tr.total)
 		m_env.TRXDIR.XDIR = 3;
+}
+
+void GSState::FlushInvalidation()
+{
+	if (m_invalidation_queue.empty())
+		return;
+
+	// For merging together invalidation ranges that are end-to-end (or nearly).
+	u32 start_i = 0;
+	u32 start_bp = 0;
+	u32 last_bp = 0;
+	u32 last_blocks = 0;
+	u32 last_psm = 0;
+	u32 last_bw = 0;
+	bool merging = false;
+
+	// Add a dummy element at the end in case we need to commit a merge range.
+	m_invalidation_queue.push_back({GIFRegBITBLTBUF{}, GSVector4i(0)});
+	
+	for (u32 i = 0; i < m_invalidation_queue.size(); i++)
+	{
+		const GSInvalidationQueue& invalidate = m_invalidation_queue[i];
+
+		const GSVector2i& bs = GSLocalMemory::m_psm[invalidate.blit.DPSM].bs;
+		const GSVector4i& bsmask = GSVector4i(bs).xyxy() - GSVector4i(1);
+
+		const GSVector4i& r = invalidate.rect;
+		const GIFRegBITBLTBUF& blit = invalidate.blit;
+		const u32 bp = blit.DBP;
+		const u32 bw = blit.DBW;
+		const u32 psm = blit.DPSM;
+
+		// Determine if the transfer can be part of a merge sequence.
+		bool merge_aligned = (r.x == 0 && r.y == 0) && // Top-left corner of transfer rect must be (0, 0).
+			((r.z & bsmask.x) == 0 && (r.w & bsmask.y) == 0); // Width/heights must be block aligned.
+
+		// Number of blocks in a mergable transfer.
+		const u32 blocks = merge_aligned ? (invalidate.rect.z / bs.x) * (invalidate.rect.w / bs.y) : 0;
+
+		// Must match the BW and PSM, and stride between BPs must be correct.
+		bool can_merge = merge_aligned && merging && (bw == last_bw) && (psm == last_psm) &&
+		                 (bp == last_bp + last_blocks) && (blocks == last_blocks);
+
+		if (can_merge)
+		{
+			// Append to the last invalidation range.
+			last_bp += last_blocks;
+		}
+		else
+		{
+			if (merging)
+			{
+				// Commit the last merging range.
+
+				last_bp += last_blocks;
+
+				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0) // Merged range must be page aligned.
+				{
+					InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
+				}
+				else
+				{
+					// Otherwise fallback to rectangle invalidation.
+					for (u32 j = start_i; j < i; j++)
+						InvalidateVideoMem(m_invalidation_queue[j].blit, m_invalidation_queue[j].rect);
+				}
+
+				// Reset merge state.
+				start_i = 0;
+				start_bp = 0;
+				last_bp = 0;
+				last_blocks = 0;
+				last_psm = 0;
+				last_bw = 0;
+				merging = false;
+			}
+
+			if (merge_aligned && (bp & (GS_BLOCKS_PER_PAGE - 1)) == 0) // Start block must be page aligned.
+			{
+				// Start a new merge range.
+				start_i = i;
+				start_bp = bp;
+				last_bp = bp;
+				last_blocks = blocks;
+				last_psm = psm;
+				last_bw = bw;
+				merging = true;
+			}
+			else
+			{
+				// Not mergable; fallback to rectangle invalidation.
+				InvalidateVideoMem(blit, r);
+			}
+		}
+	}
+
+	m_invalidation_queue.clear();
 }
 
 // This function decides if the context has changed in a way which warrants flushing the draw.
@@ -2389,7 +2488,7 @@ void GSState::Write(const u8* mem, int len)
 		if (len >= m_tr.total)
 		{
 			// received all data in one piece, no need to buffer it
-			InvalidateVideoMem(blit, r);
+			m_invalidation_queue.push_back({blit, r});
 
 			psm.wi(m_mem, m_tr.x, m_tr.y, mem, m_tr.total, blit, m_tr.m_pos, m_tr.m_reg);
 
@@ -2517,10 +2616,14 @@ void GSState::Move()
 			 m_env.TRXPOS.DIRX, m_env.TRXPOS.DIRY,
 			 sx, sy, dx, dy, w, h);
 
+	// Flush invalidation in case the move uses overlapping regions.
+	FlushInvalidation();
+
 	InvalidateLocalMem(m_env.BITBLTBUF, GSVector4i(sx, sy, sx + w, sy + h));
 	InvalidateVideoMem(m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h));
 	const bool overlaps = m_env.BITBLTBUF.SBP == m_env.BITBLTBUF.DBP;
 	const bool intersect = overlaps && !(GSVector4i(sx, sy, sx + w, sy + h).rintersect(GSVector4i(dx, dy, dx + w, dy + h)).rempty());
+	m_invalidation_queue.push_back({m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h)});
 
 	int xinc = 1;
 	int yinc = 1;
