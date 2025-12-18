@@ -2471,7 +2471,7 @@ void GSRendererHW::Draw()
 
 	// Need to fix the alpha test, since the alpha will be fixed to 1.0 if ABE is disabled and AA1 is enabled
 	// So if it doesn't meet the condition, always fail, if it does, always pass (turn off the test).
-	if (IsCoverageAlpha() && m_cached_ctx.TEST.ATE && m_cached_ctx.TEST.ATST > 1)
+	if (IsCoverageAlphaFixedOne() && m_cached_ctx.TEST.ATE && m_cached_ctx.TEST.ATST > 1)
 	{
 		const float aref = static_cast<float>(m_cached_ctx.TEST.AREF);
 		const int old_ATST = m_cached_ctx.TEST.ATST;
@@ -5020,7 +5020,19 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 			{
 				m_conf.topology = GSHWDrawConfig::Topology::Line;
 				m_conf.indices_per_prim = 2;
-				if (unscale_pt_ln)
+				if (PRIM->AA1 && features.aa1)
+				{
+					// AA1 expansion uses a similar path as upscale expansion but it is used
+					// for both upscaling and native resolution drawing.
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineAA1;
+					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 6;
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1_LINE;
+					m_conf.ps.abe = PRIM->ABE != 0;
+					ExpandLineIndices();
+				}
+				else if (unscale_pt_ln)
 				{
 					if (features.line_expand)
 					{
@@ -5077,8 +5089,36 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 		case GS_TRIANGLE_CLASS:
 			{
-				m_conf.topology = GSHWDrawConfig::Topology::Triangle;
-				m_conf.indices_per_prim = 3;
+				if (PRIM->AA1 && features.aa1)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 3;
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1_TRIANGLE;
+					m_conf.ps.abe = PRIM->ABE != 0;
+					m_conf.vertex_shader_indexing = true;
+
+					// Force ZClamp so that Z writes can be prevented for edge pixels.
+					if (m_conf.depth.zwe)
+					{
+						GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf);
+						m_conf.ps.depth_feedback = true; // Bind depth as shader resource.
+
+						// Z test must be also done in the shader then.
+						if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
+						{
+							m_conf.ps.ztst = m_conf.depth.ztst; // Enable shader Z test.
+							m_conf.depth.ztst = ZTST_ALWAYS; // Disable HW Z test.
+							m_conf.ps.depth_feedback = true; // Bind depth as shader resource.
+						}
+					}
+				}
+				else
+				{
+					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
+					m_conf.indices_per_prim = 3;
+				}
 
 				// See note above in GS_SPRITE_CLASS.
 				if (m_vt.m_accurate_stq && m_vt.m_eq.stq) [[unlikely]]
@@ -5626,15 +5666,13 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 {
 	const GIFRegALPHA& ALPHA = m_context->ALPHA;
 	{
-		// AA1: Blending needs to be enabled on draw.
-		const bool AA1 = PRIM->AA1 && (m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS);
 		// PABE: Check condition early as an optimization, no blending when As < 128.
 		// For Cs*As + Cd*(1 - As) if As is 128 then blending can be disabled as well.
 		const bool PABE_skip = m_draw_env->PABE.PABE &&
 			((GetAlphaMinMax().max < 128) || (GetAlphaMinMax().max == 128 && ALPHA.A == 0 && ALPHA.B == 1 && ALPHA.C == 0 && ALPHA.D == 1));
 
 		// No blending or coverage anti-aliasing so early exit
-		if (PABE_skip || !(NeedsBlending() || AA1))
+		if (PABE_skip || !(NeedsBlending() || IsCoverageAlpha()))
 		{
 			m_conf.blend = {};
 			m_conf.ps.no_color1 = true;
@@ -7348,11 +7386,12 @@ void GSRendererHW::GetAlphaTestConfig(
 		((config.require_one_barrier && feedback_one_pass) || config.require_full_barrier) &&
 		(features.texture_barrier || features.multidraw_fb_copy);
 
-	// This is to prevent us from using dual-source blend with FBfetch, which breaks Intel GPUs on Metal.
-	// Setting afail to RGB_ONLY without enabling color1 will enable this mode in the shader.
-	const bool rgb_only_fbfetch = simple_rgb_only && features.framebuffer_fetch;
+	const bool using_dual_source_blend = !config.ps.no_color1;
+
+	// This is to prevent us from using dual-source blend with FB-fetch, which breaks Intel GPUs on Metal.
+	const bool avoid_feedback = features.framebuffer_fetch && using_dual_source_blend;
 	
-	if (GSConfig.HWAFAILFeedback || already_have_barriers || rgb_only_fbfetch)
+	if ((GSConfig.HWAFAILFeedback || already_have_barriers || features.framebuffer_fetch) && !avoid_feedback)
 	{
 		// Use RT and/or depth sampling for accurate AFAIL in the shader.
 		GL_INS("Alpha test with RT/depth feedback (accurate)");
@@ -7362,10 +7401,13 @@ void GSRendererHW::GetAlphaTestConfig(
 		config.ps.afail = afail;
 		config.ps.color_feedback |= afail_needs_rt;
 		config.ps.depth_feedback |= afail_needs_depth;
-
-		if (!features.framebuffer_fetch || afail_needs_depth)
+		
+		// Whether we can use FB-fetch for both color and/or depth.
+		// In that case, we don't need barriers.
+		const bool use_full_fbfetch = features.framebuffer_fetch &&
+			(!afail_needs_depth || features.depth_as_rt_feedback);
+		if (!use_full_fbfetch)
 		{
-			// Only enable barriers if we either do not have FB-fetch or need depth feedback (there's no FB-fetch for depth).
 			config.require_one_barrier |= feedback_one_pass;
 			config.require_full_barrier |= !feedback_one_pass;
 		}
@@ -7379,8 +7421,8 @@ void GSRendererHW::GetAlphaTestConfig(
 			if (cached_ctx.DepthRead())
 			{
 				GL_INS("Enable SW depth testing for depth feedback");
-				config.ps.ztst = cached_ctx.TEST.ZTST;
-				config.depth.ztst = ZTST_ALWAYS;
+				config.ps.ztst = cached_ctx.TEST.ZTST; // Enable SW Z test.
+				config.depth.ztst = ZTST_ALWAYS; // Disable HW Z test.
 			}
 		}
 
@@ -7395,7 +7437,9 @@ void GSRendererHW::GetAlphaTestConfig(
 	config.alpha_second_pass.colormask.wrgba = config.colormask.wrgba;
 	config.alpha_second_pass.depth.zwe = zwe;
 
-	if (simple_fb_only || simple_zb_only || simple_rgb_only)
+	// The simple RGB method uses dual-source blend so it cannot be used
+	// if dual source blend is already used for something else.
+	if (simple_fb_only || simple_zb_only || (simple_rgb_only && !using_dual_source_blend))
 	{
 		// In these cases we can do accurate AFAIL in one or two passes.
 
@@ -7470,6 +7514,7 @@ void GSRendererHW::GetAlphaTestConfig(
 		GL_INS("Alpha test with pass/fail (approximate)");
 
 		// Enable alpha test and discard failing fragments on first pass.
+		config.alpha_second_pass.enable = true;
 		GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
 		config.ps.atst = ps_atst;
 		config.cb_ps.FogColor_AREF.a = ps_aref;
@@ -7520,7 +7565,7 @@ void GSRendererHW::GetAlphaTestConfig(
 			GL_INS("Warning: Using full barriers on alpha second pass.");
 		}
 	}
-};
+}
 
 void GSRendererHW::CleanupDraw(bool invalidate_temp_src)
 {
@@ -7603,8 +7648,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		const bool is_overlap_alpha = m_prim_overlap != PRIM_OVERLAP_NO && !(m_cached_ctx.FRAME.FBMSK & 0x80000000);
 		if (m_cached_ctx.TEST.DATM == 0)
 		{
-			// Some pixles are >= 1 so some fail, or some pixels get written but the written alpha matches or exceeds 1 (so overlap doesn't always pass).
-			DATE = rt->m_alpha_max >= 128 || (is_overlap_alpha && rt->m_alpha_min < 128 && (GetAlphaMinMax().max >= 128 || (m_context->FBA.FBA || IsCoverageAlpha())));
+			// Some pixels are >= 1 so some fail, or some pixels get written but the written alpha matches or exceeds 1 (so overlap doesn't always pass).
+			DATE = rt->m_alpha_max >= 128 || (is_overlap_alpha && rt->m_alpha_min < 128 && (GetAlphaMinMax().max >= 128 || (m_context->FBA.FBA || IsCoverageAlphaFixedOne())));
 
 			// All pixels fail.
 			if (DATE && rt->m_alpha_min >= 128)
@@ -7612,8 +7657,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		}
 		else
 		{
-			// Some pixles are < 1 so some fail, or some pixels get written but the written alpha goes below 1 (so overlap doesn't always pass).
-			DATE = rt->m_alpha_min < 128 || (is_overlap_alpha && rt->m_alpha_max >= 128 && (GetAlphaMinMax().min < 128 && !(m_context->FBA.FBA || IsCoverageAlpha())));
+			// Some pixels are < 1 so some fail, or some pixels get written but the written alpha goes below 1 (so overlap doesn't always pass).
+			DATE = rt->m_alpha_min < 128 || (is_overlap_alpha && rt->m_alpha_max >= 128 && (GetAlphaMinMax().min < 128 && !(m_context->FBA.FBA || IsCoverageAlphaFixedOne())));
 
 			// All pixels fail.
 			if (DATE && rt->m_alpha_max < 128)
@@ -7763,11 +7808,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				DATE_BARRIER = true;
 			}
 		}
-		// When Blending is disabled and Edge Anti Aliasing is enabled,
-		// the output alpha is Coverage (which we force to 128) so DATE will fail/pass guaranteed on second pass.
-		else if (m_conf.colormask.wa && (m_context->FBA.FBA || IsCoverageAlpha()) && features.stencil_buffer)
+		// When Blending is disabled and Edge Anti Aliasing is enabled and output alpha is forced to 128,
+		// DATE will fail/pass guaranteed on second pass.
+		else if (m_conf.colormask.wa && (m_context->FBA.FBA || IsCoverageAlphaFixedOne()) && features.stencil_buffer)
 		{
-			GL_PERF("DATE: Fast with FBA, all pixels will be >= 128");
+			GL_PERF("DATE: Fast with FBA or CoverageAlphaFixedOne, all pixels will be >= 128");
 			DATE_one = !m_cached_ctx.TEST.DATM;
 		}
 		else if (m_conf.colormask.wa && !m_cached_ctx.TEST.ATE && !(m_cached_ctx.FRAME.FBMSK & 0x80000000))
@@ -7950,8 +7995,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.tfx = 4;
 	}
 
-	// AA1: Set alpha source to coverage 128 when there is no alpha blending.
-	m_conf.ps.fixed_one_a = IsCoverageAlpha();
+	// AA1: Set alpha source to coverage 128 when AA1 is not supported.
+	m_conf.ps.fixed_one_a = IsCoverageAlphaFixedOne();
 
 	if ((!IsOpaque() || m_context->ALPHA.IsBlack()) && rt && ((m_conf.colormask.wrgba & 0x7) || (m_texture_shuffle && !m_copy_16bit_to_target_shuffle && !m_same_group_texture_shuffle)))
 	{
@@ -9728,4 +9773,11 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 		GetPrimitiveOverlapDrawlist(true, save_bbox, scale);
 	}
 	return m_drawlist.size();
+}
+
+bool GSRendererHW::IsCoverageAlphaSupported()
+{
+	return IsCoverageAlpha() &&
+	       ((m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) &&
+			   g_gs_device->Features().aa1);
 }
