@@ -227,6 +227,12 @@ public:
 		EEGS_TransferType transfer_type;
 	};
 
+	struct GSInvalidationQueue
+	{
+		GIFRegBITBLTBUF blit;
+		GSVector4i rect;
+	};
+
 	enum NoGapsType
 	{
 		Uninitialized = 0,
@@ -265,6 +271,11 @@ public:
 	u32 m_dirty_gs_regs = 0;
 	int m_backed_up_ctx = 0;
 	std::vector<GSUploadQueue> m_draw_transfers;
+
+	// Stores similar data to the draw transfer but is flushed every draw instead of keep track of old transfers.
+	// Used for invalidating textures in video memory.
+	std::vector<GSInvalidationQueue> m_invalidation_queue;
+
 	NoGapsType m_primitive_covers_without_gaps;
 	GSVector4i m_r = {};
 	GSVector4i m_r_no_scissor = {};
@@ -446,10 +457,15 @@ public:
 	void FlushPrim();
 	bool TestDrawChanged();
 	void FlushWrite();
+	void FlushInvalidation();
 	virtual void Draw() = 0;
 	virtual void PurgeTextureCache(bool sources, bool targets, bool hash_cache);
 	virtual void ReadbackTextureCache();
 	virtual void InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r) {}
+
+	// Should only be used to invalidate page-aligned ranges.
+	virtual void InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw) {}
+	
 	virtual void InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut = false) {}
 
 	virtual void Move();
