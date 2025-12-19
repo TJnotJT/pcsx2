@@ -341,7 +341,7 @@ private:
 	std::string m_tfx_source;
 
 	void LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
-		DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format) const;
+		DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format, DXGI_FORMAT* uav_format) const;
 
 	u32 GetSwapChainBufferCount() const;
 	bool CreateSwapChain();

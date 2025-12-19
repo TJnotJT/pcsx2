@@ -71,9 +71,14 @@ private:
 
 	GSTexture12(Type type, Format format, int width, int height, int levels, DXGI_FORMAT dxgi_format,
 		wil::com_ptr_nothrow<ID3D12Resource> resource, wil::com_ptr_nothrow<ID3D12Resource> resource_fbl,
-		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation, const D3D12DescriptorHandle& srv_descriptor,
+		wil::com_ptr_nothrow<ID3D12Resource> resource_uav, wil::com_ptr_nothrow<D3D12MA::Allocation> allocation,
+		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
-		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state);
+		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
+		bool allow_uav);
+
+	virtual void SetTargetMode(TargetMode mode) override;
+	virtual TargetMode GetTargetMode() override;
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -87,7 +92,9 @@ private:
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
+	wil::com_ptr_nothrow<ID3D12Resource> m_resource_uav;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
+	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation_uav;
 
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
@@ -104,6 +111,7 @@ private:
 
 	int m_map_level = std::numeric_limits<int>::max();
 	GSVector4i m_map_area = GSVector4i::zero();
+	bool m_allow_uav = false;
 };
 
 class GSDownloadTexture12 final : public GSDownloadTexture
