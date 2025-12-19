@@ -7245,18 +7245,21 @@ void GSRendererHW::GetAlphaTestConfigPS(const u32 atst, const u8 aref, const boo
 	}
 }
 
-void GSRendererHW::GetAlphaTestConfig(
+GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 	// Inputs
-	const HWCachedCtx& cached_ctx,
 	const GSVertexTrace& vt,
 	const PRIM_OVERLAP prim_overlap,
 	const GIFRegALPHA& ALPHA,
 	const GSDevice::FeatureSupport& features,
 	// In/outputs
-	GSHWDrawConfig& config, bool& DATE, bool& DATE_BARRIER, bool& DATE_one, bool& DATE_PRIMID)
+	HWCachedCtx& cached_ctx,
+	GSHWDrawConfig& config)
 {
 	if (!cached_ctx.TEST.ATE)
-		return;
+	{
+		GL_INS("HW: Alpha test disabled");
+		return AlphaTestMethod::NONE;
+	}
 
 	GL_PUSH("HW: Alpha test config");
 
@@ -7292,19 +7295,23 @@ void GSRendererHW::GetAlphaTestConfig(
 		afail = AFAIL_KEEP;
 	}
 
+	cached_ctx.TEST.ATST = atst;
+	cached_ctx.TEST.AFAIL = afail;
 	GL_INS("Using: ATST = %s, AFAIL = %s", GSUtil::GetATSTName(atst), GSUtil::GetAFAILName(afail));
-
-	if (atst == ATST_NEVER)
-	{
-		GL_INS("Alpha test prevents color/depth write.");
-		config.colormask.wrgba = 0;
-		config.depth.zwe = 0;
-	}
 
 	if (atst == ATST_ALWAYS)
 	{
 		GL_INS("Alpha test is a NOP.");
-		return;
+		cached_ctx.TEST.ATE = false;
+		return AlphaTestMethod::NONE;
+	}
+
+	if (atst == ATST_NEVER)
+	{
+		GL_INS("Alpha test NEVER single pass.");
+		config.colormask.wrgba = 0;
+		config.depth.zwe = 0;
+		return AlphaTestMethod::NEVER;
 	}
 
 	if (afail == AFAIL_KEEP)
@@ -7314,8 +7321,8 @@ void GSRendererHW::GetAlphaTestConfig(
 		GetAlphaTestConfigPS(atst, aref, false, ps_atst, ps_aref);
 		config.ps.atst = ps_atst;
 		config.cb_ps.FogColor_AREF.a = ps_aref;
-		config.ps.afail = AFAIL_KEEP;
-		return;
+		config.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
+		return AlphaTestMethod::KEEP;
 	}
 
 	// If true, the result of the Z test and output Z does NOT depend on overlapping Z writes to the same pixel.
@@ -7384,120 +7391,147 @@ void GSRendererHW::GetAlphaTestConfig(
 			}
 		}
 
-		return;
+		return AlphaTestMethod::FEEDBACK;
 	}
-	
-	// The following methods may need an alpha second pass.
+	else if (simple_fb_only)
+	{
+		return AlphaTestMethod::SIMPLE_FB_ONLY;
+	}
+	else if (simple_zb_only)
+	{
+		return AlphaTestMethod::SIMPLE_ZB_ONLY;
+	}
+	else if (simple_rgb_only)
+	{
+		return AlphaTestMethod::SIMPLE_RGB_ONLY;
+	}
+	else
+	{
+		return AlphaTestMethod::PASS_THEN_FAIL;
+	}
+}
+
+GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestSecondPassConfig(
+	const AlphaTestMethod method,
+	const HWCachedCtx& cached_ctx,
+	const GSDevice::FeatureSupport& features,
+	// In/outputs
+	GSHWDrawConfig& config,
+	bool& DATE, bool& DATE_BARRIER, bool& DATE_one, bool& DATE_PRIMID)
+{
+	if (!AlphaTestMethodSecondPass(method))
+		return method;
+
+	const u32 atst = cached_ctx.TEST.ATST;
+	const u32 afail = cached_ctx.TEST.AFAIL;
+	const u32 aref = cached_ctx.TEST.AREF;
+
+	// Temp variables for PS config.
+	u32 ps_atst;
+	float ps_aref;
+
+	// Enable alpha test and discard failing fragments on first pass.
+	GetAlphaTestConfigPS(atst, aref, false, ps_atst, ps_aref);
+	config.ps.atst = ps_atst;
+	config.cb_ps.FogColor_AREF.a = ps_aref;
+	config.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
+
 	std::memcpy(&config.alpha_second_pass.ps, &config.ps, sizeof(config.ps));
 	std::memcpy(&config.alpha_second_pass.colormask, &config.colormask, sizeof(config.colormask));
 	std::memcpy(&config.alpha_second_pass.depth, &config.depth, sizeof(config.depth));
 
-	config.alpha_second_pass.colormask.wrgba = config.colormask.wrgba;
-	config.alpha_second_pass.depth.zwe = zwe;
-
-	if (simple_fb_only || simple_zb_only || simple_rgb_only)
+	if (method == AlphaTestMethod::SIMPLE_FB_ONLY)
 	{
-		// In these cases we can do accurate AFAIL in one or two passes.
+		// First pass is to update color; second pass is to update Z.
+		GL_INS("Alpha test: RGBA then Z (accurate)");
+		config.depth.zwe = false; // Disable Z write on first pass
+		config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
+	}
+	else if (method == AlphaTestMethod::SIMPLE_ZB_ONLY)
+	{
+		// First pass is to update Z; second pass is to update color.
+		GL_INS("Alpha test: Z then RGBA (accurate)");
+		config.colormask.wrgba = 0; // Disable color on first pass
+		config.alpha_second_pass.depth.zwe = false; // Disable Z write on second pass
+	}
+	else if (method == AlphaTestMethod::SIMPLE_RGB_ONLY)
+	{
+		// First pass is to update color; second pass is to update Z;
+		GL_INS("Alpha test: RGBA (A with dual-source blend), then Z (accurate)");
 
-		if (simple_fb_only)
+		// Tells shader to use dual source blending AFAIL on first pass.
+		config.ps.afail = GSHWDrawConfig::PS_AFAIL_RGB_ONLY_DSB;
+		config.ps.no_color1 = false;
+
+		config.depth.zwe = false; // Disable Z write on first pass
+		config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
+
+		if (!config.blend.enable)
 		{
-			// First pass is to update color; second pass is to update Z.
-			GL_INS("Alpha test: RGBA then Z (accurate)");
-			config.depth.zwe = false; // Disable Z write on first pass
-			config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
+			config.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
+				GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
 		}
-		else if (simple_zb_only)
+		else
 		{
-			// First pass is to update Z; second pass is to update color.
-			GL_INS("Alpha test: Z then RGBA (accurate)");
-			config.colormask.wrgba = 0; // Disable color on first pass
-			config.alpha_second_pass.depth.zwe = false; // Disable Z write on second pass
-		}
-		else if (simple_rgb_only)
-		{
-			// First pass is to update color; second pass is to update Z;
-			GL_INS("Alpha test: RGBA (A with dual-source blend), then Z (accurate)");
-
-			config.depth.zwe = false; // Disable Z write on first pass
-			config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
-
-			// First pass must be set up to do AFAIL with dual source blend.
-			GetAlphaTestConfigPS(atst, aref, false, ps_atst, ps_aref);
-			config.ps.atst = ps_atst;
-			config.cb_ps.FogColor_AREF.a = ps_aref;
-			config.ps.no_color1 = false; // Tells shader to use dual source blending AFAIL.
-
-			if (!config.blend.enable)
+			if (config.blend_multi_pass.enable)
 			{
-				config.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
-					GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
+				config.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+				config.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
 			}
 			else
 			{
-				if (config.blend_multi_pass.enable)
-				{
-					config.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					config.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-				}
-				else
-				{
-					config.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					config.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-				}
-			}
-
-			// Swap stencil DATE for PrimID DATE, for both Z on and off cases.
-			// Because we're making some pixels pass, but not updating A, the stencil won't be synced.
-			if (DATE && !DATE_BARRIER && features.primitive_id)
-			{
-				if (!DATE_PRIMID)
-					GL_INS("HW: Swap stencil DATE for PrimID, due to AFAIL");
-
-				DATE_one = false;
-				DATE_PRIMID = true;
+				config.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+				config.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
 			}
 		}
 
-		// Enable alpha test and discard failing fragments on second pass.
-		GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
-		config.alpha_second_pass.ps.atst = ps_atst;
-		config.alpha_second_pass.ps_aref = ps_aref;
-		config.alpha_second_pass.ps.afail = AFAIL_KEEP;
+		// Swap stencil DATE for PrimID DATE, for both Z on and off cases.
+		// Because we're making some pixels pass, but not updating A, the stencil won't be synced.
+		if (DATE && !DATE_BARRIER && features.primitive_id)
+		{
+			if (!DATE_PRIMID)
+				GL_INS("HW: Swap stencil DATE for PrimID, due to AFAIL");
+
+			DATE_one = false;
+			DATE_PRIMID = true;
+		}
 	}
 	else
 	{
-		// Last ditch effort: use approximate pass/fail method.
-		GL_INS("Alpha test with pass/fail (approximate)");
+		// Use approximate pass/fail method.
+		GL_INS("Alpha test with pass/fail");
 
-		// Enable alpha test and discard failing fragments on first pass.
-		GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
-		config.ps.atst = ps_atst;
-		config.cb_ps.FogColor_AREF.a = ps_aref;
-		config.ps.afail = AFAIL_KEEP;
-
-		// Determine the buffer write mask for failing fragments on the seconds pass.
+		// Determine the write mask for fragments on each pass.
 		if (afail == AFAIL_FB_ONLY)
 		{
-			config.alpha_second_pass.depth.zwe = false;
+			config.alpha_second_pass.depth.zwe = 0;  // Disable Z write on second pass
 		}
 		else if (afail == AFAIL_ZB_ONLY)
 		{
-			config.alpha_second_pass.colormask.wrgba = 0;
+			config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
 		}
 		else if (afail == AFAIL_RGB_ONLY)
 		{
-			config.alpha_second_pass.colormask.wrgba = config.colormask.wrgba & 7;
+			config.alpha_second_pass.depth.zwe = false; // Disable Z write on second pass
+			config.alpha_second_pass.colormask.wrgba = config.colormask.wrgba & 7; // Disable A write on second pass
 		}
-
+	}
+	
+	if (config.alpha_second_pass.colormask.wrgba || config.alpha_second_pass.depth.zwe)
+	{
 		// Enable alpha test and discard passing fragments on second pass.
 		GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
+		config.alpha_second_pass.enable = true;
 		config.alpha_second_pass.ps.atst = ps_atst;
 		config.alpha_second_pass.ps_aref = ps_aref;
-		config.alpha_second_pass.ps.afail = AFAIL_KEEP;
+		config.alpha_second_pass.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
 	}
 
-	// Degenerate cases with no writes on the first/second pass should have been optimized out earlier.
-	pxAssert(config.colormask.wrgba || config.depth.zwe);
+	if (method != AlphaTestMethod::NEVER)
+	{
+		pxAssertRel(config.colormask.wrgba || config.depth.zwe,
+			"Alpha first pass has no color/depth write.");
+	}
 	if (config.alpha_second_pass.enable)
 	{
 		pxAssertRel(config.alpha_second_pass.colormask.wrgba || config.alpha_second_pass.depth.zwe,
@@ -7520,7 +7554,19 @@ void GSRendererHW::GetAlphaTestConfig(
 			GL_INS("Warning: Using full barriers on alpha second pass.");
 		}
 	}
-};
+
+	// Finally, if there the first pass is never used (i.e., ATST=NEVER, do only the second pass).
+	if (!(config.colormask.wrgba || config.depth.zwe))
+	{
+		std::memcpy(&config.ps, &config.alpha_second_pass.ps, sizeof(config.ps));
+		std::memcpy(&config.colormask, &config.alpha_second_pass.colormask, sizeof(config.colormask));
+		std::memcpy(&config.depth, &config.alpha_second_pass.depth, sizeof(config.depth));
+		config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
+		config.alpha_second_pass.enable = false;
+	}
+
+	return !(config.colormask.wrgba || config.depth.zwe) ? AlphaTestMethod::ABORT_DRAW : method;
+}
 
 void GSRendererHW::CleanupDraw(bool invalidate_temp_src)
 {
@@ -8005,7 +8051,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		rt->m_alpha_min = rt_new_alpha_min;
 	}
 
-	GetAlphaTestConfig(m_cached_ctx, m_vt, m_prim_overlap, m_context->ALPHA, features, m_conf, DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
+	AlphaTestMethod alpha_test_method =
+		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8249,6 +8296,15 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	HandleProvokingVertexFirst();
 
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
+
+	alpha_test_method = GetAlphaTestSecondPassConfig(alpha_test_method, m_cached_ctx, features,
+		m_conf, DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
+
+	if (alpha_test_method == AlphaTestMethod::ABORT_DRAW)
+	{
+		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
+		return;
+	}
 	
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);

@@ -337,6 +337,16 @@ struct alignas(16) GSHWDrawConfig
 		PS_ATST_NOTEQUAL = 4
 	};
 
+	// Identical with the usual GS enum except for the RGB_ONLY_DSB
+	enum PSAfail
+	{
+		PS_AFAIL_KEEP = 0,
+		PS_AFAIL_FB_ONLY = 1,
+		PS_AFAIL_ZB_ONLY = 2,
+		PS_AFAIL_RGB_ONLY = 3,
+		PS_AFAIL_RGB_ONLY_DSB = 4 // RGB only with dual source blend.
+	};
+
 #pragma pack(pop)
 #pragma pack(push, 4)
 	struct PSSelector
@@ -363,7 +373,7 @@ struct alignas(16) GSHWDrawConfig
 				// Pixel test
 				u32 date : 3;
 				u32 atst : 3;
-				u32 afail : 2;
+				u32 afail : 3;
 				u32 ztst : 2;
 				// Color sampling
 				u32 fst : 1; // Investigate to do it on the VS

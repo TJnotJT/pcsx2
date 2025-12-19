@@ -21,6 +21,7 @@
 #define AFAIL_FB_ONLY 1
 #define AFAIL_ZB_ONLY 2
 #define AFAIL_RGB_ONLY 3
+#define AFAIL_RGB_ONLY_DSB 4
 #endif
 
 #ifndef PS_ATST_NONE
@@ -45,7 +46,7 @@
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define PS_PRIMID_INIT (PS_DATE == 1 || PS_DATE == 2)
 #define NEEDS_RT_EARLY (PS_TEX_IS_FB == 1 || PS_DATE >= 5)
-#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == PS_ZB_ONLY || (PS_AFAIL == AFAIL_RGB_ONLY && PS_NO_COLOR1))
+#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == PS_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)) || PS_COLOR_FEEDBACK)
 #define NEEDS_TEX (PS_TFX != 4)
@@ -1171,7 +1172,7 @@ void ps_main()
 
 	ps_fbmask(C);
 
-#if PS_AFAIL == AFAIL_RGB && !PS_NO_COLOR1
+#if (PS_AFAIL == AFAIL_RGB_ONLY_DSB) && !PS_NO_COLOR1
 	// Use alpha blend factor to determine whether to update A.
 	alpha_blend.a = float(atst_pass);
 #endif
@@ -1198,7 +1199,7 @@ void ps_main()
 	#elif (PS_AFAIL == AFAIL_RGB_ONLY) 
 		if (!atst_pass)
 		{
-		#if NEEDS_RT && PS_NO_COLOR1 // No dual src blend
+		#if NEEDS_RT
 			C.a = sample_from_rt().a;
 		#endif
 		#if NEEDS_DEPTH && PS_ZCLAMP
