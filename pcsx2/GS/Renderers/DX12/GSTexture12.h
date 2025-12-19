@@ -59,6 +59,7 @@ public:
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level, D3D12_RESOURCE_STATES before_state,
 		D3D12_RESOURCE_STATES after_state);
+	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
@@ -83,7 +84,6 @@ private:
 		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
 		bool allow_uav);
 
-	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
 	std::unique_ptr<GSTexture12> CreateTempDepthUAVTexture(Type type) const;
 
 	static bool CreateSRVDescriptor(

@@ -70,6 +70,7 @@ const char* GSTexture::GetFormatName(Format format)
 		"ColorHDR",
 		"ColorClip",
 		"DepthStencil",
+		"Float32",
 		"UNorm8",
 		"UInt16",
 		"UInt32",
@@ -96,6 +97,7 @@ u32 GSTexture::GetCompressedBytesPerBlock(Format format)
 		8, // ColorHDR/RGBA16F
 		8, // ColorClip/RGBA16
 		4, // DepthStencil
+		4, // Float32
 		1, // UNorm8/R8
 		2, // UInt16/R16UI
 		4, // UInt32/R32UI

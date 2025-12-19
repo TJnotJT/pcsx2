@@ -6391,6 +6391,55 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
+void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
+	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER,
+	GSTextureCache::Target* rt, GSTextureCache::Target* ds)
+{
+	if (!(features.rov_color || features.rov_depth))
+		return;
+
+	if (features.framebuffer_fetch)
+	{
+		GL_INS("HW: ROV disabled because have FB-fetch");
+		return;
+	}
+
+	if (config.blend.enable)
+	{
+		GL_INS("HW: ROV disabled because HW blend enabled");
+		return;
+	}
+
+	GL_PUSH("HW: ROV setup");
+
+	if (DATE)
+	{
+		// Always use DATE barrier with ROVs.
+		DATE_one = false; // Stencil won't work for ROV write
+		DATE_PRIMID = false;
+		DATE_BARRIER = true;
+		GL_INS("HW: Using DATE BARRIER with ROV");
+	}
+
+	const bool feedback_color = 
+		config.rt && (config.require_one_barrier || config.require_full_barrier ||
+			(config.tex && config.tex == config.rt));
+
+	if (rt && features.rov_color && feedback_color)
+	{
+		GL_INS("HW: ROV used for color");
+		config.ps.rov_color = true;
+		config.ps.rov_color_mask = config.colormask.wrgba;
+		config.colormask.wrgba = 0xF;
+	}
+
+	// FIXME: Implement depth ROV
+	if (ds && config.ps.zclamp)
+	{
+
+	}
+}
+
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
 {
 	// Don't shader sample when the clamp/repeat is configured to the texture size.
@@ -7806,6 +7855,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			}
 		}
 	}
+
+	// Do ROV setup here since it might change DATE.
+	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER, rt, ds);
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.

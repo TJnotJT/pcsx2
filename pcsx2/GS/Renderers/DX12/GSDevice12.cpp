@@ -1254,7 +1254,8 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
 	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
-	m_features.rov = options.ROVsSupported;
+	m_features.rov_color = options.ROVsSupported;
+	m_features.rov_depth = false;
 
 	return true;
 }
@@ -2185,11 +2186,10 @@ void GSDevice12::IASetIndexBuffer(const void* index, size_t count)
 	m_index_stream_buffer.CommitMemory(size);
 }
 
-void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor)
+void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, const GSVector2i& viewport_size)
 {
 	GSTexture12* vkRt = static_cast<GSTexture12*>(rt);
 	GSTexture12* vkDs = static_cast<GSTexture12*>(ds);
-	pxAssert(vkRt || vkDs);
 
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs)
 	{
@@ -2228,7 +2228,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector
 	}
 
 	// This is used to set/initialize the framebuffer for tfx rendering.
-	const GSVector2i size = vkRt ? vkRt->GetSize() : vkDs->GetSize();
+	const GSVector2i size = vkRt ? vkRt->GetSize() : (vkDs ? vkDs->GetSize() : viewport_size);
 	const D3D12_VIEWPORT vp{0.0f, 0.0f, static_cast<float>(size.x), static_cast<float>(size.y), 0.0f, 1.0f};
 
 	SetViewport(vp);
@@ -2938,6 +2938,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
 	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
 	sm.AddMacro("PS_ROV_DEPTH", sel.rov_depth);
+	sm.AddMacro("PS_ROV_COLOR_MASK", sel.rov_color_mask);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
@@ -3609,6 +3610,10 @@ __ri void GSDevice12::ApplyBaseState(u32 flags, ID3D12GraphicsCommandList* cmdli
 		{
 			cmdlist->OMSetRenderTargets(0, nullptr, FALSE, &m_current_depth_target->GetWriteDescriptor().cpu_handle);
 		}
+		else
+		{
+			cmdlist->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+		}
 	}
 }
 
@@ -3888,28 +3893,6 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
-	if (config.ds && GSState::s_n == 75 && 0)
-	{
-		config.ds->SetTargetMode(GSTexture12::TargetMode::UAV);
-		config.ds->SetTargetMode(GSTexture12::TargetMode::Standard);
-		((GSTexture12*)config.ds)->SaveDepthUAV("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.png");
-	}
-
-	/*GSTexture* temp = nullptr;
-	GSTexture* temp_ds = nullptr;
-	if (config.rt)
-	{
-		temp = FetchSurface(GSTexture12::Type::RenderTarget, config.rt->GetWidth(), config.rt->GetHeight(), 1, config.rt->GetFormat(), false, false);
-		temp->SetTargetMode(GSTexture12::TargetMode::UAV);
-		config.ps.rov_color = 1;
-	}
-	if (config.ds)
-	{
-		temp_ds = FetchSurface(GSTexture12::Type::DepthStencil, config.ds->GetWidth(), config.ds->GetHeight(), 1, config.ds->GetFormat(), false, false);
-		temp_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
-		config.ps.rov_depth = 1;
-	}*/
-
 	// Destination Alpha Setup
 	const bool stencil_DATE_One = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
 	const bool stencil_DATE = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || stencil_DATE_One);
@@ -3936,8 +3919,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
-	const bool feedback_rov = feedback && m_features.rov;
-	config.ps.rov_color = feedback_rov;
 
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
@@ -3985,7 +3966,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	if (stencil_DATE)
 	{
-		pxAssert(!feedback_rov);
+		pxAssert(!config.ps.rov_color);
 		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
 	}
 
@@ -4002,14 +3983,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.pal)
 		PSSetShaderResource(1, config.pal, true);
 
-	//if (temp)
-	//	PSSetUAV(0, temp, false);
-	//if (temp_ds)
-	//	PSSetUAV(1, temp, false);
-
 	if (config.blend.constant_enable)
 		SetBlendConstants(config.blend.constant);
-
 
 	// Depth testing and sampling, bind resource as dsv read only and srv at the same time without the need of a copy.
 	if (config.tex && config.tex == config.ds)
@@ -4146,32 +4121,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	if (feedback_rov)
-	{
-		EndRenderPass();
-		OMSetRenderTargets(nullptr, draw_ds, config.scissor);
-		draw_rt->SetTargetMode(GSTexture12::TargetMode::UAV);
-		PSSetUAV(0, draw_rt, false);
-		SendHWDraw(pipe, config, nullptr, false, false, false);
-		draw_rt->SetTargetMode(GSTexture12::TargetMode::Standard);
-	}
-	else
-	{
-		SendHWDraw(pipe, config, draw_rt, feedback, config.require_one_barrier, config.require_full_barrier);
-	}
+	SendHWDraw(pipe, config, draw_rt, draw_ds, feedback, config.require_one_barrier, config.require_full_barrier);
 
-	/*if (temp)
-	{
-		temp->SetTargetMode(GSTexture12::TargetMode::Standard);
-		temp->Save("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.png");
-		Recycle(temp);
-	}
-	if (temp_ds)
-	{
-		temp_ds->SetTargetMode(GSTexture12::TargetMode::Standard);
-		temp_ds->Save("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp_ds.png");
-		Recycle(temp_ds);
-	}*/
 	// blend second pass
 	if (config.blend_multi_pass.enable)
 	{
@@ -4200,7 +4151,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.cms = config.alpha_second_pass.colormask;
 		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, feedback, config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(pipe, config, draw_rt, draw_ds, feedback,
+			config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
 	}
 
 	if (date_image)
@@ -4240,8 +4192,52 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 }
 
-void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt, const bool feedback, const bool one_barrier, const bool full_barrier)
+void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt, GSTexture12* draw_ds,
+	const bool feedback, const bool one_barrier, const bool full_barrier)
 {
+	if (config.ps.rov_color || config.ps.rov_depth)
+	{
+		EndRenderPass();
+
+		OMSetRenderTargets(
+			config.ps.rov_color ? nullptr : draw_rt,
+			config.ps.rov_depth ? nullptr : draw_ds,
+			config.scissor, draw_rt->GetSize());
+
+		if (config.ps.rov_color)
+		{
+			draw_rt->SetTargetMode(GSTexture12::TargetMode::UAV);
+			D3D12_RESOURCE_BARRIER barrier = draw_rt->GetUAVBarrier();
+			GetCommandList()->ResourceBarrier(1, &barrier);
+			PSSetUAV(0, draw_rt, false);
+		}
+
+		if (config.ps.rov_depth)
+		{
+			draw_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
+			D3D12_RESOURCE_BARRIER barrier = draw_ds->GetUAVBarrier();
+			GetCommandList()->ResourceBarrier(1, &barrier);
+			PSSetUAV(1, draw_ds, false);
+		}
+
+		if (BindDrawPipeline(pipe))
+			DrawIndexedPrimitive();
+
+		if (config.ps.rov_color)
+		{
+			// FIXME: Make transition lazy!
+			draw_rt->SetTargetMode(GSTexture12::TargetMode::Standard);
+		}
+
+		if (config.ps.rov_depth)
+		{
+			// FIXME: Make transition lazy!
+			draw_ds->SetTargetMode(GSTexture12::TargetMode::Standard);
+		}
+
+		return;
+	}
+	
 	if (feedback)
 	{
 #ifdef PCSX2_DEVBUILD

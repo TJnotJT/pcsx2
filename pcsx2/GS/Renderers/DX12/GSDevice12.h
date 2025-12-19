@@ -462,14 +462,15 @@ public:
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 	void PSSetUAV(int i, GSTexture* uav, bool check_state);
 
-	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor);
+	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, const GSVector2i& viewport_size = {});
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt, const bool feedback, const bool one_barrier, const bool full_barrier);
+	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt, GSTexture12* draw_ds,
+		const bool feedback, const bool one_barrier, const bool full_barrier);
 
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
 	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);

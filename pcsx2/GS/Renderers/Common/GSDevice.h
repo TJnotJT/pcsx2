@@ -420,6 +420,7 @@ struct alignas(16) GSHWDrawConfig
 
 				u32 rov_color : 1;
 				u32 rov_depth : 1;
+				u32 rov_color_mask : 4;
 			};
 
 			struct
@@ -849,7 +850,8 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool rov                  : 1; ///< Supports rasterizer ordered views.
+		bool rov_color            : 1; ///< Supports rasterizer ordered views for color output.
+		bool rov_depth            : 1; ///< Supports rasterizer ordered views for depth output.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
