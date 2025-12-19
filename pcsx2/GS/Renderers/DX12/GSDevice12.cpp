@@ -3,6 +3,7 @@
 
 #include "GS/GS.h"
 #include "GS/GSGL.h"
+#include "GS/GSState.h" // FIXME: Remove when done debugging
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
 #include "GS/Renderers/DX11/D3D.h"
@@ -1251,6 +1252,10 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 		DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing_supported, sizeof(allow_tearing_supported));
 	m_allow_tearing_supported = (SUCCEEDED(hr) && allow_tearing_supported == TRUE);
 
+	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
+	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
+	m_features.rov = options.ROVsSupported;
+
 	return true;
 }
 
@@ -1289,6 +1294,7 @@ void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_f
 				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R16G16B16A16_UNORM}, // ColorClip
 			{DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS, DXGI_FORMAT_UNKNOWN,
 				DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT}, // DepthStencil
+			{DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R32_FLOAT}, // Float32
 			{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN}, // UNorm8
 			{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN}, // UInt16
 			{DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32_UINT, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN}, // UInt32
@@ -2342,8 +2348,8 @@ GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string
 bool GSDevice12::CreateNullTexture()
 {
 	m_null_texture =
-		GSTexture12::Create(GSTexture::Type::Texture, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
-			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN);
+		GSTexture12::Create(GSTexture::Type::RenderTarget, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R8G8B8A8_UNORM);
 	if (!m_null_texture)
 		return false;
 
@@ -2419,7 +2425,7 @@ bool GSDevice12::CreateRootSignatures()
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL);
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 2, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 4, 2, D3D12_SHADER_VISIBILITY_PIXEL);
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL);
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -2473,6 +2479,12 @@ bool GSDevice12::CompileConvertPipelines()
 			{
 				gpb.ClearRenderTargets();
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
+			}
+			break;
+			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
+			{
+				gpb.SetRenderTarget(0, DXGI_FORMAT_R32_FLOAT);
+				gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
 			}
 			break;
 			default:
@@ -3073,6 +3085,8 @@ void GSDevice12::InitializeState()
 {
 	for (u32 i = 0; i < NUM_TOTAL_TFX_TEXTURES; i++)
 		m_tfx_textures[i] = m_null_texture->GetSRVDescriptor();
+	for (u32 i = 0; i < NUM_TFX_UAV_TEXTURES; i++)
+		m_tfx_uavs[i] = m_null_texture->GetUAVDescriptor();
 	m_tfx_sampler_sel = GSHWDrawConfig::SamplerSelector::Point().key;
 
 	InvalidateCachedState();
@@ -3252,6 +3266,41 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	GetSampler(&m_tfx_sampler, sel);
 	m_tfx_sampler_sel = sel.key;
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
+}
+
+void GSDevice12::PSSetUAV(int i, GSTexture* uav, bool check_state)
+{
+	D3D12DescriptorHandle handle;
+	if (uav)
+	{
+		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
+		
+		if (check_state)
+		{
+			if (dtex->GetTargetMode() != GSTexture12::TargetMode::UAV)
+			{
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to UAV transition");
+					EndRenderPass();
+				}
+				dtex->CommitClear();
+				dtex->SetTargetMode(GSTexture12::TargetMode::UAV);
+			}
+		}
+		dtex->SetUseFenceCounter(GetCurrentFenceValue());
+		handle = dtex->GetUAVDescriptor();
+	}
+	else
+	{
+		handle = m_null_texture->GetUAVDescriptor();
+	}
+
+	if (m_tfx_uavs[i] == handle)
+		return;
+
+	m_tfx_uavs[i] = handle;
+	m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
 }
 
 void GSDevice12::SetUtilityRootSignature()
@@ -3649,7 +3698,7 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 
 	if (flags & DIRTY_FLAG_TFX_UAV_TEXTURES)
 	{
-		if (!GetTextureGroupDescriptors(&m_tfx_uav_textures_handle_gpu, m_tfx_textures.data() + 4, 2))
+		if (!GetTextureGroupDescriptors(&m_tfx_uav_textures_handle_gpu, m_tfx_uavs.data(), 2))
 		{
 			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX UAV descriptor descriptor groups");
 			return ApplyTFXState(true);
@@ -3839,6 +3888,28 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
+	if (config.ds && GSState::s_n == 75 && 0)
+	{
+		config.ds->SetTargetMode(GSTexture12::TargetMode::UAV);
+		config.ds->SetTargetMode(GSTexture12::TargetMode::Standard);
+		((GSTexture12*)config.ds)->SaveDepthUAV("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.png");
+	}
+
+	/*GSTexture* temp = nullptr;
+	GSTexture* temp_ds = nullptr;
+	if (config.rt)
+	{
+		temp = FetchSurface(GSTexture12::Type::RenderTarget, config.rt->GetWidth(), config.rt->GetHeight(), 1, config.rt->GetFormat(), false, false);
+		temp->SetTargetMode(GSTexture12::TargetMode::UAV);
+		config.ps.rov_color = 1;
+	}
+	if (config.ds)
+	{
+		temp_ds = FetchSurface(GSTexture12::Type::DepthStencil, config.ds->GetWidth(), config.ds->GetHeight(), 1, config.ds->GetFormat(), false, false);
+		temp_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
+		config.ps.rov_depth = 1;
+	}*/
+
 	// Destination Alpha Setup
 	const bool stencil_DATE_One = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
 	const bool stencil_DATE = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || stencil_DATE_One);
@@ -3863,6 +3934,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt);
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
+
+	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
+	const bool feedback_rov = feedback && m_features.rov;
+	config.ps.rov_color = feedback_rov;
 
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
@@ -3909,7 +3984,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	if (stencil_DATE)
+	{
+		pxAssert(!feedback_rov);
 		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
+	}
 
 	// stream buffer in first, in case we need to exec
 	SetVSConstantBuffer(config.cb_vs);
@@ -3924,8 +4002,14 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.pal)
 		PSSetShaderResource(1, config.pal, true);
 
+	//if (temp)
+	//	PSSetUAV(0, temp, false);
+	//if (temp_ds)
+	//	PSSetUAV(1, temp, false);
+
 	if (config.blend.constant_enable)
 		SetBlendConstants(config.blend.constant);
+
 
 	// Depth testing and sampling, bind resource as dsv read only and srv at the same time without the need of a copy.
 	if (config.tex && config.tex == config.ds)
@@ -4016,8 +4100,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		m_pipeline_selector.ds = true;
 	}
 
-	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
-
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor);
 
 	// Begin render pass if new target or out of the area.
@@ -4064,8 +4146,32 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, feedback, config.require_one_barrier, config.require_full_barrier);
+	if (feedback_rov)
+	{
+		EndRenderPass();
+		OMSetRenderTargets(nullptr, draw_ds, config.scissor);
+		draw_rt->SetTargetMode(GSTexture12::TargetMode::UAV);
+		PSSetUAV(0, draw_rt, false);
+		SendHWDraw(pipe, config, nullptr, false, false, false);
+		draw_rt->SetTargetMode(GSTexture12::TargetMode::Standard);
+	}
+	else
+	{
+		SendHWDraw(pipe, config, draw_rt, feedback, config.require_one_barrier, config.require_full_barrier);
+	}
 
+	/*if (temp)
+	{
+		temp->SetTargetMode(GSTexture12::TargetMode::Standard);
+		temp->Save("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.png");
+		Recycle(temp);
+	}
+	if (temp_ds)
+	{
+		temp_ds->SetTargetMode(GSTexture12::TargetMode::Standard);
+		temp_ds->Save("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp_ds.png");
+		Recycle(temp_ds);
+	}*/
 	// blend second pass
 	if (config.blend_multi_pass.enable)
 	{

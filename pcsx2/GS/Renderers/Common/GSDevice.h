@@ -39,6 +39,8 @@ enum class ShaderConvert
 	RGBA8_TO_FLOAT24_BILN,
 	RGBA8_TO_FLOAT16_BILN,
 	RGB5A1_TO_FLOAT16_BILN,
+	FLOAT32_COLOR_TO_DEPTH,
+	FLOAT32_DEPTH_TO_COLOR,
 	FLOAT32_TO_FLOAT24,
 	DEPTH_COPY,
 	DOWNSAMPLE_COPY,
@@ -101,6 +103,7 @@ static inline bool HasDepthOutput(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+		case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
 			return true;
@@ -846,6 +849,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
+		bool rov                  : 1; ///< Supports rasterizer ordered views.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

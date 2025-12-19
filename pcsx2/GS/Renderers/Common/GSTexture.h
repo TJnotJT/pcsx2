@@ -34,6 +34,7 @@ public:
 		ColorHDR, ///< High dynamic range (RGBA16F) color texture
 		ColorClip, ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
+		Float32, ///< For treating depth texture as RT/UAV
 		UNorm8, ///< A8UNorm texture for paletted textures and the OSD font
 		UInt16, ///< UInt16 texture for reading back 16-bit depth
 		UInt32, ///< UInt32 texture for reading back 24 and 32-bit depth
@@ -176,7 +177,7 @@ public:
 		m_target_mode = mode;
 	}
 
-	virtual TargetMode GetTargetMode()
+	virtual TargetMode GetTargetMode() const
 	{
 		pxAssert(m_type == Type::RenderTarget || m_type == Type::DepthStencil);
 		return m_target_mode;

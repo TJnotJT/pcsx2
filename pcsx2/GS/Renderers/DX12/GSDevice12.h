@@ -80,7 +80,7 @@ public:
 	D3D12DescriptorHeapManager& GetRTVHeapManager() { return m_rtv_heap_manager; }
 	D3D12DescriptorHeapManager& GetDSVHeapManager() { return m_dsv_heap_manager; }
 	D3D12DescriptorHeapManager& GetSamplerHeapManager() { return m_sampler_heap_manager; }
-	const D3D12DescriptorHandle& GetNullSRVDescriptor() const { return m_null_srv_descriptor; }
+	const D3D12DescriptorHandle& GetNullSRVDescriptor() const { return m_null_srv_descriptor; } // FIXME: REMOVE; UNUSED!
 	D3D12StreamBuffer& GetTextureStreamBuffer() { return m_texture_stream_buffer; }
 
 	// Root signature access.
@@ -175,7 +175,7 @@ private:
 	D3D12DescriptorHeapManager m_rtv_heap_manager;
 	D3D12DescriptorHeapManager m_dsv_heap_manager;
 	D3D12DescriptorHeapManager m_sampler_heap_manager;
-	D3D12DescriptorHandle m_null_srv_descriptor;
+	D3D12DescriptorHandle m_null_srv_descriptor; // FIXME: REMOVE UNUSED
 
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_1;
 
@@ -256,8 +256,8 @@ public:
 		NUM_TFX_CONSTANT_BUFFERS = 2,
 		NUM_TFX_TEXTURES = 2,
 		NUM_TFX_RT_TEXTURES = 2,
+		NUM_TOTAL_TFX_TEXTURES = NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES,
 		NUM_TFX_UAV_TEXTURES = 2,
-		NUM_TOTAL_TFX_TEXTURES = NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES + NUM_TFX_UAV_TEXTURES,
 		NUM_TFX_SAMPLERS = 1,
 		NUM_UTILITY_TEXTURES = 1,
 		NUM_UTILITY_SAMPLERS = 1,
@@ -460,6 +460,7 @@ public:
 
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback = false);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
+	void PSSetUAV(int i, GSTexture* uav, bool check_state);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor);
 
@@ -594,6 +595,7 @@ private:
 
 	std::array<D3D12_GPU_VIRTUAL_ADDRESS, NUM_TFX_CONSTANT_BUFFERS> m_tfx_constant_buffers{};
 	std::array<D3D12DescriptorHandle, NUM_TOTAL_TFX_TEXTURES> m_tfx_textures{};
+	std::array<D3D12DescriptorHandle, NUM_TFX_UAV_TEXTURES> m_tfx_uavs{};
 	D3D12DescriptorHandle m_tfx_sampler;
 	u32 m_tfx_sampler_sel = 0;
 	D3D12DescriptorHandle m_tfx_textures_handle_gpu;
