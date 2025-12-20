@@ -6398,6 +6398,56 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
+void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
+	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER,
+	GSTextureCache::Target* rt, GSTextureCache::Target* ds)
+{
+	//return;
+	if (!(features.rov_color || features.rov_depth))
+		return;
+
+	if (features.framebuffer_fetch)
+	{
+		GL_INS("HW: ROV disabled because have FB-fetch");
+		return;
+	}
+
+	if (config.blend.enable)
+	{
+		GL_INS("HW: ROV disabled because HW blend enabled");
+		return;
+	}
+
+	GL_PUSH("HW: ROV setup");
+
+	if (DATE)
+	{
+		// Always use DATE barrier with ROVs.
+		DATE_one = false; // Stencil won't work for ROV write
+		DATE_PRIMID = false;
+		DATE_BARRIER = true;
+		GL_INS("HW: Using DATE BARRIER with ROV");
+	}
+
+	const bool feedback_color = 
+		config.rt && (config.require_one_barrier || config.require_full_barrier ||
+			(config.tex && config.tex == config.rt));
+
+	if (rt && features.rov_color && feedback_color)
+	{
+		GL_INS("HW: ROV used for color");
+		config.ps.rov_color = true;
+		config.ps.rov_color_mask = config.colormask.wrgba;
+	}
+
+	// ZClamp indicates depth will be written in fragment shader.
+	if (ds && config.ps.zclamp)
+	{
+		GL_INS("HW: ROV used for depth");
+		config.ps.rov_depth = true;
+	}
+}
+
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
 {
 	// Don't shader sample when the clamp/repeat is configured to the texture size.
@@ -8083,6 +8133,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
+	// Do ROV setup here since it might change DATE.
+	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER, rt, ds);
+
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
 	if (!rt || m_conf.colormask.wrgba == 0)
@@ -8286,8 +8339,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
 		// If depth feedback can use a color RT, we can use FB fetch.
-		// Otherwise we must keep barriers.
-		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback;
+		bool need_barriers_for_depth =
+			m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback && !m_conf.ps.rov_depth;
 
 		if (!need_barriers_for_depth)
 		{
@@ -8320,7 +8373,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Create a temporary depth color target
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ps.rov_depth)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 
