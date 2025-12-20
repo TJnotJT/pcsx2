@@ -6440,6 +6440,10 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		config.ps.rov_color_mask = config.colormask.wrgba;
 	}
 
+	// FIXME: TEMP DEBUGGING CODE!!
+	config.ps.zclamp = 1;
+	config.cb_ps.TA_MaxDepth_Af.z = 1.0f;
+
 	// ZClamp indicates depth will be written in fragment shader.
 	if (ds && config.ps.zclamp)
 	{

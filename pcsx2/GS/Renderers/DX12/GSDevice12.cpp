@@ -4302,6 +4302,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		if (config.ps.rov_depth)
 		{
+			// FIXME: MUST DO CACHING EARLIER BECAUSE STRETCH RECT IS CALLED!!!!
 			draw_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
 			D3D12_RESOURCE_BARRIER barrier = draw_ds->GetUAVBarrier();
 			GetCommandList()->ResourceBarrier(1, &barrier);

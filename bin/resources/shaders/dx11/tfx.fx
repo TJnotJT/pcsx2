@@ -151,10 +151,10 @@ struct PS_INPUT
 
 #ifdef PIXEL_SHADER
 
-struct PS_OUTPUT
+struct PS_OUTPUT_REAL
 {
 #define NUM_RTS 0
-#if !PS_NO_COLOR
+#if !PS_NO_COLOR && !PS_ROV_COLOR
 #if PS_DATE == 1 || PS_DATE == 2
 	float c : SV_Target;
 #else
@@ -166,7 +166,7 @@ struct PS_OUTPUT
 #endif
 #endif
 #endif
-#if PS_ZCLAMP
+#if PS_ZCLAMP && !PS_ROV_DEPTH
 	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
 		#if NUM_RTS > 0
 			float depth : SV_Target1;
@@ -178,6 +178,21 @@ struct PS_OUTPUT
 	#endif
 #endif
 #undef NUM_RTS
+};
+
+struct PS_OUTPUT
+{
+#if !PS_NO_COLOR
+#if PS_DATE == 1 || PS_DATE == 2
+	float c;
+#else
+	float4 c0;
+#if !PS_NO_COLOR1
+	float4 c1;
+#endif
+#endif
+#endif
+	float depth;
 };
 
 Texture2D<float4> Texture : register(t0);
@@ -1097,16 +1112,20 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 	}
 }
 
-PS_OUTPUT ps_main(PS_INPUT input)
-{
-#if PS_ROV_COLOR && PS_ROV_DEPTH
-	RtWrite(input.p.xy, float4(1, 0, 0, 1));
-	DepthWrite(input.p.xy, 1);
-	PS_OUTPUT xxx;
-	xxx.c0 = float4(0, 0, 0, 0);
-	xxx.depth = 1;
-	return xxx;
+#if !PS_ROV_COLOR || !PS_ROV_DEPTH
+PS_OUTPUT_REAL ps_main(PS_INPUT input)
+#else
+void ps_main(PS_INPUT input)
 #endif
+{
+//#if PS_ROV_COLOR && PS_ROV_DEPTH
+//	RtWrite(input.p.xy, float4(1, 0, 0, 1));
+//	DepthWrite(input.p.xy, 1);
+//	PS_OUTPUT xxx;
+//	xxx.c0 = float4(0, 0, 0, 0);
+//	xxx.depth = 1;
+//	return xxx;
+//#endif
 
 	bool fail_z = false;
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
@@ -1135,8 +1154,6 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	if (!atst_pass)
 		discard;
 #endif
-
-	PS_OUTPUT output;
 
 	if (PS_SCANMSK & 2)
 	{
@@ -1204,6 +1221,8 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	if (int(input.primid) > stencil_ceil)
 		discard;
 #endif
+
+	PS_OUTPUT output;
 
 	// Get first primitive that will write a failling alpha value
 #if PS_DATE == 1
@@ -1372,7 +1391,24 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	DepthWrite(input.p.xy, output.depth);
 #endif
 
-	return output;
+#if !PS_ROV_COLOR || !PS_ROV_DEPTH
+	PS_OUTPUT_REAL output_real;
+
+#if !PS_NO_COLOR && !PS_ROV_COLOR
+#if PS_DATE == 1 || PS_DATE == 2
+	output_real.c = output.c;
+#else
+	output_real.c0 = output.c0;
+#if !PS_NO_COLOR1
+	output_real.c1 = output.c1;
+#endif
+#endif
+#endif
+#if PS_ZCLAMP && !PS_ROV_DEPTH
+	output_real.depth = output.depth;
+#endif
+	return output_real;
+#endif // !ROV
 }
 
 #endif // PIXEL_SHADER
