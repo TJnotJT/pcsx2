@@ -442,6 +442,11 @@ struct alignas(16) GSHWDrawConfig
 				// Feedback
 				u32 color_feedback : 1;
 				u32 depth_feedback : 1;
+
+				// ROVs
+				u32 rov_color : 1;
+				u32 rov_depth : 1;
+				u32 rov_color_mask : 4;
 			};
 
 			struct
@@ -878,6 +883,8 @@ public:
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool depth_as_rt_feedback : 1; ///< Depth feedback loops/barriers by converting depth to a temporary color target.
+		bool rov_color            : 1; ///< Supports rasterizer ordered views for color output.
+		bool rov_depth            : 1; ///< Supports rasterizer ordered views for depth output.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
