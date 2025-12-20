@@ -182,10 +182,20 @@ struct PS_OUTPUT
 
 Texture2D<float4> Texture : register(t0);
 Texture2D<float4> Palette : register(t1);
+#if !PS_ROV_COLOR
 Texture2D<float4> RtTexture : register(t2);
+#endif
 Texture2D<float> PrimMinTexture : register(t3);
 Texture2D<float> DepthTexture : register(t4);
 SamplerState TextureSampler : register(s0);
+
+#if PS_ROV_COLOR
+RasterizerOrderedTexture2D<float4> RtTextureRov : register(u0);
+#endif
+
+#if PS_ROV_DEPTH
+RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+#endif
 
 #ifdef DX12
 cbuffer cb1 : register(b1)
@@ -212,10 +222,26 @@ cbuffer cb1
 	float RcpScaleFactor;
 };
 
+float4 RtLoad(int2 xy)
+{
+#if PS_ROV_COLOR
+	return RtTextureRov[xy];
+#else
+	return RtTexture.Load(int3(int2(xy), 0));
+#endif
+}
+
+void RtWrite(int2 xy, float4 c)
+{
+#if PS_ROV_COLOR
+	RtTextureRov[xy] = c;
+#endif
+}
+
 float4 sample_c(float2 uv, float uv_w, int2 xy)
 {
 #if PS_TEX_IS_FB == 1
-	return RtTexture.Load(int3(int2(xy), 0));
+	return RtLoad(xy);
 #elif PS_REGION_RECT == 1
 	return Texture.Load(int3(int2(uv), 0));
 #else
@@ -419,7 +445,7 @@ float4x4 sample_4p(uint4 u)
 int fetch_raw_depth(int2 xy)
 {
 #if PS_TEX_IS_FB == 1
-	float4 col = RtTexture.Load(int3(xy, 0));
+	float4 col = RtLoad(xy);
 #else
 	float4 col = Texture.Load(int3(xy, 0));
 #endif
@@ -429,7 +455,7 @@ int fetch_raw_depth(int2 xy)
 float4 fetch_raw_color(int2 xy)
 {
 #if PS_TEX_IS_FB == 1
-	return RtTexture.Load(int3(xy, 0));
+	return RtLoad(xy);
 #else
 	return Texture.Load(int3(xy, 0));
 #endif
@@ -438,7 +464,7 @@ float4 fetch_raw_color(int2 xy)
 float4 fetch_c(int2 uv)
 {
 #if PS_TEX_IS_FB == 1
-	return RtTexture.Load(int3(uv, 0));
+	return RtLoad(uv);
 #else
 	return Texture.Load(int3(uv, 0));
 #endif
@@ -844,7 +870,7 @@ void ps_fbmask(inout float4 C, float2 pos_xy)
 	if (PS_FBMASK)
 	{
 		float multi = PS_COLCLIP_HW ? 65535.0f : 255.0f;
-		float4 RT = trunc(RtTexture.Load(int3(pos_xy, 0)) * multi + 0.1f);
+		float4 RT = trunc(RtLoad(int2(pos_xy)) * multi + 0.1f);
 		C = (float4)(((uint4)C & ~FbMask) | ((uint4)RT & FbMask));
 	}
 }
@@ -920,7 +946,7 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 			As_rgba.rgb = (float3)1.0f;
 		}
 
-		float4 RT = SW_BLEND_NEEDS_RT ? RtTexture.Load(int3(pos_xy, 0)) : (float4)0.0f;
+		float4 RT = SW_BLEND_NEEDS_RT ? RtLoad(int2(pos_xy)) : (float4)0.0f;
 
 		if (PS_SHUFFLE && SW_BLEND_NEEDS_RT)
 		{
@@ -1091,7 +1117,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	float4 alpha_blend = (float4)0.0f;
 	if (SW_AD_TO_HW)
 	{
-		float4 RT = PS_RTA_CORRECTION ? trunc(RtTexture.Load(int3(input.p.xy, 0)) * 128.0f + 0.1f) : trunc(RtTexture.Load(int3(input.p.xy, 0)) * 255.0f + 0.1f);
+		float4 RT = PS_RTA_CORRECTION ? trunc(RtLoad(input.p.xy) * 128.0f + 0.1f) : trunc(RtLoad(input.p.xy) * 255.0f + 0.1f);
 		alpha_blend = (float4)(RT.a / 128.0f);
 	}
 	else
@@ -1115,9 +1141,9 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #if PS_WRITE_RG == 1
 	// Pseudo 16 bits access.
-	float rt_a = RtTexture.Load(int3(input.p.xy, 0)).g;
+	float rt_a = RtLoad(input.p.xy).g;
 #else
-	float rt_a = RtTexture.Load(int3(input.p.xy, 0)).a;
+	float rt_a = RtLoad(input.p.xy).a;
 #endif
 
 #if (PS_DATE & 3) == 1
@@ -1250,12 +1276,12 @@ PS_OUTPUT ps_main(PS_INPUT input)
 		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r;
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
-		output.c0 = RtTexture.Load(int3(input.p.xy, 0));
+		output.c0 = RtLoad(input.p.xy, 0);
 #elif (PS_AFAIL == AFAIL_RGB_ONLY)
 	if (!atst_pass)
 	{
 	#if PS_COLOR_FEEDBACK
-		output.c0.a = RtTexture.Load(int3(input.p.xy, 0)).a;
+		output.c0.a = RtLoad(input.p.xy).a;
 	#endif
 	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
 		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r; 
@@ -1271,6 +1297,42 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	output.depth = min(input.p.z, MaxDepthPS);	
 #endif
 
+#if PS_ROV_COLOR && !PS_NO_COLOR
+	float4 rt_col = RtLoad(input.p.xy);
+	#if PS_ROV_COLOR_MASK == 0
+	#elif PS_ROV_COLOR_MASK == 1
+		rt_col.r = output.c0.r;
+	#elif PS_ROV_COLOR_MASK == 2
+		rt_col.g = output.c0.g;
+	#elif PS_ROV_COLOR_MASK == 3
+		rt_col.rg = output.c0.rg;
+	#elif PS_ROV_COLOR_MASK == 4
+		rt_col.b = output.c0.b;
+	#elif PS_ROV_COLOR_MASK == 5
+		rt_col.rb = output.c0.rb;
+	#elif PS_ROV_COLOR_MASK == 6
+		rt_col.gb = output.c0.gb;
+	#elif PS_ROV_COLOR_MASK == 7
+		rt_col.rgb = output.c0.rgb;
+	#elif PS_ROV_COLOR_MASK == 8
+		rt_col.a = output.c0.a;
+	#elif PS_ROV_COLOR_MASK == 9
+		rt_col.ra = output.c0.ra;
+	#elif PS_ROV_COLOR_MASK == 10
+		rt_col.ga = output.c0.ga;
+	#elif PS_ROV_COLOR_MASK == 11
+		rt_col.rga = output.c0.rga;
+	#elif PS_ROV_COLOR_MASK == 12
+		rt_col.ba = output.c0.ba;
+	#elif PS_ROV_COLOR_MASK == 13
+		rt_col.rba = output.c0.rba;
+	#elif PS_ROV_COLOR_MASK == 14
+		rt_col.gba = output.c0.gba;
+	#elif PS_ROV_COLOR_MASK == 15
+		rt_col = output.c0;
+	#endif
+	RtWrite(input.p.xy, rt_col);
+#endif
 	return output;
 }
 

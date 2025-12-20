@@ -3,6 +3,7 @@
 
 #include "GS/GS.h"
 #include "GS/GSGL.h"
+#include "GS/GSState.h" // FIXME: Remove when done debugging
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
 #include "GS/Renderers/DX11/D3D.h"
@@ -1019,8 +1020,8 @@ std::string GSDevice12::GetDriverInfo() const
 	std::string ret = "Unknown Feature Level";
 
 	static constexpr std::array<std::tuple<D3D_FEATURE_LEVEL, const char*>, 2> feature_level_names = {{
-		{D3D_FEATURE_LEVEL_11_0, "D3D_FEATURE_LEVEL_11_0"},
 		{D3D_FEATURE_LEVEL_11_1, "D3D_FEATURE_LEVEL_11_1"},
+		{D3D_FEATURE_LEVEL_11_0, "D3D_FEATURE_LEVEL_11_0"},
 	}};
 
 	for (size_t i = 0; i < std::size(feature_level_names); i++)
@@ -1252,6 +1253,11 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 		DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing_supported, sizeof(allow_tearing_supported));
 	m_allow_tearing_supported = (SUCCEEDED(hr) && allow_tearing_supported == TRUE);
 
+	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
+	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
+	m_features.rov_color = options.ROVsSupported;
+	m_features.rov_depth = false;
+
 	return true;
 }
 
@@ -1275,19 +1281,19 @@ void GSDevice12::DrawIndexedPrimitive(int offset, int count)
 }
 
 void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
-	DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format) const
+	DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format, DXGI_FORMAT* uav_format) const
 {
-	static constexpr std::array<std::array<DXGI_FORMAT, 4>, static_cast<int>(GSTexture::Format::Last) + 1>
+	static constexpr std::array<std::array<DXGI_FORMAT, 5>, static_cast<int>(GSTexture::Format::Last) + 1>
 		s_format_mapping = {{
 			{DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN}, // Invalid
 			{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
-				DXGI_FORMAT_UNKNOWN}, // Color
+				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R8G8B8A8_UNORM}, // Color
 			{DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM,
-				DXGI_FORMAT_UNKNOWN}, // ColorHQ
+				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R10G10B10A2_UNORM}, // ColorHQ
 			{DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
-				DXGI_FORMAT_UNKNOWN}, // ColorHDR
+				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R16G16B16A16_FLOAT}, // ColorHDR
 			{DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM,
-				DXGI_FORMAT_UNKNOWN}, // ColorClip
+				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R16G16B16A16_UNORM}, // ColorClip
 			{DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS, DXGI_FORMAT_UNKNOWN,
 				DXGI_FORMAT_D32_FLOAT_S8X24_UINT}, // DepthStencil
 			{DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_UNKNOWN}, // Float32
@@ -1310,14 +1316,14 @@ void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_f
 		*rtv_format = mapping[2];
 	if (dsv_format)
 		*dsv_format = mapping[3];
+	if (uav_format)
+		*uav_format = mapping[4];
 }
 
 GSTexture* GSDevice12::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format)
 {
-	DXGI_FORMAT dxgi_format, srv_format, rtv_format, dsv_format;
-	LookupNativeFormat(format, &dxgi_format, &srv_format, &rtv_format, &dsv_format);
-
-	const DXGI_FORMAT uav_format = (type == GSTexture::Type::RWTexture) ? dxgi_format : DXGI_FORMAT_UNKNOWN;
+	DXGI_FORMAT dxgi_format, srv_format, rtv_format, dsv_format, uav_format;
+	LookupNativeFormat(format, &dxgi_format, &srv_format, &rtv_format, &dsv_format, &uav_format);
 
 	std::unique_ptr<GSTexture12> tex(GSTexture12::Create(type, format, width, height, levels,
 		dxgi_format, srv_format, rtv_format, dsv_format, uav_format));
@@ -2181,13 +2187,13 @@ void GSDevice12::IASetIndexBuffer(const void* index, size_t count)
 	m_index_stream_buffer.CommitMemory(size);
 }
 
-void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, const GSVector4i& scissor)
+void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, const GSVector4i& scissor,
+	const GSVector2i& viewport_size)
 {
 	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
-	pxAssert(d12Rt || d12DsRt || d12Ds);
-
+	
 	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt || m_current_depth_target != d12Ds)
 	{
 		// framebuffer change
@@ -2224,7 +2230,8 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	}
 
 	// This is used to set/initialize the framebuffer for tfx rendering.
-	const GSVector2i size = d12Rt ? d12Rt->GetSize() : (d12DsRt ? d12DsRt->GetSize() : d12Ds->GetSize());
+	const GSVector2i size = d12Rt ? d12Rt->GetSize() :
+	(d12DsRt ? d12DsRt->GetSize() : (d12Ds ? d12Ds->GetSize() : viewport_size));
 	const D3D12_VIEWPORT vp{0.0f, 0.0f, static_cast<float>(size.x), static_cast<float>(size.y), 0.0f, 1.0f};
 
 	SetViewport(vp);
@@ -2344,8 +2351,8 @@ GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string
 bool GSDevice12::CreateNullTexture()
 {
 	m_null_texture =
-		GSTexture12::Create(GSTexture::Type::Texture, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
-			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN);
+		GSTexture12::Create(GSTexture::Type::RenderTarget, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R8G8B8A8_UNORM);
 	if (!m_null_texture)
 		return false;
 
@@ -2422,6 +2429,7 @@ bool GSDevice12::CreateRootSignatures()
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 2, D3D12_SHADER_VISIBILITY_PIXEL); // RT / PrimID
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 1, D3D12_SHADER_VISIBILITY_PIXEL); // Depth
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL);
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -2935,6 +2943,9 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ZTST", sel.ztst);
 	sm.AddMacro("PS_COLOR_FEEDBACK", sel.color_feedback);
 	sm.AddMacro("PS_DEPTH_FEEDBACK", sel.depth_feedback);
+	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
+	sm.AddMacro("PS_ROV_DEPTH", sel.rov_depth);
+	sm.AddMacro("PS_ROV_COLOR_MASK", sel.rov_color_mask);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
@@ -2977,7 +2988,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		                                     (p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
 
 		DXGI_FORMAT native_format;
-		LookupNativeFormat(format, nullptr, nullptr, &native_format, nullptr);
+		LookupNativeFormat(format, nullptr, nullptr, &native_format, nullptr, nullptr);
 		gpb.SetRenderTarget(num_rts++, native_format);
 	}
 	if (p.ds_as_rt)
@@ -3094,6 +3105,8 @@ void GSDevice12::InitializeState()
 {
 	for (u32 i = 0; i < NUM_TOTAL_TFX_TEXTURES; i++)
 		m_tfx_textures[i] = m_null_texture->GetSRVDescriptor();
+	for (u32 i = 0; i < NUM_TFX_UAV_TEXTURES; i++)
+		m_tfx_uavs[i] = m_null_texture->GetUAVDescriptor();
 	m_tfx_sampler_sel = GSHWDrawConfig::SamplerSelector::Point().key;
 
 	InvalidateCachedState();
@@ -3182,6 +3195,7 @@ void GSDevice12::InvalidateCachedState()
 	m_tfx_samplers_handle_gpu.Clear();
 	m_tfx_rt_textures_handle_gpu.Clear();
 	m_tfx_depth_textures_handle_gpu.Clear();
+	m_tfx_uav_textures_handle_gpu.Clear();
 }
 
 void GSDevice12::SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS buffer, size_t size, size_t stride)
@@ -3278,6 +3292,41 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	GetSampler(&m_tfx_sampler, sel);
 	m_tfx_sampler_sel = sel.key;
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
+}
+
+void GSDevice12::PSSetUAV(int i, GSTexture* uav, bool check_state)
+{
+	D3D12DescriptorHandle handle;
+	if (uav)
+	{
+		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
+		
+		if (check_state)
+		{
+			if (dtex->GetTargetMode() != GSTexture12::TargetMode::UAV)
+			{
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to UAV transition");
+					EndRenderPass();
+				}
+				dtex->CommitClear();
+				dtex->SetTargetMode(GSTexture12::TargetMode::UAV);
+			}
+		}
+		dtex->SetUseFenceCounter(GetCurrentFenceValue());
+		handle = dtex->GetUAVDescriptor();
+	}
+	else
+	{
+		handle = m_null_texture->GetUAVDescriptor();
+	}
+
+	if (m_tfx_uavs[i] == handle)
+		return;
+
+	m_tfx_uavs[i] = handle;
+	m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
 }
 
 void GSDevice12::SetUtilityRootSignature()
@@ -3471,7 +3520,7 @@ void GSDevice12::BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE color_b
 		if (color_begin == D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR)
 		{
 			LookupNativeFormat(m_current_render_target->GetFormat(), nullptr,
-				&rt[num_rts].BeginningAccess.Clear.ClearValue.Format, nullptr, nullptr);
+				&rt[num_rts].BeginningAccess.Clear.ClearValue.Format, nullptr, nullptr, nullptr);
 			GSVector4::store<false>(rt[num_rts].BeginningAccess.Clear.ClearValue.Color, clear_color);
 		}
 		num_rts++;
@@ -3494,7 +3543,7 @@ void GSDevice12::BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE color_b
 		if (depth_begin == D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR)
 		{
 			LookupNativeFormat(m_current_depth_target->GetFormat(), nullptr, nullptr, nullptr,
-				&ds.DepthBeginningAccess.Clear.ClearValue.Format);
+				&ds.DepthBeginningAccess.Clear.ClearValue.Format, nullptr);
 			ds.DepthBeginningAccess.Clear.ClearValue.DepthStencil.Depth = clear_depth;
 		}
 		ds.StencilEndingAccess.Type = stencil_end;
@@ -3502,7 +3551,7 @@ void GSDevice12::BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE color_b
 		if (stencil_begin == D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR)
 		{
 			LookupNativeFormat(m_current_depth_target->GetFormat(), nullptr, nullptr, nullptr,
-				&ds.StencilBeginningAccess.Clear.ClearValue.Format);
+				&ds.StencilBeginningAccess.Clear.ClearValue.Format, nullptr);
 			ds.StencilBeginningAccess.Clear.ClearValue.DepthStencil.Stencil = clear_stencil;
 		}
 	}
@@ -3601,6 +3650,10 @@ __ri void GSDevice12::ApplyBaseState(u32 flags, ID3D12GraphicsCommandList* cmdli
 		{
 			cmdlist->OMSetRenderTargets(0, nullptr, FALSE, &m_current_depth_target->GetWriteDescriptor().cpu_handle);
 		}
+		else
+		{
+			cmdlist->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+		}
 	}
 }
 
@@ -3695,8 +3748,16 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX depth descriptor descriptor groups");
 			return ApplyTFXState(true);
 		}
-
 		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3;
+	}
+	if (flags & DIRTY_FLAG_TFX_UAV_TEXTURES)
+	{
+		if (!GetTextureGroupDescriptors(&m_tfx_uav_textures_handle_gpu, m_tfx_uavs.data(), 2))
+		{
+			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX UAV descriptor descriptor groups");
+			return ApplyTFXState(true);
+		}
+		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4;
 	}
 
 	ID3D12GraphicsCommandList* cmdlist = GetCommandList();
@@ -3707,7 +3768,7 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		flags |= DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
 		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3 |
-		         DIRTY_FLAG_PIPELINE;
+		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4 | DIRTY_FLAG_PIPELINE;
 		cmdlist->SetGraphicsRootSignature(m_tfx_root_signature.get());
 	}
 
@@ -3728,6 +3789,9 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES, m_tfx_rt_textures_handle_gpu);
 	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3)
 		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_DEPTH_TEXTURES, m_tfx_depth_textures_handle_gpu);
+	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4)
+		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_UAV_TEXTURES, m_tfx_uav_textures_handle_gpu);
+
 
 	ApplyBaseState(flags, cmdlist);
 	return true;
@@ -3905,6 +3969,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt);
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
 
+	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
+
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
@@ -3950,7 +4016,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	if (stencil_DATE)
+	{
+		pxAssert(!config.ps.rov_color);
 		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
+	}
 
 	// stream buffer in first, in case we need to exec
 	SetVSConstantBuffer(config.cb_vs);
@@ -4110,7 +4179,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
+	// FIXME: Select one draw_ds_as-rt or the other. Not both!!
+	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, feedback_rt, feedback_depth,
 		config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
@@ -4141,7 +4211,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.cms = config.alpha_second_pass.colormask;
 		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
+		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, feedback_rt, feedback_depth,
 			config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
 	}
 
@@ -4183,9 +4253,53 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 }
 
 void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-	GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth, const bool one_barrier,
-	const bool full_barrier)
+	GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth,
+	const bool one_barrier, const bool full_barrier)
 {
+	if (config.ps.rov_color || config.ps.rov_depth)
+	{
+		EndRenderPass();
+
+		OMSetRenderTargets(
+			config.ps.rov_color ? nullptr : draw_rt,
+			nullptr,
+			config.ps.rov_depth ? nullptr : draw_ds,
+			config.scissor, draw_rt->GetSize());
+
+		if (config.ps.rov_color)
+		{
+			draw_rt->SetTargetMode(GSTexture12::TargetMode::UAV);
+			D3D12_RESOURCE_BARRIER barrier = draw_rt->GetUAVBarrier();
+			GetCommandList()->ResourceBarrier(1, &barrier);
+			PSSetUAV(0, draw_rt, false);
+		}
+
+		if (config.ps.rov_depth)
+		{
+			draw_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
+			D3D12_RESOURCE_BARRIER barrier = draw_ds->GetUAVBarrier();
+			GetCommandList()->ResourceBarrier(1, &barrier);
+			PSSetUAV(1, draw_ds, false);
+		}
+
+		if (BindDrawPipeline(pipe))
+			DrawIndexedPrimitive();
+
+		if (config.ps.rov_color)
+		{
+			// FIXME: Make transition lazy!
+			draw_rt->SetTargetMode(GSTexture12::TargetMode::Standard);
+		}
+
+		if (config.ps.rov_depth)
+		{
+			// FIXME: Make transition lazy!
+			draw_ds->SetTargetMode(GSTexture12::TargetMode::Standard);
+		}
+
+		return;
+	}
+
 	if (feedback_rt || feedback_depth)
 	{
 #ifdef PCSX2_DEVBUILD

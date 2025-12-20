@@ -36,6 +36,7 @@ public:
 	__fi DXGI_FORMAT GetDXGIFormat() const { return m_dxgi_format; }
 	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
+	__fi ID3D12Resource* GetUAVResource() const { return m_resource_uav.get(); }
 
 	void* GetNativeHandle() const override;
 
@@ -46,6 +47,7 @@ public:
 
 #ifdef PCSX2_DEVBUILD
 	void SetDebugName(std::string_view name) override;
+	void SaveDepthUAV(const std::string& fn) const;
 #endif
 
 	void TransitionToState(D3D12_RESOURCE_STATES state);
@@ -56,10 +58,15 @@ public:
 
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level, D3D12_RESOURCE_STATES before_state,
-		D3D12_RESOURCE_STATES after_state) const;
+		D3D12_RESOURCE_STATES after_state);
+	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
+
+	// For transition to/from UAV usage.
+	virtual void SetTargetMode(TargetMode mode) override;
+	virtual TargetMode GetTargetMode() const override;
 
 private:
 	enum class WriteDescriptorType : u8
@@ -71,9 +78,13 @@ private:
 
 	GSTexture12(Type type, Format format, int width, int height, int levels, DXGI_FORMAT dxgi_format,
 		wil::com_ptr_nothrow<ID3D12Resource> resource, wil::com_ptr_nothrow<ID3D12Resource> resource_fbl,
-		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation, const D3D12DescriptorHandle& srv_descriptor,
+		wil::com_ptr_nothrow<ID3D12Resource> resource_uav, wil::com_ptr_nothrow<D3D12MA::Allocation> allocation,
+		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
-		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state);
+		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
+		bool allow_uav);
+
+	std::unique_ptr<GSTexture12> CreateTempDepthUAVTexture(Type type) const;
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -87,7 +98,9 @@ private:
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
+	wil::com_ptr_nothrow<ID3D12Resource> m_resource_uav;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
+	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation_uav;
 
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
@@ -96,7 +109,7 @@ private:
 	WriteDescriptorType m_write_descriptor_type = WriteDescriptorType::None;
 
 	DXGI_FORMAT m_dxgi_format = DXGI_FORMAT_UNKNOWN;
-	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON;
+	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON; // Tracks the resource state in non-UAV mode.
 
 	// Contains the fence counter when the texture was last used.
 	// When this matches the current fence counter, the texture was used this command buffer.
@@ -104,6 +117,7 @@ private:
 
 	int m_map_level = std::numeric_limits<int>::max();
 	GSVector4i m_map_area = GSVector4i::zero();
+	bool m_allow_uav = false;
 };
 
 class GSDownloadTexture12 final : public GSDownloadTexture
