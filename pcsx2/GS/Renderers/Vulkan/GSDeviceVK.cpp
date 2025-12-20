@@ -3974,6 +3974,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 				rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::Float32), VK_FORMAT_UNDEFINED,
 					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 			}
+			break;
 			default:
 			{
 				rp = GetRenderPass(LookupNativeFormat(depth ? GSTexture::Format::Invalid : GSTexture::Format::Color),
