@@ -1256,7 +1256,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
 	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
 	m_features.rov_color = options.ROVsSupported;
-	m_features.rov_depth = false;
+	m_features.rov_depth = options.ROVsSupported;
 
 	return true;
 }
@@ -1295,7 +1295,7 @@ void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_f
 			{DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM,
 				DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R16G16B16A16_UNORM}, // ColorClip
 			{DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS, DXGI_FORMAT_UNKNOWN,
-				DXGI_FORMAT_D32_FLOAT_S8X24_UINT}, // DepthStencil
+				DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT}, // DepthStencil
 			{DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_UNKNOWN}, // Float32
 			{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_UNKNOWN}, // UNorm8
 			{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_UNKNOWN}, // UInt16
@@ -2231,7 +2231,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 
 	// This is used to set/initialize the framebuffer for tfx rendering.
 	const GSVector2i size = d12Rt ? d12Rt->GetSize() :
-	(d12DsRt ? d12DsRt->GetSize() : (d12Ds ? d12Ds->GetSize() : viewport_size));
+		(d12DsRt ? d12DsRt->GetSize() : (d12Ds ? d12Ds->GetSize() : viewport_size));
 	const D3D12_VIEWPORT vp{0.0f, 0.0f, static_cast<float>(size.x), static_cast<float>(size.y), 0.0f, 1.0f};
 
 	SetViewport(vp);
@@ -2984,8 +2984,8 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	if (p.rt)
 	{
 		const GSTexture::Format format = IsDATEModePrimIDInit(p.ps.date) ?
-		                                     GSTexture::Format::PrimID :
-		                                     (p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
+			GSTexture::Format::PrimID :
+			(p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
 
 		DXGI_FORMAT native_format;
 		LookupNativeFormat(format, nullptr, nullptr, &native_format, nullptr, nullptr);
@@ -4179,7 +4179,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	// FIXME: Select one draw_ds_as-rt or the other. Not both!!
 	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, feedback_rt, feedback_depth,
 		config.require_one_barrier, config.require_full_barrier);
 
@@ -4258,13 +4257,12 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 {
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
-		EndRenderPass();
+		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
+		{
+			Console.Warning("DX12: Warning: ROV feedback for color and depth is inconsistent.");
+		}
 
-		OMSetRenderTargets(
-			config.ps.rov_color ? nullptr : draw_rt,
-			nullptr,
-			config.ps.rov_depth ? nullptr : draw_ds,
-			config.scissor, draw_rt->GetSize());
+		EndRenderPass();
 
 		if (config.ps.rov_color)
 		{
@@ -4281,6 +4279,12 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			GetCommandList()->ResourceBarrier(1, &barrier);
 			PSSetUAV(1, draw_ds, false);
 		}
+
+		OMSetRenderTargets(
+			config.ps.rov_color ? nullptr : draw_rt,
+			nullptr,
+			config.ps.rov_depth ? nullptr : draw_ds,
+			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()));
 
 		if (BindDrawPipeline(pipe))
 			DrawIndexedPrimitive();
@@ -4311,7 +4315,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		if (config.tex && config.tex == config.rt)
 			PSSetShaderResource(0, draw_rt, false, true);
 		if ((one_barrier || full_barrier) && feedback_depth)
-			PSSetShaderResource(4, draw_ds, false, true);
+			PSSetShaderResource(4, draw_ds_as_rt, false, true);
 
 		std::array<D3D12_RESOURCE_BARRIER, 2> barriers;
 		u32 n_barriers = 0;
@@ -4326,7 +4330,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		if (feedback_depth)
 		{
 			barriers[n_barriers] = {D3D12_RESOURCE_BARRIER_TYPE_ALIASING, D3D12_RESOURCE_BARRIER_FLAG_NONE};
-			barriers[n_barriers].Aliasing = {draw_ds->GetResource(), nullptr};
+			barriers[n_barriers].Aliasing = { draw_ds_as_rt->GetResource(), nullptr};
 			n_barriers++;
 		}
 
@@ -4374,14 +4378,14 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
 	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
-	m_pipeline_selector.dss.key = config.depth.key;
-	m_pipeline_selector.bs.key = config.blend.key;
+	m_pipeline_selector.dss.key = config.ps.rov_depth ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
+	m_pipeline_selector.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
-	m_pipeline_selector.cms.key = config.colormask.key;
+	m_pipeline_selector.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
-	m_pipeline_selector.rt = config.rt != nullptr;
-	m_pipeline_selector.ds = config.ds != nullptr;
-	m_pipeline_selector.ds_as_rt = config.ds_as_rt != nullptr;
+	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.rov_color;
+	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.rov_depth;
+	m_pipeline_selector.ds_as_rt = config.ds_as_rt != nullptr && !config.ps.rov_color && !config.ps.rov_depth;
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)

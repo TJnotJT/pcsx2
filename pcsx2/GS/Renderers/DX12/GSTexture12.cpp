@@ -20,7 +20,7 @@ GSTexture12::GSTexture12(Type type, Format format, int width, int height, int le
 	wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
 	const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
 	const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
-	bool allow_uav)
+	std::unique_ptr<GSTexture12>&& uav, bool allow_uav)
 	: m_resource(std::move(resource))
 	, m_resource_fbl(std::move(resource_fbl))
 	, m_resource_uav(std::move(resource_uav))
@@ -33,6 +33,7 @@ GSTexture12::GSTexture12(Type type, Format format, int width, int height, int le
 	, m_write_descriptor_type(wdtype)
 	, m_dxgi_format(dxgi_format)
 	, m_resource_state(resource_state)
+	, m_uav(std::move(uav))
 	, m_allow_uav(allow_uav)
 {
 	m_type = type;
@@ -209,6 +210,8 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 	wil::com_ptr_nothrow<ID3D12Resource> resource_uav;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> allocation;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav;
+	
+	std::unique_ptr<GSTexture12> uav; // For depth UAV
 
 	if (type == Type::RenderTarget)
 	{
@@ -263,8 +266,6 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		// DepthStencil requires a separate UAV resource.
 		if (type == Type::DepthStencil && allow_uav)
 		{
-			// FIXME: USe same allocation desc???
-			// FIXME: make sure to add to the constructor and destroy!!!
 			D3D12_RESOURCE_DESC desc_uav = desc;
 			desc_uav.Format = uav_format;
 			desc_uav.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS | D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -275,6 +276,15 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				// OOM isn't fatal.
 				if (hr != E_OUTOFMEMORY)
 					Console.Error("Create texture resource 4 failed: 0x%08X", hr);
+				return {};
+			}
+
+			uav = Adopt(resource_uav, Type::RenderTarget, Format::Float32, width, height, 1,
+				DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_UNKNOWN,
+				DXGI_FORMAT_R32_FLOAT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			if (!uav)
+			{
+				Console.Error("Create depth UAV failed");
 				return {};
 			}
 		}
@@ -315,12 +325,17 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				dev->GetDSVHeapManager().Free(&srv_descriptor);
 				return {};
 			}
-			if (allow_uav && !CreateUAVDescriptor(resource_uav.get(), uav_format, &uav_descriptor))
+			if (allow_uav)
+			{
+				uav_descriptor = uav->m_uav_descriptor;
+			}
+			// FIXME: REmove if not needed.
+			/*if (allow_uav && !CreateUAVDescriptor(resource_uav.get(), uav_format, &uav_descriptor))
 			{
 				dev->GetDescriptorHeapManager().Free(&write_descriptor);
 				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
 				return {};
-			}
+			}*/
 		}
 		break;
 
@@ -350,7 +365,8 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 	return std::unique_ptr<GSTexture12>(
 		new GSTexture12(type, format, width, height, levels, dxgi_format, std::move(resource), std::move(resource_fbl),
 			std::move(resource_uav), std::move(allocation), std::move(allocation_uav),
-			srv_descriptor, write_descriptor, uav_descriptor, fbl_descriptor, write_descriptor_type, state, allow_uav));
+			srv_descriptor, write_descriptor, uav_descriptor, fbl_descriptor, write_descriptor_type,
+			state, std::move(uav), allow_uav));
 }
 
 std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resource> resource, Type type, Format format,
@@ -362,8 +378,6 @@ std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resou
 	D3D12DescriptorHandle srv_descriptor, write_descriptor, uav_descriptor;
 	WriteDescriptorType write_descriptor_type = WriteDescriptorType::None;
 	bool allow_uav = uav_format != DXGI_FORMAT_UNKNOWN;
-	wil::com_ptr_nothrow<ID3D12Resource> resource_uav;
-	wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav;
 
 	if (srv_format != DXGI_FORMAT_UNKNOWN)
 	{
@@ -392,48 +406,17 @@ std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resou
 
 	if (uav_format != DXGI_FORMAT_UNKNOWN)
 	{
-		//if (type == Type::DepthStencil)
-		//{
-		//	D3D12_RESOURCE_DESC desc_uav = desc;
-		//	desc_uav.Format = uav_format;
-		//	desc_uav.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-		//	D3D12MA::ALLOCATION_DESC allocationDesc = {};
-		//	allocationDesc.Flags = D3D12MA::ALLOCATION_FLAG_WITHIN_BUDGET | D3D12MA::ALLOCATION_FLAG_COMMITTED;
-		//	allocationDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-		//	
-		//	HRESULT hr = GSDevice12::GetInstance()->GetAllocator()->CreateResource(
-		//		&allocationDesc, &desc_uav, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-		//		nullptr, allocation_uav.put(), IID_PPV_ARGS(resource_uav.put()));
-		//	if (FAILED(hr))
-		//	{
-		//		// OOM isn't fatal.
-		//		if (hr != E_OUTOFMEMORY)
-		//			Console.Error("Create depth stencil UAV resource failed: 0x%08X", hr);
-		//		return {};
-		//	}
-
-		//	if (!CreateUAVDescriptor(resource_uav.get(), uav_format, &uav_descriptor))
-		//	{
-		//		GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&write_descriptor);
-		//		GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&srv_descriptor);
-		//		return {};
-		//	}
-		//}
-		//else
+		if (!CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
 		{
-			if (!CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
-			{
-				GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&write_descriptor);
-				GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&srv_descriptor);
-				return {};
-			}
+			GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&write_descriptor);
+			GSDevice12::GetInstance()->GetDescriptorHeapManager().Free(&srv_descriptor);
+			return {};
 		}
 	}
 
-	// FIXME: Not necessary to create the depth stencil UAVs. Just leave null!!!
 	return std::unique_ptr<GSTexture12>(new GSTexture12(type, format, static_cast<u32>(desc.Width), desc.Height,
-		desc.MipLevels, desc.Format, std::move(resource), {}, std::move(resource_uav), {}, std::move(allocation_uav),
-		srv_descriptor, write_descriptor, uav_descriptor, {}, write_descriptor_type, resource_state, allow_uav));
+		desc.MipLevels, desc.Format, std::move(resource), {}, {}, {}, {},
+		srv_descriptor, write_descriptor, uav_descriptor, {}, write_descriptor_type, resource_state, nullptr, allow_uav));
 }
 
 bool GSTexture12::CreateSRVDescriptor(
@@ -763,20 +746,28 @@ void GSTexture12::SetDebugName(std::string_view name)
 
 void GSTexture12::SaveDepthUAV(const std::string& fn) const
 {
-	std::unique_ptr<GSTexture12> temp = CreateTempDepthUAVTexture(Type::Texture);
-	temp->Save(fn);
+	pxAssert(m_uav);
+	D3D12_RESOURCE_STATES orig_state = m_uav->m_resource_state;
+	m_uav->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	m_uav->Save(fn);
+	m_uav->TransitionToState(orig_state);
 }
 
 #endif
 
 void GSTexture12::TransitionToState(D3D12_RESOURCE_STATES state)
 {
-	pxAssert(m_target_mode != TargetMode::UAV); // We should not be transitioning in UAV mode.
 	TransitionToState(GSDevice12::GetInstance()->GetCommandList(), state);
 }
 
 void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state)
 {
+	if (m_target_mode == TargetMode::UAV)
+	{
+		// We do not allow transitions in UAV mode.
+		SetTargetMode(TargetMode::Standard);
+	}
+
 	if (m_resource_state == state)
 		return;
 
@@ -819,14 +810,6 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
 	SetState(GSTexture::State::Dirty);
 }
 
-std::unique_ptr<GSTexture12> GSTexture12::CreateTempDepthUAVTexture(Type type) const
-{
-	std::unique_ptr<GSTexture12> temp = Adopt(m_resource_uav, type, Format::Float32, GetWidth(), GetHeight(), 1,
-			DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R32_FLOAT,
-			D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	return std::move(temp);
-}
-
 D3D12_RESOURCE_BARRIER GSTexture12::GetUAVBarrier() const
 {
 	if (m_type == Type::DepthStencil)
@@ -853,19 +836,22 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 	if (m_target_mode == TargetMode::UAV && mode == TargetMode::Standard)
 	{
+		barrier = GetUAVBarrier();
+		cmdlist->ResourceBarrier(1, &barrier);
+
 		if (m_type == Type::DepthStencil)
 		{
 			// Must do this first or assertions will fail for transitioning in UAV mode.
 			GSTexture::SetTargetMode(TargetMode::Standard);
 
-			std::unique_ptr<GSTexture12> temp = CreateTempDepthUAVTexture(Type::Texture);
+			m_uav->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(temp.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH);
+			device->StretchRect(m_uav.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH);
 			device->EndRenderPass();
 			SetUseFenceCounter(device->GetCurrentFenceValue());
 
-			temp->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			m_uav->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		else if (m_type == Type::RenderTarget)
 		{
@@ -885,14 +871,13 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 	{
 		if (m_type == Type::DepthStencil)
 		{
-			std::unique_ptr<GSTexture12> temp = CreateTempDepthUAVTexture(Type::RenderTarget);
-			temp->TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
+			m_uav->TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(this, temp.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR);
+			device->StretchRect(this, m_uav.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR);
 			device->EndRenderPass();
 
-			temp->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			m_uav->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 			
 			// Must do this last or assertions will fail for transitioning in UAV mode.
 			GSTexture::SetTargetMode(TargetMode::UAV);

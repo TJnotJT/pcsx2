@@ -6402,6 +6402,7 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER,
 	GSTextureCache::Target* rt, GSTextureCache::Target* ds)
 {
+	//return;
 	if (!(features.rov_color || features.rov_depth))
 		return;
 
@@ -6437,13 +6438,13 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		GL_INS("HW: ROV used for color");
 		config.ps.rov_color = true;
 		config.ps.rov_color_mask = config.colormask.wrgba;
-		config.colormask.wrgba = 0xF;
 	}
 
-	// FIXME: Implement depth ROV
+	// ZClamp indicates depth will be written in fragment shader.
 	if (ds && config.ps.zclamp)
 	{
-
+		GL_INS("HW: ROV used for depth");
+		config.ps.rov_depth = true;
 	}
 }
 
@@ -8336,8 +8337,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
 		// If depth feedback can use a color RT, we can use FB fetch.
-		// Otherwise we must keep barriers.
-		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback;
+		bool need_barriers_for_depth =
+			m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback && !m_conf.ps.rov_depth;
 
 		if (!need_barriers_for_depth)
 		{
@@ -8370,7 +8371,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Create a temporary depth color target
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ps.rov_depth)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 

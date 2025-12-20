@@ -82,9 +82,7 @@ private:
 		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
 		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
-		bool allow_uav);
-
-	std::unique_ptr<GSTexture12> CreateTempDepthUAVTexture(Type type) const;
+		std::unique_ptr<GSTexture12>&& uav, bool allow_uav);
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -102,6 +100,8 @@ private:
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation_uav;
 
+	std::unique_ptr<GSTexture12> m_uav; // For depth texture points to the parallel color texture.
+
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
 	D3D12DescriptorHandle m_uav_descriptor = {};
@@ -109,7 +109,7 @@ private:
 	WriteDescriptorType m_write_descriptor_type = WriteDescriptorType::None;
 
 	DXGI_FORMAT m_dxgi_format = DXGI_FORMAT_UNKNOWN;
-	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON; // Tracks the resource state in non-UAV mode.
+	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON;
 
 	// Contains the fence counter when the texture was last used.
 	// When this matches the current fence counter, the texture was used this command buffer.
