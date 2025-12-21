@@ -168,20 +168,6 @@ void ps_colclip_resolve()
 }
 #endif
 
-#ifdef ps_convert_float32_depth_to_color
-void ps_convert_float32_depth_to_color()
-{
-	o_col0 = sample_c(v_tex).r;
-}
-#endif
-
-#ifdef ps_convert_float32_color_to_depth
-void ps_convert_float32_color_to_depth()
-{
-	gl_FragDepth = sample_c(v_tex).r;
-}
-#endif
-
 #ifdef ps_convert_float32_32bits
 void ps_convert_float32_32bits()
 {
@@ -235,7 +221,6 @@ float rgb5a1_to_depth16(vec4 unorm)
 #ifdef ps_convert_float32_depth_to_color
 void ps_convert_float32_depth_to_color()
 {
-	// Truncates depth value to 24bits
 	o_col0 = sample_c(v_tex).r;
 }
 #endif
@@ -243,7 +228,6 @@ void ps_convert_float32_depth_to_color()
 #ifdef ps_convert_float32_color_to_depth
 void ps_convert_float32_color_to_depth()
 {
-	// Truncates depth value to 24bits
 	gl_FragDepth = sample_c(v_tex).r;
 }
 #endif

@@ -6399,10 +6399,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 }
 
 void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
-	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER,
-	GSTextureCache::Target* rt, GSTextureCache::Target* ds)
+	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
 {
-	//return;
 	if (!(features.rov_color || features.rov_depth))
 		return;
 
@@ -6418,9 +6416,54 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		return;
 	}
 
-	GL_PUSH("HW: ROV setup");
+	const bool feedback_color = 
+		config.rt && (config.require_one_barrier || config.require_full_barrier ||
+			(config.tex && config.tex == config.rt));
+	const bool feedback_depth = config.ds && config.ps.IsFeedbackLoopDepth();
 
-	if (DATE)
+	const bool use_rov_color = features.rov_color && feedback_color;
+	const bool use_rov_depth = features.rov_depth && feedback_depth;
+
+	bool using_rov = false;
+
+	if (config.rt && (use_rov_color || use_rov_depth))
+	{
+		GL_INS("HW: ROV used for color");
+		config.ps.rov_color = true;
+		config.ps.rov_color_mask = config.colormask.wrgba;
+		config.ps.color_feedback = true;
+
+		using_rov = true;
+	}
+
+	if (config.ds && (use_rov_color || use_rov_depth))
+	{
+		GL_INS("HW: ROV used for depth");
+		if (config.ds->GetTargetMode() != GSTexture::TargetMode::UAV)
+		{
+			config.ds->UpdateDepthUAV(false); // Make sure UAV has updated data.
+		}
+
+		if (config.depth.ztst != ZTST_ALWAYS)
+		{
+			GL_INS("HW: Replace HW with SW depth test");
+			config.ps.ztst = config.depth.ztst;
+		}
+
+		if (config.depth.zwe)
+		{
+			GL_INS("HW: Replace HW with SW depth write");
+			config.ps.zclamp = true; // Proxy for SW Z write
+		}
+		
+		config.ps.rov_depth = true;
+		config.ps.depth_feedback = true;
+		config.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
+
+		using_rov = true;
+	}
+
+	if (using_rov && DATE)
 	{
 		// Always use DATE barrier with ROVs.
 		DATE_one = false; // Stencil won't work for ROV write
@@ -6428,27 +6471,13 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		DATE_BARRIER = true;
 		GL_INS("HW: Using DATE BARRIER with ROV");
 	}
+}
 
-	const bool feedback_color = 
-		config.rt && (config.require_one_barrier || config.require_full_barrier ||
-			(config.tex && config.tex == config.rt));
-
-	if (rt && features.rov_color && feedback_color)
+void GSRendererHW::FinishROV(const GSHWDrawConfig& config)
+{
+	if (config.ds && config.ps.rov_depth)
 	{
-		GL_INS("HW: ROV used for color");
-		config.ps.rov_color = true;
-		config.ps.rov_color_mask = config.colormask.wrgba;
-	}
-
-	// FIXME: TEMP DEBUGGING CODE!!
-	config.ps.zclamp = 1;
-	config.cb_ps.TA_MaxDepth_Af.z = 1.0f;
-
-	// ZClamp indicates depth will be written in fragment shader.
-	if (ds && config.ps.zclamp)
-	{
-		GL_INS("HW: ROV used for depth");
-		config.ps.rov_depth = true;
+		config.ds->UpdateDepthUAV(true); // Make sure depth has updated data.
 	}
 }
 
@@ -8138,7 +8167,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
 	// Do ROV setup here since it might change DATE.
-	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER, rt, ds);
+	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8433,6 +8462,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		g_gs_device->Recycle(m_conf.ds_as_rt);
 		m_conf.ds_as_rt = nullptr;
 	}
+
+	// Resolve ROV data if needed
+	FinishROV(m_conf);
 }
 
 // If the EE uploaded a new CLUT since the last draw, use that.

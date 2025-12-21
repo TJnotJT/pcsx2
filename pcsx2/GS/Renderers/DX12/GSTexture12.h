@@ -67,6 +67,7 @@ public:
 	// For transition to/from UAV usage.
 	virtual void SetTargetMode(TargetMode mode) override;
 	virtual TargetMode GetTargetMode() const override;
+	virtual void UpdateDepthUAV(bool uav_to_ds) override;
 
 private:
 	enum class WriteDescriptorType : u8

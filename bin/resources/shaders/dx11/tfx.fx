@@ -1118,12 +1118,10 @@ PS_OUTPUT_REAL ps_main(PS_INPUT input)
 void ps_main(PS_INPUT input)
 #endif
 {
-//#if PS_ROV_COLOR && PS_ROV_DEPTH
-//	RtWrite(input.p.xy, float4(1, 0, 0, 1));
-//	DepthWrite(input.p.xy, 1);
-//	PS_OUTPUT xxx;
-//	xxx.c0 = float4(0, 0, 0, 0);
-//	xxx.depth = 1;
+//#if PS_ROV_DEPTH
+//	DepthWrite(input.p.xy, 0xFF * exp2(-32.0f));
+//	PS_OUTPUT_REAL xxx;
+//	xxx.c0 = float4(1, 0, 0, 1);
 //	return xxx;
 //#endif
 
@@ -1386,7 +1384,7 @@ void ps_main(PS_INPUT input)
 	RtWrite(input.p.xy, rt_col);
 #endif
 
-#if PS_ROV_DEPTH
+#if PS_ZCLAMP && PS_ROV_DEPTH
 	output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
 	DepthWrite(input.p.xy, output.depth);
 #endif

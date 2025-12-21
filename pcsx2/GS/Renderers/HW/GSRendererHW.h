@@ -147,8 +147,8 @@ private:
 	void EmulateBlending(int rt_alpha_min, int rt_alpha_max, const bool DATE, bool& DATE_PRIMID, bool& DATE_BARRIER, GSTextureCache::Target* rt,
 		bool can_scale_rt_alpha, bool& new_rt_alpha_scale);
 	static void SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
-		const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER,
-		GSTextureCache::Target* rt, GSTextureCache::Target* ds);
+		const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER);
+	static void FinishROV(const GSHWDrawConfig& config);
 	void CleanupDraw(bool invalidate_temp_src);
 
 	void EmulateTextureSampler(const GSTextureCache::Target* rt, const GSTextureCache::Target* ds,

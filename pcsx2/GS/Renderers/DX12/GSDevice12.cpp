@@ -4292,22 +4292,8 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		EndRenderPass();
 
-		if (config.ps.rov_color)
-		{
-			draw_rt->SetTargetMode(GSTexture12::TargetMode::UAV);
-			D3D12_RESOURCE_BARRIER barrier = draw_rt->GetUAVBarrier();
-			GetCommandList()->ResourceBarrier(1, &barrier);
-			PSSetUAV(0, draw_rt, false);
-		}
-
-		if (config.ps.rov_depth)
-		{
-			// FIXME: MUST DO CACHING EARLIER BECAUSE STRETCH RECT IS CALLED!!!!
-			draw_ds->SetTargetMode(GSTexture12::TargetMode::UAV);
-			D3D12_RESOURCE_BARRIER barrier = draw_ds->GetUAVBarrier();
-			GetCommandList()->ResourceBarrier(1, &barrier);
-			PSSetUAV(1, draw_ds, false);
-		}
+		PSSetUAV(0, config.ps.rov_color ? draw_rt : nullptr, true);
+		PSSetUAV(1, config.ps.rov_depth ? draw_ds : nullptr, true);
 
 		OMSetRenderTargets(
 			config.ps.rov_color ? nullptr : draw_rt,
@@ -4320,15 +4306,18 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		if (config.ps.rov_color)
 		{
-			// FIXME: Make transition lazy!
+			PSSetUAV(0, nullptr, false);
 			draw_rt->SetTargetMode(GSTexture12::TargetMode::Standard);
 		}
 
 		if (config.ps.rov_depth)
 		{
-			// FIXME: Make transition lazy!
+			PSSetUAV(1, nullptr, false);
 			draw_ds->SetTargetMode(GSTexture12::TargetMode::Standard);
 		}
+
+		ApplyTFXState(); // Unbinds UAVs
+		return;
 	}
 
 	if (feedback_rt || feedback_depth)

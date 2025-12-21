@@ -180,9 +180,10 @@ public:
 
 	virtual TargetMode GetTargetMode() const
 	{
-		pxAssert(m_type == Type::RenderTarget || m_type == Type::DepthStencil);
 		return m_target_mode;
 	}
+
+	virtual void UpdateDepthUAV(bool uav_to_ds) {}
 };
 
 class GSDownloadTexture
