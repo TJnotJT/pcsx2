@@ -6467,14 +6467,6 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 	}
 }
 
-void GSRendererHW::FinishROV(const GSHWDrawConfig& config)
-{
-	if (config.ds && config.ps.rov_depth)
-	{
-		config.ds->UpdateDepthUAV(true); // Make sure depth has updated data.
-	}
-}
-
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
 {
 	// Don't shader sample when the clamp/repeat is configured to the texture size.
@@ -8474,9 +8466,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		g_gs_device->Recycle(m_conf.ds_as_rt);
 		m_conf.ds_as_rt = nullptr;
 	}
-
-	// Resolve ROV data if needed
-	FinishROV(m_conf);
 }
 
 // If the EE uploaded a new CLUT since the last draw, use that.

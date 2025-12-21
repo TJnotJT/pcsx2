@@ -30,20 +30,12 @@ public:
 
 	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const { return m_srv_descriptor; }
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const { return m_write_descriptor; }
-	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
-	{
-		return m_uav_descriptor; // FIXME: Set this to null descriptor when making depth stencil
-	}
+	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const { return m_uav_descriptor; }
 	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const { return m_fbl_descriptor; }
 	__fi D3D12_RESOURCE_STATES GetResourceState() const { return m_resource_state; }
 	__fi DXGI_FORMAT GetDXGIFormat() const { return m_dxgi_format; }
 	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
-	__fi ID3D12Resource* GetUAVResource()
-	{
-		pxAssert(m_state == State::UAV);
-		return m_resource_uav.get();
-	}
 
 	void* GetNativeHandle() const override;
 
@@ -85,11 +77,9 @@ private:
 
 	GSTexture12(Type type, Format format, int width, int height, int levels, DXGI_FORMAT dxgi_format,
 		wil::com_ptr_nothrow<ID3D12Resource> resource, wil::com_ptr_nothrow<ID3D12Resource> resource_fbl,
-		wil::com_ptr_nothrow<ID3D12Resource> resource_uav, wil::com_ptr_nothrow<D3D12MA::Allocation> allocation,
-		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
+		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
-		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
-		std::unique_ptr<GSTexture12>&& uav);
+		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state);
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -103,11 +93,9 @@ private:
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
-	wil::com_ptr_nothrow<ID3D12Resource> m_resource_uav;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
-	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation_uav;
 
-	std::unique_ptr<GSTexture12> m_uav; // For depth texture points to the parallel color texture.
+	std::unique_ptr<GSTexture12> m_uav_depth; // For depth texture points to the parallel color texture.
 
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
@@ -124,7 +112,6 @@ private:
 
 	int m_map_level = std::numeric_limits<int>::max();
 	GSVector4i m_map_area = GSVector4i::zero();
-	std::unique_ptr<GSTexture12> m_uav_depth; // FIXME: IMPLEMENT
 };
 
 class GSDownloadTexture12 final : public GSDownloadTexture
