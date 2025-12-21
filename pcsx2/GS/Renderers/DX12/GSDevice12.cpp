@@ -4262,12 +4262,11 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 		if (draw_rt && draw_rt->GetState() == GSTexture::State::Cleared)
 		{
-			GetCommandList()->ClearRenderTargetView(draw_rt->GetWriteDescriptor().cpu_handle, clear_color.F32, 0, nullptr);
+			draw_rt->CommitClear(clear_color.F32);
 		}
 		if (draw_ds && draw_ds->GetState() == GSTexture::State::Cleared)
 		{
-			GetCommandList()->ClearDepthStencilView(draw_ds->GetWriteDescriptor().cpu_handle, D3D12_CLEAR_FLAG_DEPTH,
-				draw_ds->GetClearDepth(), 0, 0, nullptr);
+			draw_ds->CommitClear();
 		}
 
 		// Now bind the correct RTs and UAVs. Setting the UAVs handles the texture state change/transitions.

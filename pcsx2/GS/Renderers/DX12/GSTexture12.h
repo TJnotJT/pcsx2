@@ -59,14 +59,14 @@ public:
 
 	virtual void SetState(State state) override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
-	void CommitClear();
-	void CommitClear(ID3D12GraphicsCommandList* cmdlist);
+	void CommitClear(float* color = nullptr);
+	void CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color = nullptr);
 
 	void Destroy(bool defer = true);
 
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
-	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level, D3D12_RESOURCE_STATES before_state,
-		D3D12_RESOURCE_STATES after_state);
+	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
+		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
 	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.

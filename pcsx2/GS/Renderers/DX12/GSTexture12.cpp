@@ -784,28 +784,28 @@ void GSTexture12::TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlis
 	cmdlist->ResourceBarrier(1, &barrier);
 }
 
-void GSTexture12::CommitClear()
+void GSTexture12::CommitClear(float* color)
 {
 	if (m_state != GSTexture::State::Cleared)
 		return;
 
 	GSDevice12::GetInstance()->EndRenderPass();
 
-	CommitClear(GSDevice12::GetInstance()->GetCommandList());
+	CommitClear(GSDevice12::GetInstance()->GetCommandList(), color);
 }
 
-void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
+void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color)
 {
 	if (IsDepthStencil())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 		cmdlist->ClearDepthStencilView(
-			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
+			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, color ? *color : m_clear_value.depth, 0, 0, nullptr);
 	}
 	else
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
