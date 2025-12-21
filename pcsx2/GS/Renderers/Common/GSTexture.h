@@ -22,17 +22,17 @@ public:
 		Invalid = 0,
 		RenderTarget = 1,
 		DepthStencil,
-		Texture,   // Generic texture (usually is color textures loaded by the game)
+		Texture, // Generic texture (usually is color textures loaded by the game)
 		RWTexture, // UAV
 	};
 
 	enum class Format : u8
 	{
-		Invalid = 0,  ///< Used for initialization
-		Color,        ///< Standard (RGBA8) color texture (used to store most of PS2's textures)
-		ColorHQ,      ///< High quality (RGB10A2) color texture (no proper alpha)
-		ColorHDR,     ///< High dynamic range (RGBA16F) color texture
-		ColorClip,    ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
+		Invalid = 0, ///< Used for initialization
+		Color, ///< Standard (RGBA8) color texture (used to store most of PS2's textures)
+		ColorHQ, ///< High quality (RGB10A2) color texture (no proper alpha)
+		ColorHDR, ///< High dynamic range (RGBA16F) color texture
+		ColorClip, ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
 		Float32,      ///< For treating depth texture as RT
 		UNorm8,       ///< A8UNorm texture for paletted textures and the OSD font
@@ -50,7 +50,8 @@ public:
 	{
 		Dirty,
 		Cleared,
-		Invalidated
+		Invalidated,
+		UAV
 	};
 
 	union ClearValue
@@ -59,12 +60,20 @@ public:
 		float depth;
 	};
 
+	enum class TargetMode
+	{
+		Invalid,
+		Standard,
+		UAV
+	};
+
 protected:
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
+	TargetMode m_target_mode = TargetMode::Invalid;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -135,7 +144,7 @@ public:
 	}
 
 	__fi State GetState() const { return m_state; }
-	__fi void SetState(State state) { m_state = state; }
+	virtual void SetState(State state) { m_state = state; }
 
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
@@ -163,6 +172,19 @@ public:
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
+
+	virtual void SetTargetMode(TargetMode mode)
+	{
+		pxAssert(m_type == Type::RenderTarget || m_type == Type::DepthStencil);
+		m_target_mode = mode;
+	}
+
+	virtual TargetMode GetTargetMode() const
+	{
+		return m_target_mode;
+	}
+
+	virtual void UpdateDepthUAV(bool uav_to_ds) {}
 };
 
 class GSDownloadTexture
