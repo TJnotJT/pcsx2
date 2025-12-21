@@ -60,20 +60,12 @@ public:
 		float depth;
 	};
 
-	enum class TargetMode
-	{
-		Invalid,
-		Standard,
-		UAV
-	};
-
 protected:
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
-	TargetMode m_target_mode = TargetMode::Invalid;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -172,17 +164,6 @@ public:
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
-
-	virtual void SetTargetMode(TargetMode mode)
-	{
-		pxAssert(m_type == Type::RenderTarget || m_type == Type::DepthStencil);
-		m_target_mode = mode;
-	}
-
-	virtual TargetMode GetTargetMode() const
-	{
-		return m_target_mode;
-	}
 
 	virtual void UpdateDepthUAV(bool uav_to_ds) {}
 };

@@ -208,10 +208,12 @@ SamplerState TextureSampler : register(s0);
 
 #if PS_ROV_COLOR
 RasterizerOrderedTexture2D<float4> RtTextureRov : register(u0);
+static float4 cachedRtValue;
 #endif
 
 #if PS_ROV_DEPTH
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+static float cachedDepthValue;
 #endif
 
 #ifdef DX12
@@ -237,12 +239,15 @@ cbuffer cb1
 	float4x4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	float pad0;
+	float pad1;
+	uint4 ColorMask;
 };
 
 float4 RtLoad(int2 xy)
 {
 #if PS_ROV_COLOR
-	return RtTextureRov[xy];
+	return cachedRtValue;
 #else
 	return RtTexture.Load(int3(int2(xy), 0));
 #endif
@@ -251,7 +256,7 @@ float4 RtLoad(int2 xy)
 float DepthLoad(int2 xy)
 {
 #if PS_ROV_DEPTH
-	return DepthTextureRov[xy];
+	return cachedDepthValue;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
 #endif
@@ -1115,18 +1120,20 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 #if PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP
 [earlydepthstencil]
 #endif
-#if !PS_ROV_COLOR || !PS_ROV_DEPTH
+
+#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
 PS_OUTPUT_REAL ps_main(PS_INPUT input)
 #else
 void ps_main(PS_INPUT input)
 #endif
 {
-//#if PS_ROV_DEPTH
-//	DepthWrite(input.p.xy, 0xFF * exp2(-32.0f));
-//	PS_OUTPUT_REAL xxx;
-//	xxx.c0 = float4(1, 0, 0, 1);
-//	return xxx;
-//#endif
+#if PS_ROV_COLOR && PS_COLOR_FEEDBACK
+	cachedRtValue = RtTextureRov[input.p.xy];
+#endif
+
+#if PS_ROV_DEPTH && PS_DEPTH_FEEDBACK
+	cachedDepthValue = DepthTextureRov[input.p.xy];
+#endif
 
 	bool fail_z = false;
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
@@ -1326,7 +1333,7 @@ void ps_main(PS_INPUT input)
 		input.p.z = DepthLoad(input.p.xy);
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
-		output.c0 = RtLoad(input.p.xy, 0);
+		output.c0 = RtLoad(input.p.xy);
 #elif (PS_AFAIL == AFAIL_RGB_ONLY)
 	if (!atst_pass)
 	{
@@ -1350,40 +1357,13 @@ void ps_main(PS_INPUT input)
 #if PS_ROV_COLOR && !PS_NO_COLOR
 	float4 rt_col = RtLoad(input.p.xy);
 
-	#if PS_ROV_COLOR_MASK == 0
-	#elif PS_ROV_COLOR_MASK == 1
-		rt_col.r = output.c0.r;
-	#elif PS_ROV_COLOR_MASK == 2
-		rt_col.g = output.c0.g;
-	#elif PS_ROV_COLOR_MASK == 3
-		rt_col.rg = output.c0.rg;
-	#elif PS_ROV_COLOR_MASK == 4
-		rt_col.b = output.c0.b;
-	#elif PS_ROV_COLOR_MASK == 5
-		rt_col.rb = output.c0.rb;
-	#elif PS_ROV_COLOR_MASK == 6
-		rt_col.gb = output.c0.gb;
-	#elif PS_ROV_COLOR_MASK == 7
-		rt_col.rgb = output.c0.rgb;
-	#elif PS_ROV_COLOR_MASK == 8
-		rt_col.a = output.c0.a;
-	#elif PS_ROV_COLOR_MASK == 9
-		rt_col.ra = output.c0.ra;
-	#elif PS_ROV_COLOR_MASK == 10
-		rt_col.ga = output.c0.ga;
-	#elif PS_ROV_COLOR_MASK == 11
-		rt_col.rga = output.c0.rga;
-	#elif PS_ROV_COLOR_MASK == 12
-		rt_col.ba = output.c0.ba;
-	#elif PS_ROV_COLOR_MASK == 13
-		rt_col.rba = output.c0.rba;
-	#elif PS_ROV_COLOR_MASK == 14
-		rt_col.gba = output.c0.gba;
-	#elif PS_ROV_COLOR_MASK == 15
-		rt_col = output.c0;
-	#endif
+	rt_col.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
+	rt_col.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
+	rt_col.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
+	rt_col.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
 
 	rt_col = fail_z ? RtLoad(input.p.xy) : rt_col;
+
 	RtWrite(input.p.xy, rt_col);
 #endif
 
@@ -1392,24 +1372,24 @@ void ps_main(PS_INPUT input)
 	DepthWrite(input.p.xy, output.depth);
 #endif
 
-#if !PS_ROV_COLOR || !PS_ROV_DEPTH
-	PS_OUTPUT_REAL output_real;
+#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
+		PS_OUTPUT_REAL output_real;
 
-#if !PS_NO_COLOR && !PS_ROV_COLOR
-#if PS_DATE == 1 || PS_DATE == 2
-	output_real.c = output.c;
-#else
-	output_real.c0 = output.c0;
-#if !PS_NO_COLOR1
-	output_real.c1 = output.c1;
+	#if !PS_NO_COLOR && !PS_ROV_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		output_real.c = output.c;
+	#else
+		output_real.c0 = output.c0;
+	#if !PS_NO_COLOR1
+		output_real.c1 = output.c1;
+	#endif
+	#endif
+	#endif
+	#if PS_ZCLAMP && !PS_ROV_DEPTH
+		output_real.depth = output.depth;
+	#endif
+		return output_real;
 #endif
-#endif
-#endif
-#if PS_ZCLAMP && !PS_ROV_DEPTH
-	output_real.depth = output.depth;
-#endif
-	return output_real;
-#endif // !ROV
 }
 
 #endif // PIXEL_SHADER

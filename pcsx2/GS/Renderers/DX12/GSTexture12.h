@@ -30,20 +30,12 @@ public:
 
 	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const { return m_srv_descriptor; }
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const { return m_write_descriptor; }
-	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
-	{
-		return m_uav_descriptor; // FIXME: Set this to null descriptor when making depth stencil
-	}
+	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const { return m_uav_descriptor; }
 	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const { return m_fbl_descriptor; }
 	__fi D3D12_RESOURCE_STATES GetResourceState() const { return m_resource_state; }
 	__fi DXGI_FORMAT GetDXGIFormat() const { return m_dxgi_format; }
 	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
-	__fi ID3D12Resource* GetUAVResource()
-	{
-		pxAssert(m_state == State::UAV);
-		return m_resource_uav.get();
-	}
 
 	void* GetNativeHandle() const override;
 
@@ -59,20 +51,22 @@ public:
 
 	virtual void SetState(State state) override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
-	void CommitClear();
-	void CommitClear(ID3D12GraphicsCommandList* cmdlist);
+	void CommitClear(float* color = nullptr);
+	void CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color = nullptr);
 
 	void Destroy(bool defer = true);
 
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
-	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level, D3D12_RESOURCE_STATES before_state,
-		D3D12_RESOURCE_STATES after_state);
-	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
+	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
+		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
+	void IssueUAVBarrier();
+	void SetUAVDirty();
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 
 	// For transition to/from UAV usage.
+	void CreateDepthUAV();
 	virtual void UpdateDepthUAV(bool uav_to_ds) override;
 
 private:
@@ -85,11 +79,9 @@ private:
 
 	GSTexture12(Type type, Format format, int width, int height, int levels, DXGI_FORMAT dxgi_format,
 		wil::com_ptr_nothrow<ID3D12Resource> resource, wil::com_ptr_nothrow<ID3D12Resource> resource_fbl,
-		wil::com_ptr_nothrow<ID3D12Resource> resource_uav, wil::com_ptr_nothrow<D3D12MA::Allocation> allocation,
-		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
+		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
-		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
-		std::unique_ptr<GSTexture12>&& uav);
+		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state);
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -101,13 +93,13 @@ private:
 	ID3D12Resource* AllocateUploadStagingBuffer(const void* data, u32 pitch, u32 upload_pitch, u32 height) const;
 	void CopyTextureDataForUpload(void* dst, const void* src, u32 pitch, u32 upload_pitch, u32 height) const;
 
+	void IssueUAVBarrierNoAssert(); // For issuing barriers while transitioning.
+
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
-	wil::com_ptr_nothrow<ID3D12Resource> m_resource_uav;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
-	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation_uav;
 
-	std::unique_ptr<GSTexture12> m_uav; // For depth texture points to the parallel color texture.
+	std::unique_ptr<GSTexture12> m_uav_depth; // For depth texture points to the parallel color texture.
 
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
@@ -117,6 +109,7 @@ private:
 
 	DXGI_FORMAT m_dxgi_format = DXGI_FORMAT_UNKNOWN;
 	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON;
+	bool m_uav_dirty = false; // Tracks if the UAV has been drawn to. Issuing a UAV barrier clears it.
 
 	// Contains the fence counter when the texture was last used.
 	// When this matches the current fence counter, the texture was used this command buffer.
@@ -124,7 +117,6 @@ private:
 
 	int m_map_level = std::numeric_limits<int>::max();
 	GSVector4i m_map_area = GSVector4i::zero();
-	std::unique_ptr<GSTexture12> m_uav_depth; // FIXME: IMPLEMENT
 };
 
 class GSDownloadTexture12 final : public GSDownloadTexture
