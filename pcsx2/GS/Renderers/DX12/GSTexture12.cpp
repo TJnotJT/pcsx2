@@ -768,8 +768,14 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 		m_uav_depth.reset(static_cast<GSTexture12*>(
 			GSDevice12::GetInstance()->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false)));
 		m_uav_descriptor = m_uav_depth->m_uav_descriptor;
-		m_uav_depth->SetDebugName(fmt::format("0x{:x} Depth UAV for @ 0x{:x}",
-			reinterpret_cast<u64>(m_uav_depth.get()), reinterpret_cast<u64>(this)));
+#ifdef PCSX2_DEVBUILD
+		if (GSConfig.UseDebugDevice)
+		{
+			m_uav_depth->SetDebugName(fmt::format("0x{:x} Depth UAV for @ 0x{:x}",
+				reinterpret_cast<u64>(m_uav_depth.get()), reinterpret_cast<u64>(this)));
+		}
+#endif
+		
 	}
 
 	GL_PUSH("DX12: Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
