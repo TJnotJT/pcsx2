@@ -30,13 +30,20 @@ public:
 
 	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const { return m_srv_descriptor; }
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const { return m_write_descriptor; }
-	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const { return m_uav_descriptor; }
+	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
+	{
+		return m_uav_descriptor; // FIXME: Set this to null descriptor when making depth stencil
+	}
 	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const { return m_fbl_descriptor; }
 	__fi D3D12_RESOURCE_STATES GetResourceState() const { return m_resource_state; }
 	__fi DXGI_FORMAT GetDXGIFormat() const { return m_dxgi_format; }
 	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
-	__fi ID3D12Resource* GetUAVResource() const { return m_resource_uav.get(); }
+	__fi ID3D12Resource* GetUAVResource()
+	{
+		pxAssert(m_state == State::UAV);
+		return m_resource_uav.get();
+	}
 
 	void* GetNativeHandle() const override;
 
@@ -50,6 +57,7 @@ public:
 	void SaveDepthUAV(const std::string& fn) const;
 #endif
 
+	virtual void SetState(State state) override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear();
 	void CommitClear(ID3D12GraphicsCommandList* cmdlist);
@@ -65,8 +73,6 @@ public:
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 
 	// For transition to/from UAV usage.
-	virtual void SetTargetMode(TargetMode mode) override;
-	virtual TargetMode GetTargetMode() const override;
 	virtual void UpdateDepthUAV(bool uav_to_ds) override;
 
 private:
@@ -83,7 +89,7 @@ private:
 		wil::com_ptr_nothrow<D3D12MA::Allocation> allocation_uav, const D3D12DescriptorHandle& srv_descriptor,
 		const D3D12DescriptorHandle& write_descriptor, const D3D12DescriptorHandle& uav_descriptor,
 		const D3D12DescriptorHandle& fbl_descriptor, WriteDescriptorType wdtype, D3D12_RESOURCE_STATES resource_state,
-		std::unique_ptr<GSTexture12>&& uav, bool allow_uav);
+		std::unique_ptr<GSTexture12>&& uav);
 
 	static bool CreateSRVDescriptor(
 		ID3D12Resource* resource, u32 levels, DXGI_FORMAT format, D3D12DescriptorHandle* dh);
@@ -118,7 +124,7 @@ private:
 
 	int m_map_level = std::numeric_limits<int>::max();
 	GSVector4i m_map_area = GSVector4i::zero();
-	bool m_allow_uav = false;
+	std::unique_ptr<GSTexture12> m_uav_depth; // FIXME: IMPLEMENT
 };
 
 class GSDownloadTexture12 final : public GSDownloadTexture

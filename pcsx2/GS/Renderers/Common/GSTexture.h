@@ -50,7 +50,8 @@ public:
 	{
 		Dirty,
 		Cleared,
-		Invalidated
+		Invalidated,
+		UAV
 	};
 
 	union ClearValue
@@ -143,7 +144,7 @@ public:
 	}
 
 	__fi State GetState() const { return m_state; }
-	__fi void SetState(State state) { m_state = state; }
+	virtual void SetState(State state) { m_state = state; }
 
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }

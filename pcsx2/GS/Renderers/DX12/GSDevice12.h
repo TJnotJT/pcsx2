@@ -605,6 +605,7 @@ private:
 	std::array<D3D12_GPU_VIRTUAL_ADDRESS, NUM_TFX_CONSTANT_BUFFERS> m_tfx_constant_buffers{};
 	std::array<D3D12DescriptorHandle, NUM_TOTAL_TFX_TEXTURES> m_tfx_textures{};
 	std::array<D3D12DescriptorHandle, NUM_TFX_UAV_TEXTURES> m_tfx_uavs{};
+	std::array<GSTexture12*, 2> m_tfx_uavs_tex{};
 	D3D12DescriptorHandle m_tfx_sampler;
 	u32 m_tfx_sampler_sel = 0;
 	D3D12DescriptorHandle m_tfx_textures_handle_gpu;

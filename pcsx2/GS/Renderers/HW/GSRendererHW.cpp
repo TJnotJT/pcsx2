@@ -6435,10 +6435,10 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 	if (use_rov_depth)
 	{
 		GL_INS("HW: ROV used for depth");
-		if (config.ds->GetTargetMode() != GSTexture::TargetMode::UAV)
-		{
-			config.ds->UpdateDepthUAV(false); // Make sure UAV has updated data.
-		}
+		//if (config.ds->GetTargetMode() != GSTexture::TargetMode::UAV)
+		//{
+		//	config.ds->UpdateDepthUAV(false); // Make sure UAV has updated data.
+		//}
 
 		if (config.depth.ztst != ZTST_ALWAYS)
 		{
@@ -8442,6 +8442,16 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		return;
 	}
 	
+	static FILE* debug_fp = 0;
+	if (!debug_fp)
+	{
+		debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\ROV.txt", "w");
+	}
+	bool ROV = m_conf.ps.rov_color || m_conf.ps.rov_depth;
+
+	fprintf(debug_fp, "%d: %d\n", s_n, (int)ROV);
+	fflush(debug_fp);
+
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else
