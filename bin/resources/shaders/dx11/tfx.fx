@@ -208,10 +208,12 @@ SamplerState TextureSampler : register(s0);
 
 #if PS_ROV_COLOR
 RasterizerOrderedTexture2D<float4> RtTextureRov : register(u0);
+//float4 cachedRtValue;
 #endif
 
 #if PS_ROV_DEPTH
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+//float cachedDepthValue;
 #endif
 
 #ifdef DX12
@@ -237,6 +239,9 @@ cbuffer cb1
 	float4x4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	float pad0;
+	float pad1;
+	uint4 ColorMask;
 };
 
 float4 RtLoad(int2 xy)
@@ -1128,6 +1133,14 @@ void ps_main(PS_INPUT input)
 //	return xxx;
 //#endif
 
+//#if PS_ROV_COLOR
+//	cachedRtValue = RtTextureRov[input.p.xy];
+//#endif
+//
+//#if PS_ROV_DEPTH
+//	cachedDepthValue = DepthTextureRov[input.p.xy];
+//#endif
+
 	bool fail_z = false;
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
@@ -1350,40 +1363,13 @@ void ps_main(PS_INPUT input)
 #if PS_ROV_COLOR && !PS_NO_COLOR
 	float4 rt_col = RtLoad(input.p.xy);
 
-	#if PS_ROV_COLOR_MASK == 0
-	#elif PS_ROV_COLOR_MASK == 1
-		rt_col.r = output.c0.r;
-	#elif PS_ROV_COLOR_MASK == 2
-		rt_col.g = output.c0.g;
-	#elif PS_ROV_COLOR_MASK == 3
-		rt_col.rg = output.c0.rg;
-	#elif PS_ROV_COLOR_MASK == 4
-		rt_col.b = output.c0.b;
-	#elif PS_ROV_COLOR_MASK == 5
-		rt_col.rb = output.c0.rb;
-	#elif PS_ROV_COLOR_MASK == 6
-		rt_col.gb = output.c0.gb;
-	#elif PS_ROV_COLOR_MASK == 7
-		rt_col.rgb = output.c0.rgb;
-	#elif PS_ROV_COLOR_MASK == 8
-		rt_col.a = output.c0.a;
-	#elif PS_ROV_COLOR_MASK == 9
-		rt_col.ra = output.c0.ra;
-	#elif PS_ROV_COLOR_MASK == 10
-		rt_col.ga = output.c0.ga;
-	#elif PS_ROV_COLOR_MASK == 11
-		rt_col.rga = output.c0.rga;
-	#elif PS_ROV_COLOR_MASK == 12
-		rt_col.ba = output.c0.ba;
-	#elif PS_ROV_COLOR_MASK == 13
-		rt_col.rba = output.c0.rba;
-	#elif PS_ROV_COLOR_MASK == 14
-		rt_col.gba = output.c0.gba;
-	#elif PS_ROV_COLOR_MASK == 15
-		rt_col = output.c0;
-	#endif
+	rt_col.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
+	rt_col.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
+	rt_col.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
+	rt_col.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
 
 	rt_col = fail_z ? RtLoad(input.p.xy) : rt_col;
+
 	RtWrite(input.p.xy, rt_col);
 #endif
 

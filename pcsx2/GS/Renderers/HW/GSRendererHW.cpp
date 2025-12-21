@@ -6428,17 +6428,13 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 	{
 		GL_INS("HW: ROV used for color");
 		config.ps.rov_color = true;
-		config.ps.rov_color_mask = config.colormask.wrgba;
 		config.ps.color_feedback = true;
+		config.cb_ps.ColorMask = GSVector4i(config.colormask.wr, config.colormask.wg, config.colormask.wb, config.colormask.wa);
 	}
 
 	if (use_rov_depth)
 	{
 		GL_INS("HW: ROV used for depth");
-		//if (config.ds->GetTargetMode() != GSTexture::TargetMode::UAV)
-		//{
-		//	config.ds->UpdateDepthUAV(false); // Make sure UAV has updated data.
-		//}
 
 		if (config.depth.ztst != ZTST_ALWAYS)
 		{

@@ -645,6 +645,11 @@ void GSDevice::Recycle(GSTexture* t)
 	if (!t)
 		return;
 
+	if (t->GetState() == GSTexture::State::UAV)
+	{
+		t->SetState(GSTexture::State::Dirty);
+	}
+
 	t->SetLastFrameUsed(m_frame);
 
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];

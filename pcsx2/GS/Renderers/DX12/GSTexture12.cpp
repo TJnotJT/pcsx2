@@ -35,10 +35,6 @@ GSTexture12::GSTexture12(Type type, Format format, int width, int height, int le
 	m_size.x = width;
 	m_size.y = height;
 	m_mipmap_levels = levels;
-	m_target_mode =
-		(m_type == Type::RenderTarget || m_type == Type::DepthStencil) ?
-			TargetMode::Standard :
-			TargetMode::Invalid;
 }
 
 GSTexture12::~GSTexture12()

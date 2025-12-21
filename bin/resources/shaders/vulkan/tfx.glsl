@@ -353,6 +353,9 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	mat4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	float pad0;
+	float pad1;
+	uvec4 ColorMask;
 };
 
 layout(location = 0) in VSOutput

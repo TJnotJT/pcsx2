@@ -446,7 +446,6 @@ struct alignas(16) GSHWDrawConfig
 				// ROVs
 				u32 rov_color : 1;
 				u32 rov_depth : 1;
-				u32 rov_color_mask : 4;
 			};
 
 			struct
@@ -665,6 +664,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
+		GSVector4i ColorMask;
 
 		__fi PSConstantBuffer()
 		{
