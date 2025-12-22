@@ -827,12 +827,17 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
-	static void DumpPSSelector(std::ofstream& out, const PSSelector& ps, const std::string& indent = "");
-	static void DumpVSSelector(std::ofstream& out, const VSSelector& ps, const std::string& indent = "");
-	static void DumpBlendState(std::ofstream& out, const BlendState& bs, const std::string& indent = "");
-	static void DumpDepthStencilSelctor(std::ofstream& out, const DepthStencilSelector& ds, const std::string& indent = "");
-	static void DumpSamplerSelctor(std::ofstream& out, const SamplerSelector& ss, const std::string& indent = "");
-	//static void Dump
+	static void DumpPSSelector(std::ostream& out, const PSSelector& ps, const std::string& indent = "");
+	static void DumpVSSelector(std::ostream& out, const VSSelector& vs, const std::string& indent = "");
+	static void DumpBlendState(std::ostream& out, const BlendState& bs, const std::string& indent = "");
+	static void DumpDepthStencilSelctor(std::ostream& out, const DepthStencilSelector& ds, const std::string& indent = "");
+	static void DumpSamplerSelector(std::ostream& out, const SamplerSelector& ss, const std::string& indent = "");
+	static void DumpAlphaPass(std::ostream& out, const AlphaPass& ap, const std::string& indent = "");
+	static void DumpBlendMultipass(std::ostream& out, const BlendMultiPass& bmp, const std::string& indent = "");
+	static void DumpConfig(std::ostream& out, const GSHWDrawConfig& conf,
+		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
+	static void DumpConfig(std::string& fn, const GSHWDrawConfig& conf,
+		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)

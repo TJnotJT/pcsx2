@@ -5841,7 +5841,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 2: One barrier is already enabled, prims don't overlap or is a channel shuffle so let's use sw blend instead.
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
-	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt));
+	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt)) ||
+		(features.rov_color && m_conf.rt->GetState() == GSTexture::State::UAV);
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -6407,8 +6408,6 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
 	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
 {
-	
-
 	if (!(features.rov_color || features.rov_depth))
 		return;
 
@@ -6418,20 +6417,21 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		return;
 	}
 
-	//if (config.blend.enable)
-	//{
-	//	//GL_INS("HW: ROV disabled because HW blend enabled");
-	//	//GL_INS("Disabline 
-	//	return;
-	//}
+	if (config.blend.enable)
+	{
+		GL_INS("HW: ROV disabled because HW blend enabled");
+		return;
+	}
 
 	const bool feedback_color = 
 		config.rt && (config.require_one_barrier || config.require_full_barrier ||
 			(config.tex && config.tex == config.rt));
+	const bool uav_color = config.rt && config.rt->GetState() == GSTexture::State::UAV;
 	const bool feedback_depth = config.ds && config.ps.IsFeedbackLoopDepth();
+	const bool uav_depth = config.ds && config.ds->GetState() == GSTexture::State::UAV;
 
-	const bool use_rov_color = features.rov_color && feedback_color;
-	const bool use_rov_depth = features.rov_depth && feedback_depth;
+	const bool use_rov_color = features.rov_color && (feedback_color || uav_color);
+	const bool use_rov_depth = features.rov_depth && (feedback_depth || uav_depth);
 
 	if (use_rov_color)
 	{
@@ -8164,25 +8164,38 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 
 	static FILE* debug_fp = nullptr;
-	if (!debug_fp)
+	if (s_n < 1000)
 	{
-		debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.txt", "w");
+		if (!debug_fp)
+			debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.txt", "w");
+	}
+	else
+	{
+		if (debug_fp)
+		{
+			fclose(debug_fp);
+			debug_fp = nullptr;
+		}
 	}
 
-	fprintf(debug_fp, "%d (before): color: %d, depth %d\n",
-		s_n,
-		m_conf.rt && m_conf.rt->GetState() == GSTexture::State::UAV,
-		m_conf.ds && m_conf.ds->GetState() == GSTexture::State::UAV);
+	if (debug_fp)
+	{
+		fprintf(debug_fp, "%d (before): color: %d, depth %d\n",
+			s_n,
+			m_conf.rt && m_conf.rt->GetState() == GSTexture::State::UAV,
+			m_conf.ds && m_conf.ds->GetState() == GSTexture::State::UAV);
+	}
 
 	// Do ROV setup here since it might change DATE.
 	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
 
-	fprintf(debug_fp, "%d (after): color: %d, depth %d\n",
-		s_n,
-		m_conf.ps.rov_color,
-		m_conf.ps.rov_depth);
-
-	fflush(debug_fp);
+	if (debug_fp)
+	{
+		fprintf(debug_fp, "%d (after): color: %d, depth %d\n",
+			s_n,
+			m_conf.ps.rov_color,
+			m_conf.ps.rov_depth);
+	}
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8469,6 +8482,14 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	{
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
+	}
+
+	//std::ofstream out;
+
+	if (s_n <= 1000)
+	{
+		std::string fn = fmt::format("C:\\Users\\tchan\\Desktop\\ps2_debug\\conf\\conf_{:05}.txt", s_n);
+		GSHWDrawConfig::DumpConfig(fn, m_conf);
 	}
 	
 	if (!m_channel_shuffle_width)
