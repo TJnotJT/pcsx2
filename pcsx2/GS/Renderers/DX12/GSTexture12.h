@@ -59,12 +59,14 @@ public:
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
 		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
-	D3D12_RESOURCE_BARRIER GetUAVBarrier() const;
+	void IssueUAVBarrier();
+	void SetUAVDirty();
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 
 	// For transition to/from UAV usage.
+	void CreateDepthUAV();
 	virtual void UpdateDepthUAV(bool uav_to_ds) override;
 
 private:
@@ -91,6 +93,8 @@ private:
 	ID3D12Resource* AllocateUploadStagingBuffer(const void* data, u32 pitch, u32 upload_pitch, u32 height) const;
 	void CopyTextureDataForUpload(void* dst, const void* src, u32 pitch, u32 upload_pitch, u32 height) const;
 
+	void IssueUAVBarrierNoAssert(); // For issuing barriers while transitioning.
+
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
@@ -105,6 +109,7 @@ private:
 
 	DXGI_FORMAT m_dxgi_format = DXGI_FORMAT_UNKNOWN;
 	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON;
+	bool m_uav_dirty = false; // Tracks if the UAV has been drawn to. Issuing a UAV barrier clears it.
 
 	// Contains the fence counter when the texture was last used.
 	// When this matches the current fence counter, the texture was used this command buffer.

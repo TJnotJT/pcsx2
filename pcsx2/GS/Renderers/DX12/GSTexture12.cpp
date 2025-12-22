@@ -704,7 +704,7 @@ void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RE
 
 	if (IsDepthStencil() && state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
 	{
-		Console.Error("Error: DX12: Transitioning DepthStencil to unordered access.");
+		pxFailRel("Transitioning DepthStencil to unordered access.");
 	}
 
 	if (m_resource_state == state)
@@ -749,17 +749,43 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color)
 	SetState(GSTexture::State::Dirty);
 }
 
-D3D12_RESOURCE_BARRIER GSTexture12::GetUAVBarrier() const
+void GSTexture12::IssueUAVBarrierNoAssert()
 {
-	if (m_type == Type::DepthStencil)
-		return {D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {m_uav_depth->m_resource.get()}};
-	else if (m_type == Type::RenderTarget)
-		return {D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {m_resource.get()}};
-	else
-		return {};
+	GSDevice12* dev = GSDevice12::GetInstance();
+
+	if (m_uav_dirty)
+	{
+		ID3D12Resource* resource = nullptr;
+
+		if (m_type == Type::DepthStencil)
+			resource = m_uav_depth->m_resource.get();
+		else if (m_type == Type::RenderTarget)
+			resource = m_resource.get();
+		else
+			pxFailRel("Must be RenderTarget or DepthStencil"); // Impossible
+
+		D3D12_RESOURCE_BARRIER barrier =
+		{ D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {resource} };
+
+		if (dev->InRenderPass())
+		{
+			Console.Warning("DX12: Issuing UAV Barrier in a render pass.");
+			GL_INS("DX12: Issuing UAV Barrier in a render pass.");
+			dev->EndRenderPass();
+		}
+		dev->GetCommandList()->ResourceBarrier(1, &barrier);
+
+		m_uav_dirty = false;
+	}
 }
 
-void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
+void GSTexture12::IssueUAVBarrier()
+{
+	pxAssert(IsRenderTargetOrDepthStencil() && m_state == State::UAV);
+	IssueUAVBarrierNoAssert();
+}
+
+void GSTexture12::CreateDepthUAV()
 {
 	pxAssert(m_type == Type::DepthStencil);
 
@@ -775,17 +801,32 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 				reinterpret_cast<u64>(m_uav_depth.get()), reinterpret_cast<u64>(this)));
 		}
 #endif
-		
 	}
+}
+
+void GSTexture12::SetUAVDirty()
+{
+	m_uav_dirty = true;
+}
+
+void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
+{
+	pxAssert(m_type == Type::DepthStencil);
 
 	GL_PUSH("DX12: Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
 
 	GSDevice12* device = GSDevice12::GetInstance();
-	auto cmdlist = device->GetCommandList();
 
-	device->EndRenderPass();
-	D3D12_RESOURCE_BARRIER barrier = GetUAVBarrier();
-	cmdlist->ResourceBarrier(1, &barrier);
+	if (device->InRenderPass())
+	{
+		Console.Warning("DX12: Updating depth UAV in a render pass.");
+		GL_INS("DX12: Updating depth UAV in a render pass.");
+		device->EndRenderPass();
+	}
+
+	CreateDepthUAV();
+
+	IssueUAVBarrierNoAssert(); // Not in UAV state while issuing this.
 	SetUseFenceCounter(device->GetCurrentFenceValue());
 
 	if (uav_to_ds)
@@ -824,32 +865,31 @@ void GSTexture12::SetState(State state)
 		}
 		if (m_state == State::Invalidated)
 		{
-			Console.Warning("DX12: Warning: Converting invalidated texture to UAV");
+			Console.Warning("DX12:Converting invalidated texture to UAV");
+			GL_INS("DX12:Converting invalidated texture to UAV");
 		}
 		if (IsDepthStencil())
 		{
 			TransitionToState(D3D12_RESOURCE_STATE_DEPTH_WRITE);
-			UpdateDepthUAV(false); // Handles barriers/transitions.
+			UpdateDepthUAV(false); // Handles transitions of UAV
 		}
 		else
 		{
-			D3D12_RESOURCE_BARRIER barrier = GetUAVBarrier();
-			GSDevice12::GetInstance()->GetCommandList()->ResourceBarrier(1, &barrier);
 			TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		m_state = state; // Transition to UAV last to avoid infinite recursion in TransitionToState().
 	}
 	else if (m_state == State::UAV && state != State::UAV)
 	{
-		m_state = state; // Transition to UAV first to avoid infinite recursion in TransitionToState().
+		IssueUAVBarrier();
+
+		m_state = state; // Transition out of UAV first to avoid infinite recursion in TransitionToState().
 		if (IsDepthStencil())
 		{
 			UpdateDepthUAV(true); // Handles barriers/transitions.
 		}
 		else
 		{
-			D3D12_RESOURCE_BARRIER barrier = GetUAVBarrier();
-			GSDevice12::GetInstance()->GetCommandList()->ResourceBarrier(1, &barrier);
 			TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 		}
 	}

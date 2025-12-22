@@ -1360,6 +1360,7 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 	if (sTex12->GetState() == GSTexture::State::UAV)
 	{
+		EndRenderPass();
 		sTex12->SetState(GSTexture::State::Dirty);
 	}
 
@@ -1678,11 +1679,13 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 {
 	if (sTex && sTex->GetState() == GSTexture::State::UAV)
 	{
+		EndRenderPass();
 		sTex->SetState(GSTexture::State::Dirty);
 	}
 
 	if (dTex && dTex->GetState() == GSTexture::State::UAV)
 	{
+		EndRenderPass();
 		dTex->SetState(GSTexture::State::Dirty);
 	}
 
@@ -1888,22 +1891,20 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderInterlace shader, bool linear, const InterlaceConstantBuffer& cb)
 {
-	if (sTex->GetState() == GSTexture::State::UAV)
-	{
-		sTex->SetState(GSTexture::State::Dirty);
-	}
-
-	if (dTex->GetState() == GSTexture::State::UAV)
-	{
-		dTex->SetState(GSTexture::State::Dirty);
-	}
-
-	static_cast<GSTexture12*>(dTex)->TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 	const GSVector4i rc = GSVector4i(dRect);
 	const GSVector4i dtex_rc = dTex->GetRect();
 	const GSVector4i clamped_rc = rc.rintersect(dtex_rc);
 	EndRenderPass();
+	if (sTex->GetState() == GSTexture::State::UAV)
+	{
+		sTex->SetState(GSTexture::State::Dirty);
+	}
+	if (dTex->GetState() == GSTexture::State::UAV)
+	{
+		dTex->SetState(GSTexture::State::Dirty);
+	}
+	static_cast<GSTexture12*>(dTex)->TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 	OMSetRenderTargets(dTex, nullptr, nullptr, clamped_rc);
 	SetUtilityRootSignature();
 	SetUtilityTexture(sTex, linear ? m_linear_sampler_cpu : m_point_sampler_cpu);
@@ -1919,6 +1920,10 @@ void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 
 void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4])
 {
+
+	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+	const GSVector4i dRect = dTex->GetRect();
+	EndRenderPass();
 	if (sTex->GetState() == GSTexture::State::UAV)
 	{
 		sTex->SetState(GSTexture::State::Dirty);
@@ -1927,10 +1932,6 @@ void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 	{
 		dTex->SetState(GSTexture::State::Dirty);
 	}
-
-	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
-	const GSVector4i dRect = dTex->GetRect();
-	EndRenderPass();
 	OMSetRenderTargets(dTex, nullptr, nullptr, dRect);
 	SetUtilityRootSignature();
 	SetUtilityTexture(sTex, m_point_sampler_cpu);
@@ -1947,6 +1948,10 @@ void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 
 void GSDevice12::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 {
+
+	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+	const GSVector4i dRect = dTex->GetRect();
+	EndRenderPass();
 	if (sTex->GetState() == GSTexture::State::UAV)
 	{
 		sTex->SetState(GSTexture::State::Dirty);
@@ -1955,10 +1960,6 @@ void GSDevice12::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 	{
 		dTex->SetState(GSTexture::State::Dirty);
 	}
-
-	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
-	const GSVector4i dRect = dTex->GetRect();
-	EndRenderPass();
 	OMSetRenderTargets(dTex, nullptr, nullptr, dRect);
 	SetUtilityRootSignature();
 	SetUtilityTexture(sTex, m_linear_sampler_cpu);
@@ -3362,7 +3363,7 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
 }
 
-void GSDevice12::PSSetUAV(int i, GSTexture* uav, bool check_state)
+void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	if (InRenderPass())
 	{
@@ -3370,7 +3371,7 @@ void GSDevice12::PSSetUAV(int i, GSTexture* uav, bool check_state)
 		EndRenderPass();
 	}
 
-	GSTexture* bind_uav;
+	GSTexture12* bind_uav;
 	if (uav)
 	{
 		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
@@ -4271,8 +4272,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		// Now bind the correct RTs and UAVs. Setting the UAVs handles the texture state change/transitions.
 		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
 			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()));
-		PSSetUAV(0, config.ps.rov_color ? draw_rt : nullptr, true);
-		PSSetUAV(1, config.ps.rov_depth ? draw_ds : nullptr, true);
+
+		// Note handles the first UAV barrier.
+		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
+		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
 	}
 	else
 	{
@@ -4406,14 +4409,39 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
-		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
+		if (InRenderPass())
 		{
-			Console.Warning("DX12: Warning: ROV feedback for color and depth is inconsistent.");
+			Console.Warning("DX12: ROV draw while in a render pass.");
+			EndRenderPass();
 		}
 
+		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
+		{
+			Console.Warning("DX12: ROV feedback for color and depth is inconsistent.");
+		}
+
+		if (draw_rt && config.ps.rov_color)
+		{
+			draw_rt->IssueUAVBarrier();
+		}
+
+		if (draw_ds && config.ps.rov_depth)
+		{
+			draw_ds->IssueUAVBarrier();
+		}
 
 		if (BindDrawPipeline(pipe))
 			DrawIndexedPrimitive();
+
+		if (draw_rt && config.ps.rov_color)
+		{
+			draw_rt->SetUAVDirty();
+		}
+
+		if (draw_ds && config.ps.rov_depth)
+		{
+			draw_ds->SetUAVDirty();
+		}
 
 		return;
 	}
