@@ -5760,6 +5760,12 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		m_conf.ps.blend_d = 2;
 	}
 
+	// FIXME: Make a separate function for the optimized blend values
+	m_conf.optimized_blend_equation.a = m_conf.ps.blend_a;
+	m_conf.optimized_blend_equation.b = m_conf.ps.blend_b;
+	m_conf.optimized_blend_equation.a = m_conf.ps.blend_a;
+	m_conf.optimized_blend_equation.d = m_conf.ps.blend_d;
+
 	// TODO: blend_ad_alpha_masked, as well as other blend cases can be optimized on dx11/dx12/gl to use
 	// blend multipass more which might be faster, vk likely won't benefit as barriers are already fast.
 
@@ -6401,6 +6407,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
 	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
 {
+	
+
 	if (!(features.rov_color || features.rov_depth))
 		return;
 
@@ -6410,11 +6418,12 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		return;
 	}
 
-	if (config.blend.enable)
-	{
-		GL_INS("HW: ROV disabled because HW blend enabled");
-		return;
-	}
+	//if (config.blend.enable)
+	//{
+	//	//GL_INS("HW: ROV disabled because HW blend enabled");
+	//	//GL_INS("Disabline 
+	//	return;
+	//}
 
 	const bool feedback_color = 
 		config.rt && (config.require_one_barrier || config.require_full_barrier ||
@@ -6460,6 +6469,11 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		DATE_PRIMID = false;
 		DATE_BARRIER = true;
 		GL_INS("HW: Using DATE BARRIER with ROV");
+	}
+
+	if (use_rov_color && config.blend.enable || config.ps.blend_hw)
+	{
+		GL_INS("HW: Using SW blend enabled");
 	}
 }
 
@@ -8148,8 +8162,27 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
+
+	static FILE* debug_fp = nullptr;
+	if (!debug_fp)
+	{
+		debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.txt", "w");
+	}
+
+	fprintf(debug_fp, "%d (before): color: %d, depth %d\n",
+		s_n,
+		m_conf.rt && m_conf.rt->GetState() == GSTexture::State::UAV,
+		m_conf.ds && m_conf.ds->GetState() == GSTexture::State::UAV);
+
 	// Do ROV setup here since it might change DATE.
 	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
+
+	fprintf(debug_fp, "%d (after): color: %d, depth %d\n",
+		s_n,
+		m_conf.ps.rov_color,
+		m_conf.ps.rov_depth);
+
+	fflush(debug_fp);
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8438,16 +8471,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		return;
 	}
 	
-	static FILE* debug_fp = 0;
-	if (!debug_fp)
-	{
-		debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\ROV.txt", "w");
-	}
-	bool ROV = m_conf.ps.rov_color || m_conf.ps.rov_depth;
-
-	fprintf(debug_fp, "%d: %d\n", s_n, (int)ROV);
-	fflush(debug_fp);
-
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else

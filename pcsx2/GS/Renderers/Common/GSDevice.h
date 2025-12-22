@@ -810,6 +810,15 @@ struct alignas(16) GSHWDrawConfig
 
 	BlendMultiPass blend_multi_pass;
 
+	struct
+	{
+		int a : 1;
+		int b : 1;
+		int c : 1;
+		int d : 1;
+		int FIX : 8;
+	} optimized_blend_equation;
+
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
 	
@@ -817,6 +826,13 @@ struct alignas(16) GSHWDrawConfig
 	ColClipMode colclip_mode;
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
+
+	static void DumpPSSelector(std::ofstream& out, const PSSelector& ps, const std::string& indent = "");
+	static void DumpVSSelector(std::ofstream& out, const VSSelector& ps, const std::string& indent = "");
+	static void DumpBlendState(std::ofstream& out, const BlendState& bs, const std::string& indent = "");
+	static void DumpDepthStencilSelctor(std::ofstream& out, const DepthStencilSelector& ds, const std::string& indent = "");
+	static void DumpSamplerSelctor(std::ofstream& out, const SamplerSelector& ss, const std::string& indent = "");
+	//static void Dump
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
