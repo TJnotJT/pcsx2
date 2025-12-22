@@ -755,6 +755,8 @@ void GSTexture12::IssueUAVBarrierNoAssert()
 
 	if (m_uav_dirty)
 	{
+		g_perfmon.Put(GSPerfMon::Barriers, 1);
+
 		ID3D12Resource* resource = nullptr;
 
 		if (m_type == Type::DepthStencil)

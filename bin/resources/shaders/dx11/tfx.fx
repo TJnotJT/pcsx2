@@ -208,12 +208,12 @@ SamplerState TextureSampler : register(s0);
 
 #if PS_ROV_COLOR
 RasterizerOrderedTexture2D<float4> RtTextureRov : register(u0);
-//float4 cachedRtValue;
+static float4 cachedRtValue;
 #endif
 
 #if PS_ROV_DEPTH
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
-//float cachedDepthValue;
+static float cachedDepthValue;
 #endif
 
 #ifdef DX12
@@ -247,7 +247,7 @@ cbuffer cb1
 float4 RtLoad(int2 xy)
 {
 #if PS_ROV_COLOR
-	return RtTextureRov[xy];
+	return cachedRtValue;
 #else
 	return RtTexture.Load(int3(int2(xy), 0));
 #endif
@@ -256,7 +256,7 @@ float4 RtLoad(int2 xy)
 float DepthLoad(int2 xy)
 {
 #if PS_ROV_DEPTH
-	return DepthTextureRov[xy];
+	return cachedDepthValue;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
 #endif
@@ -1133,13 +1133,13 @@ void ps_main(PS_INPUT input)
 //	return xxx;
 //#endif
 
-//#if PS_ROV_COLOR
-//	cachedRtValue = RtTextureRov[input.p.xy];
-//#endif
-//
-//#if PS_ROV_DEPTH
-//	cachedDepthValue = DepthTextureRov[input.p.xy];
-//#endif
+#if PS_ROV_COLOR
+	cachedRtValue = RtTextureRov[input.p.xy];
+#endif
+
+#if PS_ROV_DEPTH
+	cachedDepthValue = DepthTextureRov[input.p.xy];
+#endif
 
 	bool fail_z = false;
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
@@ -1339,7 +1339,7 @@ void ps_main(PS_INPUT input)
 		input.p.z = DepthLoad(input.p.xy);
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
-		output.c0 = RtLoad(input.p.xy, 0);
+		output.c0 = RtLoad(input.p.xy);
 #elif (PS_AFAIL == AFAIL_RGB_ONLY)
 	if (!atst_pass)
 	{
