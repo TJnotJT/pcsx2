@@ -700,6 +700,7 @@ void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RE
 {
 	if (m_state == State::UAV)
 	{
+		Console.Error("DX12: Error: Transitioning in UAV");
 		SetState(State::Dirty); // Disallow transitioning in UAV state.
 	}
 

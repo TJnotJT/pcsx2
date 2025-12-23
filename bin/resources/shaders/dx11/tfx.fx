@@ -1120,7 +1120,8 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 #if PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP
 [earlydepthstencil]
 #endif
-#if !PS_ROV_COLOR || !PS_ROV_DEPTH
+
+#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
 PS_OUTPUT_REAL ps_main(PS_INPUT input)
 #else
 void ps_main(PS_INPUT input)
@@ -1371,24 +1372,24 @@ void ps_main(PS_INPUT input)
 	DepthWrite(input.p.xy, output.depth);
 #endif
 
-#if !PS_ROV_COLOR || !PS_ROV_DEPTH
-	PS_OUTPUT_REAL output_real;
+#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
+		PS_OUTPUT_REAL output_real;
 
-#if !PS_NO_COLOR && !PS_ROV_COLOR
-#if PS_DATE == 1 || PS_DATE == 2
-	output_real.c = output.c;
-#else
-	output_real.c0 = output.c0;
-#if !PS_NO_COLOR1
-	output_real.c1 = output.c1;
+	#if !PS_NO_COLOR && !PS_ROV_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		output_real.c = output.c;
+	#else
+		output_real.c0 = output.c0;
+	#if !PS_NO_COLOR1
+		output_real.c1 = output.c1;
+	#endif
+	#endif
+	#endif
+	#if PS_ZCLAMP && !PS_ROV_DEPTH
+		output_real.depth = output.depth;
+	#endif
+		return output_real;
 #endif
-#endif
-#endif
-#if PS_ZCLAMP && !PS_ROV_DEPTH
-	output_real.depth = output.depth;
-#endif
-	return output_real;
-#endif // !ROV
 }
 
 #endif // PIXEL_SHADER

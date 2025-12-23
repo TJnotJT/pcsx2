@@ -4024,6 +4024,16 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
+	// Must do state transition here because we may require a render pass to resolve UAV to depth.
+	if (config.rt && config.rt->GetState() == GSTexture::State::UAV && !config.ps.rov_color)
+	{
+		config.rt->SetState(GSTexture::State::Dirty);
+	}
+	if (config.ds && config.ds->GetState() == GSTexture::State::UAV && !config.ps.rov_depth)
+	{
+		config.ds->SetState(GSTexture::State::Dirty);
+	}
+
 	// Destination Alpha Setup
 	const bool stencil_DATE_One = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
 	const bool stencil_DATE = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || stencil_DATE_One);
