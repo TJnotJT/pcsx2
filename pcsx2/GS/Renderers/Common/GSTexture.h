@@ -54,6 +54,13 @@ public:
 		UAV
 	};
 
+	enum class TargetMode : u8
+	{
+		NotTarget,
+		Target,
+		UAV
+	};
+
 	union ClearValue
 	{
 		u32 color;
@@ -66,6 +73,7 @@ protected:
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
+	//State m_target_mode = TargetMode::
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge

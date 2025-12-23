@@ -6437,6 +6437,14 @@ void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, 
 		use_rov_depth = true;
 	}
 
+	// If we use color ROV with discard, we cannot use early depth stencil,
+	// so must use depth ROV with feedback.
+	if (use_rov_color && m_conf.ps.HasShaderDiscard())
+	{
+		use_rov_depth = true;
+		feedback_depth = true;
+	}
+
 	// Setup depth ROV first as color ROV will depend on depth feedback.
 	if (use_rov_depth)
 	{
