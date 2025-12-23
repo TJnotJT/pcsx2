@@ -1298,7 +1298,7 @@ void GSHWDrawConfig::DumpPSSelector(std::ostream& out, const PSSelector& ps, con
 	out << indent << "fog: " << static_cast<u32>(ps.fog) << std::endl;
 	out << indent << "iip: " << static_cast<u32>(ps.iip) << std::endl;
 	out << indent << "date: " << static_cast<u32>(ps.date) << std::endl;
-	out << indent << "atst: " << GSUtil::GetATSTName(static_cast<u32>(ps.atst)) << std::endl;
+	out << indent << "atst: " << static_cast<u32>(ps.atst) << std::endl;
 	out << indent << "afail: " << GSUtil::GetAFAILName(static_cast<u32>(ps.afail)) << std::endl;
 	out << indent << "ztst: " << GSUtil::GetZTSTName(static_cast<u32>(ps.ztst)) << std::endl;
 	out << indent << "fst: " << static_cast<u32>(ps.fst) << std::endl;

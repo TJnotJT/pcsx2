@@ -1255,8 +1255,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
 	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
-	m_features.rov_color = GSConfig.HWROV && options.ROVsSupported;
-	m_features.rov_depth = GSConfig.HWROV && options.ROVsSupported;
+	m_features.rov = GSConfig.HWROV && options.ROVsSupported;
 
 	return true;
 }
@@ -2240,7 +2239,7 @@ void GSDevice12::IASetIndexBuffer(const void* index, size_t count)
 }
 
 void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, const GSVector4i& scissor,
-	const GSVector2i& viewport_size)
+	const GSVector2i& viewport_size, bool dirty_flag)
 {
 	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
@@ -2289,22 +2288,22 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	SetViewport(vp);
 	SetScissor(scissor);
 
+	if (dirty_flag)
+		m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET; // Only do when not using render passes.
+
 	// Unbind conflicting UAVs
-	// FIXME: MAKE AN ARRAY AND LOOP
-	if (m_current_render_target && m_current_render_target == m_tfx_uavs_tex[0])
+	std::array<GSTexture12*, 3> curr_rts{ m_current_render_target, m_current_depth_render_target, m_current_depth_target };
+	std::array<GSTexture12**, 2> curr_uavs{ &m_tfx_uavs_tex[0], &m_tfx_uavs_tex[1] };
+	for (GSTexture12** uav : curr_uavs)
 	{
-		m_tfx_uavs_tex[0] = nullptr;
-		m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
-	}
-	if (m_current_depth_render_target && m_current_depth_render_target == m_tfx_uavs_tex[0])
-	{
-		m_tfx_uavs_tex[0] = nullptr;
-		m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
-	}
-	if (m_current_depth_target && m_current_depth_target == m_tfx_uavs_tex[1])
-	{
-		m_tfx_uavs_tex[1] = nullptr;
-		m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
+		for (GSTexture12* rt : curr_rts)
+		{
+			if (*uav == rt)
+			{
+				*uav = nullptr;
+				m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
+			}
+		}
 	}
 }
 
@@ -3399,25 +3398,12 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 	m_tfx_uavs[i] = m_tfx_uavs_tex[i]->GetUAVDescriptor();
 	m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
 
-	// Unbind conflicting targets.
-	if (i == 0)
+	std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
+	for (GSTexture12** rt : curr_rts)
 	{
-		if (m_current_render_target && m_current_render_target == m_tfx_uavs_tex[0])
+		if (*rt == m_tfx_uavs_tex[i])
 		{
-			m_current_render_target = nullptr;
-			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
-		}
-		if (m_current_depth_render_target && m_current_depth_render_target == m_tfx_uavs_tex[0])
-		{
-			m_current_depth_render_target = nullptr;
-			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
-		}
-	}
-	if (i == 1)
-	{
-		if (m_current_depth_target && m_current_depth_target == m_tfx_uavs_tex[1])
-		{
-			m_current_depth_target = nullptr;
+			*rt = nullptr;
 			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
 		}
 	}
@@ -4133,7 +4119,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		SetBlendConstants(config.blend.constant);
 
 	// Depth testing and sampling, bind resource as dsv read only and srv at the same time without the need of a copy.
-	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe)
+	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe &&
+		config.ds->GetState() != GSTexture::State::UAV)
 	{
 		EndRenderPass();
 
@@ -4269,11 +4256,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			draw_ds->CommitClear();
 		}
 
-		// Now bind the correct RTs and UAVs. Setting the UAVs handles the texture state change/transitions.
 		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
-			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()));
+			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
 
-		// Note handles the first UAV barrier.
 		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
 		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
 	}
@@ -4527,7 +4512,7 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.rov_color;
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.rov_depth;
-	m_pipeline_selector.ds_as_rt = config.ds_as_rt != nullptr && !config.ps.rov_color && !config.ps.rov_depth;
+	m_pipeline_selector.ds_as_rt = config.ds_as_rt != nullptr && !config.ps.rov_depth;
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)

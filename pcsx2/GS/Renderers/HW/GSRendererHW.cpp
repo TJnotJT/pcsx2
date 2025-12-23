@@ -5842,7 +5842,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
 	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt)) ||
-		(features.rov_color && m_conf.rt->GetState() == GSTexture::State::UAV);
+		(features.rov && m_conf.rt->GetState() == GSTexture::State::UAV);
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -6405,10 +6405,11 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
-void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawConfig& config,
-	const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
+void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
 {
-	if (!(features.rov_color || features.rov_depth))
+	const GSDevice::FeatureSupport& features = g_gs_device->Features();
+
+	if (!features.rov)
 		return;
 
 	if (features.framebuffer_fetch)
@@ -6417,49 +6418,74 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		return;
 	}
 
-	if (config.blend.enable)
+	if (m_conf.blend.enable)
 	{
 		GL_INS("HW: ROV disabled because HW blend enabled");
 		return;
 	}
 
-	const bool feedback_color = 
-		config.rt && (config.require_one_barrier || config.require_full_barrier ||
-			(config.tex && config.tex == config.rt));
-	const bool uav_color = config.rt && config.rt->GetState() == GSTexture::State::UAV;
-	const bool feedback_depth = config.ds && config.ps.IsFeedbackLoopDepth();
-	const bool uav_depth = config.ds && config.ds->GetState() == GSTexture::State::UAV;
+	bool feedback_color = 
+		m_conf.rt && (m_conf.require_one_barrier || m_conf.require_full_barrier ||
+			(m_conf.tex && m_conf.tex == m_conf.rt));
+	bool feedback_depth = m_conf.ds && m_conf.ps.IsFeedbackLoopDepth();
 
-	const bool use_rov_color = features.rov_color && (feedback_color || uav_color);
-	const bool use_rov_depth = features.rov_depth && (feedback_depth || uav_depth);
+	const bool uav_color = m_conf.rt && m_conf.rt->GetState() == GSTexture::State::UAV;
+	const bool uav_depth = m_conf.ds && m_conf.ds->GetState() == GSTexture::State::UAV;
 
-	if (use_rov_color)
+	bool use_rov_depth = features.rov && (feedback_depth || uav_depth);
+	bool use_rov_color = features.rov && (feedback_color || uav_color);
+
+	// If depth and color have feedback and one uses ROV, the other must also.
+	// Use currently don't have a way of using barriers in one and ROV in the other.
+	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
 	{
-		GL_INS("HW: ROV used for color");
-		config.ps.rov_color = true;
-		config.ps.color_feedback = true;
-		config.cb_ps.ColorMask = GSVector4i(config.colormask.wr, config.colormask.wg, config.colormask.wb, config.colormask.wa);
+		use_rov_color = true;
+		use_rov_depth = true;
 	}
 
+	// Setup depth ROV first as color ROV will depend on depth feedback.
 	if (use_rov_depth)
 	{
 		GL_INS("HW: ROV used for depth");
 
-		if (config.depth.ztst != ZTST_ALWAYS)
+		if (m_conf.depth.ztst != ZTST_ALWAYS)
 		{
 			GL_INS("HW: Replace HW with SW depth test");
-			config.ps.ztst = config.depth.ztst;
+			m_conf.ps.ztst = m_conf.depth.ztst;
+			m_conf.ps.depth_feedback = true;
+
 		}
 
-		if (config.depth.zwe)
+		if (m_conf.depth.zwe)
 		{
 			GL_INS("HW: Replace HW with SW depth write");
-			config.ps.zclamp = true; // Proxy for SW Z write
+			GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf); // Z clamp is a proxy for SW Z write.
 		}
 		
-		config.ps.rov_depth = true;
-		config.ps.depth_feedback = true;
-		config.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
+		m_conf.ps.rov_depth = true;
+		m_conf.ps.depth_feedback |= feedback_depth;
+		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
+	}
+
+	if (m_conf.rt && use_rov_depth && m_conf.ps.depth_feedback)
+	{
+		// We must also use color ROV with feedback so that color discard works correctly.
+		use_rov_color = true;
+		feedback_color = true;
+	}
+
+	if (use_rov_color)
+	{
+		GL_INS("HW: ROV used for color");
+		m_conf.ps.rov_color = true;
+
+		m_conf.ps.color_feedback |= feedback_color;
+
+		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
+		const bool use_mask = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
+		m_conf.ps.color_feedback |= use_mask;
+
+		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
 	}
 
 	if ((use_rov_color || use_rov_depth) && DATE)
@@ -6469,11 +6495,6 @@ void GSRendererHW::SetupROV(const GSDevice::FeatureSupport& features, GSHWDrawCo
 		DATE_PRIMID = false;
 		DATE_BARRIER = true;
 		GL_INS("HW: Using DATE BARRIER with ROV");
-	}
-
-	if (use_rov_color && config.blend.enable || config.ps.blend_hw)
-	{
-		GL_INS("HW: Using SW blend enabled");
 	}
 }
 
@@ -8187,7 +8208,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Do ROV setup here since it might change DATE.
-	SetupROV(features, m_conf, DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
+	SetupROV(DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
 
 	if (debug_fp)
 	{
@@ -8486,7 +8507,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	//std::ofstream out;
 
-	if (s_n <= 1000)
+	if (1800 <= s_n && s_n <= 1900 )
 	{
 		std::string fn = fmt::format("C:\\Users\\tchan\\Desktop\\ps2_debug\\conf\\conf_{:05}.txt", s_n);
 		GSHWDrawConfig::DumpConfig(fn, m_conf);

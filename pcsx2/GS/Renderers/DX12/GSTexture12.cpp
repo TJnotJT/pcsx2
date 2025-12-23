@@ -6,6 +6,7 @@
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSGL.h"
+#include "GS/GSState.h" // FIXME: TEMP FOR DEBUGGING
 
 #include "common/Assertions.h"
 #include "common/Console.h"
@@ -816,6 +817,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 	pxAssert(m_type == Type::DepthStencil);
 
 	GL_PUSH("DX12: Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
+	Console.Warning("DX12: %d Updating %s", GSState::s_n, uav_to_ds ? "UAV -> DS" : "DS -> UAV");
 
 	GSDevice12* device = GSDevice12::GetInstance();
 
@@ -859,6 +861,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 
 void GSTexture12::SetState(State state)
 {
+	// FIXME: REMOVE TEMP DEBUGGING WANRINGS
 	if (state == State::UAV && m_state != State::UAV)
 	{
 		if (m_state == State::Cleared)
@@ -874,9 +877,11 @@ void GSTexture12::SetState(State state)
 		{
 			TransitionToState(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 			UpdateDepthUAV(false); // Handles transitions of UAV
+			Console.Warning("DX12: %d DS -> UAV", GSState::s_n);
 		}
 		else
 		{
+			Console.Warning("DX12: %d RT -> UAV", GSState::s_n);
 			TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		m_state = state; // Transition to UAV last to avoid infinite recursion in TransitionToState().
@@ -888,10 +893,12 @@ void GSTexture12::SetState(State state)
 		m_state = state; // Transition out of UAV first to avoid infinite recursion in TransitionToState().
 		if (IsDepthStencil())
 		{
+			Console.Warning("DX12: %d} UAV -> DS", GSState::s_n);
 			UpdateDepthUAV(true); // Handles barriers/transitions.
 		}
 		else
 		{
+			Console.Warning("DX12: %d UAV -> RT", GSState::s_n);
 			TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 		}
 	}
@@ -948,6 +955,11 @@ void GSDownloadTexture12::CopyFromTexture(
 	const GSVector4i& drc, GSTexture* stex, const GSVector4i& src, u32 src_level, bool use_transfer_pitch)
 {
 	GSTexture12* const tex12 = static_cast<GSTexture12*>(stex);
+
+	if (tex12->GetState() == GSTexture::State::UAV)
+	{
+		tex12->SetState(GSTexture::State::Dirty);
+	}
 
 	pxAssert(tex12->GetFormat() == m_format);
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());

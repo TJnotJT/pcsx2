@@ -1126,18 +1126,11 @@ PS_OUTPUT_REAL ps_main(PS_INPUT input)
 void ps_main(PS_INPUT input)
 #endif
 {
-//#if PS_ROV_DEPTH
-//	DepthWrite(input.p.xy, 0xFF * exp2(-32.0f));
-//	PS_OUTPUT_REAL xxx;
-//	xxx.c0 = float4(1, 0, 0, 1);
-//	return xxx;
-//#endif
-
-#if PS_ROV_COLOR
+#if PS_ROV_COLOR && PS_COLOR_FEEDBACK
 	cachedRtValue = RtTextureRov[input.p.xy];
 #endif
 
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH && PS_DEPTH_FEEDBACK
 	cachedDepthValue = DepthTextureRov[input.p.xy];
 #endif
 

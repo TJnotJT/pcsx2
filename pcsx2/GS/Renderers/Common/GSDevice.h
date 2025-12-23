@@ -904,8 +904,7 @@ public:
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool depth_as_rt_feedback : 1; ///< Depth feedback loops/barriers by converting depth to a temporary color target.
-		bool rov_color            : 1; ///< Supports rasterizer ordered views for color output.
-		bool rov_depth            : 1; ///< Supports rasterizer ordered views for depth output.
+		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

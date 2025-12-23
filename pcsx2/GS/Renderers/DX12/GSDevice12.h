@@ -465,7 +465,8 @@ public:
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 	void PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state);
 
-	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor, const GSVector2i& viewport_size = {});
+	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt,
+		const GSVector4i& scissor, const GSVector2i& viewport_size = {}, bool dirty_flag = false);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
