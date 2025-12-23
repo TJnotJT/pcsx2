@@ -3243,8 +3243,7 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 							g_gs_device->ClearRenderTarget(dst->m_texture, cc);
 						}
 					}
-					else if (dst_match->m_texture->GetState() == GSTexture::State::Dirty ||
-						dst_match->m_texture->GetState() == GSTexture::State::UAV)
+					else if (dst_match->m_texture->GetState() == GSTexture::State::Dirty)
 					{
 						dst_match->UnscaleRTAlpha();
 						g_gs_device->StretchRect(dst_match->m_texture, sRect, dst->m_texture, dRect, shader, false);
@@ -7899,7 +7898,7 @@ bool GSTextureCache::Target::ResizeTexture(int new_unscaled_width, int new_unsca
 	}
 
 	// Only need to copy if it's been written to.
-	if (m_texture->GetState() == GSTexture::State::Dirty || m_texture->GetState() == GSTexture::State::UAV)
+	if (m_texture->GetState() == GSTexture::State::Dirty)
 	{
 		const GSVector4i rc = require_new_rect ? new_rect : GSVector4i::loadh(size.min(new_size));
 		if (tex->IsDepthStencil())

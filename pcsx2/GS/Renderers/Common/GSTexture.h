@@ -50,7 +50,13 @@ public:
 	{
 		Dirty,
 		Cleared,
-		Invalidated,
+		Invalidated
+	};
+
+	enum class TargetMode : u8
+	{
+		Invalid,
+		Standard,
 		UAV
 	};
 
@@ -66,6 +72,7 @@ protected:
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
+	TargetMode m_target_mode = TargetMode::Invalid;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -135,9 +142,24 @@ public:
 		return (m_type == Type::Texture);
 	}
 
+	__fi bool IsTargetModeStandard()
+	{
+		return m_target_mode == TargetMode::Standard;
+	}
+
+	__fi bool IsTargetModeUAV() const
+	{
+		return m_target_mode == TargetMode::UAV;
+	}
+
 	__fi State GetState() const { return m_state; }
 	virtual void SetState(State state) { m_state = state; }
 
+	__fi TargetMode GetTargetMode() const { return m_target_mode; }
+	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
+	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
+	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
+	
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 
@@ -164,8 +186,6 @@ public:
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
-
-	virtual void UpdateDepthUAV(bool uav_to_ds) {}
 };
 
 class GSDownloadTexture

@@ -472,6 +472,11 @@ struct alignas(16) GSHWDrawConfig
 			return depth_feedback;
 		}
 
+		__fi bool HasShaderDiscard() const
+		{
+			return (afail == PS_AFAIL_KEEP) || scanmsk || date || (ztst == ZTST_GEQUAL || ZTST_GREATER);
+		}
+
 		/// Disables color output from the pixel shader, this is done when all channels are masked.
 		__fi void DisableColorOutput()
 		{

@@ -1345,6 +1345,20 @@ std::unique_ptr<GSDownloadTexture> GSDevice12::CreateDownloadTexture(u32 width, 
 
 void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY)
 {
+	if (sTex && sTex->IsTargetModeUAV())
+	{
+		Console.Warning("DX12: %d UAV -> Standard in CopyRect()", GSState::s_n);
+		sTex->SetTargetModeStandard();
+		EndRenderPass();
+	}
+
+	if (dTex && dTex->IsTargetModeUAV())
+	{
+		Console.Warning("DX12: %d UAV -> Standard in CopyRect()", GSState::s_n);
+		dTex->SetTargetModeStandard();
+		EndRenderPass();
+	}
+
 	// Empty rect, abort copy.
 	if (r.rempty())
 	{
@@ -1356,12 +1370,6 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	GSTexture12* const dTex12 = static_cast<GSTexture12*>(dTex);
 	const GSVector4i dst_rect(0, 0, dTex12->GetWidth(), dTex12->GetHeight());
 	const bool full_draw_copy = dst_rect.eq(r);
-
-	if (sTex12->GetState() == GSTexture::State::UAV)
-	{
-		EndRenderPass();
-		sTex12->SetState(GSTexture::State::Dirty);
-	}
 
 	// Source is cleared, if destination is a render target, we can carry the clear forward.
 	if (sTex12->GetState() == GSTexture::State::Cleared)
@@ -1546,12 +1554,27 @@ void GSDevice12::DrawMultiStretchRects(
 	for (u32 i = 0; i < num_rects; i++)
 	{
 		GSTexture12* const stex = static_cast<GSTexture12*>(rects[i].src);
+
+		if (stex->IsTargetModeUAV())
+		{
+			Console.Warning("DX12: %d UAV -> Standard in DrawMultiStretchRects()", GSState::s_n);
+			stex->SetTargetModeStandard();
+			EndRenderPass();
+		}
+
 		stex->CommitClear();
 		if (stex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 		{
 			EndRenderPass();
 			stex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		}
+	}
+
+	if (dTex->IsTargetModeUAV())
+	{
+		Console.Warning("DX12: %d UAV -> Standard in DrawMultiStretchRects()", GSState::s_n);
+		dTex->SetTargetModeStandard();
+		EndRenderPass();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -1576,6 +1599,9 @@ void GSDevice12::DrawMultiStretchRects(
 void GSDevice12::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvert shader)
 {
+	pxAssert(!dTex || !dTex->IsTargetModeUAV());
+	pxAssert(num_rects == 0 || !rects[0].src || !rects[0].src->IsTargetModeUAV());
+
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -1676,16 +1702,18 @@ void GSDevice12::BeginRenderPassForStretchRect(
 void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSTexture12* dTex, const GSVector4& dRect,
 	const ID3D12PipelineState* pipeline, bool linear, bool allow_discard)
 {
-	if (sTex && sTex->GetState() == GSTexture::State::UAV)
+	if (sTex && sTex->IsTargetModeUAV())
 	{
+		Console.Warning("DX12: %d UAV -> Standard in DoStretchRect()", GSState::s_n);
+		sTex->SetTargetModeStandard();
 		EndRenderPass();
-		sTex->SetState(GSTexture::State::Dirty);
 	}
 
-	if (dTex && dTex->GetState() == GSTexture::State::UAV)
+	if (dTex && dTex->IsTargetModeUAV())
 	{
+		Console.Warning("DX12: %d  UAV -> Standard in DoStretchRect()", GSState::s_n);
+		dTex->SetTargetModeStandard();
 		EndRenderPass();
-		dTex->SetState(GSTexture::State::Dirty);
 	}
 
 	if (sTex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
@@ -1761,9 +1789,11 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 
 	for (int i = 0; i < 3; i++)
 	{
-		if (sTex[i] && sTex[i]->GetState() == GSTexture::State::UAV)
+		if (sTex[i] && !sTex[i]->IsTargetModeStandard())
 		{
-			sTex[i]->SetState(GSTexture::State::Dirty);
+			Console.Warning("DX12: UAV -> Standard transition in DoMerge()");
+			sTex[i]->SetTargetModeStandard();
+			EndRenderPass();
 		}
 	}
 
@@ -1890,19 +1920,13 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderInterlace shader, bool linear, const InterlaceConstantBuffer& cb)
 {
+	pxAssert(!sTex || !sTex->IsTargetModeUAV());
+	pxAssert(!dTex || !dTex->IsTargetModeUAV());
 
 	const GSVector4i rc = GSVector4i(dRect);
 	const GSVector4i dtex_rc = dTex->GetRect();
 	const GSVector4i clamped_rc = rc.rintersect(dtex_rc);
 	EndRenderPass();
-	if (sTex->GetState() == GSTexture::State::UAV)
-	{
-		sTex->SetState(GSTexture::State::Dirty);
-	}
-	if (dTex->GetState() == GSTexture::State::UAV)
-	{
-		dTex->SetState(GSTexture::State::Dirty);
-	}
 	static_cast<GSTexture12*>(dTex)->TransitionToState(D3D12_RESOURCE_STATE_RENDER_TARGET);
 	OMSetRenderTargets(dTex, nullptr, nullptr, clamped_rc);
 	SetUtilityRootSignature();
@@ -1919,18 +1943,12 @@ void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 
 void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4])
 {
+	pxAssert(!sTex || !sTex->IsTargetModeUAV());
+	pxAssert(!dTex || !dTex->IsTargetModeUAV());
 
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
-	if (sTex->GetState() == GSTexture::State::UAV)
-	{
-		sTex->SetState(GSTexture::State::Dirty);
-	}
-	if (dTex->GetState() == GSTexture::State::UAV)
-	{
-		dTex->SetState(GSTexture::State::Dirty);
-	}
 	OMSetRenderTargets(dTex, nullptr, nullptr, dRect);
 	SetUtilityRootSignature();
 	SetUtilityTexture(sTex, m_point_sampler_cpu);
@@ -1947,18 +1965,12 @@ void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 
 void GSDevice12::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 {
+	pxAssert(!sTex || !sTex->IsTargetModeUAV());
+	pxAssert(!dTex || !dTex->IsTargetModeUAV());
 
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
-	if (sTex->GetState() == GSTexture::State::UAV)
-	{
-		sTex->SetState(GSTexture::State::Dirty);
-	}
-	if (dTex->GetState() == GSTexture::State::UAV)
-	{
-		dTex->SetState(GSTexture::State::Dirty);
-	}
 	OMSetRenderTargets(dTex, nullptr, nullptr, dRect);
 	SetUtilityRootSignature();
 	SetUtilityTexture(sTex, m_linear_sampler_cpu);
@@ -2254,7 +2266,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	{
 		// Framebuffer unchanged, but check for clears. Have to restart render pass, unlike Vulkan.
 		// We'll take care of issuing the actual clear there, because we have to start one anyway.
-		for (GSTexture12* tex : std::array{d12Rt, d12DsRt, d12Ds})
+		for (GSTexture12* tex : std::array{ d12Rt, d12DsRt, d12Ds })
 		{
 			if (tex && tex->GetState() != GSTexture::State::Dirty)
 			{
@@ -2263,6 +2275,16 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 				else
 					tex->SetState(GSTexture::State::Dirty);
 			}
+		}
+	}
+
+	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
+	{
+		if (tex && tex->IsTargetModeUAV())
+		{
+			Console.Warning("DX12: UAV -> Standard transition in OMSetRenderTarget()");
+			tex->SetTargetModeStandard();
+			EndRenderPass();
 		}
 	}
 
@@ -3330,6 +3352,12 @@ void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 				EndRenderPass();
 			}
 
+			if (dtex->IsTargetModeUAV())
+			{
+				EndRenderPass();
+				dtex->IssueUAVBarrier();
+			}
+
 			dtex->CommitClear();
 			dtex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		}
@@ -3366,7 +3394,7 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	if (InRenderPass())
 	{
-		Console.Warning("Ending render pass due to UAV transition (should have ended earlier)");
+		GL_INS("Ending render pass due to binding UAV.");
 		EndRenderPass();
 	}
 
@@ -3377,11 +3405,15 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		
 		if (check_state)
 		{
-			if (dtex->GetState() != GSTexture12::State::UAV)
+			if (!dtex->IsTargetModeUAV())
 			{
+				Console.Warning("DX12: %d Standard -> UAV in PSSetUnorderedAccess()", GSState::s_n);
 				dtex->CommitClear();
-				dtex->SetState(GSTexture12::State::UAV);
+				dtex->SetTargetModeUAV();
+				EndRenderPass(); // We may have used a render pass for depth -> UAV conversion.
 			}
+
+			dtex->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		dtex->SetUseFenceCounter(GetCurrentFenceValue());
 		bind_uav = dtex;
@@ -4024,18 +4056,6 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
-	// Must do state transition here because we may require a render pass to resolve UAV to depth.
-	if (config.rt && config.rt->GetState() == GSTexture::State::UAV && !config.ps.rov_color)
-	{
-		EndRenderPass();
-		config.rt->SetState(GSTexture::State::Dirty);
-	}
-	if (config.ds && config.ds->GetState() == GSTexture::State::UAV && !config.ps.rov_depth)
-	{
-		EndRenderPass();
-		config.ds->SetState(GSTexture::State::Dirty);
-	}
-
 	// Destination Alpha Setup
 	const bool stencil_DATE_One = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
 	const bool stencil_DATE = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || stencil_DATE_One);
@@ -4131,8 +4151,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		SetBlendConstants(config.blend.constant);
 
 	// Depth testing and sampling, bind resource as dsv read only and srv at the same time without the need of a copy.
-	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe &&
-		config.ds->GetState() != GSTexture::State::UAV)
+	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.rov_depth)
 	{
 		EndRenderPass();
 
@@ -4183,7 +4202,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 				colclip_rt->SetState(GSTexture::State::Cleared);
 				colclip_rt->SetClearColor(draw_rt->GetClearColor());
 			}
-			else if (draw_rt->GetState() == GSTexture::State::Dirty || draw_rt->GetState() == GSTexture::State::UAV)
+			else if (draw_rt->GetState() == GSTexture::State::Dirty)
 			{
 				GL_PUSH_("ColorClip Render Target Setup");
 				draw_rt->SetState(GSTexture::State::Dirty);
@@ -4258,14 +4277,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 		EndRenderPass();
 
-		if (draw_rt && draw_rt->GetState() == GSTexture::State::Cleared)
-		{
-			draw_rt->CommitClear(clear_color.F32);
-		}
-		if (draw_ds && draw_ds->GetState() == GSTexture::State::Cleared)
-		{
-			draw_ds->CommitClear();
-		}
 
 		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
 			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
@@ -4295,7 +4306,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// rt -> colclip hw blit if enabled
 	if (colclip_rt && (config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly || config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) &&
-		(config.rt->GetState() == GSTexture::State::Dirty || config.rt->GetState() == GSTexture::State::UAV))
+		config.rt->GetState() == GSTexture::State::Dirty)
 	{
 		OMSetRenderTargets(draw_rt, nullptr, draw_ds, GSVector4i::loadh(rtsize));
 		SetUtilityTexture(static_cast<GSTexture12*>(config.rt), m_point_sampler_cpu);
@@ -4427,7 +4438,26 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		}
 
 		if (BindDrawPipeline(pipe))
+		{
+			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = m_tfx_uav_textures_handle_gpu;
+			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = { gpu_handle_rt.ptr + GetDescriptorAllocator().GetDescriptorIncrementSize() };
+
+			// Do UAV clears here are we need the GPU descriptor handles to be allocated in BindDrawPipeline();
+
+			if (draw_rt && config.ps.rov_color && draw_rt->GetState() == GSTexture::State::Cleared)
+			{
+				draw_rt->CommitClearUAV(gpu_handle_rt);
+				draw_rt->IssueUAVBarrier();
+			}
+
+			if (draw_ds && config.ps.rov_depth && draw_ds->GetState() == GSTexture::State::Cleared)
+			{
+				draw_ds->CommitClearUAV(gpu_handle_ds);
+				draw_ds->IssueUAVBarrier();
+			}
+
 			DrawIndexedPrimitive();
+		}
 
 		if (draw_rt && config.ps.rov_color)
 		{
