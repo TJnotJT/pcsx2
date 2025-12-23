@@ -50,14 +50,13 @@ public:
 	{
 		Dirty,
 		Cleared,
-		Invalidated,
-		UAV
+		Invalidated
 	};
 
 	enum class TargetMode : u8
 	{
-		NotTarget,
-		Target,
+		Invalid,
+		Standard,
 		UAV
 	};
 
@@ -73,11 +72,13 @@ protected:
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
-	//State m_target_mode = TargetMode::
+	TargetMode m_target_mode = TargetMode::Invalid;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
 	u32 m_last_frame_used = 0;
+
+	u32 last_draw_uav_transition = 0;
 
 	bool m_needs_mipmaps_generated = true;
 	ClearValue m_clear_value = {};
@@ -143,9 +144,24 @@ public:
 		return (m_type == Type::Texture);
 	}
 
-	__fi State GetState() const { return m_state; }
-	virtual void SetState(State state) { m_state = state; }
+	__fi bool IsTargetModeStandard()
+	{
+		return m_target_mode == TargetMode::Standard;
+	}
 
+	__fi bool IsTargetModeUAV() const
+	{
+		return m_target_mode == TargetMode::UAV;
+	}
+
+	__fi State GetState() const { return m_state; }
+	virtual void SetState(State state) { m_state = state; } // FIXME: Implement m_uav_dirty generically
+
+	__fi TargetMode GetTargetMode() const { return m_target_mode; }
+	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
+	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
+	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
+	
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 

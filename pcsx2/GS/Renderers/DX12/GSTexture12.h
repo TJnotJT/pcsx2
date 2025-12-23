@@ -29,13 +29,71 @@ public:
 		DXGI_FORMAT dsv_format, DXGI_FORMAT uav_format, D3D12_RESOURCE_STATES resource_state);
 
 	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const { return m_srv_descriptor; }
+	
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const { return m_write_descriptor; }
-	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const { return m_uav_descriptor; }
+
+	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return m_uav_depth->m_uav_descriptor;
+		}
+		else
+		{
+			return m_uav_descriptor;
+		}
+	}
+
 	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const { return m_fbl_descriptor; }
-	__fi D3D12_RESOURCE_STATES GetResourceState() const { return m_resource_state; }
+
+	__fi D3D12_RESOURCE_STATES GetResourceState() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return m_uav_depth->m_resource_state;
+		}
+		else
+		{
+			return m_resource_state;
+		}
+	}
+
+	__fi void SetResourceState(D3D12_RESOURCE_STATES state)
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			m_uav_depth->m_resource_state = state;
+		}
+		else
+		{
+			m_resource_state = state;
+		}
+	}
+
 	__fi DXGI_FORMAT GetDXGIFormat() const { return m_dxgi_format; }
-	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
+
+	__fi ID3D12Resource* GetResource() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return m_uav_depth->m_resource.get();
+		}
+		else
+		{
+			return m_resource.get();
+		}
+	}
+
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
+
+	virtual void SetState(State state) override
+	{
+		if (IsTargetModeUAV() && state == State::Dirty)
+		{
+			m_uav_dirty = true;
+		}
+		m_state = state;
+	}
 
 	void* GetNativeHandle() const override;
 
@@ -49,16 +107,19 @@ public:
 	void SaveDepthUAV(const std::string& fn) const;
 #endif
 
-	virtual void SetState(State state) override;
+	virtual void SetTargetMode(TargetMode state) override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear(float* color = nullptr);
 	void CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color = nullptr);
+	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v, float* color = nullptr);
+	void CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, float* color = nullptr);
 
 	void Destroy(bool defer = true);
 
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
 		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
+	void IssueUAVBarrier(ID3D12GraphicsCommandList* cmdlist);
 	void IssueUAVBarrier();
 	void SetUAVDirty();
 
@@ -93,7 +154,7 @@ private:
 	ID3D12Resource* AllocateUploadStagingBuffer(const void* data, u32 pitch, u32 upload_pitch, u32 height) const;
 	void CopyTextureDataForUpload(void* dst, const void* src, u32 pitch, u32 upload_pitch, u32 height) const;
 
-	void IssueUAVBarrierNoAssert(); // For issuing barriers while transitioning.
+	void IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist);
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;

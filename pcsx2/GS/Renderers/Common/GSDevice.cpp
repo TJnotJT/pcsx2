@@ -648,10 +648,11 @@ void GSDevice::Recycle(GSTexture* t)
 	if (!t)
 		return;
 
-	if (t->GetState() == GSTexture::State::UAV)
-	{
-		t->SetState(GSTexture::State::Dirty);
-	}
+	//if (t->IsTargetModeUAV())
+	//{
+	//	Console.Warning("TC: UAV -> Standard in Recycle()");
+	//	//t->
+	//}
 
 	t->SetLastFrameUsed(m_frame);
 
