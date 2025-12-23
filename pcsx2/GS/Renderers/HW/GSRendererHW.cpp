@@ -5835,7 +5835,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 2: One barrier is already enabled, prims don't overlap or is a channel shuffle so let's use sw blend instead.
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
-	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt));
+	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt)) ||
+		(features.rov && m_conf.rt->IsTargetModeUAV());
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -6395,6 +6396,107 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		GL_PERF("DATE: Swap DATE_PRIMID with DATE_BARRIER");
 		DATE_PRIMID = false;
 		DATE_BARRIER = true;
+	}
+}
+
+void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
+{
+	const GSDevice::FeatureSupport& features = g_gs_device->Features();
+
+	if (!features.rov)
+		return;
+
+	if (features.framebuffer_fetch)
+	{
+		GL_INS("HW: ROV disabled because have FB-fetch");
+		return;
+	}
+
+	if (m_conf.blend.enable)
+	{
+		GL_INS("HW: ROV disabled because HW blend enabled");
+		return;
+	}
+
+	bool feedback_color = 
+		m_conf.rt && (m_conf.require_one_barrier || m_conf.require_full_barrier ||
+			(m_conf.tex && m_conf.tex == m_conf.rt));
+	bool feedback_depth = m_conf.ds && m_conf.ps.IsFeedbackLoopDepth();
+
+	const bool uav_color = m_conf.rt && m_conf.rt->IsTargetModeUAV();
+	const bool uav_depth = m_conf.ds && m_conf.ds->IsTargetModeUAV();
+
+	bool use_rov_depth = features.rov && (feedback_depth || uav_depth);
+	bool use_rov_color = features.rov && (feedback_color || uav_color);
+
+	// If depth and color have feedback and one uses ROV, the other must also.
+	// Use currently don't have a way of using barriers in one and ROV in the other.
+	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
+	{
+		use_rov_color = true;
+		use_rov_depth = true;
+	}
+
+	// If we use color ROV with discard, we cannot use early depth stencil,
+	// so must use depth ROV with feedback.
+	if (use_rov_color && m_conf.ps.HasShaderDiscard())
+	{
+		use_rov_depth = true;
+		feedback_depth = true;
+	}
+
+	// Setup depth ROV first as color ROV will depend on depth feedback.
+	if (use_rov_depth)
+	{
+		GL_INS("HW: ROV used for depth");
+
+		if (m_conf.depth.ztst != ZTST_ALWAYS)
+		{
+			GL_INS("HW: Replace HW with SW depth test");
+			m_conf.ps.ztst = m_conf.depth.ztst;
+			m_conf.ps.depth_feedback = true;
+
+		}
+
+		if (m_conf.depth.zwe)
+		{
+			GL_INS("HW: Replace HW with SW depth write");
+			GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf); // Z clamp is a proxy for SW Z write.
+		}
+		
+		m_conf.ps.rov_depth = true;
+		m_conf.ps.depth_feedback |= feedback_depth;
+		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
+	}
+
+	if (m_conf.rt && use_rov_depth && m_conf.ps.depth_feedback)
+	{
+		// We must also use color ROV with feedback so that color discard works correctly.
+		use_rov_color = true;
+		feedback_color = true;
+	}
+
+	if (use_rov_color)
+	{
+		GL_INS("HW: ROV used for color");
+		m_conf.ps.rov_color = true;
+
+		m_conf.ps.color_feedback |= feedback_color;
+
+		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
+		const bool use_mask = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
+		m_conf.ps.color_feedback |= use_mask;
+
+		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+	}
+
+	if ((use_rov_color || use_rov_depth) && DATE)
+	{
+		// Always use DATE barrier with ROVs.
+		DATE_one = false; // Stencil won't work for ROV write
+		DATE_PRIMID = false;
+		DATE_BARRIER = true;
+		GL_INS("HW: Using DATE BARRIER with ROV");
 	}
 }
 
@@ -8083,6 +8185,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
+	// Do ROV setup here since it might change DATE.
+	SetupROV(DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
+
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
 	if (!rt || m_conf.colormask.wrgba == 0)
@@ -8286,8 +8391,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
 		// If depth feedback can use a color RT, we can use FB fetch.
-		// Otherwise we must keep barriers.
-		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback;
+		bool need_barriers_for_depth =
+			m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback && !m_conf.ps.rov_depth;
 
 		if (!need_barriers_for_depth)
 		{
@@ -8320,7 +8425,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Create a temporary depth color target
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ps.rov_depth)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 
