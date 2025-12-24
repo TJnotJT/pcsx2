@@ -6,7 +6,6 @@
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSGL.h"
-#include "GS/GSState.h" // FIXME: TEMP FOR DEBUGGING
 
 #include "common/Assertions.h"
 #include "common/Console.h"
@@ -920,6 +919,8 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 	// Handles updating DepthStencil <-> UAV dirty depth.
 	// Does not do the actual resource transition. The caller should do that.
+
+	g_perfmon.Put(GSPerfMon::TargetTransitions, 1.0);
 
 	if (GetTargetMode() == TargetMode::Standard && mode == TargetMode::UAV)
 	{
