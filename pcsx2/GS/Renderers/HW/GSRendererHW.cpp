@@ -8185,40 +8185,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
-
-	/*static FILE* debug_fp = nullptr;
-	if (s_n < 1000)
-	{
-		if (!debug_fp)
-			debug_fp = fopen("C:\\Users\\tchan\\Desktop\\ps2_debug\\temp.txt", "w");
-	}
-	else
-	{
-		if (debug_fp)
-		{
-			fclose(debug_fp);
-			debug_fp = nullptr;
-		}
-	}
-
-	if (debug_fp)
-	{
-		fprintf(debug_fp, "%d (before): color: %d, depth %d\n",
-			s_n,
-			m_conf.rt && m_conf.rt->IsTargetModeUAV(),
-			m_conf.ds && m_conf.ds->IsTargetModeUAV());
-	}*/
-
 	// Do ROV setup here since it might change DATE.
 	SetupROV(DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
-
-	/*if (debug_fp)
-	{
-		fprintf(debug_fp, "%d (after): color: %d, depth %d\n",
-			s_n,
-			m_conf.ps.rov_color,
-			m_conf.ps.rov_depth);
-	}*/
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8506,12 +8474,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
 	}
-
-	/*if (1800 <= s_n && s_n <= 1900 )
-	{
-		std::string fn = fmt::format("C:\\Users\\tchan\\Desktop\\ps2_debug\\conf\\conf_{:05}.txt", s_n);
-		GSHWDrawConfig::DumpConfig(fn, m_conf);
-	}*/
 	
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
