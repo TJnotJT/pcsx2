@@ -782,8 +782,9 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color)
 {
 	if (IsTargetModeUAV())
 	{
-		Console.Warning("DX12: Transitioning UAV -> Standard in CommitClear()");
+		Console.Warning("DX12: %d UAV -> Standard in CommitClear()", GSState::s_n);
 		SetTargetModeStandard();
+		GSDevice12::GetInstance()->EndRenderPass();
 	}
 
 	if (IsDepthStencil())
@@ -922,7 +923,7 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 	// Handles updating DepthStencil <-> UAV dirty depth.
 	// Does not do the actual resource transition. The caller should do that.
 
-	if (mode == TargetMode::UAV)
+	if (GetTargetMode() == TargetMode::Standard && mode == TargetMode::UAV)
 	{
 		// Standard -> UAV
 		if (IsDepthStencil())
@@ -937,7 +938,7 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 		m_target_mode = TargetMode::UAV; // After UpdateDepthUAV() to avoid assertion.
 	}
-	else if (mode == TargetMode::Standard)
+	else if (GetTargetMode() == TargetMode::UAV && mode == TargetMode::Standard)
 	{
 		// UAV -> Standard
 		IssueUAVBarrier();

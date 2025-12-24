@@ -1347,14 +1347,16 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 {
 	if (sTex && sTex->IsTargetModeUAV())
 	{
-		Console.Warning("DX12: UAV -> Standard in CopyRect()");
+		Console.Warning("DX12: %d UAV -> Standard in CopyRect()", GSState::s_n);
 		sTex->SetTargetModeStandard();
+		EndRenderPass();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
-		Console.Warning("DX12: UAV -> Standard in CopyRect()");
+		Console.Warning("DX12: %d UAV -> Standard in CopyRect()", GSState::s_n);
 		dTex->SetTargetModeStandard();
+		EndRenderPass();
 	}
 
 	// Empty rect, abort copy.
@@ -1552,12 +1554,27 @@ void GSDevice12::DrawMultiStretchRects(
 	for (u32 i = 0; i < num_rects; i++)
 	{
 		GSTexture12* const stex = static_cast<GSTexture12*>(rects[i].src);
+
+		if (stex->IsTargetModeUAV())
+		{
+			Console.Warning("DX12: %d UAV -> Standard in DrawMultiStretchRects()", GSState::s_n);
+			stex->SetTargetModeStandard();
+			EndRenderPass();
+		}
+
 		stex->CommitClear();
 		if (stex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 		{
 			EndRenderPass();
 			stex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		}
+	}
+
+	if (dTex->IsTargetModeUAV())
+	{
+		Console.Warning("DX12: %d UAV -> Standard in DrawMultiStretchRects()", GSState::s_n);
+		dTex->SetTargetModeStandard();
+		EndRenderPass();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -1582,6 +1599,9 @@ void GSDevice12::DrawMultiStretchRects(
 void GSDevice12::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvert shader)
 {
+	pxAssert(!dTex || !dTex->IsTargetModeUAV());
+	pxAssert(num_rects == 0 || !rects[0].src || !rects[0].src->IsTargetModeUAV());
+
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -1684,16 +1704,16 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 {
 	if (sTex && sTex->IsTargetModeUAV())
 	{
-		EndRenderPass();
+		Console.Warning("DX12: %d UAV -> Standard in DoStretchRect()", GSState::s_n);
 		sTex->SetTargetModeStandard();
-		Console.Warning("DX12: UAV -> Standard transition in DoStretchRect()");
+		EndRenderPass();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
-		EndRenderPass();
+		Console.Warning("DX12: %d  UAV -> Standard in DoStretchRect()", GSState::s_n);
 		dTex->SetTargetModeStandard();
-		Console.Warning("DX12: UAV -> Standard transition in DoStretchRect()");
+		EndRenderPass();
 	}
 
 	if (sTex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
@@ -1771,8 +1791,9 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	{
 		if (sTex[i] && !sTex[i]->IsTargetModeStandard())
 		{
-			sTex[i]->SetTargetModeStandard();
 			Console.Warning("DX12: UAV -> Standard transition in DoMerge()");
+			sTex[i]->SetTargetModeStandard();
+			EndRenderPass();
 		}
 	}
 
@@ -2261,9 +2282,9 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	{
 		if (tex && tex->IsTargetModeUAV())
 		{
-			EndRenderPass();
-			tex->SetTargetModeStandard();
 			Console.Warning("DX12: UAV -> Standard transition in OMSetRenderTarget()");
+			tex->SetTargetModeStandard();
+			EndRenderPass();
 		}
 	}
 
@@ -3335,7 +3356,6 @@ void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 			{
 				EndRenderPass();
 				dtex->IssueUAVBarrier();
-				Console.Warning("DX12: UAV barrier in PSSetShaderResource()");
 			}
 
 			dtex->CommitClear();
@@ -3387,6 +3407,7 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		{
 			if (!dtex->IsTargetModeUAV())
 			{
+				Console.Warning("DX12: %d Standard -> UAV in PSSetUnorderedAccess()", GSState::s_n);
 				dtex->CommitClear();
 				dtex->SetTargetModeUAV();
 				EndRenderPass(); // We may have used a render pass for depth -> UAV conversion.
