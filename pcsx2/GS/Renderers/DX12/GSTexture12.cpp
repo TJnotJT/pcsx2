@@ -480,7 +480,7 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 
 	if (IsTargetModeUAV())
 	{
-		Console.Warning("DX12: %d UAV -> Standard in Update()", GSState::s_n);
+		GL_INS("Target mode transition UAV -> Standard in Update()");
 		SetTargetModeStandard();
 		GSDevice12::GetInstance()->EndRenderPass();
 	}
@@ -783,7 +783,7 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color)
 {
 	if (IsTargetModeUAV())
 	{
-		Console.Warning("DX12: %d UAV -> Standard in CommitClear()", GSState::s_n);
+		GL_INS("Target mode transition UAV -> Standard in CommitClear()");
 		SetTargetModeStandard();
 		GSDevice12::GetInstance()->EndRenderPass();
 	}
@@ -827,8 +827,7 @@ void GSTexture12::IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist)
 
 		if (dev->InRenderPass())
 		{
-			Console.Warning("DX12: Issuing UAV Barrier in a render pass.");
-			GL_INS("DX12: Issuing UAV Barrier in a render pass.");
+			Console.Warning("Issuing UAV Barrier in a render pass.");
 			dev->EndRenderPass();
 		}
 		cmdlist->ResourceBarrier(1, &barrier);
@@ -877,15 +876,13 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 	// Not being in TargetMode::Standard could lead to state becoming inconsistent when using TransitionToState();
 	pxAssert(IsDepthStencil() && IsTargetModeStandard());
 
-	GL_PUSH("DX12: Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
-	Console.Warning("DX12: %d Updating %s", GSState::s_n, uav_to_ds ? "UAV -> DS" : "DS -> UAV");
+	GL_PUSH("Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
 
 	GSDevice12* device = GSDevice12::GetInstance();
 
 	if (device->InRenderPass())
 	{
-		Console.Warning("DX12: Updating depth UAV in a render pass.");
-		GL_INS("DX12: Updating depth UAV in a render pass.");
+		Console.Warning("Updating depth UAV in a render pass.");
 		device->EndRenderPass();
 	}
 
@@ -930,11 +927,6 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 		if (IsDepthStencil())
 		{
 			UpdateDepthUAV(false);
-			Console.Warning("DX12: %d DS -> UAV", GSState::s_n);
-		}
-		else
-		{
-			Console.Warning("DX12: %d RT -> UAV", GSState::s_n);
 		}
 
 		m_target_mode = TargetMode::UAV; // After UpdateDepthUAV() to avoid assertion.
@@ -948,12 +940,7 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 		if (IsDepthStencil())
 		{
-			Console.Warning("DX12: %d UAV -> DS", GSState::s_n);
 			UpdateDepthUAV(true);
-		}
-		else
-		{
-			Console.Warning("DX12: %d UAV -> RT", GSState::s_n);
 		}
 	}
 	else
