@@ -110,6 +110,13 @@
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 
+#define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
+#define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
+#define PS_RETURN_DEPTH_ROV (PS_ZCLAMP && PS_ROV_DEPTH)
+#define PS_RETURN_DEPTH (PS_ZCLAMP && !PS_ROV_DEPTH)
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP)
+#define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+
 struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
@@ -154,19 +161,24 @@ struct PS_INPUT
 struct PS_OUTPUT_REAL
 {
 #define NUM_RTS 0
-#if !PS_NO_COLOR && !PS_ROV_COLOR
-#if PS_DATE == 1 || PS_DATE == 2
-	float c : SV_Target;
-#else
-	float4 c0 : SV_Target0;
-	#undef NUM_RTS
-	#define NUM_RTS 1
-#if !PS_NO_COLOR1
-	float4 c1 : SV_Target1;
+
+#if PS_RETURN_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		float c : SV_Target;
+	#else
+		
+		float4 c0 : SV_Target0;
+
+		#undef NUM_RTS
+		#define NUM_RTS 1
+		
+		#if !PS_NO_COLOR1
+			float4 c1 : SV_Target1;
+		#endif
+	#endif
 #endif
-#endif
-#endif
-#if PS_ZCLAMP && !PS_ROV_DEPTH
+
+#if PS_RETURN_DEPTH
 	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
 		#if NUM_RTS > 0
 			float depth : SV_Target1;
@@ -177,20 +189,21 @@ struct PS_OUTPUT_REAL
 		float depth : SV_Depth;
 	#endif
 #endif
+
 #undef NUM_RTS
 };
 
 struct PS_OUTPUT
 {
 #if !PS_NO_COLOR
-#if PS_DATE == 1 || PS_DATE == 2
-	float c;
-#else
-	float4 c0;
-#if !PS_NO_COLOR1
-	float4 c1;
-#endif
-#endif
+	#if PS_DATE == 1 || PS_DATE == 2
+		float c;
+	#else
+		float4 c0;
+		#if !PS_NO_COLOR1
+			float4 c1;
+		#endif
+	#endif
 #endif
 	float depth;
 };
@@ -1117,11 +1130,11 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 	}
 }
 
-#if PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP
+#if PS_ROV_EARLYDEPTHSTENCIL
 [earlydepthstencil]
 #endif
 
-#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
+#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 PS_OUTPUT_REAL ps_main(PS_INPUT input)
 #else
 void ps_main(PS_INPUT input)
@@ -1136,7 +1149,7 @@ void ps_main(PS_INPUT input)
 #endif
 
 	bool fail_z = false;
-#if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+#if PS_DEPTH_FEEDBACK && PS_ENABLE_ZTST
 	#if PS_ZTST == ZTST_GEQUAL
 		fail_z = (input.p.z < DepthLoad(input.p.xy));
 	#elif PS_ZTST == ZTST_GREATER
@@ -1147,7 +1160,7 @@ void ps_main(PS_INPUT input)
 		if (fail_z)
 			discard;
 	#endif
-#endif // PS_ZTST
+#endif
 
 	float4 C = ps_color(input);
 
@@ -1354,41 +1367,43 @@ void ps_main(PS_INPUT input)
 	output.depth = min(input.p.z, MaxDepthPS);	
 #endif
 
-#if PS_ROV_COLOR && !PS_NO_COLOR
+#if PS_RETURN_COLOR_ROV
 	float4 rt_col = RtLoad(input.p.xy);
 
-	rt_col.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
-	rt_col.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
-	rt_col.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
-	rt_col.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
+	output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
+	output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
+	output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
+	output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
 
-	rt_col = fail_z ? RtLoad(input.p.xy) : rt_col;
+	output.c0 = fail_z ? rt_col : output.c0;
 
-	RtWrite(input.p.xy, rt_col);
+	RtWrite(input.p.xy, output.c0);
 #endif
 
-#if PS_ZCLAMP && PS_ROV_DEPTH
+#if PS_RETURN_DEPTH_ROV
 	output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
 	DepthWrite(input.p.xy, output.depth);
 #endif
 
-#if (!PS_NO_COLOR && !PS_ROV_COLOR) || (PS_ZCLAMP && !PS_ROV_DEPTH)
-		PS_OUTPUT_REAL output_real;
+#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
+	PS_OUTPUT_REAL output_real;
 
-	#if !PS_NO_COLOR && !PS_ROV_COLOR
-	#if PS_DATE == 1 || PS_DATE == 2
-		output_real.c = output.c;
-	#else
-		output_real.c0 = output.c0;
-	#if !PS_NO_COLOR1
-		output_real.c1 = output.c1;
+	#if PS_RETURN_COLOR
+		#if PS_DATE == 1 || PS_DATE == 2
+			output_real.c = output.c;
+		#else
+			output_real.c0 = output.c0;
+			#if !PS_NO_COLOR1
+				output_real.c1 = output.c1;
+			#endif
+		#endif
 	#endif
-	#endif
-	#endif
-	#if PS_ZCLAMP && !PS_ROV_DEPTH
+
+	#if PS_RETURN_DEPTH
 		output_real.depth = output.depth;
 	#endif
-		return output_real;
+
+	return output_real;
 #endif
 }
 
