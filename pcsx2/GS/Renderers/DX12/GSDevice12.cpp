@@ -4273,14 +4273,24 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
-		// Do not use render pass for ROV. Instead process clears manually.
+		// Do not use render pass for ROV.
 
 		EndRenderPass();
 
+		if (draw_rt && !config.ps.rov_color)
+		{
+			draw_rt->CommitClear(clear_color.v);
+		}
+
+		if (draw_ds && !config.ps.rov_depth)
+		{
+			draw_ds->CommitClear();
+		}
 
 		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
 			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
 
+		// UAV clears handled in SendHWDraw().
 		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
 		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
 	}
@@ -4427,16 +4437,6 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			Console.Warning("DX12: ROV feedback for color and depth is inconsistent.");
 		}
 
-		if (draw_rt && config.ps.rov_color)
-		{
-			draw_rt->IssueUAVBarrier();
-		}
-
-		if (draw_ds && config.ps.rov_depth)
-		{
-			draw_ds->IssueUAVBarrier();
-		}
-
 		if (BindDrawPipeline(pipe))
 		{
 			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = m_tfx_uav_textures_handle_gpu;
@@ -4447,27 +4447,36 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			if (draw_rt && config.ps.rov_color && draw_rt->GetState() == GSTexture::State::Cleared)
 			{
 				draw_rt->CommitClearUAV(gpu_handle_rt);
-				draw_rt->IssueUAVBarrier();
 			}
 
 			if (draw_ds && config.ps.rov_depth && draw_ds->GetState() == GSTexture::State::Cleared)
 			{
 				draw_ds->CommitClearUAV(gpu_handle_ds);
+			}
+
+			if (draw_rt && config.ps.rov_color && config.ps.color_feedback)
+			{
+				draw_rt->IssueUAVBarrier();
+			}
+
+			if (draw_ds && config.ps.rov_depth && config.ps.depth_feedback)
+			{
 				draw_ds->IssueUAVBarrier();
 			}
 
 			DrawIndexedPrimitive();
+
+			if (draw_rt && config.ps.rov_color)
+			{
+				draw_rt->SetUAVDirty();
+			}
+
+			if (draw_ds && config.ps.rov_depth)
+			{
+				draw_ds->SetUAVDirty();
+			}
 		}
 
-		if (draw_rt && config.ps.rov_color)
-		{
-			draw_rt->SetUAVDirty();
-		}
-
-		if (draw_ds && config.ps.rov_depth)
-		{
-			draw_ds->SetUAVDirty();
-		}
 
 		return;
 	}

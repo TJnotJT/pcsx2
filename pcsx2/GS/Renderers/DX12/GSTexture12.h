@@ -119,9 +119,13 @@ public:
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
 		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
+
+	bool GetUAVDirty() const { return m_uav_dirty; }
+	void SetUAVDirty() { m_uav_dirty = true; }
+	void ClearUAVDirty() { m_uav_dirty = false; }
+	D3D12_RESOURCE_BARRIER GetUAVBarrier();
 	void IssueUAVBarrier(ID3D12GraphicsCommandList* cmdlist);
 	void IssueUAVBarrier();
-	void SetUAVDirty();
 
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }

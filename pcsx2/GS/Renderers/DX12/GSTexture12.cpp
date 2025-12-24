@@ -865,11 +865,6 @@ void GSTexture12::CreateDepthUAV()
 	}
 }
 
-void GSTexture12::SetUAVDirty()
-{
-	m_uav_dirty = true;
-}
-
 void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 {
 	// Not being in TargetMode::Standard could lead to state becoming inconsistent when using TransitionToState();
@@ -924,7 +919,8 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 	if (GetTargetMode() == TargetMode::Standard && mode == TargetMode::UAV)
 	{
-		// Standard -> UAV
+		GL_INS("Target mode transition Standard -> UAV");
+
 		if (IsDepthStencil())
 		{
 			UpdateDepthUAV(false);
@@ -935,6 +931,8 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 	else if (GetTargetMode() == TargetMode::UAV && mode == TargetMode::Standard)
 	{
 		// UAV -> Standard
+		GL_INS("Target mode transition UAV -> Standard");
+
 		IssueUAVBarrier();
 
 		m_target_mode = TargetMode::Standard; // Before UpdateDepthUAV() to avoid assertion.

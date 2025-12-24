@@ -1488,7 +1488,7 @@ void GSHWDrawConfig::DumpConfig(std::ostream& out, const GSHWDrawConfig& conf,
 	}
 }
 
-void GSHWDrawConfig::DumpConfig(std::string& fn, const GSHWDrawConfig& conf,
+void GSHWDrawConfig::DumpConfig(const std::string& fn, const GSHWDrawConfig& conf,
 	bool ps, bool vs, bool bs, bool dss, bool ss, bool asp, bool bmp)
 {
 	std::ofstream file(fn);
