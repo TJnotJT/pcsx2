@@ -946,7 +946,7 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 
 		if (IsDepthStencil())
 		{
-			Console.Warning("DX12: %d} UAV -> DS", GSState::s_n);
+			Console.Warning("DX12: %d UAV -> DS", GSState::s_n);
 			UpdateDepthUAV(true);
 		}
 		else

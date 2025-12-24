@@ -3374,7 +3374,7 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	if (InRenderPass())
 	{
-		Console.Error("DX12: PSSetUnorderedAccess: Should have already ended render pass.");
+		GL_INS("Ending render pass due to binding UAV.");
 		EndRenderPass();
 	}
 
@@ -3387,9 +3387,9 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		{
 			if (!dtex->IsTargetModeUAV())
 			{
-				Console.Warning("DX12: Texture should already be in UAV mode.");
 				dtex->CommitClear();
 				dtex->SetTargetModeUAV();
+				EndRenderPass(); // We may have used a render pass for depth -> UAV conversion.
 			}
 
 			dtex->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -4035,42 +4035,6 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
-	// Must do barriers/state transitions here because we may require a render pass to resolve UAV to depth.
-	//if (config.rt)
-	//{
-	//	GSTexture::TargetMode expected_mode = config.ps.rov_color ? GSTexture::TargetMode::UAV : GSTexture::TargetMode::Standard;
-	//	if (config.rt->GetTargetMode() != expected_mode)
-	//	{
-	//		EndRenderPass();
-	//		config.rt->SetTargetMode(expected_mode);
-	//	}
-	//}
-
-	/*if (config.ds)
-	{
-		GSTexture::TargetMode expected_mode = config.ps.rov_depth? GSTexture::TargetMode::UAV : GSTexture::TargetMode::Standard;
-		if (config.ds->GetTargetMode() != expected_mode)
-		{
-			EndRenderPass();
-			config.ds->SetTargetMode(expected_mode);
-		}
-	}*/
-
-	/*if (config.ds_as_rt && config.ds_as_rt->IsTargetModeUAV())
-	{
-		config.ds_as_rt->SetTargetModeStandard();
-	}*/
-
-	//if (config.tex && config.tex->IsTargetModeUAV())
-	//{
-	//	config.tex->SetTargetModeStandard();
-	//}
-
-	//if (config.pal && config.pal->IsTargetModeUAV())
-	//{
-	//	config.pal->SetTargetModeStandard();
-	//}
-
 	// Destination Alpha Setup
 	const bool stencil_DATE_One = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
 	const bool stencil_DATE = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || stencil_DATE_One);
