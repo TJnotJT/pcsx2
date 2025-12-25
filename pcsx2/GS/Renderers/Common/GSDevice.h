@@ -460,11 +460,16 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool operator!=(const PSSelector& rhs) const { return (key_lo != rhs.key_lo || key_hi != rhs.key_hi); }
 		__fi bool operator<(const PSSelector& rhs) const { return (key_lo < rhs.key_lo || key_hi < rhs.key_hi); }
 
+		__fi bool IsSWBlend() const
+		{
+			return (blend_a | blend_b | blend_d) != 0;
+		}
+
 		__fi bool IsFeedbackLoopRT() const
 		{
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
-			return color_feedback || channel_fb || tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt;;
+			return color_feedback || channel_fb || tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || colclip;
 		}
 
 		__fi bool IsFeedbackLoopDepth() const
@@ -472,9 +477,19 @@ struct alignas(16) GSHWDrawConfig
 			return depth_feedback;
 		}
 
+		__fi bool IsZTestEnabled() const
+		{
+			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
+		}
+
+		__fi bool IsAlphaTestDiscard() const
+		{
+			return atst != PS_ATST_NONE && afail == PS_AFAIL_KEEP;
+		}
+
 		__fi bool HasShaderDiscard() const
 		{
-			return (afail == PS_AFAIL_KEEP) || scanmsk || date || (ztst == ZTST_GEQUAL || ZTST_GREATER);
+			return IsAlphaTestDiscard() || scanmsk || date || IsZTestEnabled();
 		}
 
 		/// Disables color output from the pixel shader, this is done when all channels are masked.
@@ -588,6 +603,10 @@ struct alignas(16) GSHWDrawConfig
 			out.ztst = ZTST_ALWAYS;
 			return out;
 		}
+		bool IsZTestEnabled()
+		{
+			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
+		}
 	};
 	struct ColorMaskSelector
 	{
@@ -651,6 +670,40 @@ struct alignas(16) GSHWDrawConfig
 			return true;
 		}
 	};
+
+	union ROVConstants
+	{
+		struct
+		{
+			u32 ColorMask;
+
+			struct
+			{
+				u32 ztst : 2;
+				u32 atst : 3;
+				u32 afail : 3;
+				u32 datm : 2;
+				u32 zwe : 1;
+				u32 _pad : 21;
+			} Test;
+
+			struct
+			{
+				u32 blend_a : 2;
+				u32 blend_b : 2;
+				u32 blend_c : 2;
+				u32 blend_d : 2;
+				u32 _pad : 24;
+			} Blend;
+
+			u32 Unused;
+		};
+
+		GSVector4i v;
+	};
+
+	static_assert(sizeof(ROVConstants) == 16);
+
 	struct alignas(16) PSConstantBuffer
 	{
 		GSVector4 FogColor_AREF;
@@ -669,7 +722,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
-		GSVector4i ColorMask;
+		ROVConstants ROV;
 
 		__fi PSConstantBuffer()
 		{
@@ -701,6 +754,9 @@ struct alignas(16) GSHWDrawConfig
 			return true;
 		}
 	};
+
+	static_assert(sizeof(PSConstantBuffer) == 256);
+
 	// For hardware rendering backends
 	struct BlendState
 	{
@@ -832,7 +888,7 @@ struct alignas(16) GSHWDrawConfig
 	static void DumpBlendMultipass(std::ostream& out, const BlendMultiPass& bmp, const std::string& indent = "");
 	static void DumpConfig(std::ostream& out, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
-	static void DumpConfig(std::string& fn, const GSHWDrawConfig& conf,
+	static void DumpConfig(const std::string& fn, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
 };
 

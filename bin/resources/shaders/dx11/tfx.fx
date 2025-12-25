@@ -104,8 +104,8 @@
 #define PS_DEPTH_FEEDBACK 0
 #endif
 
-#define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
-#define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
+#define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D || PS_ROV_COLOR)
+#define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1 || PS_ROV_COLOR))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
@@ -115,7 +115,8 @@
 #define PS_RETURN_DEPTH_ROV (PS_ZCLAMP && PS_ROV_DEPTH)
 #define PS_RETURN_DEPTH (PS_ZCLAMP && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP)
-#define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+#define PS_ENABLE_ZTST (PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER))
+#define PS_ENABLE_ZTST_ROV (PS_DEPTH_FEEDBACK && PS_ROV_DEPTH)
 
 struct VS_INPUT
 {
@@ -254,8 +255,59 @@ cbuffer cb1
 	float RcpScaleFactor;
 	float pad0;
 	float pad1;
-	uint4 ColorMask;
+	uint4 ROV;
 };
+
+uint ROVColorMask()
+{
+	return ROV.x;
+}
+
+uint ROVZTst()
+{
+	return ROV.y & 3;
+}
+
+uint ROVAtst()
+{
+	return (ROV.y >> 2) & 7;
+}
+
+
+uint ROVAfail()
+{
+	return (ROV.y >> 5) & 7;
+}
+
+uint ROVDatm()
+{
+	return (ROV.y >> 8) & 3;
+}
+
+uint ROVZwe()
+{
+	return (ROV.y >> 10) & 1;
+}
+
+uint ROVBlendA()
+{
+	return ROV.z & 3;
+}
+
+uint ROVBlendB()
+{
+	return (ROV.z >> 2) & 3;
+}
+
+uint ROVBlendC()
+{
+	return (ROV.z >> 4) & 3;
+}
+
+uint ROVBlendD()
+{
+	return (ROV.z >> 6) & 3;
+}
 
 float4 RtLoad(int2 xy)
 {
@@ -827,27 +879,14 @@ bool atst(float4 C)
 {
 	float a = C.a;
 
-#if PS_ATST == PS_ATST_LEQUAL
+	uint ps_atst = PS_ROV_COLOR ? ROVAtst() : PS_ATST;
 
-	return (a <= AREF);
-
-#elif PS_ATST == PS_ATST_GEQUAL
-
-	return (a >= AREF);
-
-#elif PS_ATST == PS_ATST_EQUAL
-
-	return (abs(a - AREF) <= 0.5f);
-
-#elif PS_ATST == PS_ATST_NOTEQUAL
-
-	return (abs(a - AREF) >= 0.5f);
-
-#else
-
-	return true;
-
-#endif
+	return
+		(ps_atst == PS_ATST_LEQUAL) ? (a <= AREF) :
+		(ps_atst == PS_ATST_GEQUAL) ? (a >= AREF) :
+		(ps_atst == PS_ATST_EQUAL) ? (abs(a - AREF) <= 0.5f) :
+		(ps_atst == PS_ATST_NOTEQUAL) ? (abs(a - AREF) >= 0.5f) :
+		true;
 }
 
 float4 fog(float4 c, float f)
@@ -1023,10 +1062,19 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 		float3 Cd = trunc(RT.rgb * color_multi + 0.1f);
 		float3 Cs = Color.rgb;
 
-		float3 A = (PS_BLEND_A == 0) ? Cs : ((PS_BLEND_A == 1) ? Cd : (float3)0.0f);
-		float3 B = (PS_BLEND_B == 0) ? Cs : ((PS_BLEND_B == 1) ? Cd : (float3)0.0f);
-		float  C = (PS_BLEND_C == 0) ? As : ((PS_BLEND_C == 1) ? Ad : Af);
-		float3 D = (PS_BLEND_D == 0) ? Cs : ((PS_BLEND_D == 1) ? Cd : (float3)0.0f);
+		uint ps_blend_a = PS_ROV_COLOR ? ROVBlendA() : PS_BLEND_A;
+		uint ps_blend_b = PS_ROV_COLOR ? ROVBlendB() : PS_BLEND_B;
+		uint ps_blend_c = PS_ROV_COLOR ? ROVBlendC() : PS_BLEND_C;
+		uint ps_blend_d = PS_ROV_COLOR ? ROVBlendD() : PS_BLEND_D;
+		float3 A = (ps_blend_a == 0) ? Cs : ((ps_blend_a == 1) ? Cd : (float3)0.0f);
+		float3 B = (ps_blend_b == 0) ? Cs : ((ps_blend_b == 1) ? Cd : (float3)0.0f);
+		float  C = (ps_blend_c == 0) ? As : ((ps_blend_c == 1) ? Ad : Af);
+		float3 D = (ps_blend_d == 0) ? Cs : ((ps_blend_d == 1) ? Cd : (float3)0.0f);
+
+#if PS_ROV_COLOR // FIXME: Make PS_ROV_BLEND
+		Color.rgb = trunc(((A - B) * C) + D);
+		return;
+#endif
 
 		// As/Af clamp alpha for Blend mix
 		// We shouldn't clamp blend mix with blend hw 1 as we want alpha higher
@@ -1148,19 +1196,22 @@ void ps_main(PS_INPUT input)
 	cachedDepthValue = DepthTextureRov[input.p.xy];
 #endif
 
-	bool fail_z = false;
-#if PS_DEPTH_FEEDBACK && PS_ENABLE_ZTST
-	#if PS_ZTST == ZTST_GEQUAL
-		fail_z = (input.p.z < DepthLoad(input.p.xy));
-	#elif PS_ZTST == ZTST_GREATER
-		fail_z = (input.p.z <= DepthLoad(input.p.xy));
-	#endif
+	/// Z test
+	bool fail_ztst = false;
+	uint ztst = PS_ENABLE_ZTST_ROV ? ROVZTst() : (PS_ENABLE_ZTST ? PS_ZTST : 0);
 
-	#if !PS_ROV_DEPTH
-		if (fail_z)
-			discard;
-	#endif
+	fail_ztst =
+		(ztst == ZTST_GEQUAL) ?
+		(input.p.z < DepthLoad(input.p.xy)) :
+		(ztst == ZTST_GREATER) ?
+		(input.p.z <= DepthLoad(input.p.xy)) :
+		false;
+
+#if PS_ENABLE_ZTST
+	if (fail_ztst)
+		discard;
 #endif
+	/// End Z test
 
 	float4 C = ps_color(input);
 
@@ -1171,9 +1222,10 @@ void ps_main(PS_INPUT input)
 
 	bool atst_pass = atst(C);
 
-#if PS_AFAIL == AFAIL_KEEP
+#if (PS_ATST != PS_ATST_NONE) && (PS_AFAIL == AFAIL_KEEP)
 	if (!atst_pass)
 		discard;
+	// FIXME: Discard for ROV also
 #endif
 
 	if (PS_SCANMSK & 2)
@@ -1206,8 +1258,7 @@ void ps_main(PS_INPUT input)
 		if (C.a < A_one) C.a += A_one;
 	}
 
-#if PS_DATE >= 5
-
+	/// Destination alpha test
 #if PS_WRITE_RG == 1
 	// Pseudo 16 bits access.
 	float rt_a = RtLoad(input.p.xy).g;
@@ -1215,23 +1266,24 @@ void ps_main(PS_INPUT input)
 	float rt_a = RtLoad(input.p.xy).a;
 #endif
 
-#if (PS_DATE & 3) == 1
-	// DATM == 0: Pixel with alpha equal to 1 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = (254.5f / 255.0f) < rt_a;
-	#else
-		bool bad = (127.5f / 255.0f) < rt_a;
-	#endif
-#elif (PS_DATE & 3) == 2
-	// DATM == 1: Pixel with alpha equal to 0 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = rt_a < (254.5f / 255.0f);
-	#else
-		bool bad = rt_a < (127.5f / 255.0f);
-	#endif
-#endif
+	// FIXME: Make defined for ROV DATE
+	// FIXME: Allow discard for ROV date.
+	
+	uint datm = PS_ROV_COLOR ? ROVDatm() : (PS_DATE & 3);
+	
+	bool fail_date =
+		(datm == 1) ? // DATM == 0: Pixel with alpha equal to 1 will failed
+			((PS_RTA_CORRECTION) ?
+				((254.5f / 255.0f) < rt_a) :
+				((127.5f / 255.0f) < rt_a)) :
+		(datm == 2) ? // DATM == 1: Pixel with alpha equal to 0 will failed
+			((PS_RTA_CORRECTION) ?
+				(rt_a < (254.5f / 255.0f)) :
+				(rt_a < (127.5f / 255.0f))) :
+		false;
 
-	if (bad)
+#if ((PS_DATE >= 5) && !PS_ROV_COLOR) || (PS_ROV_COLOR && !PS_ROV_EARLYDEPTHSTENCIL)
+	if (fail_date)
 		discard;
 #endif
 
@@ -1242,6 +1294,7 @@ void ps_main(PS_INPUT input)
 	if (int(input.primid) > stencil_ceil)
 		discard;
 #endif
+	/// End destination alpha test
 
 	PS_OUTPUT output;
 
@@ -1339,27 +1392,39 @@ void ps_main(PS_INPUT input)
 #if !PS_NO_COLOR1
 	output.c1 = alpha_blend;
 #endif
+#endif // !PS_NO_COLOR
 
-	// Alpha test with feedback
-#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
+	uint rov_afail = ROVAfail();
+
+	// Depth afail with feedback
+#if (PS_ROV_DEPTH && PS_DEPTH_FEEDBACK && PS_ZCLAMP)
+	input.p.z =
+		((rov_afail == AFAIL_KEEP) || (rov_afail == AFAIL_FB_ONLY) || (rov_afail == AFAIL_RGB_ONLY)) ?
+		(atst_pass ? input.p.z : DepthLoad(input.p.xy)) :
+		input.p.z;
+#elif ((PS_AFAIL == AFAIL_FB_ONLY) || (PS_AFAIL == AFAIL_RGB_ONLY)) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
 	if (!atst_pass)
 		input.p.z = DepthLoad(input.p.xy);
+#endif
+
+	// Color afail with feedback
+#if (PS_ROV_COLOR && PS_COLOR_FEEDBACK)
+	output.c0.rgb =
+		((rov_afail == AFAIL_KEEP) || (rov_afail == AFAIL_ZB_ONLY)) ?
+		(atst_pass ? output.c0.rgb : RtLoad(input.p.xy).rgb) :
+		output.c0.rgb;
+	output.c0.a =
+		((rov_afail == AFAIL_KEEP) || (rov_afail == AFAIL_ZB_ONLY) || (rov_afail == AFAIL_RGB_ONLY)) ?
+		(atst_pass ? output.c0.a : RtLoad(input.p.xy).a) :
+		output.c0.a;
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
 		output.c0 = RtLoad(input.p.xy);
-#elif (PS_AFAIL == AFAIL_RGB_ONLY)
+#elif (PS_AFAIL == AFAIL_RGB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
-	{
-	#if PS_COLOR_FEEDBACK
 		output.c0.a = RtLoad(input.p.xy).a;
-	#endif
-	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
-		input.p.z = DepthLoad(input.p.xy);
-	#endif
-	}
 #endif
 
-#endif // !PS_NO_COLOR
 
 #endif // PS_DATE != 1/2
 
@@ -1369,19 +1434,20 @@ void ps_main(PS_INPUT input)
 
 #if PS_RETURN_COLOR_ROV
 	float4 rt_col = RtLoad(input.p.xy);
+	uint rov_colormask = ROVColorMask();
 
-	output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
-	output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
-	output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
-	output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
+	output.c0.r = bool(rov_colormask & 0xFF) ? output.c0.r : rt_col.r;
+	output.c0.g = bool(rov_colormask & 0xFF00) ? output.c0.g : rt_col.g;
+	output.c0.b = bool(rov_colormask & 0xFF0000) ? output.c0.b : rt_col.b;
+	output.c0.a = bool(rov_colormask & 0xFF000000) ? output.c0.a : rt_col.a;
 
-	output.c0 = fail_z ? rt_col : output.c0;
+	output.c0 = (fail_ztst || fail_date) ? rt_col : output.c0;
 
 	RtWrite(input.p.xy, output.c0);
 #endif
 
 #if PS_RETURN_DEPTH_ROV
-	output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
+	output.depth = (fail_ztst || fail_date || !ROVZwe()) ? DepthLoad(input.p.xy) : output.depth;
 	DepthWrite(input.p.xy, output.depth);
 #endif
 

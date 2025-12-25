@@ -5836,7 +5836,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
 	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt)) ||
-		(features.rov && m_conf.rt->IsTargetModeUAV());
+		(features.rov && (m_conf.rt->IsTargetModeUAV() || m_conf.ds && m_conf.ds->IsTargetModeUAV()));
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -6399,9 +6399,11 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
-void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
+void GSRendererHW::SetupROV()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
+
+	m_conf.cb_ps.ROV.v = GSVector4i(0);
 
 	if (!features.rov)
 		return;
@@ -6450,22 +6452,30 @@ void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, 
 	{
 		GL_INS("HW: ROV used for depth");
 
-		if (m_conf.depth.ztst != ZTST_ALWAYS)
+		if (m_conf.depth.IsZTestEnabled())
 		{
-			GL_INS("HW: Replace HW with SW depth test");
-			m_conf.ps.ztst = m_conf.depth.ztst;
+			GL_INS("HW: Replace HW Z test with ROV Z test");
 			m_conf.ps.depth_feedback = true;
-
+			m_conf.cb_ps.ROV.Test.ztst = m_conf.depth.ztst & 3;
 		}
 
-		if (m_conf.depth.zwe)
+		if (m_conf.ps.IsZTestEnabled())
 		{
-			GL_INS("HW: Replace HW with SW depth write");
-			GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf); // Z clamp is a proxy for SW Z write.
+			GL_INS("HW: Replace SW Z test with ROV Z test");
+			m_conf.ps.depth_feedback = true;
+			m_conf.cb_ps.ROV.Test.ztst = m_conf.ps.ztst & 3;
 		}
+
+		// Determine Z write
+		m_conf.cb_ps.ROV.Test.zwe = m_conf.depth.zwe || m_conf.ps.zclamp;
+		GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf); // Get the MaxDepth constant
+		m_conf.ps.zclamp = true; // Always enable Z clamp for Z write
 		
 		m_conf.ps.rov_depth = true;
 		m_conf.ps.depth_feedback |= feedback_depth;
+		
+		// Disable HW and regular SW Z test
+		m_conf.ps.ztst = 0;
 		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
 	}
 
@@ -6487,16 +6497,63 @@ void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, 
 		const bool use_mask = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
 		m_conf.ps.color_feedback |= use_mask;
 
-		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
-	}
+		u32 mask =
+			(m_conf.colormask.wr ? 0xFF : 0) | (m_conf.colormask.wg ? 0xFF00 : 0) |
+			(m_conf.colormask.wb ? 0xFF0000 : 0) | (m_conf.colormask.wa ? 0xFF000000 : 0);
 
-	if ((use_rov_color || use_rov_depth) && DATE)
-	{
-		// Always use DATE barrier with ROVs.
-		DATE_one = false; // Stencil won't work for ROV write
-		DATE_PRIMID = false;
-		DATE_BARRIER = true;
-		GL_INS("HW: Using DATE BARRIER with ROV");
+		if (m_conf.ps.fbmask)
+		{
+			// TODO
+			//m_conf.cb_ps.FbMask &= ~mask;
+		}
+
+		m_conf.cb_ps.ROV.ColorMask = mask;
+
+		// Blend setup
+		if (m_conf.ps.IsSWBlend())
+		{
+			// Setup ROV blend
+			m_conf.cb_ps.ROV.Blend.blend_a = m_conf.ps.blend_a & 3;
+			m_conf.cb_ps.ROV.Blend.blend_b = m_conf.ps.blend_b & 3;
+			m_conf.cb_ps.ROV.Blend.blend_c = m_conf.ps.blend_c & 3;
+			m_conf.cb_ps.ROV.Blend.blend_d = m_conf.ps.blend_d & 3;
+			
+			// Disable usual SW blend
+			m_conf.ps.blend_a = 0;
+			m_conf.ps.blend_b = 0;
+			m_conf.ps.blend_c = 0;
+			m_conf.ps.blend_d = 0;
+		}
+
+		// Alpha test setup
+		if (m_conf.ps.atst)
+		{
+			GL_INS("HW: Using alpha test with ROV");
+
+			m_conf.cb_ps.ROV.Test.atst = m_conf.ps.atst & 7;
+			m_conf.cb_ps.ROV.Test.afail = m_conf.ps.afail & 7;
+			m_conf.ps.atst = 0;
+			m_conf.ps.afail = 0;
+		}
+
+		// Destination alpha test setup
+		if (m_conf.ps.date)
+		{
+			GL_INS("HW: Using destination alpha test with ROV");
+
+			// Enable ROV DATE
+			m_conf.cb_ps.ROV.Test.datm = m_conf.ps.date & 3;
+
+			// Disable usual DATE
+			m_conf.ps.date = 0;
+			m_conf.depth.date = 0;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
+		}
+
+		if (s_n == 1598)
+		{
+			m_conf.cb_ps.ROV.Unused = 1;
+		}
 	}
 }
 
@@ -8185,9 +8242,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
-	// Do ROV setup here since it might change DATE.
-	SetupROV(DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
-
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
 	if (!rt || m_conf.colormask.wrgba == 0)
@@ -8382,6 +8436,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.rta_correction = rt->m_rt_alpha_scale;
 	}
 
+	SetupROV();
+
 	if (features.framebuffer_fetch)
 	{
 		// Intel GPUs on Metal lock up if you try to use DSB and framebuffer fetch at once
@@ -8474,7 +8530,15 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
 	}
-	
+
+	/*if (s_n <= 5000)
+	{
+		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
+
+		printf("%d: rov color: %d, feedback color: %d, rov depth: %d, feedback depth: %d\n",
+			s_n, m_conf.ps.rov_color, m_conf.ps.color_feedback, m_conf.ps.rov_depth, m_conf.ps.depth_feedback);
+	}*/
+
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else
