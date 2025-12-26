@@ -832,7 +832,7 @@ struct alignas(16) GSHWDrawConfig
 	static void DumpBlendMultipass(std::ostream& out, const BlendMultiPass& bmp, const std::string& indent = "");
 	static void DumpConfig(std::ostream& out, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
-	static void DumpConfig(std::string& fn, const GSHWDrawConfig& conf,
+	static void DumpConfig(const std::string& fn, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true);
 };
 

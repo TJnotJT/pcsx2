@@ -5760,6 +5760,11 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		m_conf.ps.blend_d = 2;
 	}
 
+	m_optimized_blend.A = m_conf.ps.blend_a;
+	m_optimized_blend.B = m_conf.ps.blend_b;
+	m_optimized_blend.C = m_conf.ps.blend_c;
+	m_optimized_blend.D = m_conf.ps.blend_d;
+
 	// TODO: blend_ad_alpha_masked, as well as other blend cases can be optimized on dx11/dx12/gl to use
 	// blend multipass more which might be faster, vk likely won't benefit as barriers are already fast.
 
@@ -6399,7 +6404,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
-void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, bool& DATE_BARRIER)
+void GSRendererHW::SetupROV()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -6479,24 +6484,34 @@ void GSRendererHW::SetupROV(const bool DATE, bool& DATE_one, bool& DATE_PRIMID, 
 	if (use_rov_color)
 	{
 		GL_INS("HW: ROV used for color");
-		m_conf.ps.rov_color = true;
 
+		m_conf.ps.rov_color = true;
 		m_conf.ps.color_feedback |= feedback_color;
 
 		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
 		const bool use_mask = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
-		m_conf.ps.color_feedback |= use_mask;
+		if (use_mask)
+		{
+			// Write mask disallows certain channels for the format.
+			m_conf.ps.color_feedback = true;
+			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+		}
+		else
+		{
+			m_conf.cb_ps.ColorMask = GSVector4i(1); // Default value to try to prevent unnecessary uploads.
+		}
 
-		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
-	}
-
-	if ((use_rov_color || use_rov_depth) && DATE)
-	{
-		// Always use DATE barrier with ROVs.
-		DATE_one = false; // Stencil won't work for ROV write
-		DATE_PRIMID = false;
-		DATE_BARRIER = true;
-		GL_INS("HW: Using DATE BARRIER with ROV");
+		// Destination alpha test setup
+		if (m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off)
+		{
+			GL_INS("HW: ROV using destination alpha test Full");
+			m_conf.ps.color_feedback = true;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
+			m_conf.depth.date = false; // Don't use stencil with ROV
+			m_conf.depth.date_one = false; // Don't use stencil with ROV
+			m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATE
+			m_conf.datm = static_cast<SetDATM>(0); // Not needed
+		}
 	}
 }
 
@@ -8185,9 +8200,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	AlphaTestMethod alpha_test_method =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
-	// Do ROV setup here since it might change DATE.
-	SetupROV(DATE, DATE_one, DATE_PRIMID, DATE_BARRIER);
-
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
 	if (!rt || m_conf.colormask.wrgba == 0)
@@ -8343,6 +8355,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	{
 		m_conf.depth.date = 1;
 	}
+
+	SetupROV();
 
 	m_conf.ps.fba = m_context->FBA.FBA;
 
