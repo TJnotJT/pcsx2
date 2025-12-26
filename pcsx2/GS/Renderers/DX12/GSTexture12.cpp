@@ -882,12 +882,23 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 
 	CreateDepthUAV();
 
-	IssueUAVBarrierInternal(device->GetCommandList());
 	SetUseFenceCounter(device->GetCurrentFenceValue());
+
+	if (GetState() == State::Cleared)
+	{
+		// Clears will be handled when the resource is actually used.
+		GL_INS("Resource in Cleared state; early exit.");
+		return;
+	}
 
 	if (uav_to_ds)
 	{
 		// UAV to DS
+		
+		// Using the depth UAV like this bypasses its status as UAV so we must
+		// issue UAV barrier explicitly here.
+		IssueUAVBarrierInternal(device->GetCommandList());
+
 		m_uav_depth->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		TransitionToState(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
