@@ -70,6 +70,7 @@ enum class ShaderInterlace
 	Count
 };
 
+
 static inline bool HasVariableWriteMask(ShaderConvert shader)
 {
 	switch (shader)
@@ -745,6 +746,29 @@ struct alignas(16) GSHWDrawConfig
 		// Blending has no effect if RGB is masked.
 		bool IsEffective(ColorMaskSelector colormask) const;
 	};
+
+	enum class AlphaTestMode
+	{
+		NONE,
+		KEEP,
+		FEEDBACK,
+		SIMPLE_FB_ONLY,
+		SIMPLE_ZB_ONLY,
+		SIMPLE_RGB_ONLY,
+		PASS_THEN_FAIL,
+		NEVER,
+		ABORT_DRAW
+	};
+
+	static bool HasAlphaTestSecondPass(AlphaTestMode method)
+	{
+		return method == AlphaTestMode::SIMPLE_FB_ONLY ||
+			method == AlphaTestMode::SIMPLE_ZB_ONLY ||
+			method == AlphaTestMode::SIMPLE_RGB_ONLY ||
+			method == AlphaTestMode::PASS_THEN_FAIL ||
+			method == AlphaTestMode::NEVER;
+	}
+
 	enum class DestinationAlphaMode : u8
 	{
 		Off,            ///< No destination alpha test
@@ -789,6 +813,8 @@ struct alignas(16) GSHWDrawConfig
 
 	bool require_one_barrier;  ///< Require texture barrier before draw (also used to requst an rt copy if texture barrier isn't supported)
 	bool require_full_barrier; ///< Require texture barrier between all prims
+
+	AlphaTestMode alpha_test;
 
 	DestinationAlphaMode destination_alpha;
 	SetDATM datm : 2;

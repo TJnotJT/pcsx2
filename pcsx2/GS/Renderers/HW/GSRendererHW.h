@@ -106,28 +106,6 @@ private:
 		SHUFFLE_READWRITE,
 	};
 
-	enum class AlphaTestMethod
-	{
-		NONE,
-		KEEP,
-		FEEDBACK,
-		SIMPLE_FB_ONLY,
-		SIMPLE_ZB_ONLY,
-		SIMPLE_RGB_ONLY,
-		PASS_THEN_FAIL,
-		NEVER,
-		ABORT_DRAW
-	};
-
-	static bool AlphaTestMethodSecondPass(AlphaTestMethod method)
-	{
-		return method == AlphaTestMethod::SIMPLE_FB_ONLY ||
-		       method == AlphaTestMethod::SIMPLE_ZB_ONLY ||
-		       method == AlphaTestMethod::SIMPLE_RGB_ONLY ||
-		       method == AlphaTestMethod::PASS_THEN_FAIL ||
-		       method == AlphaTestMethod::NEVER;
-	}
-
 	bool HasEEUpload(GSVector4i r);
 	CLUTDrawTestResult PossibleCLUTDraw();
 	CLUTDrawTestResult PossibleCLUTDrawAggressive();
@@ -160,7 +138,7 @@ private:
 	static void GetZClampConfigVSPS(const HWCachedCtx& cached_ctx, const GSVertexTrace& vt, const bool force_enable_ps, GSHWDrawConfig& config);
 	void EmulateZbuffer(const GSTextureCache::Target* ds);
 	static void GetAlphaTestConfigPS(const u32 atst, const u8 aref, const bool invert_test, u32& ps_atst_out, float& aref_out);
-	static AlphaTestMethod GetAlphaTestConfig(
+	static GSHWDrawConfig::AlphaTestMode GetAlphaTestConfig(
 		// Inputs
 		const GSVertexTrace& vt,
 		const PRIM_OVERLAP prim_overlap,
@@ -169,9 +147,9 @@ private:
 		// In/outputs
 		HWCachedCtx& cached_ctx,
 		GSHWDrawConfig& config);
-	static AlphaTestMethod GetAlphaTestSecondPassConfig(
+	static GSHWDrawConfig::AlphaTestMode GetAlphaTestSecondPassConfig(
 		// Inputs
-		const AlphaTestMethod method,
+		const GSHWDrawConfig::AlphaTestMode mode,
 		const HWCachedCtx& cached_ctx,
 		const GSDevice::FeatureSupport& features,
 		// In/outputs

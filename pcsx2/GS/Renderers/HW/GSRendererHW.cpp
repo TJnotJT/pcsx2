@@ -6688,8 +6688,10 @@ void GSRendererHW::SetupROV()
 		// Alpha test setup
 		if (ate)
 		{
-			GL_INS("ROV: Using SW alpha test%s", m_conf.alpha_second_pass.enable ?
+			GL_INS("ROV: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
 				" and disabling alpha second pass" : "");
+
+			m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::FEEDBACK;
 
 			u32 ps_atst;
 			float ps_aref;
@@ -7553,7 +7555,7 @@ void GSRendererHW::GetAlphaTestConfigPS(const u32 atst, const u8 aref, const boo
 	}
 }
 
-GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
+GSHWDrawConfig::AlphaTestMode GSRendererHW::GetAlphaTestConfig(
 	// Inputs
 	const GSVertexTrace& vt,
 	const PRIM_OVERLAP prim_overlap,
@@ -7566,7 +7568,7 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 	if (!cached_ctx.TEST.ATE)
 	{
 		GL_INS("HW: Alpha test disabled");
-		return AlphaTestMethod::NONE;
+		return GSHWDrawConfig::AlphaTestMode::NONE;
 	}
 
 	GL_PUSH("HW: Alpha test config (1)");
@@ -7611,13 +7613,13 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 	{
 		GL_INS("Alpha test: ALWAYS (disable)");
 		cached_ctx.TEST.ATE = false;
-		return AlphaTestMethod::NONE;
+		return GSHWDrawConfig::AlphaTestMode::NONE;
 	}
 
 	if (atst == ATST_NEVER)
 	{
 		GL_INS("Alpha test: NEVER single pass (accurate)");
-		return AlphaTestMethod::NEVER;
+		return GSHWDrawConfig::AlphaTestMode::NEVER;
 	}
 
 	if (afail == AFAIL_KEEP)
@@ -7628,7 +7630,7 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 		config.ps.atst = ps_atst;
 		config.cb_ps.FogColor_AREF.a = ps_aref;
 		config.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
-		return AlphaTestMethod::KEEP;
+		return GSHWDrawConfig::AlphaTestMode::KEEP;
 	}
 
 	// If true, the result of the Z test and output Z does NOT depend on overlapping Z writes to the same pixel.
@@ -7707,35 +7709,35 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 			}
 		}
 
-		return AlphaTestMethod::FEEDBACK;
+		return GSHWDrawConfig::AlphaTestMode::FEEDBACK;
 	}
 	else if (simple_fb_only)
 	{
-		return AlphaTestMethod::SIMPLE_FB_ONLY;
+		return GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY;
 	}
 	else if (simple_zb_only)
 	{
-		return AlphaTestMethod::SIMPLE_ZB_ONLY;
+		return GSHWDrawConfig::AlphaTestMode::SIMPLE_ZB_ONLY;
 	}
 	else if (simple_rgb_only)
 	{
-		return AlphaTestMethod::SIMPLE_RGB_ONLY;
+		return GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY;
 	}
 	else
 	{
-		return AlphaTestMethod::PASS_THEN_FAIL;
+		return GSHWDrawConfig::AlphaTestMode::PASS_THEN_FAIL;
 	}
 }
 
-GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestSecondPassConfig(
-	const AlphaTestMethod method,
+GSHWDrawConfig::AlphaTestMode GSRendererHW::GetAlphaTestSecondPassConfig(
+	const GSHWDrawConfig::AlphaTestMode method,
 	const HWCachedCtx& cached_ctx,
 	const GSDevice::FeatureSupport& features,
 	// In/outputs
 	GSHWDrawConfig& config,
 	bool& DATE, bool& DATE_BARRIER, bool& DATE_one, bool& DATE_PRIMID)
 {
-	if (!AlphaTestMethodSecondPass(method))
+	if (!GSHWDrawConfig::HasAlphaTestSecondPass(method))
 		return method;
 
 	GL_PUSH("HW: Alpha test config (2)");
@@ -7752,26 +7754,26 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestSecondPassConfig(
 	std::memcpy(&config.alpha_second_pass.colormask, &config.colormask, sizeof(config.colormask));
 	std::memcpy(&config.alpha_second_pass.depth, &config.depth, sizeof(config.depth));
 
-	if (method == AlphaTestMethod::SIMPLE_FB_ONLY || method == AlphaTestMethod::SIMPLE_RGB_ONLY ||
-		method == AlphaTestMethod::SIMPLE_ZB_ONLY)
+	if (method == GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY || method == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY ||
+		method == GSHWDrawConfig::AlphaTestMode::SIMPLE_ZB_ONLY)
 	{
 		// Two pass methods to process RGBA then Z, or Z then RGBA. Always accurate.
 
-		if (method == AlphaTestMethod::SIMPLE_FB_ONLY)
+		if (method == GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY)
 		{
 			// First pass is to update color; second pass is to update Z.
 			GL_INS("Alpha test: RGBA then Z (accurate)");
 			config.depth.zwe = false; // Disable Z write on first pass
 			config.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
 		}
-		else if (method == AlphaTestMethod::SIMPLE_ZB_ONLY)
+		else if (method == GSHWDrawConfig::AlphaTestMode::SIMPLE_ZB_ONLY)
 		{
 			// First pass is to update Z; second pass is to update color.
 			GL_INS("Alpha test: Z then RGBA (accurate)");
 			config.colormask.wrgba = 0; // Disable color on first pass
 			config.alpha_second_pass.depth.zwe = false; // Disable Z write on second pass
 		}
-		else if (method == AlphaTestMethod::SIMPLE_RGB_ONLY)
+		else if (method == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
 		{
 			// First pass is to update color; second pass is to update Z;
 			GL_INS("Alpha test: RGBA (A with dual-source blend), then Z (accurate)");
@@ -7864,7 +7866,7 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestSecondPassConfig(
 		}
 	}
 
-	if (method != AlphaTestMethod::NEVER)
+	if (method != GSHWDrawConfig::AlphaTestMode::NEVER)
 	{
 		pxAssertRel(config.colormask.wrgba || config.depth.zwe,
 			"Alpha first pass has no color/depth write.");
@@ -7902,7 +7904,7 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestSecondPassConfig(
 		config.alpha_second_pass.enable = false;
 	}
 
-	return !(config.colormask.wrgba || config.depth.zwe) ? AlphaTestMethod::ABORT_DRAW : method;
+	return !(config.colormask.wrgba || config.depth.zwe) ? GSHWDrawConfig::AlphaTestMode::ABORT_DRAW : method;
 }
 
 void GSRendererHW::CleanupDraw(bool invalidate_temp_src)
@@ -8388,7 +8390,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		rt->m_alpha_min = rt_new_alpha_min;
 	}
 
-	AlphaTestMethod alpha_test_method =
+	m_conf.alpha_test =
 		GetAlphaTestConfig(m_vt, m_prim_overlap, m_context->ALPHA, features, m_cached_ctx, m_conf);
 
 	// No point outputting colours if we're just writing depth.
@@ -8671,10 +8673,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
 
-	alpha_test_method = GetAlphaTestSecondPassConfig(alpha_test_method, m_cached_ctx, features,
+	m_conf.alpha_test = GetAlphaTestSecondPassConfig(m_conf.alpha_test, m_cached_ctx, features,
 		m_conf, DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
 
-	if (alpha_test_method == AlphaTestMethod::ABORT_DRAW)
+	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::ABORT_DRAW)
 	{
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
