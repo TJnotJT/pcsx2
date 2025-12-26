@@ -124,6 +124,7 @@ private:
 	bool EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
 	void EmulateBlending(int rt_alpha_min, int rt_alpha_max, const bool DATE, bool& DATE_PRIMID, bool& DATE_BARRIER, GSTextureCache::Target* rt,
 		bool can_scale_rt_alpha, bool& new_rt_alpha_scale);
+	void SetupROV();
 	void CleanupDraw(bool invalidate_temp_src);
 
 	void EmulateTextureSampler(const GSTextureCache::Target* rt, const GSTextureCache::Target* ds,
@@ -199,6 +200,19 @@ private:
 	float m_userhacks_tcoffset_y = 0.0f;
 
 	GSVector2i m_lod = {}; // Min & Max level of detail
+
+	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
+
+	// Track history of feedback use in last n draws as a heuristic
+	// to descide when to stick with or abandon ROV draws.
+	struct
+	{
+		std::vector<bool> color;
+		std::vector<bool> depth;
+		u32 index = 0;
+		u32 color_count = 0; // Color feedbacks in last n draws.
+		u32 depth_count = 0; // Depth feedbacks in last n draws.
+	} m_rov_feedback_history;
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
