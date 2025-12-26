@@ -5840,8 +5840,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 2: One barrier is already enabled, prims don't overlap or is a channel shuffle so let's use sw blend instead.
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
-	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt)) ||
-		(features.rov && m_conf.rt->IsTargetModeUAV());
+	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt));
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -6417,25 +6416,153 @@ void GSRendererHW::SetupROV()
 		return;
 	}
 
-	if (m_conf.blend.enable)
+	const bool color_write = m_conf.rt != nullptr && m_conf.colormask.wrgba != 0;
+	const bool depth_write = m_conf.ds != nullptr && m_cached_ctx.DepthWrite();
+
+	const u32 ate = m_cached_ctx.TEST.ATE;
+	const u32 atst = m_cached_ctx.TEST.ATST;
+	const u32 afail = m_cached_ctx.TEST.AFAIL;
+
+	const bool afail_needs_rt = ate && ((afail == AFAIL_ZB_ONLY) || (afail == AFAIL_RGB_ONLY));
+	const bool afail_needs_depth = ate && ((afail == AFAIL_FB_ONLY) || (afail == AFAIL_RGB_ONLY));
+
+	const bool blend = m_conf.blend.enable || m_conf.ps.IsSWBlending();
+	const bool blend_needs_rt = blend &&
+		(m_optimized_blend.A == 1 || m_optimized_blend.B == 1 ||
+		m_optimized_blend.C == 1 || m_optimized_blend.D == 1);
+
+	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
+
+	// FIXME: Is is ok to check m_conf.tex == m_conf.rt or better to use tex_is_fb??
+	bool feedback_color = 
+		color_write &&
+		(m_conf.require_one_barrier || m_conf.require_full_barrier ||
+			(m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
+			afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
+	bool feedback_depth = depth_write &&
+		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
+			afail_needs_depth);
+
+	//printf("ROV: %d (pre): feedback color: %d, feedback depth: %d\n", s_n, feedback_color, feedback_depth);
+
+	// Heuristic to determine ROV usage: check the fraction of previous
+	// draws that required feedback or some kind for full accuracy.
+	float fraction_color_feedback = 0.0f;
+	float fraction_depth_feedback = 0.0f;
 	{
-		GL_INS("HW: ROV disabled because HW blend enabled");
-		return;
+		std::vector<bool>& color_history = m_rov_feedback_history.color;
+		std::vector<bool>& depth_history = m_rov_feedback_history.depth;
+		u32& index = m_rov_feedback_history.index;
+		u32& color_count = m_rov_feedback_history.color_count;
+		u32& depth_count = m_rov_feedback_history.depth_count;
+
+		if (color_history.empty())
+		{
+			color_history.resize(128);
+			depth_history.resize(128);
+			for (u32 i = 0; i < static_cast<u32>(color_history.size()); i++)
+			{
+				color_history[i] = false;
+				depth_history[i] = false;
+			}
+			index = 0;
+			color_count = 0;
+			depth_count = 0;
+		}
+
+		const u32 size = static_cast<u32>(color_history.size());
+
+		color_count -= static_cast<u32>(color_history[index]);
+		color_history[index] = static_cast<u32>(feedback_color);
+		color_count += static_cast<u32>(color_history[index]);
+		
+		depth_count -= static_cast<u32>(depth_history[index]);
+		depth_history[index] = static_cast<u32>(feedback_depth);
+		depth_count += static_cast<u32>(depth_history[index]);
+
+		index = (index + 1) % static_cast<u32>(color_history.size());
+
+		fraction_color_feedback = static_cast<float>(color_count) / static_cast<float>(color_history.size());
+		fraction_depth_feedback = static_cast<float>(depth_count) / static_cast<float>(depth_history.size());
 	}
 
-	bool feedback_color = 
-		m_conf.rt && (m_conf.require_one_barrier || m_conf.require_full_barrier ||
-			(m_conf.tex && m_conf.tex == m_conf.rt));
-	bool feedback_depth = m_conf.ds && m_conf.ps.IsFeedbackLoopDepth();
+	//printf("ROV: %d (pre): feedback color: %f, feedback depth: %f\n", s_n, fraction_color_feedback, fraction_depth_feedback);
 
-	const bool uav_color = m_conf.rt && m_conf.rt->IsTargetModeUAV();
-	const bool uav_depth = m_conf.ds && m_conf.ds->IsTargetModeUAV();
+	// Use asymmetric enable/disable threshold to avoid frequent switch
+	// It's inefficient to switch layouts too frequently. Especially depth, which requires a draw to resolve.
+	constexpr float fraction_enable_rov = 0.2f;
+	constexpr float fraction_disable_rov = 0.05f;
 
-	bool use_rov_depth = features.rov && (feedback_depth || uav_depth);
-	bool use_rov_color = features.rov && (feedback_color || uav_color);
+	bool use_rov_depth = false;
+	bool use_rov_color = false;
+
+	if (m_conf.rt)
+	{
+		if (m_conf.rt->IsTargetModeUAV())
+		{
+			if (fraction_color_feedback >= fraction_disable_rov)
+			{
+				GL_INS("ROV: Color feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				use_rov_color = true;
+			}
+			else
+			{
+				GL_INS("ROV: Color feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				use_rov_color = false;
+			}
+		}
+		else
+		{
+			if (fraction_color_feedback >= fraction_enable_rov)
+			{
+				GL_INS("ROV: Color feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				use_rov_color = true;
+			}
+			else
+			{
+				GL_INS("ROV: Color feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				use_rov_color = false;
+			}
+		}
+	}
+
+	if (m_conf.ds)
+	{
+		if (m_conf.ds->IsTargetModeUAV())
+		{
+			if (fraction_depth_feedback >= fraction_disable_rov)
+			{
+				GL_INS("ROV: Depth feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				use_rov_depth = true;
+			}
+			else
+			{
+				GL_INS("ROV: Depth feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				use_rov_depth = false;
+			}
+		}
+		else
+		{
+			if (fraction_depth_feedback >= fraction_enable_rov)
+			{
+				GL_INS("ROV: Depth feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				use_rov_depth = true;
+			}
+			else
+			{
+				GL_INS("ROV: Depth feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				use_rov_depth = false;
+			}
+		}
+	}
+
+	use_rov_color = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_color);
+	use_rov_depth = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_depth);
+
+	//printf("ROV: %d (post): rov color: %d, rov depth: %d\n\n", s_n, use_rov_color, use_rov_depth);
 
 	// If depth and color have feedback and one uses ROV, the other must also.
-	// Use currently don't have a way of using barriers in one and ROV in the other.
+	// We currently don't have a way of using barriers in one and ROV in the other.
 	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
 	{
 		use_rov_color = true;
@@ -6459,8 +6586,6 @@ void GSRendererHW::SetupROV()
 		{
 			GL_INS("HW: Replace HW with SW depth test");
 			m_conf.ps.ztst = m_conf.depth.ztst;
-			m_conf.ps.depth_feedback = true;
-
 		}
 
 		if (m_conf.depth.zwe)
@@ -6470,7 +6595,7 @@ void GSRendererHW::SetupROV()
 		}
 		
 		m_conf.ps.rov_depth = true;
-		m_conf.ps.depth_feedback |= feedback_depth;
+		m_conf.ps.depth_feedback = feedback_depth;
 		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
 	}
 
@@ -6486,11 +6611,12 @@ void GSRendererHW::SetupROV()
 		GL_INS("HW: ROV used for color");
 
 		m_conf.ps.rov_color = true;
-		m_conf.ps.color_feedback |= feedback_color;
+		m_conf.ps.color_feedback = feedback_color;
 
+		// ColorMask setup
 		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
-		const bool use_mask = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
-		if (use_mask)
+		const bool colormask_needs_rt = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
+		if (colormask_needs_rt)
 		{
 			// Write mask disallows certain channels for the format.
 			m_conf.ps.color_feedback = true;
@@ -6501,16 +6627,81 @@ void GSRendererHW::SetupROV()
 			m_conf.cb_ps.ColorMask = GSVector4i(1); // Default value to try to prevent unnecessary uploads.
 		}
 
-		// Destination alpha test setup
-		if (m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off)
+		// Blend setup
+		if (blend)
 		{
-			GL_INS("HW: ROV using destination alpha test Full");
-			m_conf.ps.color_feedback = true;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
-			m_conf.depth.date = false; // Don't use stencil with ROV
-			m_conf.depth.date_one = false; // Don't use stencil with ROV
-			m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATE
-			m_conf.datm = static_cast<SetDATM>(0); // Not needed
+			GL_INS("ROV: Using SW blend%s", m_conf.blend.enable ? " and disabling HW" : "");
+			m_conf.ps.blend_a = m_optimized_blend.A;
+			m_conf.ps.blend_b = m_optimized_blend.B;
+			m_conf.ps.blend_c = m_optimized_blend.C;
+			m_conf.ps.blend_d = m_optimized_blend.D;
+
+			// Disable HW or mixed blend or multipass blend
+			m_conf.blend = {};
+			m_conf.ps.blend_hw = 0;
+			m_conf.ps.blend_mix = 0;
+			m_conf.blend_multi_pass = {};
+
+			if (!m_conf.ps.no_color1)
+			{
+				// We should never need dual source with SW blend
+				GL_INS("ROV: Disabling dual source blending");
+				m_conf.ps.no_color1 = true;
+			}
+		}
+
+		// Destination alpha test setup
+		if (date)
+		{
+			GL_INS("ROV: Using destination alpha Full%s",
+				(m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Full) ? " and replace current method" : "");
+
+			if (m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Full)
+			{
+				m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
+				m_conf.depth.date = false; // Don't use stencil with ROV
+				m_conf.depth.date_one = false; // Don't use stencil with ROV
+				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM
+				m_conf.datm = static_cast<SetDATM>(0); // Not needed
+			}
+		}
+
+		// Colclip setup
+		if (m_conf.ps.colclip_hw)
+		{
+			// Remove HW colclip texture if needed
+			GL_INS("ROV: Replacing colclip HW with SW");
+			const bool has_colclip_texture = g_gs_device->GetColorClipTexture() != nullptr;
+			m_conf.ps.colclip_hw = 0;
+			m_conf.ps.colclip = 1;
+			m_conf.colclip_mode = has_colclip_texture ? GSHWDrawConfig::ColClipMode::EarlyResolve : GSHWDrawConfig::ColClipMode::NoModify;
+		}
+
+		// PABE setup
+		const bool PABE = m_draw_env->PABE.PABE && GetAlphaMinMax().min < 128;
+		if (blend && PABE && !m_conf.ps.pabe)
+		{
+			GL_INS("ROV: Enabling PABE");
+			m_conf.ps.pabe = true;
+		}
+
+		// Alpha test setup
+		if (ate)
+		{
+			GL_INS("ROV: Using SW alpha test%s", m_conf.alpha_second_pass.enable ?
+				" and disabling alpha second pass" : "");
+
+			u32 ps_atst;
+			float ps_aref;
+			GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
+			m_conf.ps.atst = ps_atst;
+			m_conf.ps.afail = m_cached_ctx.TEST.AFAIL;
+			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
+			
+			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AFAIL=%.2f", ps_atst, afail, ps_aref);
+
+			if (m_conf.alpha_second_pass.enable)
+				m_conf.alpha_second_pass = {};
 		}
 	}
 }
@@ -7385,7 +7576,7 @@ GSRendererHW::AlphaTestMethod GSRendererHW::GetAlphaTestConfig(
 	float ps_aref;
 
 	u32 atst = cached_ctx.TEST.ATST;
-	u32 afail = cached_ctx.TEST.AFAIL;
+	u32 afail = cached_ctx.TEST.GetAFAIL(cached_ctx.FRAME.PSM);
 	u8 aref = cached_ctx.TEST.AREF;
 	const bool zwe = cached_ctx.DepthWrite();
 

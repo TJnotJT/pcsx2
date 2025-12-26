@@ -460,6 +460,11 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool operator!=(const PSSelector& rhs) const { return (key_lo != rhs.key_lo || key_hi != rhs.key_hi); }
 		__fi bool operator<(const PSSelector& rhs) const { return (key_lo < rhs.key_lo || key_hi < rhs.key_hi); }
 
+		__fi bool IsSWBlending() const
+		{
+			return blend_a || blend_b || blend_d;
+		}
+
 		__fi bool IsFeedbackLoopRT() const
 		{
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;

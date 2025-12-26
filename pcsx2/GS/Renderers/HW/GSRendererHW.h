@@ -240,6 +240,17 @@ private:
 
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
 
+	// Track history of feedback use in last n draws as a heuristic
+	// to descide when to stick with or abandon ROV draws.
+	struct
+	{
+		std::vector<bool> color;
+		std::vector<bool> depth;
+		u32 index = 0;
+		u32 color_count = 0; // Color feedbacks in last n draws.
+		u32 depth_count = 0; // Depth feedbacks in last n draws.
+	} m_rov_feedback_history;
+
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
 
