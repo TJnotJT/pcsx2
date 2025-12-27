@@ -3457,6 +3457,12 @@ void GSDevice12::SetUtilityTexture(GSTexture* dtex, const D3D12DescriptorHandle&
 	if (dtex)
 	{
 		GSTexture12* d12tex = static_cast<GSTexture12*>(dtex);
+		if (d12tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in SetUtilityTexture()");
+			d12tex->SetTargetModeStandard();
+			EndRenderPass();
+		}
 		d12tex->CommitClear();
 		d12tex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		d12tex->SetUseFenceCounter(GetCurrentFenceValue());
