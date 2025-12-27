@@ -4299,12 +4299,15 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			draw_ds->CommitClear();
 		}
 
-		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
-			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
-
 		// UAV clears handled in SendHWDraw().
 		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
 		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
+
+		// Warning: PSSetUnorderedAccess may use StretchRect() to update depth UAV so we must
+		// call OMSetRenderTargets() after to clear any unused RTs. Otherwise the UAV may end up
+		// being bound as both RT and UAV, which is probably undefined behavior.
+		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
+			config.scissor, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
 	}
 	else
 	{
