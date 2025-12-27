@@ -4160,6 +4160,12 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.ds && (config.ds == config.tex || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.rov_depth)
 	{
 		EndRenderPass();
+		if (draw_ds->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in RenderHW() (read-only depth SRV)");
+			draw_ds->SetTargetModeStandard();
+			EndRenderPass();
+		}
 
 		// Transition dsv as read only.
 		draw_ds->TransitionToState(D3D12_RESOURCE_STATE_DEPTH_READ);
