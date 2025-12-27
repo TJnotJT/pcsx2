@@ -7782,7 +7782,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
 	if (!GSHWDrawConfig::HasAlphaTestSecondPass(m_conf.alpha_test))
-		return
+		return;
 
 	GL_PUSH("HW: Alpha test config (2)");
 
