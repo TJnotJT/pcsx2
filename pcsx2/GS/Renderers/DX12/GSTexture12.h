@@ -109,10 +109,6 @@ public:
 
 	virtual void SetState(State state) override
 	{
-		Console.Warning("SET STATE: %d %s %x", GSState::s_n, state == State::Cleared ? "CLEARED" : (state == State::Dirty ? "DIRTY" : "INVALIDATED"),
-			(u64)(this));
-		GL_INS("SET STATE: %s %x", state == State::Cleared ? "CLEARED" : (state == State::Dirty ? "DIRTY" : "INVALIDATED"),
-			(u64)(this));
 		if (IsTargetModeUAV() && state == State::Dirty)
 		{
 			m_uav_dirty = true;
