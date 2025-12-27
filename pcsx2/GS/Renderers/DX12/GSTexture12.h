@@ -28,9 +28,23 @@ public:
 		int width, int height, int levels, DXGI_FORMAT dxgi_format, DXGI_FORMAT srv_format, DXGI_FORMAT rtv_format,
 		DXGI_FORMAT dsv_format, DXGI_FORMAT uav_format, D3D12_RESOURCE_STATES resource_state);
 
-	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const { return m_srv_descriptor; }
+	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return m_uav_depth->m_srv_descriptor;
+		}
+		else
+		{
+			return m_srv_descriptor;
+		}
+	}
 	
-	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const { return m_write_descriptor; }
+	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const
+	{
+		pxAssertRel(!IsTargetModeUAV(), "Trying to access write descriptor in UAV mode");
+		return m_write_descriptor;
+	}
 
 	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
 	{
@@ -44,7 +58,11 @@ public:
 		}
 	}
 
-	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const { return m_fbl_descriptor; }
+	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const
+	{
+		pxAssertRel(!IsTargetModeUAV(), "Trying to access FBL descriptor in UAV mode");
+		return m_fbl_descriptor;
+	}
 
 	__fi D3D12_RESOURCE_STATES GetResourceState() const
 	{
