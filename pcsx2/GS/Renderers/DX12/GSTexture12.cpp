@@ -761,7 +761,6 @@ void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_D
 	pxAssert(IsTargetModeUAV());
 
 	TransitionToState(cmdlist, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	IssueUAVBarrier(cmdlist);
 
 	if (IsDepthStencil())
 	{
@@ -903,7 +902,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 		TransitionToState(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH);
+		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 	}
 	else
 	{
@@ -912,7 +911,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 		TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR);
+		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 	}
 }
 
