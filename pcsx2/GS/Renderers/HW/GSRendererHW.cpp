@@ -6410,9 +6410,11 @@ void GSRendererHW::SetupROV()
 	if (!features.rov)
 		return;
 
+	GL_PUSH("HW: ROV Setup")
+
 	if (features.framebuffer_fetch)
 	{
-		GL_INS("HW: ROV disabled because have FB-fetch");
+		GL_INS("ROV: Disabled because have FB-fetch");
 		return;
 	}
 
@@ -6429,12 +6431,12 @@ void GSRendererHW::SetupROV()
 	const bool blend = m_conf.blend.enable || m_conf.ps.IsSWBlending();
 	const bool blend_needs_rt = blend &&
 		(m_optimized_blend.A == 1 || m_optimized_blend.B == 1 ||
-		m_optimized_blend.C == 1 || m_optimized_blend.D == 1);
+			m_optimized_blend.C == 1 || m_optimized_blend.D == 1);
 
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
 	// FIXME: Is is ok to check m_conf.tex == m_conf.rt or better to use tex_is_fb??
-	bool feedback_color = 
+	bool feedback_color =
 		color_write &&
 		(m_conf.require_one_barrier || m_conf.require_full_barrier ||
 			(m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
@@ -6443,55 +6445,10 @@ void GSRendererHW::SetupROV()
 		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
 			afail_needs_depth);
 
-	//printf("ROV: %d (pre): feedback color: %d, feedback depth: %d\n", s_n, feedback_color, feedback_depth);
-
 	// Heuristic to determine ROV usage: check the fraction of previous
-	// draws that required feedback or some kind for full accuracy.
-	float fraction_color_feedback = 0.0f;
-	float fraction_depth_feedback = 0.0f;
-	{
-		std::vector<bool>& color_history = m_rov_feedback_history.color;
-		std::vector<bool>& depth_history = m_rov_feedback_history.depth;
-		u32& index = m_rov_feedback_history.index;
-		u32& color_count = m_rov_feedback_history.color_count;
-		u32& depth_count = m_rov_feedback_history.depth_count;
-
-		if (color_history.empty())
-		{
-			color_history.resize(128);
-			depth_history.resize(128);
-			for (u32 i = 0; i < static_cast<u32>(color_history.size()); i++)
-			{
-				color_history[i] = false;
-				depth_history[i] = false;
-			}
-			index = 0;
-			color_count = 0;
-			depth_count = 0;
-		}
-
-		const u32 size = static_cast<u32>(color_history.size());
-
-		color_count -= static_cast<u32>(color_history[index]);
-		color_history[index] = static_cast<u32>(feedback_color);
-		color_count += static_cast<u32>(color_history[index]);
-		
-		depth_count -= static_cast<u32>(depth_history[index]);
-		depth_history[index] = static_cast<u32>(feedback_depth);
-		depth_count += static_cast<u32>(depth_history[index]);
-
-		index = (index + 1) % static_cast<u32>(color_history.size());
-
-		fraction_color_feedback = static_cast<float>(color_count) / static_cast<float>(color_history.size());
-		fraction_depth_feedback = static_cast<float>(depth_count) / static_cast<float>(depth_history.size());
-	}
-
-	//printf("ROV: %d (pre): feedback color: %f, feedback depth: %f\n", s_n, fraction_color_feedback, fraction_depth_feedback);
-
-	// Use asymmetric enable/disable threshold to avoid frequent switch
-	// It's inefficient to switch layouts too frequently. Especially depth, which requires a draw to resolve.
-	constexpr float fraction_enable_rov = 0.2f;
-	constexpr float fraction_disable_rov = 0.05f;
+	// draws that required feedback for full accuracy.
+	float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, feedback_color) : 0.0f;
+	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, feedback_depth) : 0.0f;
 
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
@@ -6508,6 +6465,7 @@ void GSRendererHW::SetupROV()
 			else
 			{
 				GL_INS("ROV: Color feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_color = false;
 			}
 		}
@@ -6516,6 +6474,7 @@ void GSRendererHW::SetupROV()
 			if (fraction_color_feedback >= fraction_enable_rov)
 			{
 				GL_INS("ROV: Color feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_color = true;
 			}
 			else
@@ -6556,10 +6515,9 @@ void GSRendererHW::SetupROV()
 		}
 	}
 
-	use_rov_color = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_color);
-	use_rov_depth = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_depth);
-
-	//printf("ROV: %d (post): rov color: %d, rov depth: %d\n\n", s_n, use_rov_color, use_rov_depth);
+	// Old heuristic - keep temporarily for testing
+	/*use_rov_color = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_color);
+	use_rov_depth = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_depth);*/
 
 	// If depth and color have feedback and one uses ROV, the other must also.
 	// We currently don't have a way of using barriers in one and ROV in the other.
@@ -6580,22 +6538,23 @@ void GSRendererHW::SetupROV()
 	// Setup depth ROV first as color ROV will depend on depth feedback.
 	if (use_rov_depth)
 	{
-		GL_INS("HW: ROV used for depth");
+		GL_INS("ROV: Using depth ROV");
 
 		if (m_conf.depth.ztst != ZTST_ALWAYS)
 		{
-			GL_INS("HW: Replace HW with SW depth test");
+			GL_INS("ROV: Replace HW with SW depth test");
 			m_conf.ps.ztst = m_conf.depth.ztst;
+			feedback_depth = true;
 		}
 
 		if (m_conf.depth.zwe)
 		{
-			GL_INS("HW: Replace HW with SW depth write");
-			GetZClampConfigVSPS(m_cached_ctx, m_vt, true, m_conf); // Z clamp is a proxy for SW Z write.
+			GL_INS("ROV: Replace HW with SW depth write");
+			GetZClampConfigVSPS(true); // Z clamp is a proxy for SW Z write.
 		}
 		
 		m_conf.ps.rov_depth = true;
-		m_conf.ps.depth_feedback = feedback_depth;
+		m_conf.ps.depth_feedback |= feedback_depth;
 		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth
 	}
 
@@ -6608,10 +6567,7 @@ void GSRendererHW::SetupROV()
 
 	if (use_rov_color)
 	{
-		GL_INS("HW: ROV used for color");
-
-		m_conf.ps.rov_color = true;
-		m_conf.ps.color_feedback = feedback_color;
+		GL_INS("ROV: Use color ROV");
 
 		// ColorMask setup
 		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
@@ -6619,8 +6575,8 @@ void GSRendererHW::SetupROV()
 		if (colormask_needs_rt)
 		{
 			// Write mask disallows certain channels for the format.
-			m_conf.ps.color_feedback = true;
 			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+			feedback_color = true;
 		}
 		else
 		{
@@ -6705,6 +6661,14 @@ void GSRendererHW::SetupROV()
 			if (m_conf.alpha_second_pass.enable)
 				m_conf.alpha_second_pass = {};
 		}
+
+		m_conf.ps.rov_color = true;
+		m_conf.ps.color_feedback |= feedback_color;
+
+		if (s_n == 3446)
+			m_conf.cb_ps.FogColor_AREF.x = 123;
+		else
+			m_conf.cb_ps.FogColor_AREF.x = 0;
 	}
 }
 
