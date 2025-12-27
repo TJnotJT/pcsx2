@@ -3516,10 +3516,23 @@ void GSDevice12::UnbindTexture(GSTexture12* tex)
 			m_dirty_flags |= DIRTY_FLAG_TFX_TEXTURES;
 		}
 	}
+	for (u32 i = 0; i < NUM_TFX_UAV_TEXTURES; i++)
+	{
+		if (m_tfx_uavs_tex[i] == tex)
+		{
+			m_tfx_uavs_tex[i] = nullptr;
+		}
+		m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
+	}
 	if (m_current_render_target == tex)
 	{
 		EndRenderPass();
 		m_current_render_target = nullptr;
+	}
+	if (m_current_depth_render_target == tex)
+	{
+		EndRenderPass();
+		m_current_depth_render_target = nullptr;
 	}
 	if (m_current_depth_target == tex)
 	{

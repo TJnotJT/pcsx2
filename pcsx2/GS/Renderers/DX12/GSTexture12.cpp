@@ -45,6 +45,13 @@ GSTexture12::~GSTexture12()
 
 void GSTexture12::Destroy(bool defer)
 {
+	if (m_uav_depth)
+	{
+		m_uav_depth->Destroy(defer);
+		m_uav_depth.release();
+	}
+	ResetTargetMode();
+
 	GSDevice12* const dev = GSDevice12::GetInstance();
 	dev->UnbindTexture(this);
 
