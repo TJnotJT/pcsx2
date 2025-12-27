@@ -958,6 +958,17 @@ void GSTexture12::SetTargetMode(TargetMode mode)
 	}
 }
 
+void GSTexture12::ResetTargetMode()
+{
+	if (GetTargetMode() == TargetMode::UAV)
+	{
+		// Forget UAV dirty state but keep the depth UAV copy around in case
+		// it is needed in the future.
+		m_uav_dirty = false;
+	}
+	
+	m_target_mode = IsRenderTargetOrDepthStencil() ? TargetMode::Standard : TargetMode::Standard;
+}
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)
 	: GSDownloadTexture(width, height, format)

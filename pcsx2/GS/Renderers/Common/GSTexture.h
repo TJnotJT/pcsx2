@@ -159,6 +159,7 @@ public:
 	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
 	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
 	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
+	virtual void ResetTargetMode() { pxFailRel("Not implemented."); }
 	
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
@@ -182,7 +183,7 @@ public:
 	void ClearMipmapGenerationFlag() { m_needs_mipmaps_generated = false; }
 
 	// Typical size of a RGBA texture
-	u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
+	virtual u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }

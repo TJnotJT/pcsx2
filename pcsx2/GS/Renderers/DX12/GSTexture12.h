@@ -95,6 +95,13 @@ public:
 		m_state = state;
 	}
 
+	virtual u32 GetMemUsage() const override
+	{
+		u32 mem = GSTexture::GetMemUsage();
+		if (m_uav_depth)
+			return mem += m_uav_depth->GetMemUsage();
+		return mem;
+	}
 	void* GetNativeHandle() const override;
 
 	bool Update(const GSVector4i& r, const void* data, int pitch, int layer = 0) override;
@@ -108,6 +115,7 @@ public:
 #endif
 
 	virtual void SetTargetMode(TargetMode state) override;
+	virtual void ResetTargetMode() override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear(float* color = nullptr);
 	void CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color = nullptr);

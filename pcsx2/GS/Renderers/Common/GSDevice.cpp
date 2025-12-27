@@ -648,6 +648,8 @@ void GSDevice::Recycle(GSTexture* t)
 	if (!t)
 		return;
 
+	t->ResetTargetMode();
+
 	t->SetLastFrameUsed(m_frame);
 
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];
