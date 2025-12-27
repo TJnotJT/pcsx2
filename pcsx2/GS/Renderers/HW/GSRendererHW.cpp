@@ -6421,6 +6421,9 @@ void GSRendererHW::SetupROV()
 	const bool color_write = m_conf.rt != nullptr && m_conf.colormask.wrgba != 0;
 	const bool depth_write = m_conf.ds != nullptr && m_cached_ctx.DepthWrite();
 
+	const u32 colormask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM) & m_conf.colormask.wrgba;
+	const bool colormask_needs_rt = colormask != 0xF;
+
 	const u32 ate = m_cached_ctx.TEST.ATE;
 	const u32 atst = m_cached_ctx.TEST.ATST;
 	const u32 afail = m_cached_ctx.TEST.AFAIL;
@@ -6440,7 +6443,7 @@ void GSRendererHW::SetupROV()
 		color_write &&
 		(m_conf.require_one_barrier || m_conf.require_full_barrier ||
 			(m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
-			afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
+			colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
 	bool feedback_depth = depth_write &&
 		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
 			afail_needs_depth);
@@ -6572,18 +6575,7 @@ void GSRendererHW::SetupROV()
 		GL_INS("ROV: Use color ROV");
 
 		// ColorMask setup
-		const u32 chan_mask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM);
-		const bool colormask_needs_rt = (chan_mask & m_conf.colormask.wrgba) != chan_mask;
-		if (colormask_needs_rt)
-		{
-			// Write mask disallows certain channels for the format.
-			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
-			feedback_color = true;
-		}
-		else
-		{
-			m_conf.cb_ps.ColorMask = GSVector4i(1); // Default value to try to prevent unnecessary uploads.
-		}
+		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
 
 		// Blend setup
 		if (blend)
@@ -6658,7 +6650,7 @@ void GSRendererHW::SetupROV()
 			m_conf.ps.afail = m_cached_ctx.TEST.AFAIL;
 			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
 			
-			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AFAIL=%.2f", ps_atst, afail, ps_aref);
+			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
 
 			if (m_conf.alpha_second_pass.enable)
 				m_conf.alpha_second_pass = {};
@@ -6666,11 +6658,6 @@ void GSRendererHW::SetupROV()
 
 		m_conf.ps.rov_color = true;
 		m_conf.ps.color_feedback |= feedback_color;
-
-		if (s_n == 3446)
-			m_conf.cb_ps.FogColor_AREF.x = 123;
-		else
-			m_conf.cb_ps.FogColor_AREF.x = 0;
 	}
 }
 

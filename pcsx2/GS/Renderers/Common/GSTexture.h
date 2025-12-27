@@ -159,7 +159,7 @@ public:
 	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
 	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
 	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
-	virtual void ResetTargetMode() { pxFailRel("Not implemented."); }
+	virtual void ResetTargetMode() { }
 	
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }

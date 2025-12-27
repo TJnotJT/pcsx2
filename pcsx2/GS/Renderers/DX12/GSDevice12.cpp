@@ -3408,9 +3408,9 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 			if (!dtex->IsTargetModeUAV())
 			{
 				GL_INS("Target mode transition * -> UAV in PSSetUnorderedAccess()");
-				dtex->CommitClear();
 				dtex->SetTargetModeUAV();
 				EndRenderPass(); // We may have used a render pass for depth -> UAV conversion.
+				// Clears will be handled in SendHWDraw().
 			}
 
 			dtex->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -4286,20 +4286,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
 		// Do not use render pass for ROV.
-
+		// Clearing/state change is handled in SendHWDraw().
 		EndRenderPass();
 
-		if (draw_rt && !config.ps.rov_color)
-		{
-			draw_rt->CommitClear(clear_color.v);
-		}
-
-		if (draw_ds && !config.ps.rov_depth)
-		{
-			draw_ds->CommitClear();
-		}
-
-		// UAV clears handled in SendHWDraw().
 		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
 		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
 
@@ -4431,7 +4420,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 	GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth,
-	const bool one_barrier, const bool full_barrier)
+	const bool one_barrier, const bool full_barrier, const float* clear_color)
 {
 	if (BindDrawPipeline(pipe) && !m_features.texture_barrier) [[unlikely]]
 	{
@@ -4441,6 +4430,10 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
+		// Sanity check to make sure we are in the correct mode.
+		pxAssert(!draw_rt || (static_cast<bool>(config.ps.rov_color) == draw_rt->IsTargetModeUAV()));
+		pxAssert(!draw_ds || (static_cast<bool>(config.ps.rov_depth) == draw_ds->IsTargetModeUAV()));
+
 		if (InRenderPass())
 		{
 			Console.Warning("DX12: ROV draw while in a render pass.");
@@ -4454,42 +4447,64 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		if (BindDrawPipeline(pipe))
 		{
+			GL_INS("ROV Pass (Color=%s/%s, D=%s/%s)",
+				draw_rt ? (draw_rt->GetState() == GSTexture::State::Dirty ? "Preserve" :
+					draw_rt->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+						draw_rt->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
+				draw_rt ? (config.ps.rov_color ? "UAV" : "Standard") : "None",
+				draw_ds ? (draw_ds->GetState() == GSTexture::State::Dirty ? "Preserve" :
+					draw_ds->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+						draw_ds->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
+				draw_ds ? (config.ps.rov_depth ? "UAV" : "Standard") : "None");
+
 			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = m_tfx_uav_textures_handle_gpu;
 			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = { gpu_handle_rt.ptr + GetDescriptorAllocator().GetDescriptorIncrementSize() };
 
-			// Do UAV clears here are we need the GPU descriptor handles to be allocated in BindDrawPipeline();
-
-			if (draw_rt && config.ps.rov_color && draw_rt->GetState() == GSTexture::State::Cleared)
+			// Do state updates here as we need the GPU descriptor handles to be allocated in
+			// BindDrawPipeline() for UAV clears.
+			if (draw_rt)
 			{
-				draw_rt->CommitClearUAV(gpu_handle_rt);
+				if (draw_rt->GetState() == GSTexture::State::Cleared)
+				{
+					if (config.ps.rov_color)
+					{
+						draw_rt->CommitClearUAV(gpu_handle_rt, clear_color);
+					}
+					else
+					{
+						draw_rt->CommitClear(clear_color);
+					}
+				}
+				draw_rt->SetState(GSTexture::State::Dirty);
+
+				if (config.ps.rov_color && config.ps.color_feedback)
+				{
+					draw_rt->IssueUAVBarrier();
+				}
 			}
 
-			if (draw_ds && config.ps.rov_depth && draw_ds->GetState() == GSTexture::State::Cleared)
+			if (draw_ds)
 			{
-				draw_ds->CommitClearUAV(gpu_handle_ds);
-			}
+				if (draw_ds->GetState() == GSTexture::State::Cleared)
+				{
+					if (config.ps.rov_depth)
+					{
+						draw_ds->CommitClearUAV(gpu_handle_ds);
+					}
+					else
+					{
+						draw_ds->CommitClear();
+					}
+				}
+				draw_ds->SetState(GSTexture::State::Dirty);
 
-			if (draw_rt && config.ps.rov_color && config.ps.color_feedback)
-			{
-				draw_rt->IssueUAVBarrier();
-			}
-
-			if (draw_ds && config.ps.rov_depth && config.ps.depth_feedback)
-			{
-				draw_ds->IssueUAVBarrier();
+				if (config.ps.rov_depth && config.ps.depth_feedback)
+				{
+					draw_ds->IssueUAVBarrier();
+				}
 			}
 
 			DrawIndexedPrimitive();
-
-			if (draw_rt && config.ps.rov_color)
-			{
-				draw_rt->SetUAVDirty();
-			}
-
-			if (draw_ds && config.ps.rov_depth)
-			{
-				draw_ds->SetUAVDirty();
-			}
 		}
 
 		return;

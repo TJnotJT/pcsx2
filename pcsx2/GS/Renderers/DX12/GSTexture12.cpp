@@ -736,7 +736,7 @@ void GSTexture12::TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlis
 	cmdlist->ResourceBarrier(1, &barrier);
 }
 
-void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, float* color)
+void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, const float* color)
 {
 	if (m_state != GSTexture::State::Cleared)
 		return;
@@ -746,7 +746,7 @@ void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, float* 
 	CommitClearUAV(GSDevice12::GetInstance()->GetCommandList(), gpu_handle, color);
 }
 
-void GSTexture12::CommitClear(float* color)
+void GSTexture12::CommitClear(const float* color)
 {
 	if (m_state != GSTexture::State::Cleared)
 		return;
@@ -756,7 +756,7 @@ void GSTexture12::CommitClear(float* color)
 	CommitClear(GSDevice12::GetInstance()->GetCommandList(), color);
 }
 
-void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, float* color)
+void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, const float* color)
 {
 	pxAssert(IsTargetModeUAV());
 
@@ -777,7 +777,7 @@ void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_D
 	SetState(GSTexture::State::Dirty);
 }
 
-void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color)
+void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color)
 {
 	if (IsTargetModeUAV())
 	{
@@ -967,7 +967,7 @@ void GSTexture12::ResetTargetMode()
 		m_uav_dirty = false;
 	}
 	
-	m_target_mode = IsRenderTargetOrDepthStencil() ? TargetMode::Standard : TargetMode::Standard;
+	m_target_mode = IsRenderTargetOrDepthStencil() ? TargetMode::Standard : TargetMode::Invalid;
 }
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)

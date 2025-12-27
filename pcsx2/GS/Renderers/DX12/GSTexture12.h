@@ -4,9 +4,12 @@
 #pragma once
 
 #include "GS/GS.h"
+#include "GS/GSState.h"
+#include "GS/GSGL.h" // FIXME: Remove after debugging!
 #include "GS/Renderers/Common/GSTexture.h"
 #include "GS/Renderers/DX12/D3D12DescriptorHeapManager.h"
 
+#include "common/Console.h"
 #include "common/RedtapeWilCom.h"
 
 #include <limits>
@@ -106,6 +109,10 @@ public:
 
 	virtual void SetState(State state) override
 	{
+		Console.Warning("SET STATE: %d %s %x", GSState::s_n, state == State::Cleared ? "CLEARED" : (state == State::Dirty ? "DIRTY" : "INVALIDATED"),
+			(u64)(this));
+		GL_INS("SET STATE: %s %x", state == State::Cleared ? "CLEARED" : (state == State::Dirty ? "DIRTY" : "INVALIDATED"),
+			(u64)(this));
 		if (IsTargetModeUAV() && state == State::Dirty)
 		{
 			m_uav_dirty = true;
@@ -135,10 +142,11 @@ public:
 	virtual void SetTargetMode(TargetMode state) override;
 	virtual void ResetTargetMode() override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
-	void CommitClear(float* color = nullptr);
-	void CommitClear(ID3D12GraphicsCommandList* cmdlist, float* color = nullptr);
-	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v, float* color = nullptr);
-	void CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, float* color = nullptr);
+	void CommitClear(const float* color = nullptr);
+	void CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color = nullptr);
+	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v, const float* color = nullptr);
+	void CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle,
+		const float* color = nullptr);
 
 	void Destroy(bool defer = true);
 
