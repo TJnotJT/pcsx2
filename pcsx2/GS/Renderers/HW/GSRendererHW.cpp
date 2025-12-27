@@ -6410,7 +6410,7 @@ void GSRendererHW::SetupROV()
 	if (!features.rov)
 		return;
 
-	GL_PUSH("HW: ROV Setup")
+	GL_PUSH("HW: ROV Setup");
 
 	if (features.framebuffer_fetch)
 	{
@@ -6465,7 +6465,7 @@ void GSRendererHW::SetupROV()
 			else
 			{
 				GL_INS("ROV: Color feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
-				Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
+				//Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_color = false;
 			}
 		}
@@ -6474,7 +6474,7 @@ void GSRendererHW::SetupROV()
 			if (fraction_color_feedback >= fraction_enable_rov)
 			{
 				GL_INS("ROV: Color feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
-				Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
+				//Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_color = true;
 			}
 			else
@@ -6497,6 +6497,7 @@ void GSRendererHW::SetupROV()
 			else
 			{
 				GL_INS("ROV: Depth feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				//Console.Warning("%d ROV: Depth feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_depth = false;
 			}
 		}
@@ -6505,6 +6506,7 @@ void GSRendererHW::SetupROV()
 			if (fraction_depth_feedback >= fraction_enable_rov)
 			{
 				GL_INS("ROV: Depth feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				//Console.Warning("%d ROV: Depth feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_depth = true;
 			}
 			else
