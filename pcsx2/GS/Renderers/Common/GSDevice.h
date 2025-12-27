@@ -465,6 +465,16 @@ struct alignas(16) GSHWDrawConfig
 			return blend_a || blend_b || blend_d;
 		}
 
+		__fi bool IsZTesting() const
+		{
+			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
+		}
+
+		__fi bool IsAlphaTesting() const
+		{
+			return atst != 0;
+		}
+
 		__fi bool IsFeedbackLoopRT() const
 		{
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
@@ -479,7 +489,7 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasShaderDiscard() const
 		{
-			return (afail == PS_AFAIL_KEEP) || scanmsk || date || (ztst == ZTST_GEQUAL || ZTST_GREATER);
+			return (IsAlphaTesting() && afail == PS_AFAIL_KEEP) || scanmsk || date || IsZTesting();
 		}
 
 		/// Disables color output from the pixel shader, this is done when all channels are masked.
