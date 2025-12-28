@@ -2257,6 +2257,17 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
 
+	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
+	{
+		if (tex && tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
+			EndRenderPass();
+			tex->SetTargetModeStandard();
+			EndRenderPass(); // Updating depth <-> UAV might have started a render pass
+		}
+	}
+
 	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt || m_current_depth_target != d12Ds)
 	{
 		// framebuffer change
@@ -2275,16 +2286,6 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 				else
 					tex->SetState(GSTexture::State::Dirty);
 			}
-		}
-	}
-
-	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
-	{
-		if (tex && tex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
-			tex->SetTargetModeStandard();
-			EndRenderPass();
 		}
 	}
 
@@ -4461,13 +4462,13 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		if (InRenderPass())
 		{
-			Console.Warning("DX12: ROV draw while in a render pass.");
+			Console.Warning("ROV draw while in a render pass.");
 			EndRenderPass();
 		}
 
 		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
 		{
-			Console.Warning("DX12: ROV feedback for color and depth is inconsistent.");
+			Console.Warning("ROV feedback for color and depth is inconsistent.");
 		}
 
 		if (BindDrawPipeline(pipe))
@@ -4493,6 +4494,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				{
 					if (config.ps.rov_color)
 					{
+						// Small optimization: clear directly as UAV without transitioning.
 						draw_rt->CommitClearUAV(gpu_handle_rt, clear_color);
 					}
 					else
@@ -4500,11 +4502,18 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 						draw_rt->CommitClear(clear_color);
 					}
 				}
-				draw_rt->SetState(GSTexture::State::Dirty);
 
 				if (config.ps.rov_color && config.ps.color_feedback)
 				{
+					// Color is read.
 					draw_rt->IssueUAVBarrier();
+				}
+
+				if (!config.ps.no_color)
+				{
+					// Color is written. Warning: do this after issuing the barrier
+					// so that the UAV is correctly marked as dirty.
+					draw_rt->SetState(GSTexture::State::Dirty);
 				}
 			}
 
@@ -4514,6 +4523,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				{
 					if (config.ps.rov_depth)
 					{
+						// Small optimization: clear directly as UAV without transitioning.
 						draw_ds->CommitClearUAV(gpu_handle_ds);
 					}
 					else
@@ -4521,11 +4531,18 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 						draw_ds->CommitClear();
 					}
 				}
-				draw_ds->SetState(GSTexture::State::Dirty);
 
 				if (config.ps.rov_depth && config.ps.depth_feedback)
 				{
+					// Depth is read.
 					draw_ds->IssueUAVBarrier();
+				}
+
+				if (config.ps.zclamp)
+				{
+					// Depth is written. Warning: do this after issuing the barrier
+					// so that the UAV is correctly marked as dirty.
+					draw_ds->SetState(GSTexture::State::Dirty);
 				}
 			}
 

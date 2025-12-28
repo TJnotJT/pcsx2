@@ -6403,6 +6403,44 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
+// Gets a weighted average of the number of draw calls in the history
+// of the given texture. Used as a heuristic to determine when to
+// start/stop using ROVs in a scene.
+__fi float GSRendererHW::GetTextureAverageBarriers(GSTexture* tex, float barriers)
+{
+	auto it = std::find_if(
+		m_average_barriers_history.begin(), m_average_barriers_history.end(),
+		[&](const TextureAverageBarriers& e) { return e.tex == tex; });
+
+	if (it == m_average_barriers_history.end())
+	{
+		// Add new texture to the history cache
+		if (m_average_barriers_history.size() >= GSConfig.HWROVHistoryDraws)
+			m_average_barriers_history.pop_back(); // Evict last element
+
+		m_average_barriers_history.push_back(TextureAverageBarriers(tex));
+
+		it = std::prev(m_average_barriers_history.end());
+	}
+
+	// Move current element to the front
+	std::rotate(m_average_barriers_history.begin(), it, it + 1);
+
+	TextureAverageBarriers& e = m_average_barriers_history.front();
+
+	// Be careful of wrap around in 32 bit s_n
+	if (std::max(static_cast<int>(s_n - e.last_draw), 0) >= static_cast<int>(GSConfig.HWROVHistoryDraws))
+	{
+		e.average_barriers = 1.0f;
+	}
+
+	const float w = std::clamp(GSConfig.HWROVHistoryDecay, 0.0f, 1.0f);
+	e.average_barriers = w * e.average_barriers + (1 - w) * barriers;
+	e.last_draw = s_n;
+
+	return e.average_barriers;
+}
+
 void GSRendererHW::SetupROV()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
@@ -6438,23 +6476,30 @@ void GSRendererHW::SetupROV()
 
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
-	// FIXME: Is is ok to check m_conf.tex == m_conf.rt or better to use tex_is_fb??
-	bool feedback_color =
-		color_write &&
-		(m_conf.require_one_barrier || m_conf.require_full_barrier ||
-			(m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
+	const bool using_barriers = m_conf.require_one_barrier || m_conf.require_full_barrier;
+
+	bool feedback_color = color_write &&
+		(using_barriers || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
 			colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
 	bool feedback_depth = depth_write &&
-		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
-			afail_needs_depth);
+		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) || afail_needs_depth);
 
-	// Heuristic to determine ROV usage: check the fraction of previous
-	// draws that required feedback for full accuracy.
-	float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, feedback_color) : 0.0f;
-	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, feedback_depth) : 0.0f;
+	// Get the number of barriers that would be used with the current settings.
+	const float barriers = std::max(static_cast<float>(m_drawlist.size()), 1.0f);
+	const float multiplier = 1.0f + (m_conf.alpha_second_pass.enable ? 1.0f : 0.0f) + (m_conf.blend_multi_pass.enable ? 1.0f : 0.0f);
+	
+	float barriers_color = multiplier * ((feedback_color && using_barriers && m_conf.ps.IsFeedbackLoopRT()) ? barriers : 1.0f);
+	float barriers_depth = multiplier * ((feedback_depth && using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ? barriers : 1.0f);
+
+	// Heuristic to determine ROV usage: check the fraction of previous that required barriers.
+	float fraction_color_feedback = m_conf.rt ? GetTextureAverageBarriers(m_conf.rt, barriers_color) : 0.0f;
+	float fraction_depth_feedback = m_conf.ds ? GetTextureAverageBarriers(m_conf.ds, barriers_depth) : 0.0f;
 
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
+
+	const float fraction_enable_rov = GSConfig.HWROVDrawsEnable;
+	const float fraction_disable_rov = GSConfig.HWROVDrawsDisable;
 
 	if (m_conf.rt)
 	{
@@ -6462,12 +6507,16 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_color_feedback >= fraction_disable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d ROV: Color average draws under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+				}
 				//Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_color = false;
 			}
@@ -6476,13 +6525,17 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_color_feedback >= fraction_enable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color feedback fraction above %.2f => starting ROV usage", fraction_enable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d ROV: Color average draws above %.2f0 => starting ROV usage", s_n, fraction_enable_rov);
+				}
 				//Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
 				use_rov_color = false;
 			}
 		}
@@ -6494,13 +6547,16 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_depth_feedback >= fraction_disable_rov)
 			{
-				GL_INS("ROV: Depth feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Depth feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
-				//Console.Warning("%d ROV: Depth feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
+				GL_INS("ROV: Depth feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d: ROV: Depth average barriers under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+				}
 				use_rov_depth = false;
 			}
 		}
@@ -6509,12 +6565,16 @@ void GSRendererHW::SetupROV()
 			if (fraction_depth_feedback >= fraction_enable_rov)
 			{
 				GL_INS("ROV: Depth feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d: ROV: Depth average barriers above %.2f => starting ROV usage", s_n, fraction_enable_rov);
+				}
 				//Console.Warning("%d ROV: Depth feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Depth feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
 				use_rov_depth = false;
 			}
 		}
@@ -6528,6 +6588,7 @@ void GSRendererHW::SetupROV()
 	// We currently don't have a way of using barriers in one and ROV in the other.
 	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
 	{
+		GL_INS("[Feedback color + depth ROV] or [feedback depth + color ROV] => forces [color ROV + depth ROV]");
 		use_rov_color = true;
 		use_rov_depth = true;
 	}
@@ -6536,6 +6597,7 @@ void GSRendererHW::SetupROV()
 	// so must use depth ROV with feedback.
 	if (use_rov_color && m_conf.ps.HasShaderDiscard())
 	{
+		GL_INS("Color ROV + shader discard => forces depth ROV");
 		use_rov_depth = true;
 		feedback_depth = true;
 	}
@@ -6572,10 +6634,17 @@ void GSRendererHW::SetupROV()
 
 	if (use_rov_color)
 	{
-		GL_INS("ROV: Use color ROV");
+		GL_INS("ROV: Using color ROV");
 
 		// ColorMask setup
-		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+		if (color_write)
+		{
+			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+		}
+		else
+		{
+			m_conf.ps.no_color = true;
+		}
 
 		// Blend setup
 		if (blend)
@@ -6659,6 +6728,22 @@ void GSRendererHW::SetupROV()
 		m_conf.ps.rov_color = true;
 		m_conf.ps.color_feedback |= feedback_color;
 	}
+
+	// Remove regular barriers (they will be replace by UAV barriers)
+	if (use_rov_color || use_rov_depth)
+	{
+		m_conf.require_full_barrier = false;
+		m_conf.require_one_barrier = false;
+	}
+
+	// FIXME; Remove after done testing.
+	//if (s_n <= 5000)
+	//{
+	//	Console.WriteLn("%d: bar=%.2f barc=%.2f bard=%.2f fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
+	//		s_n, barriers,
+	//		barriers_color, barriers_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
+	//		afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
+	//}
 }
 
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
@@ -8483,8 +8568,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.depth.date = 1;
 	}
 
-	SetupROV();
-
 	m_conf.ps.fba = m_context->FBA.FBA;
 
 	if (m_conf.ps.dither || m_conf.blend_multi_pass.dither)
@@ -8573,6 +8656,17 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
 	}
+
+	// ComputeDrawlistGetSize expects the original index layout, so needs to be called before we modify it via HandleProvokingVertexFirst/SetupIA.
+	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
+	{
+		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	// Must call after draw list is computed so we have accurate history tracking of draws.
+	SetupROV();
 	
 	// Create a temporary depth color target
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ps.rov_depth)
@@ -8603,14 +8697,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	m_conf.drawarea = m_channel_shuffle ? scissor : scissor.rintersect(ComputeBoundingBox(rtsize, rtscale));
 	m_conf.scissor = (DATE && !DATE_BARRIER) ? m_conf.drawarea : scissor;
-
-	// ComputeDrawlistGetSize expects the original index layout, so needs to be called before we modify it via HandleProvokingVertexFirst/SetupIA.
-	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
-	{
-		ComputeDrawlistGetSize(rt->m_scale);
-		m_conf.drawlist = &m_drawlist;
-		m_conf.drawlist_bbox = &m_drawlist_bbox;
-	}
 
 	HandleProvokingVertexFirst();
 
