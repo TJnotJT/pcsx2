@@ -32,7 +32,7 @@ public:
 	{
 		if (IsDepthStencil() && IsTargetModeUAV())
 		{
-			return m_uav_depth->m_srv_descriptor;
+			return static_cast<GSTexture12*>(m_uav_depth.get())->m_srv_descriptor;
 		}
 		else
 		{
@@ -50,7 +50,7 @@ public:
 	{
 		if (IsDepthStencil() && IsTargetModeUAV())
 		{
-			return m_uav_depth->m_uav_descriptor;
+			return static_cast<GSTexture12*>(m_uav_depth.get())->m_uav_descriptor;
 		}
 		else
 		{
@@ -68,7 +68,7 @@ public:
 	{
 		if (IsDepthStencil() && IsTargetModeUAV())
 		{
-			return m_uav_depth->m_resource_state;
+			return static_cast<GSTexture12*>(m_uav_depth.get())->m_resource_state;
 		}
 		else
 		{
@@ -80,7 +80,7 @@ public:
 	{
 		if (IsDepthStencil() && IsTargetModeUAV())
 		{
-			m_uav_depth->m_resource_state = state;
+			static_cast<GSTexture12*>(m_uav_depth.get())->m_resource_state = state;
 		}
 		else
 		{
@@ -94,7 +94,7 @@ public:
 	{
 		if (IsDepthStencil() && IsTargetModeUAV())
 		{
-			return m_uav_depth->m_resource.get();
+			return static_cast<GSTexture12*>(m_uav_depth.get())->m_resource.get();
 		}
 		else
 		{
@@ -103,23 +103,6 @@ public:
 	}
 
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
-
-	virtual void SetState(State state) override
-	{
-		if (IsTargetModeUAV() && state == State::Dirty)
-		{
-			m_uav_dirty = true;
-		}
-		m_state = state;
-	}
-
-	virtual u32 GetMemUsage() const override
-	{
-		u32 mem = GSTexture::GetMemUsage();
-		if (m_uav_depth)
-			return mem += m_uav_depth->GetMemUsage();
-		return mem;
-	}
 	
 	void* GetNativeHandle() const override;
 
@@ -133,8 +116,6 @@ public:
 	void SaveDepthUAV(const std::string& fn) const;
 #endif
 
-	virtual void SetTargetMode(TargetMode state) override;
-	virtual void ResetTargetMode() override;
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear(const float* color = nullptr);
 	void CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color = nullptr);
@@ -148,17 +129,18 @@ public:
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
 		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
 
-	bool GetUAVDirty() const { return m_uav_dirty; }
-	void SetUAVDirty() { m_uav_dirty = true; }
-	void ClearUAVDirty() { m_uav_dirty = false; }
 	D3D12_RESOURCE_BARRIER GetUAVBarrier();
 	void IssueUAVBarrier(ID3D12GraphicsCommandList* cmdlist);
-	void IssueUAVBarrier();
-
+	void IssueUAVBarrier() override;
+	
+	void SetTargetMode(TargetMode mode) override;
+	
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 
 private:
+	void UpdateDepthUAV(bool uav_to_ds) override;
+
 	enum class WriteDescriptorType : u8
 	{
 		None,
@@ -183,15 +165,11 @@ private:
 	void CopyTextureDataForUpload(void* dst, const void* src, u32 pitch, u32 upload_pitch, u32 height) const;
 
 	// For transition to/from UAV usage.
-	void CreateDepthUAV();
-	void UpdateDepthUAV(bool uav_to_ds);
 	void IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist);
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> m_allocation;
-
-	std::unique_ptr<GSTexture12> m_uav_depth; // For depth texture points to the parallel color texture.
 
 	D3D12DescriptorHandle m_srv_descriptor = {};
 	D3D12DescriptorHandle m_write_descriptor = {};
@@ -201,7 +179,6 @@ private:
 
 	DXGI_FORMAT m_dxgi_format = DXGI_FORMAT_UNKNOWN;
 	D3D12_RESOURCE_STATES m_resource_state = D3D12_RESOURCE_STATE_COMMON;
-	bool m_uav_dirty = false; // Tracks if the UAV has been drawn to. Issuing a UAV barrier clears it.
 
 	// Contains the fence counter when the texture was last used.
 	// When this matches the current fence counter, the texture was used this command buffer.
