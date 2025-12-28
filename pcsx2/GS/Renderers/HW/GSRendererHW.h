@@ -220,25 +220,25 @@ private:
 		{
 			bool b0 = Get();
 
-			if (b0 == b)
-				return;
-
-			count -= static_cast<u32>(b0);
-			count += static_cast<u32>(b);
-
-			if (b)
+			if (b0 != b)
 			{
-				if (index < 64)
-					lo |= _1 << index;
+				count -= static_cast<u32>(b0);
+				count += static_cast<u32>(b);
+
+				if (b)
+				{
+					if (index < 64)
+						lo |= _1 << index;
+					else
+						hi |= _1 << (index - 64);
+				}
 				else
-					hi |= _1 << (index - 64);
-			}
-			else
-			{
-				if (index < 64)
-					lo &= ~(_1 << index);
-				else
-					hi &= ~(_1 << (index - 64));
+				{
+					if (index < 64)
+						lo &= ~(_1 << index);
+					else
+						hi &= ~(_1 << (index - 64));
+				}
 			}
 
 			index = (index + 1) & 127;
@@ -281,8 +281,8 @@ private:
 	// and number of feedback draws in the 128 such usages.
 	static constexpr u32 rov_feedback_history_draws = 1024;
 	static constexpr size_t rov_feedback_history_max_size = 32;
-	static constexpr float fraction_enable_rov = 0.2f;
-	static constexpr float fraction_disable_rov = 0.05f;
+	static constexpr float fraction_enable_rov = 0.25f;
+	static constexpr float fraction_disable_rov = 0.0625f;
 	std::vector<ROVFeedbackHistory> m_rov_feedback_history;
 
 	__fi float GetFractionFeedback(GSTexture* tex, bool feedback)

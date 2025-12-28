@@ -6438,20 +6438,24 @@ void GSRendererHW::SetupROV()
 
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
+	const bool barrier = m_conf.require_one_barrier || m_conf.require_full_barrier;
+
 	// FIXME: Is is ok to check m_conf.tex == m_conf.rt or better to use tex_is_fb??
 	bool feedback_color =
 		color_write &&
-		(m_conf.require_one_barrier || m_conf.require_full_barrier ||
-			(m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
+		(barrier || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
 			colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
 	bool feedback_depth = depth_write &&
 		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
 			afail_needs_depth);
 
-	// Heuristic to determine ROV usage: check the fraction of previous
-	// draws that required feedback for full accuracy.
-	float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, feedback_color) : 0.0f;
-	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, feedback_depth) : 0.0f;
+	// FIXME: Change the "feedback" terminology to "barrier" if this works better.
+	bool barrier_color = feedback_color && barrier && m_conf.ps.IsFeedbackLoopRT();
+	bool barrier_depth = feedback_depth && barrier && m_conf.ps.IsFeedbackLoopDepth();
+
+	// Heuristic to determine ROV usage: check the fraction of previous that required barriers.
+	float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, barrier_color) : 0.0f;
+	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, barrier_depth) : 0.0f;
 
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
@@ -6659,6 +6663,14 @@ void GSRendererHW::SetupROV()
 		m_conf.ps.rov_color = true;
 		m_conf.ps.color_feedback |= feedback_color;
 	}
+
+	// FIXME; Remove after done testing.
+	//if (s_n <= 5000)
+	//{
+	//	Console.WriteLn("%d: barc=%d bard=%d fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d", s_n,
+	//		barrier_color, barrier_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
+	//		afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
+	//}
 }
 
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
