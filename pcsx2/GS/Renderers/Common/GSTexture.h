@@ -67,12 +67,17 @@ public:
 	};
 
 protected:
+	// Helper to copy data to/from color UAV copy for depth.
+	virtual void UpdateDepthUAV(bool uav_to_ds) { pxFailRel("Not implemented."); }
+
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
 	TargetMode m_target_mode = TargetMode::Invalid;
+	std::unique_ptr<GSTexture> m_uav_depth; // For depth texture points to the parallel color texture.
+	bool m_uav_dirty = false; // Tracks if the UAV has been drawn to. Issuing a UAV barrier clears it.
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -153,14 +158,39 @@ public:
 	}
 
 	__fi State GetState() const { return m_state; }
-	virtual void SetState(State state) { m_state = state; }
+	void SetState(State state)
+	{
+		if (IsTargetModeUAV() && state == State::Dirty)
+		{
+			SetUAVDirty();
+		}
+		m_state = state;
+	}
 
+	// Managing whether a target is being used as a UAV or Standard OM target.
+	// We do this because tranistioning out in/out of UAV usage is complicated by the fact that
+	// depth textures must create a color copy to be used as UAVs.
 	__fi TargetMode GetTargetMode() const { return m_target_mode; }
-	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
+	void SetTargetMode(TargetMode mode);
+	void CreateDepthUAV();
 	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
 	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
-	virtual void ResetTargetMode() { }
-	
+	void ResetTargetMode()
+	{
+		if (GetTargetMode() == TargetMode::UAV)
+		{
+			// Forget UAV dirty state but keep the depth UAV copy around in case
+			// it is needed in the future.
+			m_uav_dirty = false;
+		}
+
+		m_target_mode = IsRenderTargetOrDepthStencil() ? TargetMode::Standard : TargetMode::Invalid;
+	}
+	virtual void IssueUAVBarrier() { pxFailRel("Not implemented."); }
+	bool GetUAVDirty() const { return m_uav_dirty; }
+	void SetUAVDirty() { m_uav_dirty = true; }
+	void ClearUAVDirty() { m_uav_dirty = false; }
+
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 
@@ -183,7 +213,13 @@ public:
 	void ClearMipmapGenerationFlag() { m_needs_mipmaps_generated = false; }
 
 	// Typical size of a RGBA texture
-	virtual u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
+	u32 GetMemUsage() const
+	{
+		u32 mem =  m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4);
+		if (m_uav_depth)
+			return mem += m_uav_depth.get()->GetMemUsage();
+		return mem;
+	}
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }

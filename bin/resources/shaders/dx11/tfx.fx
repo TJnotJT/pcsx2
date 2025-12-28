@@ -102,6 +102,8 @@
 #define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
+#define PS_ROV_COLOR 0
+#define PS_ROV_DEPTH 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)

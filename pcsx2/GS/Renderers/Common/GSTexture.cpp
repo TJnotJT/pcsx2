@@ -4,6 +4,8 @@
 #include "GS/Renderers/Common/GSTexture.h"
 #include "GS/Renderers/Common/GSDevice.h"
 #include "GS/GSPng.h"
+#include "GS/GSPerfmon.h"
+#include "GS/GSGL.h"
 
 #include "common/Console.h"
 #include "common/BitUtils.h"
@@ -181,6 +183,66 @@ void GSTexture::GenerateMipmapsIfNeeded()
 
 	m_needs_mipmaps_generated = false;
 	GenerateMipmap();
+}
+
+void GSTexture::CreateDepthUAV()
+{
+	pxAssert(IsDepthStencil());
+
+	if (!m_uav_depth)
+	{
+		m_uav_depth.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
+#ifdef PCSX2_DEVBUILD
+		if (GSConfig.UseDebugDevice)
+		{
+			m_uav_depth->SetDebugName(fmt::format("0x{:x} Depth UAV for @ 0x{:x}",
+				reinterpret_cast<u64>(m_uav_depth.get()), reinterpret_cast<u64>(this)));
+		}
+#endif
+	}
+}
+
+void GSTexture::SetTargetMode(TargetMode mode)
+{
+	pxAssert(IsRenderTargetOrDepthStencil() && (IsTargetModeStandard() || IsTargetModeUAV()));
+
+	if (GetTargetMode() == mode)
+		return;
+
+	// Handles updating DepthStencil <-> UAV dirty depth.
+	// Does not do the actual state/layout transition. The caller should do that.
+
+	g_perfmon.Put(GSPerfMon::TargetTransitions, 1.0);
+
+	if (GetTargetMode() == TargetMode::Standard && mode == TargetMode::UAV)
+	{
+		GL_INS("Target mode transition Standard -> UAV");
+
+		if (IsDepthStencil())
+		{
+			UpdateDepthUAV(false);
+		}
+
+		m_target_mode = TargetMode::UAV; // After UpdateDepthUAV() to avoid assertion.
+	}
+	else if (GetTargetMode() == TargetMode::UAV && mode == TargetMode::Standard)
+	{
+		// UAV -> Standard
+		GL_INS("Target mode transition UAV -> Standard");
+
+		IssueUAVBarrier();
+
+		m_target_mode = TargetMode::Standard; // Before UpdateDepthUAV() to avoid assertion.
+
+		if (IsDepthStencil())
+		{
+			UpdateDepthUAV(true);
+		}
+	}
+	else
+	{
+		pxFailRel("Setting invalid target mode");
+	}
 }
 
 GSDownloadTexture::GSDownloadTexture(u32 width, u32 height, GSTexture::Format format)

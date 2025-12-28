@@ -2278,6 +2278,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 		}
 	}
 
+	// FIXME: Move this to the beginning of function like VK for consistency.
 	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
 	{
 		if (tex && tex->IsTargetModeUAV())

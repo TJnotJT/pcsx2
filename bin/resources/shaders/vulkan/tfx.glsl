@@ -319,6 +319,8 @@ void main()
 #define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
+#define PS_ROV_COLOR 0
+#define PS_ROV_DEPTH 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -331,6 +333,13 @@ void main()
 #define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK && AFAIL_NEEDS_DEPTH)
 
 #define NEEDS_TEX (PS_TFX != 4)
+
+#define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
+#define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
+#define PS_RETURN_DEPTH_ROV (PS_ZCLAMP && PS_ROV_DEPTH)
+#define PS_RETURN_DEPTH (PS_ZCLAMP && !PS_ROV_DEPTH)
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP)
+#define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 
 vec4 FragCoord;
 
@@ -369,11 +378,23 @@ layout(location = 0) in VSOutput
 	#endif
 } vsIn;
 
-#if !PS_NO_COLOR && !PS_NO_COLOR1
-layout(location = 0, index = 0) out vec4 o_col0;
-layout(location = 0, index = 1) out vec4 o_col1;
-#elif !PS_NO_COLOR
-layout(location = 0) out vec4 o_col0;
+#if PS_RETURN_COLOR
+	#if !PS_NO_COLOR1
+	layout(location = 0, index = 0) out vec4 o_col0;
+	layout(location = 0, index = 1) out vec4 o_col1;
+	#elif !PS_NO_COLOR
+	layout(location = 0) out vec4 o_col0;
+	#endif
+#endif
+
+// FIXME: use readonly/writeonly when possible
+#if PS_ROV_COLOR
+	layout(set = 1, binding = 5, rgba32f) uniform restrict image2D RtImageRov;
+#endif
+
+// FIXME: use readonly/writeonly when possible
+#if PS_ROV_DEPTH
+	layout(set = 1, binding = 5, r32f) uniform restrict image2D DepthImageRov;
 #endif
 
 #if NEEDS_TEX
@@ -383,25 +404,25 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_RT || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 	#if defined(DISABLE_TEXTURE_BARRIER) || defined(HAS_FEEDBACK_LOOP_LAYOUT)
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
 			layout(set = 1, binding = 2) uniform texture2D RtSampler;
 			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(FragCoord.xy), 0); }
 		#endif
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
 			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0); }
 		#endif
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
 			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
-		#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-		#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
 		#endif

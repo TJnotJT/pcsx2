@@ -39,9 +39,42 @@ public:
 
 	void Destroy(bool defer);
 
-	__fi VkImage GetImage() const { return m_image; }
-	__fi VkImageView GetView() const { return m_view; }
-	__fi Layout GetLayout() const { return m_layout; }
+	__fi VkImage GetImage() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_image;
+		}
+		else
+		{
+			return m_image;
+		}
+	}
+
+	__fi VkImageView GetView() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_view;
+		}
+		else
+		{
+			return m_view;
+		}
+	}
+
+	__fi Layout GetLayout() const
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_layout;
+		}
+		else
+		{
+			return m_layout;
+		}
+	}
+
 	__fi VkFormat GetVkFormat() const { return m_vk_format; }
 
 	VkImageLayout GetVkLayout() const;
@@ -70,6 +103,10 @@ public:
 	void TransitionSubresourcesToLayout(
 		VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout);
 
+	virtual void IssueUAVBarrier();
+
+	static VkFramebuffer CreateNullFramebuffer();
+
 	/// Framebuffers are lazily allocated.
 	VkFramebuffer GetFramebuffer(bool feedback_loop);
 
@@ -79,6 +116,19 @@ public:
 	__fi void SetUseFenceCounter(u64 counter) { m_use_fence_counter = counter; }
 
 private:
+	void UpdateDepthUAV(bool uav_to_ds) override;
+	__fi void SetLayout(Layout new_layout)
+	{
+		if (IsDepthStencil() && IsTargetModeUAV())
+		{
+			static_cast<GSTextureVK*>(m_uav_depth.get())->m_layout = new_layout;
+		}
+		else
+		{
+			m_layout = new_layout;
+		}
+	}
+
 	GSTextureVK(Type type, Format format, int width, int height, int levels, VkImage image, VmaAllocation allocation,
 		VkImageView view, VkFormat vk_format);
 
