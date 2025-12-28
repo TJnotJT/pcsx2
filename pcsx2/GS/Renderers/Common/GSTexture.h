@@ -22,17 +22,17 @@ public:
 		Invalid = 0,
 		RenderTarget = 1,
 		DepthStencil,
-		Texture,   // Generic texture (usually is color textures loaded by the game)
+		Texture, // Generic texture (usually is color textures loaded by the game)
 		RWTexture, // UAV
 	};
 
 	enum class Format : u8
 	{
-		Invalid = 0,  ///< Used for initialization
-		Color,        ///< Standard (RGBA8) color texture (used to store most of PS2's textures)
-		ColorHQ,      ///< High quality (RGB10A2) color texture (no proper alpha)
-		ColorHDR,     ///< High dynamic range (RGBA16F) color texture
-		ColorClip,    ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
+		Invalid = 0, ///< Used for initialization
+		Color, ///< Standard (RGBA8) color texture (used to store most of PS2's textures)
+		ColorHQ, ///< High quality (RGB10A2) color texture (no proper alpha)
+		ColorHDR, ///< High dynamic range (RGBA16F) color texture
+		ColorClip, ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
 		Float32,      ///< For treating depth texture as RT
 		UNorm8,       ///< A8UNorm texture for paletted textures and the OSD font
@@ -53,6 +53,13 @@ public:
 		Invalidated
 	};
 
+	enum class TargetMode : u8
+	{
+		Invalid,
+		Standard,
+		UAV
+	};
+
 	union ClearValue
 	{
 		u32 color;
@@ -65,6 +72,7 @@ protected:
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
+	TargetMode m_target_mode = TargetMode::Invalid;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -134,9 +142,25 @@ public:
 		return (m_type == Type::Texture);
 	}
 
-	__fi State GetState() const { return m_state; }
-	__fi void SetState(State state) { m_state = state; }
+	__fi bool IsTargetModeStandard()
+	{
+		return m_target_mode == TargetMode::Standard;
+	}
 
+	__fi bool IsTargetModeUAV() const
+	{
+		return m_target_mode == TargetMode::UAV;
+	}
+
+	__fi State GetState() const { return m_state; }
+	virtual void SetState(State state) { m_state = state; }
+
+	__fi TargetMode GetTargetMode() const { return m_target_mode; }
+	virtual void SetTargetMode(TargetMode mode) { pxFailRel("Not implemented."); }
+	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
+	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
+	virtual void ResetTargetMode() { }
+	
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 
@@ -159,7 +183,7 @@ public:
 	void ClearMipmapGenerationFlag() { m_needs_mipmaps_generated = false; }
 
 	// Typical size of a RGBA texture
-	u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
+	virtual u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }

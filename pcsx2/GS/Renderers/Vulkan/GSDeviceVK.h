@@ -46,6 +46,8 @@ public:
 		bool vk_khr_driver_properties : 1;
 		bool vk_khr_shader_non_semantic_info : 1;
 		bool vk_ext_attachment_feedback_loop_layout : 1;
+		bool vk_khr_dynamic_rendering : 1;
+		bool vk_ext_fragment_shader_interlock : 1;
 	};
 
 	// Global state accessors

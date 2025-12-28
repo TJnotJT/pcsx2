@@ -447,6 +447,10 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		enable_surface && SupportsExtension(VK_EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME, false);
 #endif
 
+	m_optional_extensions.vk_khr_dynamic_rendering = SupportsExtension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, false);
+	
+	m_optional_extensions.vk_ext_fragment_shader_interlock = SupportsExtension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, false);
+
 	return true;
 }
 
@@ -633,6 +637,10 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT};
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchain_maintenance1_khr_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
+	VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_khr_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR };
+	VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fragment_shader_interlock_ext_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT};
 
 	if (m_optional_extensions.vk_ext_provoking_vertex)
 	{
@@ -666,6 +674,16 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 			swapchain_maintenance1_ext_feature.swapchainMaintenance1 = VK_TRUE;
 			Vulkan::AddPointerToChain(&device_info, &swapchain_maintenance1_ext_feature);
 		}
+	}
+	if (m_optional_extensions.vk_khr_dynamic_rendering)
+	{
+		dynamic_rendering_khr_feature.dynamicRendering = VK_TRUE;
+		Vulkan::AddPointerToChain(&device_info, &dynamic_rendering_khr_feature);
+	}
+	if (m_optional_extensions.vk_ext_fragment_shader_interlock)
+	{
+		fragment_shader_interlock_ext_feature.fragmentShaderPixelInterlock = VK_TRUE;
+		Vulkan::AddPointerToChain(&device_info, &fragment_shader_interlock_ext_feature);
 	}
 
 	VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
