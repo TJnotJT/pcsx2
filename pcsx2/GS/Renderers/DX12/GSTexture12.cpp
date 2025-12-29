@@ -847,8 +847,6 @@ void GSTexture12::IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist)
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
 
-		ID3D12Resource* resource = nullptr;
-	
 		D3D12_RESOURCE_BARRIER barrier =
 			{ D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {GetResource()} };
 
