@@ -824,6 +824,7 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 	}
 	else if (IsDepthStencil() && IsTargetModeUAV())
 	{
+		ClearUAVDirty(); // Avoid assertions when transitioning.
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET); // Actually transitions the UAV copy
 		float cv[4] = { m_clear_value.depth, 0.0f, 0.0f, 0.0f };
 		cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_uav_depth.get())->GetWriteDescriptor(),

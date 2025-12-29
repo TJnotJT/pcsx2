@@ -4243,7 +4243,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			else if (draw_rt->GetState() == GSTexture::State::Dirty)
 			{
 				GL_PUSH_("ColorClip Render Target Setup");
-				draw_rt->SetState(GSTexture::State::Dirty);
+				if (draw_rt->GetUAVDirty())
+				{
+					draw_rt->IssueUAVBarrier();
+				}
 				draw_rt->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 			}
 
