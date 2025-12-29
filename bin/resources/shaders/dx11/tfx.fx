@@ -1158,8 +1158,8 @@ void ps_main(PS_INPUT input)
 		fail_z = (input.p.z <= DepthLoad(input.p.xy));
 	#endif
 
-	// Cannot directly discard with ROVs because it is illegal to discard based on the value read from an ROVs.
-	// We must instead use conditional writes.
+	// Cannot directly discard with ROVs because it is illegal to do control flow based on the
+	// value read from an ROVs. We must instead use conditional writes (later).
 	#if !PS_ROV_DEPTH
 		if (fail_z)
 			discard;

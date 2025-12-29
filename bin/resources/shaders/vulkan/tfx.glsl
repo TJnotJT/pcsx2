@@ -1361,9 +1361,8 @@ void main()
 	#endif
 
 	// We do not discard for ROVs and instead do conditional writes to mirror DX12,
-	// which does not allow control flow based on ROV reads.
-	// It remains to be tested whether control flow based on ROV
-	// reads works with Vulkan fragment shader interlock.
+	// which does not allow control flow based on ROV reads. However, it might be safe to
+	// do control flow in Vulkan based on interlocked reads (not tested).
 	#if !PS_ROV_DEPTH
 		if (fail_z)
 			discard;

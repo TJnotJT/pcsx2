@@ -6491,51 +6491,49 @@ void GSRendererHW::SetupROV()
 	float barriers_color = multiplier * ((feedback_color && using_barriers && m_conf.ps.IsFeedbackLoopRT()) ? barriers : 1.0f);
 	float barriers_depth = multiplier * ((feedback_depth && using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ? barriers : 1.0f);
 
-	// Heuristic to determine ROV usage: check the fraction of previous that required barriers.
-	float fraction_color_feedback = m_conf.rt ? GetTextureAverageBarriers(m_conf.rt, barriers_color) : 0.0f;
-	float fraction_depth_feedback = m_conf.ds ? GetTextureAverageBarriers(m_conf.ds, barriers_depth) : 0.0f;
+	// Heuristic to determine ROV usage: get average barriers per draw in recent history.
+	float average_color_barriers = m_conf.rt ? GetTextureAverageBarriers(m_conf.rt, barriers_color) : 0.0f;
+	float average_depth_barriers = m_conf.ds ? GetTextureAverageBarriers(m_conf.ds, barriers_depth) : 0.0f;
 
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
 
-	const float fraction_enable_rov = GSConfig.HWROVDrawsEnable;
-	const float fraction_disable_rov = GSConfig.HWROVDrawsDisable;
+	const float barriers_enable_rov = GSConfig.HWROVDrawsEnable;
+	const float barriers_disable_rov = GSConfig.HWROVDrawsDisable;
 
 	if (m_conf.rt)
 	{
 		if (m_conf.rt->IsTargetModeUAV())
 		{
-			if (fraction_color_feedback >= fraction_disable_rov)
+			if (average_color_barriers >= barriers_disable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color average barriers above %.2f => continuing ROV usage", barriers_disable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color average barriers under %.2f => ending ROV usage", barriers_disable_rov);
 				if (GSConfig.HWROVLogging)
 				{
-					Console.Warning("%d ROV: Color average draws under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+					Console.Warning("%d ROV: Color average barriers under %.2f => ending ROV usage", s_n, barriers_disable_rov);
 				}
-				//Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_color = false;
 			}
 		}
 		else
 		{
-			if (fraction_color_feedback >= fraction_enable_rov)
+			if (average_color_barriers >= barriers_enable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f => starting ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color average barriers above %.2f => starting ROV usage", barriers_enable_rov);
 				if (GSConfig.HWROVLogging)
 				{
-					Console.Warning("%d ROV: Color average draws above %.2f0 => starting ROV usage", s_n, fraction_enable_rov);
+					Console.Warning("%d ROV: Color average barriers above %.2f0 => starting ROV usage", s_n, barriers_enable_rov);
 				}
-				//Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color average barriers under %.2f => continuing non-ROV usage", barriers_enable_rov);
 				use_rov_color = false;
 			}
 		}
@@ -6545,44 +6543,39 @@ void GSRendererHW::SetupROV()
 	{
 		if (m_conf.ds->IsTargetModeUAV())
 		{
-			if (fraction_depth_feedback >= fraction_disable_rov)
+			if (average_depth_barriers >= barriers_disable_rov)
 			{
-				GL_INS("ROV: Depth feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Depth average barriers above %.2f => continuing ROV usage", barriers_disable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Depth average barriers under %.2f => ending ROV usage", barriers_disable_rov);
 				if (GSConfig.HWROVLogging)
 				{
-					Console.Warning("%d: ROV: Depth average barriers under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+					Console.Warning("%d: ROV: Depth average barriers under %.2f => ending ROV usage", s_n, barriers_disable_rov);
 				}
 				use_rov_depth = false;
 			}
 		}
 		else
 		{
-			if (fraction_depth_feedback >= fraction_enable_rov)
+			if (average_depth_barriers >= barriers_enable_rov)
 			{
-				GL_INS("ROV: Depth feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Depth average barriers above %.2f; starting ROV usage", barriers_enable_rov);
 				if (GSConfig.HWROVLogging)
 				{
-					Console.Warning("%d: ROV: Depth average barriers above %.2f => starting ROV usage", s_n, fraction_enable_rov);
+					Console.Warning("%d: ROV: Depth average barriers above %.2f => starting ROV usage", s_n, barriers_enable_rov);
 				}
-				//Console.Warning("%d ROV: Depth feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Depth average barriers under %.2f => continuing non-ROV usage", barriers_enable_rov);
 				use_rov_depth = false;
 			}
 		}
 	}
-
-	// Old heuristic - keep temporarily for testing
-	/*use_rov_color = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_color);
-	use_rov_depth = m_conf.rt && (m_conf.rt->IsTargetModeUAV() || feedback_depth);*/
 
 	// If depth and color have feedback and one uses ROV, the other must also.
 	// We currently don't have a way of using barriers in one and ROV in the other.
@@ -6593,8 +6586,8 @@ void GSRendererHW::SetupROV()
 		use_rov_depth = true;
 	}
 
-	// If we use color ROV with discard, we cannot use early depth stencil,
-	// so must use depth ROV with feedback.
+	// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
+	// TODO: Account for this in the heuristic.
 	if (use_rov_color && m_conf.ps.HasShaderDiscard())
 	{
 		GL_INS("Color ROV + shader discard => forces depth ROV");
@@ -6741,7 +6734,7 @@ void GSRendererHW::SetupROV()
 	//{
 	//	Console.WriteLn("%d: bar=%.2f barc=%.2f bard=%.2f fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
 	//		s_n, barriers,
-	//		barriers_color, barriers_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
+	//		barriers_color, barriers_depth, average_color_barriers, average_depth_barriers, afail_needs_rt,
 	//		afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
 	//}
 }

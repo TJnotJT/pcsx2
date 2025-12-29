@@ -816,19 +816,18 @@ void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_D
 
 void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color)
 {
-	// FIXME: Use the VK method of clearing the depth color copy if we are in UAV mode instead of transitioning.
-	if (IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in CommitClear()");
-		SetTargetModeStandard();
-		GSDevice12::GetInstance()->EndRenderPass();
-	}
-
-	if (IsDepthStencil())
+	if (IsDepthStencil() && IsTargetModeStandard())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 		cmdlist->ClearDepthStencilView(
 			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, color ? *color : m_clear_value.depth, 0, 0, nullptr);
+	}
+	else if (IsDepthStencil() && IsTargetModeUAV())
+	{
+		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET); // Actually transitions the UAV copy
+		float cv[4] = { m_clear_value.depth, 0.0f, 0.0f, 0.0f };
+		cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_uav_depth.get())->GetWriteDescriptor(),
+			color ? color : cv, 0, nullptr);
 	}
 	else
 	{
@@ -931,7 +930,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 void GSTexture12::SetTargetMode(TargetMode mode)
 {
 	// Request a barrier for transitioning out of UAV because resource transitions
-	// (handled by caller) don't automatically count as a memory barrier.
+	// (handled by caller) don't automatically count as a memory barrier (unlike Vulkan layout transitions).
 	SetTargetModeInternal(mode, IsTargetModeUAV() && (mode != TargetMode::UAV));
 }
 
