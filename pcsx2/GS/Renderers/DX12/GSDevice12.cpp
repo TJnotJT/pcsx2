@@ -2308,15 +2308,14 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 
 	// Unbind conflicting UAVs
 	std::array<GSTexture12*, 3> curr_rts{ m_current_render_target, m_current_depth_render_target, m_current_depth_target };
-	std::array<GSTexture12**, 2> curr_uavs{ &m_tfx_uavs_tex[0], &m_tfx_uavs_tex[1] };
-	for (GSTexture12** uav : curr_uavs)
+	std::array<GSTexture12**, 2> curr_uavs{ &m_tfx_textures_uav[0], &m_tfx_textures_uav[1] };
+	for (u32 i = TEXTURE_RT_UAV; i <= TEXTURE_DEPTH_UAV; i++)
 	{
 		for (GSTexture12* rt : curr_rts)
 		{
-			if (*uav == rt)
+			if (m_tfx_textures_uav[i - TEXTURE_RT_UAV] == rt)
 			{
-				*uav = nullptr;
-				m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
+				PSSetUnorderedAccess(i, nullptr, false);
 			}
 		}
 	}
@@ -2509,11 +2508,15 @@ bool GSDevice12::CreateRootSignatures()
 	rsb.AddCBVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
 	rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_PIXEL);
 	rsb.AddSRVParameter(0, D3D12_SHADER_VISIBILITY_VERTEX);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL); // Source / Palette 
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL); // Source (t0) / Palette (t2)
 	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 2, D3D12_SHADER_VISIBILITY_PIXEL); // RT / PrimID
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 1, D3D12_SHADER_VISIBILITY_PIXEL); // Depth
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL);
+
+	// RT (t2) / PrimID (t3) / Depth (t4) / RT UAV (u0) / Depth UAV (u1)
+	D3D12_DESCRIPTOR_RANGE_TYPE rt_types[2] = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, D3D12_DESCRIPTOR_RANGE_TYPE_UAV };
+	u32 rt_start_regs[2] = { 2, 0 };
+	u32 rt_num_regs[2] = { 3, 2 };
+	rsb.AddDescriptorTableMultiRange(2, rt_types, rt_start_regs, rt_num_regs, D3D12_SHADER_VISIBILITY_PIXEL); 
+
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -3186,10 +3189,10 @@ bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
 
 void GSDevice12::InitializeState()
 {
-	for (u32 i = 0; i < NUM_TOTAL_TFX_TEXTURES; i++)
+	for (u32 i = 0; i < TEXTURE_RT_UAV; i++)
 		m_tfx_textures[i] = m_null_texture->GetSRVDescriptor();
-	for (u32 i = 0; i < NUM_TFX_UAV_TEXTURES; i++)
-		m_tfx_uavs[i] = m_null_texture->GetUAVDescriptor();
+	for (u32 i = TEXTURE_RT_UAV; i < NUM_TOTAL_TFX_TEXTURES; i++)
+		m_tfx_textures[i] = m_null_texture->GetUAVDescriptor();
 	m_tfx_sampler_sel = GSHWDrawConfig::SamplerSelector::Point().key;
 
 	InvalidateCachedState();
@@ -3277,8 +3280,6 @@ void GSDevice12::InvalidateCachedState()
 	m_tfx_textures_handle_gpu.Clear();
 	m_tfx_samplers_handle_gpu.Clear();
 	m_tfx_rt_textures_handle_gpu.Clear();
-	m_tfx_depth_textures_handle_gpu.Clear();
-	m_tfx_uav_textures_handle_gpu.Clear();
 }
 
 void GSDevice12::SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS buffer, size_t size, size_t stride)
@@ -3333,6 +3334,8 @@ void GSDevice12::SetStencilRef(u8 ref)
 
 void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback)
 {
+	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Trying to bind UAV slot with wrong function");
+
 	D3D12DescriptorHandle handle;
 	if (sr)
 	{
@@ -3366,11 +3369,7 @@ void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 		return;
 
 	m_tfx_textures[i] = handle;
-	m_dirty_flags |=
-		(i < 2) ? DIRTY_FLAG_TFX_TEXTURES :
-		(i < 4) ? DIRTY_FLAG_TFX_RT_TEXTURES :
-		(i < 5) ? DIRTY_FLAG_TFX_DEPTH_TEXTURES :
-		          0; 
+	m_dirty_flags |= (i < NUM_TFX_TEXTURES) ? DIRTY_FLAG_TFX_TEXTURES : DIRTY_FLAG_TFX_RT_TEXTURES;
 }
 
 void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
@@ -3385,6 +3384,8 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 
 void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
+	pxAssertRel(TEXTURE_RT_UAV <= i && i <= TEXTURE_DEPTH_UAV, "Trying to bind UAV in wrong slot");
+
 	if (InRenderPass())
 	{
 		GL_INS("Ending render pass due to binding UAV.");
@@ -3415,17 +3416,20 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		bind_uav = m_null_texture.get();
 	}
 
-	if (m_tfx_uavs_tex[i] == bind_uav)
+	const int i_uav = i - TEXTURE_RT_UAV;
+
+	if (m_tfx_textures_uav[i_uav] == bind_uav)
 		return;
 
-	m_tfx_uavs_tex[i] = static_cast<GSTexture12*>(bind_uav);
-	m_tfx_uavs[i] = m_tfx_uavs_tex[i]->GetUAVDescriptor();
-	m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
+	// Store pointer to the texture in addition to descriptor since depth UAVs have a color copy.
+	m_tfx_textures_uav[i_uav] = static_cast<GSTexture12*>(bind_uav);
+	m_tfx_textures[i] = static_cast<GSTexture12*>(bind_uav)->GetUAVDescriptor();
+	m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
 
 	std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
 	for (GSTexture12** rt : curr_rts)
 	{
-		if (*rt == m_tfx_uavs_tex[i])
+		if (*rt == m_tfx_textures_uav[i_uav])
 		{
 			*rt = nullptr;
 			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
@@ -3499,7 +3503,8 @@ void GSDevice12::SetUtilityPushConstants(const void* data, u32 size)
 
 void GSDevice12::UnbindTexture(GSTexture12* tex)
 {
-	for (u32 i = 0; i < NUM_TOTAL_TFX_TEXTURES; i++)
+	// Source / palette
+	for (u32 i = 0; i <= TEXTURE_PALETTE; i++)
 	{
 		if (m_tfx_textures[i] == tex->GetSRVDescriptor() || m_tfx_textures[i] == tex->GetFBLDescriptor())
 		{
@@ -3507,14 +3512,28 @@ void GSDevice12::UnbindTexture(GSTexture12* tex)
 			m_dirty_flags |= DIRTY_FLAG_TFX_TEXTURES;
 		}
 	}
-	for (u32 i = 0; i < NUM_TFX_UAV_TEXTURES; i++)
+
+	// RT / primid / depth
+	for (u32 i = TEXTURE_RT; i <= TEXTURE_DEPTH; i++)
 	{
-		if (m_tfx_uavs_tex[i] == tex)
+		if (m_tfx_textures[i] == tex->GetSRVDescriptor() || m_tfx_textures[i] == tex->GetFBLDescriptor())
 		{
-			m_tfx_uavs_tex[i] = nullptr;
+			m_tfx_textures[i] = m_null_texture->GetSRVDescriptor();
+			m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
 		}
-		m_dirty_flags |= DIRTY_FLAG_TFX_UAV_TEXTURES;
 	}
+
+	// RT UAV / depth UAV
+	for (u32 i = TEXTURE_RT_UAV; i <= TEXTURE_DEPTH_UAV; i++)
+	{
+		if (m_tfx_textures_uav[i - TEXTURE_RT_UAV] == tex)
+		{
+			m_tfx_textures_uav[i - TEXTURE_RT_UAV] = nullptr;
+			m_tfx_textures[i] = m_null_texture->GetUAVDescriptor();
+			m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
+		}
+	}
+
 	if (m_current_render_target == tex)
 	{
 		EndRenderPass();
@@ -3854,32 +3873,13 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 
 	if (flags & DIRTY_FLAG_TFX_RT_TEXTURES)
 	{
-		if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, 2))
+		if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, 5))
 		{
 			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX RT descriptor descriptor groups");
 			return ApplyTFXState(true);
 		}
 
 		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2;
-	}
-
-	if (flags & DIRTY_FLAG_TFX_DEPTH_TEXTURES)
-	{
-		if (!GetTextureGroupDescriptors(&m_tfx_depth_textures_handle_gpu, m_tfx_textures.data() + 4, 1))
-		{
-			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX depth descriptor descriptor groups");
-			return ApplyTFXState(true);
-		}
-		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3;
-	}
-	if (flags & DIRTY_FLAG_TFX_UAV_TEXTURES)
-	{
-		if (!GetTextureGroupDescriptors(&m_tfx_uav_textures_handle_gpu, m_tfx_uavs.data(), 2))
-		{
-			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX UAV descriptor descriptor groups");
-			return ApplyTFXState(true);
-		}
-		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4;
 	}
 
 	ID3D12GraphicsCommandList* cmdlist = GetCommandList();
@@ -3889,8 +3889,7 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		m_current_root_signature = RootSignature::TFX;
 		flags |= DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
-		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3 |
-		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4 | DIRTY_FLAG_PIPELINE;
+		         DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_PIPELINE;
 		cmdlist->SetGraphicsRootSignature(m_tfx_root_signature.get());
 	}
 
@@ -3909,11 +3908,6 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_SAMPLERS, m_tfx_samplers_handle_gpu);
 	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2)
 		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES, m_tfx_rt_textures_handle_gpu);
-	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_3)
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_DEPTH_TEXTURES, m_tfx_depth_textures_handle_gpu);
-	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_4)
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_UAV_TEXTURES, m_tfx_uav_textures_handle_gpu);
-
 
 	ApplyBaseState(flags, cmdlist);
 	return true;
@@ -4307,8 +4301,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		// Clearing/state change is handled in SendHWDraw().
 		EndRenderPass();
 
-		PSSetUnorderedAccess(0, config.ps.rov_color ? draw_rt : nullptr, true);
-		PSSetUnorderedAccess(1, config.ps.rov_depth ? draw_ds : nullptr, true);
+		PSSetUnorderedAccess(TEXTURE_RT_UAV, config.ps.rov_color ? draw_rt : nullptr, true);
+		PSSetUnorderedAccess(TEXTURE_DEPTH_UAV, config.ps.rov_depth ? draw_ds : nullptr, true);
 
 		// Warning: PSSetUnorderedAccess may use StretchRect() to update depth UAV so we must
 		// call OMSetRenderTargets() after to clear any unused RTs. Otherwise the UAV may end up
@@ -4475,8 +4469,14 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 						draw_ds->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
 				draw_ds ? (config.ps.rov_depth ? "UAV" : "Standard") : "None");
 
-			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = m_tfx_uav_textures_handle_gpu;
-			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = { gpu_handle_rt.ptr + GetDescriptorAllocator().GetDescriptorIncrementSize() };
+			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = {
+				m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
+				(TEXTURE_RT_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
+			};
+			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = {
+				m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
+				(TEXTURE_DEPTH_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
+			};
 
 			// Do state updates here as we need the GPU descriptor handles to be allocated in
 			// BindDrawPipeline() for UAV clears.
