@@ -6739,9 +6739,9 @@ void GSRendererHW::SetupROV()
 	// FIXME; Remove after done testing.
 	//if (s_n <= 5000)
 	//{
-	//	Console.WriteLn("%d: drw=%.2f drwc=%.2f drwd=%.2f fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
-	//		s_n, draws,
-	//		draws_color, draws_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
+	//	Console.WriteLn("%d: bar=%.2f barc=%.2f bard=%.2f fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
+	//		s_n, barriers,
+	//		barriers_color, barriers_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
 	//		afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
 	//}
 }
