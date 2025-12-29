@@ -5296,15 +5296,8 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 
 			if (vkTex->GetLayout() != layout && InRenderPass())
 			{
-				GL_INS("Ending render pass due to resource transition");
+				GL_INS("Ending render pass due to resource transition/barrier");
 				EndRenderPass();
-			}
-
-			// FIXME: This is unnecessary; transition should handle it.
-			if (vkTex->IsTargetModeUAV())
-			{
-				EndRenderPass();
-				vkTex->IssueUAVBarrier();
 			}
 
 			vkTex->CommitClear();
@@ -6113,12 +6106,6 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
 		}
 
-		if (config.ps.color_feedback)
-		{
-			// Need to read previous values.
-			draw_rt_rov->IssueUAVBarrier();
-		}
-
 		PSSetShaderResource(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, false);
 		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
 
@@ -6127,6 +6114,18 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			// Unbind to avoid conflicts.
 			PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT);
+		}
+
+		if (config.ps.color_feedback)
+		{
+			// Color is read in the draw. This also clears the UAV dirty flag.
+			draw_rt_rov->IssueUAVBarrier();
+		}
+
+		if (!config.ps.no_color)
+		{
+			// Color is written in the draw. This also sets the UAV dirty flag.
+			draw_rt_rov->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -6147,12 +6146,6 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
 		}
 
-		if (config.ps.depth_feedback)
-		{
-			// Need to read previous values.
-			draw_ds_rov->IssueUAVBarrier();
-		}
-
 		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, false);
 		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
 
@@ -6161,6 +6154,18 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			// Unbind to avoid conflicts.
 			PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH);
+		}
+
+		if (config.ps.depth_feedback)
+		{
+			// Depth is read in the draw. This also clears the UAV dirty flag.
+			draw_ds_rov->IssueUAVBarrier();
+		}
+
+		if (config.ps.zclamp)
+		{
+			// Depth is written in the draw. This also sets the UAV dirty flag.
+			draw_ds_rov->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -6435,6 +6440,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 	if ((one_barrier || full_barrier) && !(m_pipeline_selector.ps.IsFeedbackLoopRT() || m_pipeline_selector.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("VK: Possible unnecessary barrier detected.");
 #endif
+
 	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
 
 	std::array<VkImageMemoryBarrier, 2> barriers;

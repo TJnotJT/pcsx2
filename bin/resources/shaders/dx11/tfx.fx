@@ -1158,6 +1158,9 @@ void ps_main(PS_INPUT input)
 		fail_z = (input.p.z <= DepthLoad(input.p.xy));
 	#endif
 
+	// Cannot directly discard with ROVs because it is illegal
+	// to discard based on the value read from an ROVs.
+	// We must instead use conditional writes.
 	#if !PS_ROV_DEPTH
 		if (fail_z)
 			discard;
@@ -1382,6 +1385,7 @@ void ps_main(PS_INPUT input)
 	RtWrite(input.p.xy, output.c0);
 #endif
 
+	// FIXME: OMIT the test if its not enabled!
 #if PS_RETURN_DEPTH_ROV
 	output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
 	DepthWrite(input.p.xy, output.depth);

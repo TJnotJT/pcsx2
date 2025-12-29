@@ -332,14 +332,19 @@ void main()
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5) || PS_COLOR_FEEDBACK)
 #define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK && AFAIL_NEEDS_DEPTH)
 
-#define NEEDS_TEX (PS_TFX != 4)
-
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
 #define PS_RETURN_DEPTH_ROV (PS_ZCLAMP && PS_ROV_DEPTH)
 #define PS_RETURN_DEPTH (PS_ZCLAMP && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP)
 #define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+
+#define NEEDS_TEX (PS_TFX != 4)
+
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+#extension GL_ARB_fragment_shader_interlock : enable
+#extension GL_ARB_shader_image_load_store : enable
+#endif
 
 vec4 FragCoord;
 
@@ -380,21 +385,41 @@ layout(location = 0) in VSOutput
 
 #if PS_RETURN_COLOR
 	#if !PS_NO_COLOR1
-	layout(location = 0, index = 0) out vec4 o_col0;
-	layout(location = 0, index = 1) out vec4 o_col1;
+		layout(location = 0, index = 0) out vec4 o_col0;
+		layout(location = 0, index = 1) out vec4 o_col1;
 	#elif !PS_NO_COLOR
-	layout(location = 0) out vec4 o_col0;
+		layout(location = 0) out vec4 o_col0;
+	#endif
+#elif PS_RETURN_COLOR_ROV
+	vec4 o_col0;
+#endif
+
+#if PS_ROV_COLOR
+	#if PS_RETURN_COLOR_ROV && PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent image2D RtImageRov;
+	#elif PS_RETURN_COLOR_ROV
+		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent writeonly image2D RtImageRov;
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent readonly image2D RtImageRov;
+	#endif
+	#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		vec4 cachedRtValue;
+		vec4 sample_from_rt() { return cachedRtValue; }
 	#endif
 #endif
 
-// FIXME: use readonly/writeonly when possible
-#if PS_ROV_COLOR
-	layout(set = 1, binding = 5, rgba32f) uniform restrict image2D RtImageRov;
-#endif
-
-// FIXME: use readonly/writeonly when possible
 #if PS_ROV_DEPTH
-	layout(set = 1, binding = 5, r32f) uniform restrict image2D DepthImageRov;
+	#if PS_RETURN_DEPTH_ROV && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+	#elif PS_RETURN_DEPTH_ROV
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent writeonly image2D DepthImageRov;
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent readonly image2D DepthImageRov;
+	#endif
+	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		vec4 cachedDepthValue;
+		vec4 sample_from_depth() { return cachedDepthValue; }
+	#endif
 #endif
 
 #if NEEDS_TEX
@@ -1300,16 +1325,40 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+layout(pixel_interlock_ordered) in;
+#endif
+
+#if PS_EARLYDEPTHSTENCIL
+layout(early_fragment_test) in;
+#endif
+
 void main()
 {
 	FragCoord = gl_FragCoord;
 
-#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+	beginInvocationInterlockARB();
+#endif
+
+#if PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT
+	cachedRtValue = imageLoad(RtImageRov, ivec2(FragCoord.xy));
+#endif
+
+#if PS_DEPTH_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	cachedDepthValue = imageLoad(DepthImageRov, ivec2(FragCoord.xy)).r;
+#endif
+
+	bool fail_z = false;
+#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
 	#if PS_ZTST == ZTST_GEQUAL
-		if (FragCoord.z < sample_from_depth().r)
-			discard;
+		fail_z = FragCoord.z < sample_from_depth().r;
 	#elif PS_ZTST == ZTST_GREATER
-		if (FragCoord.z <= sample_from_depth().r)
+		fail_z = FragCoord.z <= sample_from_depth().r;
+	#endif
+
+	#if !PS_ROV_DEPTH
+		if (fail_z)
 			discard;
 	#endif
 #endif // PS_ZTST
@@ -1498,8 +1547,39 @@ void main()
 		#endif
 	#endif
 
+	float FragDepth;
 	#if PS_ZCLAMP
-		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
+		FragDepth = min(FragCoord.z, MaxDepthPS);
+	#endif
+
+	#if PS_RETURN_COLOR_ROV
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_COLOR
+			vec4 rt_col = sample_from_rt();
+
+			o_col0.r = bool(ColorMask.r) ? o_col0.r : rt_col.r;
+			o_col0.g = bool(ColorMask.g) ? o_col0.g : rt_col.g;
+			o_col0.b = bool(ColorMask.b) ? o_col0.b : rt_col.b;
+			o_col0.a = bool(ColorMask.a) ? o_col0.a : rt_col.a;
+		
+			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
+				o_col0 = fail_z ? rt_col : o_col0;
+			#endif
+		#endif
+
+		imageStore(RtImageRov, ivec2(FragCoord.xy), o_col0);
+	#endif
+
+	#if PS_RETURN_DEPTH
+		gl_FragDepth = FragDepth;
+	#elif PS_RETURN_DEPTH_ROV
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
+			FragDepth = fail_z ? sample_from_depth().r : FragDepth;
+		#endif
+		imageStore(DepthImageRov, ivec2(FragCoord.xy), vec4(FragDepth, 0, 0, 1.0f));
+	#endif
+
+	#if PS_ROV_COLOR || PS_ROV_DEPTH
+		endInvocationInterlockARB();
 	#endif
 #endif // PS_DATE
 }

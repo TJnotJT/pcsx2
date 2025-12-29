@@ -4462,13 +4462,13 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 		if (InRenderPass())
 		{
-			Console.Warning("DX12: ROV draw while in a render pass.");
+			Console.Warning("ROV draw while in a render pass.");
 			EndRenderPass();
 		}
 
 		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
 		{
-			Console.Warning("DX12: ROV feedback for color and depth is inconsistent.");
+			Console.Warning("ROV feedback for color and depth is inconsistent.");
 		}
 
 		if (BindDrawPipeline(pipe))
@@ -4494,6 +4494,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				{
 					if (config.ps.rov_color)
 					{
+						// Small optimization: clear directly as UAV without transitioning.
 						draw_rt->CommitClearUAV(gpu_handle_rt, clear_color);
 					}
 					else
@@ -4501,11 +4502,18 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 						draw_rt->CommitClear(clear_color);
 					}
 				}
-				draw_rt->SetState(GSTexture::State::Dirty);
 
 				if (config.ps.rov_color && config.ps.color_feedback)
 				{
+					// Color is read.
 					draw_rt->IssueUAVBarrier();
+				}
+
+				if (!config.ps.no_color)
+				{
+					// Color is written. Warning: do this after issuing the barrier
+					// so that the UAV is correctly marked as dirty.
+					draw_rt->SetState(GSTexture::State::Dirty);
 				}
 			}
 
@@ -4515,6 +4523,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				{
 					if (config.ps.rov_depth)
 					{
+						// Small optimization: clear directly as UAV without transitioning.
 						draw_ds->CommitClearUAV(gpu_handle_ds);
 					}
 					else
@@ -4522,11 +4531,18 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 						draw_ds->CommitClear();
 					}
 				}
-				draw_ds->SetState(GSTexture::State::Dirty);
 
 				if (config.ps.rov_depth && config.ps.depth_feedback)
 				{
+					// Depth is read.
 					draw_ds->IssueUAVBarrier();
+				}
+
+				if (config.ps.zclamp)
+				{
+					// Depth is written. Warning: do this after issuing the barrier
+					// so that the UAV is correctly marked as dirty.
+					draw_ds->SetState(GSTexture::State::Dirty);
 				}
 			}
 

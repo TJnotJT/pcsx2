@@ -6607,7 +6607,14 @@ void GSRendererHW::SetupROV()
 		GL_INS("ROV: Use color ROV");
 
 		// ColorMask setup
-		m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+		if (color_write)
+		{
+			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+		}
+		else
+		{
+			m_conf.ps.no_color = true;
+		}
 
 		// Blend setup
 		if (blend)
@@ -6690,6 +6697,13 @@ void GSRendererHW::SetupROV()
 
 		m_conf.ps.rov_color = true;
 		m_conf.ps.color_feedback |= feedback_color;
+	}
+
+	// Remove regular barriers (they will be replace by UAV barriers)
+	if (use_rov_color || use_rov_depth)
+	{
+		m_conf.require_full_barrier = false;
+		m_conf.require_one_barrier = false;
 	}
 
 	// FIXME; Remove after done testing.
