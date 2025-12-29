@@ -2869,14 +2869,12 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	{
 		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
 		sTex->SetTargetModeStandard();
-		EndRenderPass();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
 		dTex->SetTargetModeStandard();
-		EndRenderPass();
 	}
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -2992,7 +2990,6 @@ void GSDeviceVK::DrawMultiStretchRects(
 		{
 			GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
 			stex->SetTargetModeStandard();
-			EndRenderPass();
 		}
 
 		stex->CommitClear();
@@ -3007,7 +3004,6 @@ void GSDeviceVK::DrawMultiStretchRects(
 	{
 		GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
 		dTex->SetTargetModeStandard();
-		EndRenderPass();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -3152,14 +3148,12 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
 		sTex->SetTargetModeStandard();
-		EndRenderPass();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
 		dTex->SetTargetModeStandard();
-		EndRenderPass();
 	}
 
 	if (sTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
@@ -3331,7 +3325,6 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 		{
 			GL_INS("Target mode transition UAV -> Standard in DoMerge()");
 			sTex[i]->SetTargetModeStandard();
-			EndRenderPass();
 		}
 	}
 
@@ -3542,7 +3535,6 @@ void GSDeviceVK::OMSetRenderTargets(
 			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
 			EndRenderPass();
 			tex->SetTargetModeStandard();
-			EndRenderPass(); // Updating depth <-> UAV might have started a render pass
 		}
 	}
 
@@ -5305,7 +5297,6 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 		{
 			GL_INS("Target mode transition * -> UAV in PSSetUnorderedAccess()");
 			tex->SetTargetModeUAV();
-			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
 		}
 
 		PSSetShaderResource(i, tex, true, false);
@@ -5392,7 +5383,6 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
 		{
 			GL_INS("Target mode transition UAV -> Standard in SetUtilityTexture()");
 			vkTex->SetTargetModeStandard();
-			EndRenderPass();
 		}
 		vkTex->CommitClear();
 		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);

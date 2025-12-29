@@ -508,7 +508,6 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 	{
 		GL_INS("Target mode transition UAV -> Standard in Update()");
 		SetTargetModeStandard();
-		GSDevice12::GetInstance()->EndRenderPass();
 	}
 
 	g_perfmon.Put(GSPerfMon::TextureUploads, 1);
@@ -603,7 +602,6 @@ bool GSTexture12::Map(GSMap& m, const GSVector4i* r, int layer)
 	{
 		GL_INS("Target mode transition UAV -> Standard in Map()");
 		SetTargetModeStandard();
-		GSDevice12::GetInstance()->EndRenderPass();
 	}
 
 	// map for writing
@@ -907,8 +905,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 	{
 		// UAV to DS
 		
-		// Using the depth UAV like this bypasses its status as UAV so we must
-		// issue UAV barrier explicitly here.
+		// Using the depth UAV like this bypasses its status as UAV so we must issue UAV barrier explicitly here.
 		IssueUAVBarrierInternal(device->GetCommandList());
 
 		static_cast<GSTexture12*>(m_uav_depth.get())->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -916,6 +913,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+		device->EndRenderPass();
 	}
 	else
 	{
@@ -925,6 +923,7 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+		device->EndRenderPass();
 	}
 }
 

@@ -634,6 +634,7 @@ void GSTextureVK::UpdateDepthUAV(bool uav_to_ds)
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+		device->EndRenderPass();
 	}
 	else
 	{
@@ -643,6 +644,7 @@ void GSTextureVK::UpdateDepthUAV(bool uav_to_ds)
 
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+		device->EndRenderPass();
 	}
 }
 
@@ -981,7 +983,6 @@ void GSDownloadTextureVK::CopyFromTexture(
 	{
 		GL_INS("Target mode transition UAV -> Standard in CopyFromTexture()");
 		vkTex->SetTargetModeStandard();
-		GSDeviceVK::GetInstance()->EndRenderPass();
 	}
 
 	pxAssert(vkTex->GetFormat() == m_format);
