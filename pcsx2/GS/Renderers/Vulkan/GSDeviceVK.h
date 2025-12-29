@@ -565,6 +565,7 @@ public:
 	void IASetVertexBuffer(const void* vertex, size_t stride, size_t count, size_t align_multiplier = 1);
 	void IASetIndexBuffer(const void* index, size_t count);
 
+	void PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, bool uav_read, bool uav_write);
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool read_only = true);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 

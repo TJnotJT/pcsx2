@@ -447,9 +447,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		enable_surface && SupportsExtension(VK_EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME, false);
 #endif
 
-	// FIXME: Remove dynamic rendering extension; not being used yet.
-	//m_optional_extensions.vk_khr_dynamic_rendering = SupportsExtension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, false);
-	m_optional_extensions.vk_khr_dynamic_rendering = 0;
+	m_optional_extensions.vk_khr_dynamic_rendering = SupportsExtension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_fragment_shader_interlock = SupportsExtension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, false);
 
 	return true;
@@ -5286,6 +5284,63 @@ void GSDeviceVK::SetLineWidth(float width)
 	m_dirty_flags |= DIRTY_FLAG_LINE_WIDTH;
 }
 
+void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, bool read, bool write)
+{
+	pxAssertRel(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV, "Only use this to set ROV textures");
+
+	const u32 dirty_flag = (i == TFX_TEXTURE_RT_ROV)
+		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV)
+		: (i == TFX_TEXTURE_DEPTH_ROV)
+		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV)
+		: 0;
+
+	u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT
+		: (i == TFX_TEXTURE_DEPTH_ROV) ? TFX_TEXTURE_DEPTH : -1;
+
+	if (tex)
+	{
+		pxAssertMsg(m_features.rov, "ROV enabled");
+
+		if (!tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition * -> UAV in PSSetUnorderedAccess()");
+			tex->SetTargetModeUAV();
+			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
+		}
+
+		PSSetShaderResource(i, tex, true, false);
+		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
+
+		if (m_tfx_textures[i_conflict] == tex)
+		{
+			// Unbind to avoid conflicts.
+			PSSetShaderResource(i_conflict, nullptr, false);
+		}
+
+		if (read)
+		{
+			// UAV is read in the draw. Issue UAV barrier (clears UAV dirty flag).
+			if (InRenderPass())
+			{
+				GL_INS("Ending render pass due to UAV barrier");
+				EndRenderPass();
+			}
+			tex->IssueUAVBarrier();
+		}
+
+		if (write)
+		{
+			// UAV is written in the draw. Set the UAV dirty flag.
+			tex->SetState(GSTexture::State::Dirty);
+		}
+	}
+	else
+	{
+		// Unbind explicitly to avoid conflicts with OM targets.
+		PSSetShaderResource(i, nullptr, false);
+	}
+}
+
 void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool read_only)
 {
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(sr);
@@ -6094,95 +6149,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 	}
 	
-	if (draw_rt_rov)
-	{
-		// FIXME: Make a PSSetUnorderedAccess function
-
-		pxAssertMsg(m_features.rov, "ROV enabled");
-
-		if (!draw_rt_rov->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition * -> UAV in RenderHW (binding UAV)");
-			draw_rt_rov->SetTargetModeUAV();
-			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
-		}
-
-		PSSetShaderResource(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, false);
-		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
-
-		if (m_tfx_textures[TFX_TEXTURE_RT] == draw_rt_rov)
-		{
-			// Unbind to avoid conflicts.
-			PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
-			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT);
-		}
-
-		if (config.ps.color_feedback)
-		{
-			// Color is read in the draw. This also clears the UAV dirty flag.
-			if (InRenderPass())
-			{
-				GL_INS("Ending render pass due to UAV barrier");
-				EndRenderPass();
-			}
-			draw_rt_rov->IssueUAVBarrier();
-		}
-
-		if (!config.ps.no_color)
-		{
-			// Color is written in the draw. This also sets the UAV dirty flag.
-			draw_rt_rov->SetState(GSTexture::State::Dirty);
-		}
-	}
-	else
-	{
-		PSSetShaderResource(TFX_TEXTURE_RT_ROV, nullptr, false);
-	}
-	
-	if (draw_ds_rov)
-	{
-		// FIXME: Make a PSSetUnorderedAccess function
-
-		pxAssertMsg(m_features.rov, "ROV enabled");
-
-		if (!draw_ds_rov->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition * -> UAV in RenderHW (binding UAV)");
-			draw_ds_rov->SetTargetModeUAV();
-			EndRenderPass(); // In case we started a render pass to update/resolve depth UAV.
-		}
-
-		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, false);
-		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
-
-		if (m_tfx_textures[TFX_TEXTURE_DEPTH] == draw_ds_rov)
-		{
-			// Unbind to avoid conflicts.
-			PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
-			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH);
-		}
-
-		if (config.ps.depth_feedback)
-		{
-			// Depth is read in the draw. This also clears the UAV dirty flag.
-			if (InRenderPass())
-			{
-				GL_INS("Ending render pass due to UAV barrier");
-				EndRenderPass();
-			}
-			draw_ds_rov->IssueUAVBarrier();
-		}
-
-		if (config.ps.zclamp)
-		{
-			// Depth is written in the draw. This also sets the UAV dirty flag.
-			draw_ds_rov->SetState(GSTexture::State::Dirty);
-		}
-	}
-	else
-	{
-		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, nullptr, false);
-	}
+	PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, config.ps.color_feedback, !config.ps.no_color);
+	PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, config.ps.depth_feedback, config.ps.zclamp);
 
 	// Set framebuffer after settings feedback textures/UAVs in case a depth UAV update requires a render pass.
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
