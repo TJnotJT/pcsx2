@@ -103,7 +103,7 @@ public:
 	void TransitionSubresourcesToLayout(
 		VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout);
 
-	virtual void IssueUAVBarrier();
+	void IssueUAVBarrier() override;
 
 	static VkFramebuffer CreateNullFramebuffer();
 

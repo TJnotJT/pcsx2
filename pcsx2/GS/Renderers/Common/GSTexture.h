@@ -5,6 +5,7 @@
 
 #include "GS/GSVector.h"
 
+#include <memory>
 #include <string>
 #include <string_view>
 
