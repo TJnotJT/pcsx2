@@ -3542,8 +3542,9 @@ void GSDeviceVK::OMSetRenderTargets(
 		if (tex && tex->IsTargetModeUAV())
 		{
 			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
-			tex->SetTargetModeStandard();
 			EndRenderPass();
+			tex->SetTargetModeStandard();
+			EndRenderPass(); // Updating depth <-> UAV might have started a render pass
 		}
 	}
 
@@ -6119,6 +6120,11 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (config.ps.color_feedback)
 		{
 			// Color is read in the draw. This also clears the UAV dirty flag.
+			if (InRenderPass())
+			{
+				GL_INS("Ending render pass due to UAV barrier");
+				EndRenderPass();
+			}
 			draw_rt_rov->IssueUAVBarrier();
 		}
 
@@ -6159,6 +6165,11 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (config.ps.depth_feedback)
 		{
 			// Depth is read in the draw. This also clears the UAV dirty flag.
+			if (InRenderPass())
+			{
+				GL_INS("Ending render pass due to UAV barrier");
+				EndRenderPass();
+			}
 			draw_ds_rov->IssueUAVBarrier();
 		}
 

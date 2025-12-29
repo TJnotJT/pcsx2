@@ -1158,8 +1158,7 @@ void ps_main(PS_INPUT input)
 		fail_z = (input.p.z <= DepthLoad(input.p.xy));
 	#endif
 
-	// Cannot directly discard with ROVs because it is illegal
-	// to discard based on the value read from an ROVs.
+	// Cannot directly discard with ROVs because it is illegal to discard based on the value read from an ROVs.
 	// We must instead use conditional writes.
 	#if !PS_ROV_DEPTH
 		if (fail_z)
@@ -1338,24 +1337,26 @@ void ps_main(PS_INPUT input)
 	alpha_blend.a = float(atst_pass);
 #endif
 
+	// Output color scaling
 #if !PS_NO_COLOR
 	output.c0.a = PS_RTA_CORRECTION ? C.a / 128.0f : C.a / 255.0f;
 	output.c0.rgb = PS_COLCLIP_HW ? float3(C.rgb / 65535.0f) : C.rgb / 255.0f;
 #if !PS_NO_COLOR1
 	output.c1 = alpha_blend;
 #endif
+#endif // !PS_NO_COLOR
 
 	// Alpha test with feedback
 #if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
 	if (!atst_pass)
 		input.p.z = DepthLoad(input.p.xy);
-#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
+#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK && !PS_NO_COLOR
 	if (!atst_pass)
 		output.c0 = RtLoad(input.p.xy);
 #elif (PS_AFAIL == AFAIL_RGB_ONLY)
 	if (!atst_pass)
 	{
-	#if PS_COLOR_FEEDBACK
+	#if PS_COLOR_FEEDBACK && !PS_NO_COLOR
 		output.c0.a = RtLoad(input.p.xy).a;
 	#endif
 	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
@@ -1364,51 +1365,54 @@ void ps_main(PS_INPUT input)
 	}
 #endif
 
-#endif // !PS_NO_COLOR
-
 #endif // PS_DATE != 1/2
 
+	// Z clamping
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);	
-#endif
-
-#if PS_RETURN_COLOR_ROV
-	float4 rt_col = RtLoad(input.p.xy);
-
-	output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
-	output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
-	output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
-	output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
-
-	output.c0 = fail_z ? rt_col : output.c0;
-
-	RtWrite(input.p.xy, output.c0);
-#endif
-
-	// FIXME: OMIT the test if its not enabled!
-#if PS_RETURN_DEPTH_ROV
-	output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
-	DepthWrite(input.p.xy, output.depth);
+	output.depth = min(input.p.z, MaxDepthPS);
 #endif
 
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 	PS_OUTPUT_REAL output_real;
+#endif
 
-	#if PS_RETURN_COLOR
-		#if PS_DATE == 1 || PS_DATE == 2
-			output_real.c = output.c;
-		#else
-			output_real.c0 = output.c0;
-			#if !PS_NO_COLOR1
-				output_real.c1 = output.c1;
-			#endif
+	// Color write back
+#if PS_RETURN_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		output_real.c = output.c;
+	#else
+		output_real.c0 = output.c0;
+		#if !PS_NO_COLOR1
+			output_real.c1 = output.c1;
 		#endif
 	#endif
+#elif PS_RETURN_COLOR_ROV
+	#if PS_COLOR_FEEDBACK
+		float4 rt_col = RtLoad(input.p.xy);
 
-	#if PS_RETURN_DEPTH
-		output_real.depth = output.depth;
+		output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
+		output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
+		output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
+		output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
 	#endif
 
+	#if PS_DEPTH_FEEDBACK && PS_ENABLE_ZTST
+		output.c0 = fail_z ? rt_col : output.c0;
+	#endif
+
+	RtWrite(input.p.xy, output.c0);
+#endif
+
+#if PS_RETURN_DEPTH
+	output_real.depth = output.depth;
+#elif PS_RETURN_DEPTH_ROV
+	#if PS_DEPTH_FEEDBACK && PS_ENABLE_ZTST
+		output.depth = fail_z ? DepthLoad(input.p.xy) : output.depth;
+	#endif
+	DepthWrite(input.p.xy, output.depth);
+#endif
+
+#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 	return output_real;
 #endif
 }

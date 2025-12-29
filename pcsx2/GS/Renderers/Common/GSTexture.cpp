@@ -202,7 +202,7 @@ void GSTexture::CreateDepthUAV()
 	}
 }
 
-void GSTexture::SetTargetMode(TargetMode mode)
+void GSTexture::SetTargetModeInternal(TargetMode mode, bool need_barrier)
 {
 	pxAssert(IsRenderTargetOrDepthStencil() && (IsTargetModeStandard() || IsTargetModeUAV()));
 
@@ -230,7 +230,12 @@ void GSTexture::SetTargetMode(TargetMode mode)
 		// UAV -> Standard
 		GL_INS("Target mode transition UAV -> Standard");
 
-		IssueUAVBarrier();
+		// DX12 needs a UAV barrier (in addition to state transitions handled by the caller).
+		// VK does not because layout transitions count as a memory barrier.
+		if (need_barrier)
+		{
+			IssueUAVBarrier();
+		}
 
 		m_target_mode = TargetMode::Standard; // Before UpdateDepthUAV() to avoid assertion.
 

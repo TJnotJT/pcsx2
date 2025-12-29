@@ -851,15 +851,8 @@ void GSTexture12::IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist)
 
 		ID3D12Resource* resource = nullptr;
 	
-		if (m_type == Type::DepthStencil)
-			resource = static_cast<GSTexture12*>(m_uav_depth.get())->m_resource.get();
-		else if (m_type == Type::RenderTarget)
-			resource = m_resource.get();
-		else
-			pxFailRel("Must be RenderTarget or DepthStencil"); // Impossible
-
 		D3D12_RESOURCE_BARRIER barrier =
-			{ D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {resource} };
+			{ D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE, {GetResource()} };
 
 		if (dev->InRenderPass())
 		{
@@ -933,6 +926,13 @@ void GSTexture12::UpdateDepthUAV(bool uav_to_ds)
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 	}
+}
+
+void GSTexture12::SetTargetMode(TargetMode mode)
+{
+	// Request a barrier for transitioning out of UAV because resource transitions
+	// (handled by caller) don't automatically count as a memory barrier.
+	SetTargetModeInternal(mode, IsTargetModeUAV() && (mode != TargetMode::UAV));
 }
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)

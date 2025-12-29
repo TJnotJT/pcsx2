@@ -131,8 +131,10 @@ public:
 
 	D3D12_RESOURCE_BARRIER GetUAVBarrier();
 	void IssueUAVBarrier(ID3D12GraphicsCommandList* cmdlist);
-	virtual void IssueUAVBarrier() override;
-
+	void IssueUAVBarrier() override;
+	
+	void SetTargetMode(TargetMode mode) override;
+	
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 

@@ -645,26 +645,25 @@ void GSTextureVK::IssueUAVBarrier()
 {
 	pxAssert(IsTargetModeUAV());
 
-	if (GSDeviceVK::GetInstance()->InRenderPass())
+	GSDeviceVK* dev = GSDeviceVK::GetInstance();
+
+	if (dev->InRenderPass())
 	{
 		Console.Warning("Issuing UAV barrier in a render pass.");
-		GSDeviceVK::GetInstance()->EndRenderPass();
+		dev->EndRenderPass();
 	}
 
 	if (GetUAVDirty())
 	{
-		if (GetLayout() != Layout::ReadWriteImage)
-		{
-			// Handles both the layout and memory barrier.
-			TransitionToLayout(Layout::ReadWriteImage);
-		}
-		else
-		{
-			// Do just the memory barrier.
-			TransitionSubresourcesToLayout(GSDeviceVK::GetInstance()->GetCurrentCommandBuffer(), 0, 1, GetLayout(), GetLayout());
-		}
-		ClearUAVDirty();
+		TransitionToLayout(dev->GetCurrentCommandBuffer(), GetLayout(), true);
 	}
+}
+
+void GSTextureVK::SetTargetMode(TargetMode mode)
+{
+	// Do not request a barrier for transitioning out of UAV mode as layout transitions
+	// (handled by the caller) count as a memory barrier.
+	SetTargetModeInternal(mode, false);
 }
 
 void GSTextureVK::TransitionToLayout(Layout layout)
@@ -672,14 +671,20 @@ void GSTextureVK::TransitionToLayout(Layout layout)
 	TransitionToLayout(GSDeviceVK::GetInstance()->GetCurrentCommandBuffer(), layout);
 }
 
-void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout)
+void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout, bool allow_same_layout)
 {
-	if (GetLayout() == new_layout)
+	// Allowing the same layout allow us to use this for memory barriers.
+	if ((GetLayout() == new_layout) && !allow_same_layout)
 		return;
 
 	TransitionSubresourcesToLayout(command_buffer, 0, m_mipmap_levels, GetLayout(), new_layout);
 
 	SetLayout(new_layout);
+
+	if (IsTargetModeUAV() && GetUAVDirty())
+	{
+		ClearUAVDirty();
+	}
 }
 
 void GSTextureVK::TransitionSubresourcesToLayout(
@@ -966,6 +971,13 @@ void GSDownloadTextureVK::CopyFromTexture(
 	const GSVector4i& drc, GSTexture* stex, const GSVector4i& src, u32 src_level, bool use_transfer_pitch)
 {
 	GSTextureVK* const vkTex = static_cast<GSTextureVK*>(stex);
+
+	if (vkTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in CopyFromTexture()");
+		vkTex->SetTargetModeStandard();
+		GSDeviceVK::GetInstance()->EndRenderPass();
+	}
 
 	pxAssert(vkTex->GetFormat() == m_format);
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());

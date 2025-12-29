@@ -70,6 +70,7 @@ public:
 protected:
 	// Helper to copy data to/from color UAV copy for depth.
 	virtual void UpdateDepthUAV(bool uav_to_ds) { pxFailRel("Not implemented."); }
+	void SetTargetModeInternal(TargetMode mode, bool need_barrier); // Helper to combine common code in VK/DX12
 
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
@@ -172,7 +173,7 @@ public:
 	// We do this because tranistioning out in/out of UAV usage is complicated by the fact that
 	// depth textures must create a color copy to be used as UAVs.
 	__fi TargetMode GetTargetMode() const { return m_target_mode; }
-	void SetTargetMode(TargetMode mode);
+	virtual void SetTargetMode(TargetMode mode) {}
 	void CreateDepthUAV();
 	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
 	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }

@@ -99,11 +99,13 @@ public:
 	// irrelevant and will not be loaded.
 	void OverrideImageLayout(Layout new_layout);
 
-	void TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout);
+	void TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout, bool allow_same_layout = false);
 	void TransitionSubresourcesToLayout(
 		VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout);
 
 	void IssueUAVBarrier() override;
+	
+	void SetTargetMode(TargetMode mode) override;
 
 	static VkFramebuffer CreateNullFramebuffer();
 

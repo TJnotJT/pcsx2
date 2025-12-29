@@ -329,15 +329,18 @@ void main()
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 
-#define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5) || PS_COLOR_FEEDBACK)
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK && AFAIL_NEEDS_DEPTH)
-
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
 #define PS_RETURN_DEPTH_ROV (PS_ZCLAMP && PS_ROV_DEPTH)
 #define PS_RETURN_DEPTH (PS_ZCLAMP && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZCLAMP)
 #define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+
+#define PS_FEEDBACK_LOOP_IS_NEEDED_RT \
+	(PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW \
+	|| (PS_DATE >= 5) || PS_COLOR_FEEDBACK)
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK || AFAIL_NEEDS_DEPTH || PS_ENABLE_ZTST)
+
 
 #define NEEDS_TEX (PS_TFX != 4)
 
@@ -417,8 +420,8 @@ layout(location = 0) in VSOutput
 		layout(set = 1, binding = 6, r32f) uniform restrict coherent readonly image2D DepthImageRov;
 	#endif
 	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		vec4 cachedDepthValue;
-		vec4 sample_from_depth() { return cachedDepthValue; }
+		float cachedDepthValue;
+		vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
 	#endif
 #endif
 
@@ -1329,8 +1332,8 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 layout(pixel_interlock_ordered) in;
 #endif
 
-#if PS_EARLYDEPTHSTENCIL
-layout(early_fragment_test) in;
+#if PS_ROV_EARLYDEPTHSTENCIL
+layout(early_fragment_tests) in;
 #endif
 
 void main()
@@ -1345,7 +1348,7 @@ void main()
 	cachedRtValue = imageLoad(RtImageRov, ivec2(FragCoord.xy));
 #endif
 
-#if PS_DEPTH_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+#if PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 	cachedDepthValue = imageLoad(DepthImageRov, ivec2(FragCoord.xy)).r;
 #endif
 
@@ -1357,6 +1360,10 @@ void main()
 		fail_z = FragCoord.z <= sample_from_depth().r;
 	#endif
 
+	// We do not discard for ROVs and instead do conditional writes to mirror DX12,
+	// which does not allow control flow based on ROV reads.
+	// It remains to be tested whether control flow based on ROV
+	// reads works with Vulkan fragment shader interlock.
 	#if !PS_ROV_DEPTH
 		if (fail_z)
 			discard;
@@ -1512,6 +1519,7 @@ void main()
 		alpha_blend.a = float(atst_pass);
 	#endif
 
+	// Output color scaling
 	#if !PS_NO_COLOR
 		#if PS_RTA_CORRECTION
 			o_col0.a = C.a / 128.0f;
@@ -1526,34 +1534,35 @@ void main()
 		#if !PS_NO_COLOR1
 			o_col1 = alpha_blend;
 		#endif
+	#endif
 
-		// Alpha test with feedback
-		#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
-			if (!atst_pass)
-				FragCoord.z = sample_from_depth().r;
-		#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_RT
-			if (!atst_pass)
-				o_col0 = sample_from_rt();
-		#elif (PS_AFAIL == AFAIL_RGB_ONLY) 
-			if (!atst_pass)
-			{
-			#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
-				o_col0.a = sample_from_rt().a;
-			#endif
-			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
-				FragCoord.z = sample_from_depth().r;
-			#endif
-			}
+	// Alpha test with feedback
+	#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
+		if (!atst_pass)
+			FragCoord.z = sample_from_depth().r;
+	#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_NO_COLOR
+		if (!atst_pass)
+			o_col0 = sample_from_rt();
+	#elif (PS_AFAIL == AFAIL_RGB_ONLY) 
+		if (!atst_pass)
+		{
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_NO_COLOR
+			o_col0.a = sample_from_rt().a;
 		#endif
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
+			FragCoord.z = sample_from_depth().r;
+		#endif
+		}
 	#endif
 
-	float FragDepth;
+	// Z Clamping
 	#if PS_ZCLAMP
-		FragDepth = min(FragCoord.z, MaxDepthPS);
+		FragCoord.z = min(FragCoord.z, MaxDepthPS);
 	#endif
 
+	// Writing back color (nothing to do for non-ROV)
 	#if PS_RETURN_COLOR_ROV
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_COLOR
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
 			vec4 rt_col = sample_from_rt();
 
 			o_col0.r = bool(ColorMask.r) ? o_col0.r : rt_col.r;
@@ -1569,13 +1578,14 @@ void main()
 		imageStore(RtImageRov, ivec2(FragCoord.xy), o_col0);
 	#endif
 
+	// Write back depth
 	#if PS_RETURN_DEPTH
-		gl_FragDepth = FragDepth;
+		gl_FragDepth = FragCoord.z;
 	#elif PS_RETURN_DEPTH_ROV
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
-			FragDepth = fail_z ? sample_from_depth().r : FragDepth;
+			FragCoord.z = fail_z ? sample_from_depth().r : FragCoord.z;
 		#endif
-		imageStore(DepthImageRov, ivec2(FragCoord.xy), vec4(FragDepth, 0, 0, 1.0f));
+		imageStore(DepthImageRov, ivec2(FragCoord.xy), vec4(FragCoord.z, 0, 0, 1.0f));
 	#endif
 
 	#if PS_ROV_COLOR || PS_ROV_DEPTH

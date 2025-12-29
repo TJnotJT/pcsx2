@@ -2257,6 +2257,17 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
 
+	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
+	{
+		if (tex && tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
+			EndRenderPass();
+			tex->SetTargetModeStandard();
+			EndRenderPass(); // Updating depth <-> UAV might have started a render pass
+		}
+	}
+
 	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt || m_current_depth_target != d12Ds)
 	{
 		// framebuffer change
@@ -2275,17 +2286,6 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 				else
 					tex->SetState(GSTexture::State::Dirty);
 			}
-		}
-	}
-
-	// FIXME: Move this to the beginning of function like VK for consistency.
-	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
-	{
-		if (tex && tex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
-			tex->SetTargetModeStandard();
-			EndRenderPass();
 		}
 	}
 
