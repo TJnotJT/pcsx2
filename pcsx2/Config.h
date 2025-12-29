@@ -759,6 +759,7 @@ struct Pcsx2Config
 					HWMipmap : 1,
 					HWAFAILFeedback : 1,
 					HWROV : 1,
+					HWROVLogging : 1,
 					ManualUserHacks : 1,
 					UserHacks_AlignSpriteX : 1,
 					UserHacks_CPUFBConversion : 1,
@@ -849,6 +850,12 @@ struct Pcsx2Config
 		GSBilinearDirtyMode UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
 		TriFiltering TriFilter = TriFiltering::Automatic;
 		s8 OverrideTextureBarriers = -1;
+
+		u32 HWROVHistoryTextures = 32;
+		u32 HWROVHistoryDraws = 1024;
+		float HWROVHistoryDecay = 0.9625f;
+		float HWROVDrawsEnable = 2.0f;
+		float HWROVDrawsDisable = 1.25f;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;

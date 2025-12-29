@@ -753,6 +753,12 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWMipmap = true;
 	HWAFAILFeedback = false;
 	HWROV = false;
+	HWROVLogging = false;
+	HWROVHistoryDraws = 1024;
+	HWROVHistoryDecay = 0.9625f;
+	HWROVHistoryTextures = 32;
+	HWROVDrawsEnable = 2.0f;
+	HWROVDrawsDisable = 1.25f;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1024,7 +1030,13 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
 	SettingsWrapBitBoolEx(HWAFAILFeedback, "HWAFAILFeedback");
-	SettingsWrapBitBoolEx(HWROV, "HWROV");
+	SettingsWrapBitBool(HWROV);
+	SettingsWrapBitBool(HWROVLogging);
+	SettingsWrapEntry(HWROVHistoryDraws);
+	SettingsWrapEntry(HWROVHistoryDecay);
+	SettingsWrapEntry(HWROVHistoryTextures);
+	SettingsWrapEntry(HWROVDrawsEnable);
+	SettingsWrapEntry(HWROVDrawsDisable);
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");

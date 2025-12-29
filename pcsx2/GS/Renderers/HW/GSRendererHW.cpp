@@ -6449,16 +6449,28 @@ void GSRendererHW::SetupROV()
 		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
 			afail_needs_depth);
 
-	// FIXME: Change the "feedback" terminology to "barrier" if this works better.
-	bool barrier_color = feedback_color && barrier && m_conf.ps.IsFeedbackLoopRT();
-	bool barrier_depth = feedback_depth && barrier && m_conf.ps.IsFeedbackLoopDepth();
+	// FIXME: Change the "feedback" terminology to "average draws or barriers" if this works better.
+	/*bool barrier_color = feedback_color && barrier && m_conf.ps.IsFeedbackLoopRT();
+	bool barrier_depth = feedback_depth && barrier && m_conf.ps.IsFeedbackLoopDepth();*/
+	
+	// Get the number of draws that would be used with the current settings.
+	float draws_color = (feedback_color && barrier && m_conf.ps.IsFeedbackLoopRT()) ? static_cast<float>(m_drawlist.size()) : 1.0f;
+	float draws_depth = (feedback_depth && barrier && m_conf.ps.IsFeedbackLoopDepth()) ? static_cast<float>(m_drawlist.size()) : 1.0f;
+	float multiplier = 1.0f + (m_conf.alpha_second_pass.enable ? 1.0f : 0.0f) + (m_conf.blend_multi_pass.enable ? 1.0f : 0.0f);
+	draws_color *= multiplier;
+	draws_depth *= multiplier;
 
 	// Heuristic to determine ROV usage: check the fraction of previous that required barriers.
-	float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, barrier_color) : 0.0f;
-	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, barrier_depth) : 0.0f;
+	/*float fraction_color_feedback = m_conf.rt ? GetFractionFeedback(m_conf.rt, barrier_color) : 0.0f;
+	float fraction_depth_feedback = m_conf.ds ? GetFractionFeedback(m_conf.ds, barrier_depth) : 0.0f;*/
+	float fraction_color_feedback = m_conf.rt ? GetAverageDrawHistory(m_conf.rt, draws_color) : 0.0f;
+	float fraction_depth_feedback = m_conf.ds ? GetAverageDrawHistory(m_conf.ds, draws_depth) : 0.0f;
 
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
+
+	const float fraction_enable_rov = GSConfig.HWROVDrawsEnable;
+	const float fraction_disable_rov = GSConfig.HWROVDrawsDisable;
 
 	if (m_conf.rt)
 	{
@@ -6466,12 +6478,16 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_color_feedback >= fraction_disable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Color feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d ROV: Color average draws under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+				}
 				//Console.Warning("%d ROV: Color feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_color = false;
 			}
@@ -6480,13 +6496,17 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_color_feedback >= fraction_enable_rov)
 			{
-				GL_INS("ROV: Color feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color feedback fraction above %.2f => starting ROV usage", fraction_enable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d ROV: Color average draws above %.2f0 => starting ROV usage", s_n, fraction_enable_rov);
+				}
 				//Console.Warning("%d ROV: Color feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_color = true;
 			}
 			else
 			{
-				GL_INS("ROV: Color feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Color feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
 				use_rov_color = false;
 			}
 		}
@@ -6498,12 +6518,16 @@ void GSRendererHW::SetupROV()
 		{
 			if (fraction_depth_feedback >= fraction_disable_rov)
 			{
-				GL_INS("ROV: Depth feedback fraction above %.2f; continuing ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Depth feedback fraction above %.2f => continuing ROV usage", fraction_disable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f; ending ROV usage", fraction_disable_rov);
+				GL_INS("ROV: Depth feedback fraction under %.2f => ending ROV usage", fraction_disable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d: ROV: Depth average draws under %.2f => ending ROV usage", s_n, fraction_disable_rov);
+				}
 				//Console.Warning("%d ROV: Depth feedback fraction under %.2f; ending ROV usage", s_n, fraction_disable_rov);
 				use_rov_depth = false;
 			}
@@ -6513,12 +6537,16 @@ void GSRendererHW::SetupROV()
 			if (fraction_depth_feedback >= fraction_enable_rov)
 			{
 				GL_INS("ROV: Depth feedback fraction above %.2f; starting ROV usage", fraction_enable_rov);
+				if (GSConfig.HWROVLogging)
+				{
+					Console.Warning("%d: ROV: Depth average draws above %.2f => starting ROV usage", s_n, fraction_enable_rov);
+				}
 				//Console.Warning("%d ROV: Depth feedback fraction above %.2f; starting ROV usage", s_n, fraction_enable_rov);
 				use_rov_depth = true;
 			}
 			else
 			{
-				GL_INS("ROV: Depth feedback fraction under %.2f; continuing non-ROV usage", fraction_enable_rov);
+				GL_INS("ROV: Depth feedback fraction under %.2f => continuing non-ROV usage", fraction_enable_rov);
 				use_rov_depth = false;
 			}
 		}
@@ -6665,9 +6693,18 @@ void GSRendererHW::SetupROV()
 	}
 
 	// FIXME; Remove after done testing.
+	/*if (s_n <= 5000)
+	{
+		Console.WriteLn("%d: drw=%d barc=%d bard=%d fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
+			s_n, (u32)m_drawlist.size(),
+			barrier_color, barrier_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
+			afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
+	}*/
+
 	//if (s_n <= 5000)
 	//{
-	//	Console.WriteLn("%d: barc=%d bard=%d fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d", s_n,
+	//	Console.WriteLn("%d: drw=%d barc=%f bard=%f fracc=%.2f fracd=%.2f afailrt=%d afaildep=%d blendrt=%d => rovc=%d rovd=%d",
+	//		s_n, (u32)m_drawlist.size(),
 	//		barrier_color, barrier_depth, fraction_color_feedback, fraction_depth_feedback, afail_needs_rt,
 	//		afail_needs_depth, blend_needs_rt, use_rov_color, use_rov_depth);
 	//}
@@ -8495,8 +8532,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.depth.date = 1;
 	}
 
-	SetupROV();
-
 	m_conf.ps.fba = m_context->FBA.FBA;
 
 	if (m_conf.ps.dither || m_conf.blend_multi_pass.dither)
@@ -8585,6 +8620,17 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
 	}
+
+	// ComputeDrawlistGetSize expects the original index layout, so needs to be called before we modify it via HandleProvokingVertexFirst/SetupIA.
+	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
+	{
+		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	// Must call after draw list is computed so we have accurate history tracking of draws.
+	SetupROV();
 	
 	// Create a temporary depth color target
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ps.rov_depth)
@@ -8615,14 +8661,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	m_conf.drawarea = m_channel_shuffle ? scissor : scissor.rintersect(ComputeBoundingBox(rtsize, rtscale));
 	m_conf.scissor = (DATE && !DATE_BARRIER) ? m_conf.drawarea : scissor;
-
-	// ComputeDrawlistGetSize expects the original index layout, so needs to be called before we modify it via HandleProvokingVertexFirst/SetupIA.
-	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
-	{
-		ComputeDrawlistGetSize(rt->m_scale);
-		m_conf.drawlist = &m_drawlist;
-		m_conf.drawlist_bbox = &m_drawlist_bbox;
-	}
 
 	HandleProvokingVertexFirst();
 

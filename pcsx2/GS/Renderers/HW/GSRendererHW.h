@@ -203,67 +203,109 @@ private:
 
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
 
-	struct BitCount128
+	/*struct DrawCountRing
 	{
-		u64 lo = 0;
-		u64 hi = 0;
-		u32 count = 0;
-		u32 index = 0;
-		static constexpr u64 _1 = 1;
+		std::array<u32, 128> m_draws;
+		u32 m_index = 0;
+		u32 m_total_draws = 0;
 
-		bool Get() const
+		DrawCountRing()
 		{
-			return index < 64 ? (lo & (_1 << index)) : (hi & (_1 << (index - 64)));
+			memset(m_draws.data(), 0, sizeof(u32) * m_draws.size());
 		}
 
-		void Set(bool b)
+		u32 Get() const
 		{
-			bool b0 = Get();
+			return m_draws[m_index];
+		}
 
-			if (b0 != b)
+		void Set(bool draws)
+		{
+			bool draws0 = Get();
+
+			count -= static_cast<u32>(draws0);
+			count += static_cast<u32>(draws);
+
+			if (b)
 			{
-				count -= static_cast<u32>(b0);
-				count += static_cast<u32>(b);
-
-				if (b)
-				{
-					if (index < 64)
-						lo |= _1 << index;
-					else
-						hi |= _1 << (index - 64);
-				}
+				if (index < 64)
+					lo |= _1 << index;
 				else
-				{
-					if (index < 64)
-						lo &= ~(_1 << index);
-					else
-						hi &= ~(_1 << (index - 64));
-				}
+					hi |= _1 << (index - 64);
+			}
+			else
+			{
+				if (index < 64)
+					lo &= ~(_1 << index);
+				else
+					hi &= ~(_1 << (index - 64));
 			}
 
 			index = (index + 1) & 127;
 		}
+	};*/
 
-		u32 GetCount() const
-		{
-			return count;
-		}
+	//struct BitCount128
+	//{
+	//	u64 lo = 0;
+	//	u64 hi = 0;
+	//	u32 count = 0;
+	//	u32 index = 0;
+	//	static constexpr u64 _1 = 1;
 
-		float GetFraction() const
-		{
-			return static_cast<float>(count) / 128.0f;
-		}
+	//	bool Get() const
+	//	{
+	//		return index < 64 ? (lo & (_1 << index)) : (hi & (_1 << (index - 64)));
+	//	}
 
-		void Reset()
-		{
-			lo = 0;
-			hi = 0;
-			count = 0;
-			index = 0;
-		}
-	};
+	//	void Set(bool b)
+	//	{
+	//		bool b0 = Get();
 
-	struct ROVFeedbackHistory
+	//		if (b0 != b)
+	//		{
+	//			count -= static_cast<u32>(b0);
+	//			count += static_cast<u32>(b);
+
+	//			if (b)
+	//			{
+	//				if (index < 64)
+	//					lo |= _1 << index;
+	//				else
+	//					hi |= _1 << (index - 64);
+	//			}
+	//			else
+	//			{
+	//				if (index < 64)
+	//					lo &= ~(_1 << index);
+	//				else
+	//					hi &= ~(_1 << (index - 64));
+	//			}
+	//		}
+
+	//		index = (index + 1) & 127;
+	//	}
+
+	//	u32 GetCount() const
+	//	{
+	//		return count;
+	//	}
+
+	//	float GetFraction() const
+	//	{
+	//		return static_cast<float>(count) / 128.0f;
+	//	}
+
+	//	void Reset()
+	//	{
+	//		lo = 0;
+	//		hi = 0;
+	//		count = 0;
+	//		index = 0;
+	//	}
+	//};
+
+	/*struct ROVFeedbackHistory
 	{
 		GSTexture* tex = nullptr;
 		u32 last_draw = 0;
@@ -273,51 +315,116 @@ private:
 			: tex(tex)
 		{
 		}
-	};
+	}*/;
+
+	/*struct ROVFeedbackHistory
+	{
+		GSTexture* tex = nullptr;
+		u32 last_draw = 0;
+		float average_draws = 1.0f;
+		u32 entries = 0;
+
+		ROVFeedbackHistory(GSTexture* tex)
+			: tex(tex)
+		{
+		}
+	};*/
 
 	// Track history of feedback use in last n draws as a heuristic
 	// to decide when to stick with or abandon ROV draws.
 	// This maps tracks the draw number the texture was used in as a target
 	// and number of feedback draws in the 128 such usages.
-	static constexpr u32 rov_feedback_history_draws = 1024;
-	static constexpr size_t rov_feedback_history_max_size = 32;
-	static constexpr float fraction_enable_rov = 0.25f;
-	static constexpr float fraction_disable_rov = 0.0625f;
-	std::vector<ROVFeedbackHistory> m_rov_feedback_history;
+	//static constexpr u32 rov_feedback_history_draws = 1024;
+	//static constexpr size_t rov_feedback_history_max_size = 32;
+	/*static constexpr float fraction_enable_rov = 0.25f;
+	static constexpr float fraction_disable_rov = 0.0625f;*/
+	//std::vector<ROVFeedbackHistory> m_rov_feedback_history;
 
-	__fi float GetFractionFeedback(GSTexture* tex, bool feedback)
+	//__fi float GetFractionFeedback(GSTexture* tex, bool feedback)
+	//{
+	//	auto it = std::find_if(
+	//		m_rov_feedback_history.begin(), m_rov_feedback_history.end(),
+	//		[&](const ROVFeedbackHistory& h) { return h.tex == tex; });
+
+	//	if (it == m_rov_feedback_history.end())
+	//	{
+	//		// Add new texture to the history cache
+
+	//		if (m_rov_feedback_history.size() >= rov_feedback_history_max_size)
+	//			m_rov_feedback_history.pop_back(); // Evict last element
+
+	//		m_rov_feedback_history.push_back(ROVFeedbackHistory(tex));
+
+	//		it = std::prev(m_rov_feedback_history.end());
+	//	}
+
+	//	// Move current element to the front
+	//	std::rotate(m_rov_feedback_history.begin(), it, it + 1);
+
+	//	ROVFeedbackHistory& hist = m_rov_feedback_history.front();
+
+	//	// Be careful of wrap around in 32 bit s_n
+	//	if (std::max(static_cast<int>(s_n - hist.last_draw), 0) >= rov_feedback_history_draws)
+	//	{
+	//		hist.feedback_history.Reset();
+	//	}
+
+	//	hist.feedback_history.Set(feedback);
+	//	hist.last_draw = s_n;
+
+	//	return hist.feedback_history.GetFraction();
+	//}
+
+	struct AverageDrawEntry
+	{
+		GSTexture* tex = nullptr; // Texture being tracked.
+		u32 last_draw = 0; // Last draw this was updated.
+		float average_draws = 1.0f; // Average number of draws per pass.
+
+		AverageDrawEntry(GSTexture* tex)
+			: tex(tex)
+		{
+		}
+	};
+
+	std::vector<AverageDrawEntry> m_average_draw_history;
+
+	// Gets a weighted average of the number of draw calls in the history
+	// of the given texture. Used as a heuristic to determine when to
+	// start/stop using ROVs in a scene.
+	__fi float GetAverageDrawHistory(GSTexture* tex, float draws)
 	{
 		auto it = std::find_if(
-			m_rov_feedback_history.begin(), m_rov_feedback_history.end(),
-			[&](const ROVFeedbackHistory& h) { return h.tex == tex; });
+			m_average_draw_history.begin(), m_average_draw_history.end(),
+			[&](const AverageDrawEntry& e) { return e.tex == tex; });
 
-		if (it == m_rov_feedback_history.end())
+		if (it == m_average_draw_history.end())
 		{
 			// Add new texture to the history cache
+			if (m_average_draw_history.size() >= GSConfig.HWROVHistoryDraws)
+				m_average_draw_history.pop_back(); // Evict last element
 
-			if (m_rov_feedback_history.size() >= rov_feedback_history_max_size)
-				m_rov_feedback_history.pop_back(); // Evict last element
+			m_average_draw_history.push_back(AverageDrawEntry(tex));
 
-			m_rov_feedback_history.push_back(ROVFeedbackHistory(tex));
-
-			it = std::prev(m_rov_feedback_history.end());
+			it = std::prev(m_average_draw_history.end());
 		}
 
 		// Move current element to the front
-		std::rotate(m_rov_feedback_history.begin(), it, it + 1);
+		std::rotate(m_average_draw_history.begin(), it, it + 1);
 
-		ROVFeedbackHistory& hist = m_rov_feedback_history.front();
+		AverageDrawEntry& e = m_average_draw_history.front();
 
 		// Be careful of wrap around in 32 bit s_n
-		if (std::max(static_cast<int>(s_n - hist.last_draw), 0) >= rov_feedback_history_draws)
+		if (std::max(static_cast<int>(s_n - e.last_draw), 0) >= static_cast<int>(GSConfig.HWROVHistoryDraws))
 		{
-			hist.feedback_history.Reset();
+			e.average_draws = 1.0f;
 		}
 
-		hist.feedback_history.Set(feedback);
-		hist.last_draw = s_n;
+		const float w = std::clamp(GSConfig.HWROVHistoryDecay, 0.0f, 1.0f);
+		e.average_draws = w * e.average_draws + (1 - w) * draws;
+		e.last_draw = s_n;
 
-		return hist.feedback_history.GetFraction();
+		return e.average_draws;
 	}
 
 	GSHWDrawConfig m_conf = {};
