@@ -6501,7 +6501,7 @@ void GSRendererHW::SetupROV()
 	}
 
 	// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
-	if (use_rov_color && m_conf.ps.HasShaderDiscard())
+	if (m_conf.ds && use_rov_color && m_conf.ps.HasShaderDiscard())
 	{
 		GL_INS("Color ROV with shader discard forces depth ROV");
 		use_rov_depth = true;
