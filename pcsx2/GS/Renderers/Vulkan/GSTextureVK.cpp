@@ -580,9 +580,10 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 	}
 	else if (IsRenderTarget())
 	{
-		alignas(16) VkClearColorValue cv = {};
-		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
-		vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+		alignas(16) VkClearColorValue cv;
+		GSVector4::store<true>(cv.float32, GetUNormClearColor());
+		const VkImageSubresourceRange srr = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u };
+		vkCmdClearColorImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
 	}
 	else
 	{

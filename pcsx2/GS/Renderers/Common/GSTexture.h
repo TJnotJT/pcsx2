@@ -170,10 +170,10 @@ public:
 	}
 
 	// Managing whether a target is being used as a UAV or Standard OM target.
-	// We do this because tranistioning out in/out of UAV usage is complicated by the fact that
+	// We do this because transitioning out in/out of UAV usage is complicated by the fact that
 	// depth textures must create a color copy to be used as UAVs.
 	__fi TargetMode GetTargetMode() const { return m_target_mode; }
-	virtual void SetTargetMode(TargetMode mode) {}
+	virtual void SetTargetMode(TargetMode mode) { pxFail("Not implemented.");  }
 	void CreateDepthUAV();
 	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
 	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
