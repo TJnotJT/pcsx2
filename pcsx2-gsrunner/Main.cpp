@@ -855,9 +855,15 @@ void GSRunner::DumpStats()
 #define main real_main
 #endif
 
+// FIXME: DEBUGGING - REMOVE
+std::string dump_name;
+
 static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 {
 	ret->store(EXIT_FAILURE);
+
+	// FIXME: DEBUGGING - REMOVE
+	dump_name = Path::GetFileName(params->filename);
 
 	if (VMManager::Internal::CPUThreadInitialize())
 	{

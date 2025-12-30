@@ -6441,6 +6441,9 @@ __fi float GSRendererHW::GetTextureAverageBarriers(GSTexture* tex, float barrier
 	return e.average_barriers;
 }
 
+static FILE* debug_fp = nullptr;
+extern std::string dump_name;
+
 void GSRendererHW::SetupROV()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
@@ -6456,8 +6459,8 @@ void GSRendererHW::SetupROV()
 		return;
 	}
 
-	const bool color_write = m_conf.rt != nullptr && m_conf.colormask.wrgba != 0;
-	const bool depth_write = m_conf.ds != nullptr && m_cached_ctx.DepthWrite();
+	const bool color_write = m_conf.rt && m_conf.colormask.wrgba != 0;
+	const bool depth_write = m_conf.ds && m_cached_ctx.DepthWrite();
 
 	const u32 colormask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM) & m_conf.colormask.wrgba;
 	const bool colormask_needs_rt = colormask != 0xF;
@@ -6484,23 +6487,135 @@ void GSRendererHW::SetupROV()
 	bool feedback_depth = depth_write &&
 		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) || afail_needs_depth);
 
+	// First determine what ROVs would be needed to eliminate barriers.
+	bool use_rov_color = feedback_color && using_barriers && m_conf.ps.IsFeedbackLoopRT();
+	bool use_rov_depth = feedback_depth && using_barriers && m_conf.ps.IsFeedbackLoopDepth();
+
+	// If depth and color have feedback and one uses ROV, the other must also.
+	// We currently don't have a way of using barriers in one and ROV in the other.
+	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
+	{
+		GL_INS("Feedback compatibility forces color and depth ROV");
+		use_rov_color = true;
+		use_rov_depth = true;
+	}
+
+	// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
+	if (use_rov_color && m_conf.ps.HasShaderDiscard())
+	{
+		GL_INS("Color ROV with shader discard forces depth ROV");
+		use_rov_depth = true;
+		feedback_depth = true;
+	}
+
+	static float historical_barriers = 0.0f;
+
 	// Get the number of barriers that would be used with the current settings.
-	const float barriers = std::max(static_cast<float>(m_drawlist.size()), 1.0f);
+	const float num_drawcalls = std::max(static_cast<float>(m_drawlist.size()), 1.0f);
 	const float multiplier = 1.0f + (m_conf.alpha_second_pass.enable ? 1.0f : 0.0f) + (m_conf.blend_multi_pass.enable ? 1.0f : 0.0f);
+	const float barriers = multiplier * num_drawcalls;
+
+	const float history_weight = std::clamp(GSConfig.HWROVHistoryDecay, 0.0f, 1.0f);
+	historical_barriers = history_weight * historical_barriers + (1.0f - history_weight) * barriers;
+	//historical_barriers = barriers_average;
+
+	const float use_barriers = use_rov_depth ? historical_barriers : barriers;
 	
-	float barriers_color = multiplier * ((feedback_color && using_barriers && m_conf.ps.IsFeedbackLoopRT()) ? barriers : 1.0f);
-	float barriers_depth = multiplier * ((feedback_depth && using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ? barriers : 1.0f);
+	float enable_threshold = GSConfig.HWROVDrawsEnable;
+	if (use_rov_depth)
+	{
+		enable_threshold *= 5.0f;
+		if (m_conf.ds->IsTargetModeUAV())
+			enable_threshold *= 0.5;
+	}
 
+	if (use_barriers >= enable_threshold)
+	{
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("%d ROV: Barriers %.2f; Average barriers %.2f >= %.2f; enabling ROV (c=%d, d=%d).",
+				s_n, barriers, use_barriers, enable_threshold, use_rov_color, use_rov_depth);
+		}
+	}
+	else
+	{
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("%d ROV: Barriers %.2f; Average barriers %.2f < %.2f; disabling ROV (c=%d, d=%d).",
+				s_n, barriers, use_barriers, enable_threshold, use_rov_color, use_rov_depth);
+		}
+		use_rov_color = false;
+		use_rov_depth = false;
+	}
+
+	//float barriers_color = multiplier * (() ? barriers : 1.0f);
+	//float barriers_depth = multiplier * ((feedback_depth && using_barriers && ) ? barriers : 1.0f);
+
+#if 0
+	{
+		if (s_n <= 5000)
+		{
+			if (!debug_fp)
+			{
+				std::string full_name = std::string("C:\\Users\\tchan\\Desktop\\ps2_debug\\barrier_log\\") + dump_name + ".txt";
+				debug_fp = fopen(full_name.c_str(), "w");
+				if (!debug_fp)
+					pxFailRel("Couldn't open debug file");
+			}
+			bool bc = barriers_color > 1.0f;
+			bool bd = barriers_depth > 1.0f;
+			fprintf(debug_fp, "_%d: { bar: %.2f, barc: %d, bard: %d, fbc: %d, fbd: %d, dis: %d }\n",
+				s_n, barriers, bc, bd, feedback_color, feedback_depth, m_conf.ps.HasShaderDiscard());
+		}
+		else if (debug_fp)
+		{
+			fclose(debug_fp);
+			debug_fp = nullptr;
+		}
+		return;
+	}
+#endif
 	// Heuristic to determine ROV usage: get average barriers per draw in recent history.
-	float average_color_barriers = m_conf.rt ? GetTextureAverageBarriers(m_conf.rt, barriers_color) : 0.0f;
-	float average_depth_barriers = m_conf.ds ? GetTextureAverageBarriers(m_conf.ds, barriers_depth) : 0.0f;
+	//float average_color_barriers = m_conf.rt ? GetTextureAverageBarriers(m_conf.rt, barriers_color) : 0.0f;
+	//float average_depth_barriers = m_conf.ds ? GetTextureAverageBarriers(m_conf.ds, barriers_depth) : 0.0f;
 
+#if 0
 	bool use_rov_depth = false;
 	bool use_rov_color = false;
 
 	const float barriers_enable_rov = GSConfig.HWROVDrawsEnable;
 	const float barriers_disable_rov = GSConfig.HWROVDrawsDisable;
 
+	float enable_threshold;
+	float disable_threshold;
+	if (color_forces_depth_rov)
+	{
+		enable_threshold = 2.0f * barriers_enable_rov;
+		disable_threshold = 1.0f;
+	}
+	else
+	{
+		enable_threshold = barriers_enable_rov;
+		disable_threshold = 1.0f;
+	}
+
+	if (average_color_barriers >= enable_threshold)
+	{
+		use_rov_color = true;
+	}
+
+	if (s_n <= 5000)
+	{
+		Console.Warning("%d: bar=%d forced=%d avgcol=%.2f rov=%d", s_n, barriers, color_forces_depth_rov,
+			average_color_barriers, use_rov_color);
+	}
+
+	if (!use_rov_color)
+	{
+		return;
+	}
+#endif
+#if 0
 	if (m_conf.rt)
 	{
 		if (m_conf.rt->IsTargetModeUAV())
@@ -6576,24 +6691,7 @@ void GSRendererHW::SetupROV()
 			}
 		}
 	}
-
-	// If depth and color have feedback and one uses ROV, the other must also.
-	// We currently don't have a way of using barriers in one and ROV in the other.
-	if ((feedback_color && use_rov_depth) || (feedback_depth && use_rov_color))
-	{
-		GL_INS("[Feedback color + depth ROV] or [feedback depth + color ROV] => forces [color ROV + depth ROV]");
-		use_rov_color = true;
-		use_rov_depth = true;
-	}
-
-	// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
-	// TODO: Account for this in the heuristic.
-	if (use_rov_color && m_conf.ps.HasShaderDiscard())
-	{
-		GL_INS("Color ROV + shader discard => forces depth ROV");
-		use_rov_depth = true;
-		feedback_depth = true;
-	}
+#endif
 
 	// Setup depth ROV first as color ROV will depend on depth feedback.
 	if (use_rov_depth)
@@ -8694,6 +8792,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	HandleProvokingVertexFirst();
 
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
+
+	if (s_n == 336)
+	{
+		//GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig", s_n), m_conf);
+	}
 	
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
