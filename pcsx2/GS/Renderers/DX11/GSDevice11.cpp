@@ -59,6 +59,8 @@ GSDevice11::GSDevice11()
 	m_features.stencil_buffer = true;
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
+	m_features.depth_feedback = m_features.multidraw_fb_copy && !GSConfig.DisableDepthFeedback;
+	m_features.depth_as_rt_feedback = false;
 }
 
 GSDevice11::~GSDevice11() = default;

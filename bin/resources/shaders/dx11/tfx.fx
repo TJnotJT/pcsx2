@@ -1268,7 +1268,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);	
+	output.depth = min(input.p.z, MaxDepthPS);
 #endif
 
 	return output;
