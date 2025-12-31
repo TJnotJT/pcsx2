@@ -636,6 +636,8 @@ void GSTextureVK::UpdateDepthUAV(bool uav_to_ds)
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 		device->EndRenderPass();
+
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 	}
 	else
 	{
@@ -646,6 +648,8 @@ void GSTextureVK::UpdateDepthUAV(bool uav_to_ds)
 		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 		device->EndRenderPass();
+
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 	}
 }
 
@@ -663,7 +667,8 @@ void GSTextureVK::IssueUAVBarrier()
 
 	if (GetUAVDirty())
 	{
-		TransitionToLayout(dev->GetCurrentCommandBuffer(), GetLayout(), true);
+		g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+		TransitionToLayout(dev->GetCurrentCommandBuffer(), GetLayout(), true); // Clears the dirty flag
 	}
 }
 
