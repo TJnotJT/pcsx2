@@ -16,7 +16,6 @@
 #include "common/BitUtils.h"
 #include "common/Error.h"
 #include "common/HostSys.h"
-#include "common/ScopedGuard.h"
 #include "common/SmallString.h"
 #include "common/StringUtil.h"
 
@@ -1242,7 +1241,8 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
-	m_features.depth_as_rt_feedback = m_features.texture_barrier;
+	m_features.depth_feedback = false;
+	m_features.depth_as_rt_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -4243,7 +4243,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			PSSetShaderResource(0, draw_rt, false, true);
 		if ((one_barrier || full_barrier) && feedback_depth)
 			PSSetShaderResource(4, draw_ds, false, true);
-
+		
 		std::array<D3D12_RESOURCE_BARRIER, 2> barriers;
 		u32 n_barriers = 0;
 		// Specify null for the after resource as both resources are used after the barrier.
@@ -4275,7 +4275,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
 				EndRenderPass();
-				
+
 				GetCommandList()->ResourceBarrier(n_barriers, barriers.data());
 
 				if (BindDrawPipeline(pipe))
