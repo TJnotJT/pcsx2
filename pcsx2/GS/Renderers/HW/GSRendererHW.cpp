@@ -7347,22 +7347,43 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	// Determine whether the feedback methods require a single pass.
 	const bool feedback_one_pass = simple_fb_only || simple_rgb_only || simple_zb_only;
 
+	// Determine if the method for doing depth feedback uses multiple render targets.
+	// This should not be used in conjunction with dual source blend.
+	// This also requires 2 full screen copies of depth <-> color so avoid if possible.
+	const bool depth_as_rt_feedback = afail_needs_depth && features.depth_as_rt_feedback;
+
 	// If we are already have the required barriers for the accurate feedback path.
-	const bool already_have_barriers =
+	const bool free_to_use_barriers =
 		((m_conf.require_one_barrier && feedback_one_pass) || m_conf.require_full_barrier) &&
-		(features.texture_barrier || features.multidraw_fb_copy);
+		(features.texture_barrier || features.multidraw_fb_copy) &&
+		!depth_as_rt_feedback;
 
 	// Dual source blend comes with some restrictions, so detect and avoid them here.
 	const bool using_dual_source_blend = !m_conf.ps.no_color1;
 
-	// Determines if the method for doing depth feedback uses multiple render targets.
-	// This should not be used in conjunction with dual source blend.
-	const bool depth_as_rt_feedback = afail_needs_depth && features.depth_as_rt_feedback;
+	// Determine if we have the correct features for depth feedback.
+	const bool depth_feedback_supported = features.depth_feedback || features.depth_as_rt_feedback;
 
-	// Also do not use dual source blend with FB-fetch, which breaks Intel GPUs on Metal.
-	const bool avoid_feedback = (features.framebuffer_fetch || depth_as_rt_feedback) && using_dual_source_blend;
+	const bool avoid_feedback =
+		// Do not use dual source blend with FB-fetch, which breaks Intel GPUs on Metal.
+		// Also do not use dual source blend with multiple render targets, which is against spec.
+		((features.framebuffer_fetch || depth_as_rt_feedback) && using_dual_source_blend) ||
+		// We need depth feedback but do not have the correct features.
+		(afail_needs_depth && !depth_feedback_supported);
+	
+	// Determine if we can use FB-fetch for color only feedback.
+	const bool free_fbfetch_feedback = features.framebuffer_fetch && !depth_as_rt_feedback;
 
-	if ((GSConfig.HWAFAILFeedback || already_have_barriers || features.framebuffer_fetch) && !avoid_feedback)
+	// Prefer feedback method only if blend level requests it or it's free.
+	const bool prefer_feedback = (GSConfig.AccurateBlendingUnit >= AccBlendLevel::Maximum) ||
+	                             free_to_use_barriers || free_fbfetch_feedback;
+
+	// The two simple cases can be handle accurately in two passes so no point
+	// in requiring barriers if they are not already being used.
+	const bool prefer_two_pass = !(m_conf.require_full_barrier || m_conf.require_full_barrier) &&
+	                             (simple_fb_only || simple_rgb_only);
+	
+	if (prefer_feedback && !prefer_two_pass && !avoid_feedback)
 	{
 		// Use RT and/or depth sampling for accurate AFAIL in the shader.
 		GL_INS("Alpha test with RT/depth feedback (accurate)");
@@ -7378,7 +7399,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		// In that case, we don't need barriers.
 		const bool use_full_fbfetch = features.framebuffer_fetch &&
 		                              (!afail_needs_depth || features.depth_as_rt_feedback);
-		if (!use_full_fbfetch)
+		if (!use_full_fbfetch && (features.texture_barrier || features.multidraw_fb_copy))
 		{
 			m_conf.require_one_barrier |= feedback_one_pass;
 			m_conf.require_full_barrier |= !feedback_one_pass;
@@ -8314,7 +8335,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (m_conf.alpha_second_pass.enable)
 		{
 			m_conf.alpha_second_pass.depth.zwe = 0;
-			m_conf.alpha_second_pass.depth.ztst = 0;
+			m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
 		}
 		
 		// Create the temporary depth copy
@@ -8322,6 +8343,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			GSTexture::Format::Float32, false, true);
 		const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(m_conf.ds->GetWidth()), static_cast<float>(m_conf.ds->GetHeight()));
 		g_gs_device->StretchRect(m_conf.ds, m_conf.ds_as_rt, dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 	}
 
 	// rs
@@ -8356,6 +8378,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		g_gs_device->StretchRect(m_conf.ds_as_rt, m_conf.ds, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 		g_gs_device->Recycle(m_conf.ds_as_rt);
 		m_conf.ds_as_rt = nullptr;
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 	}
 }
 
