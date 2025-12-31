@@ -447,6 +447,8 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		enable_surface && SupportsExtension(VK_EXT_FULL_SCREEN_EXCLUSIVE_EXTENSION_NAME, false);
 #endif
 
+	m_optional_extensions.vk_ext_fragment_shader_interlock = SupportsExtension(VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, false);
+
 	return true;
 }
 
@@ -463,6 +465,7 @@ bool GSDeviceVK::SelectDeviceFeatures()
 	m_device_features.textureCompressionBC = available_features.textureCompressionBC;
 	m_device_features.samplerAnisotropy = available_features.samplerAnisotropy;
 	m_device_features.geometryShader = available_features.geometryShader;
+	m_device_features.fragmentStoresAndAtomics = available_features.fragmentStoresAndAtomics;
 
 	return true;
 }
@@ -633,6 +636,8 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT};
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchain_maintenance1_khr_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
+	VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fragment_shader_interlock_ext_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT};
 
 	if (m_optional_extensions.vk_ext_provoking_vertex)
 	{
@@ -666,6 +671,11 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 			swapchain_maintenance1_ext_feature.swapchainMaintenance1 = VK_TRUE;
 			Vulkan::AddPointerToChain(&device_info, &swapchain_maintenance1_ext_feature);
 		}
+	}
+	if (m_optional_extensions.vk_ext_fragment_shader_interlock)
+	{
+		fragment_shader_interlock_ext_feature.fragmentShaderPixelInterlock = VK_TRUE;
+		Vulkan::AddPointerToChain(&device_info, &fragment_shader_interlock_ext_feature);
 	}
 
 	VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
@@ -738,6 +748,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR, nullptr, VK_TRUE};
 	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT};
+	VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fragment_shader_interlock_ext_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT };
 
 	// add in optional feature structs
 	if (m_optional_extensions.vk_ext_provoking_vertex)
@@ -752,6 +764,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		Vulkan::AddPointerToChain(&features2, &swapchain_maintenance1_khr_feature);
 	if (m_optional_extensions.vk_swapchain_maintenance1 && !m_optional_extensions.vk_swapchain_maintenance1_is_khr)
 		Vulkan::AddPointerToChain(&features2, &swapchain_maintenance1_ext_feature);
+	if (m_optional_extensions.vk_ext_fragment_shader_interlock)
+		Vulkan::AddPointerToChain(&features2, &fragment_shader_interlock_ext_feature);
 
 	// query
 	vkGetPhysicalDeviceFeatures2(m_physical_device, &features2);
@@ -830,6 +844,9 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		(swapchain_maintenance1_khr_feature.swapchainMaintenance1 == VK_TRUE) :	
 		(swapchain_maintenance1_ext_feature.swapchainMaintenance1 == VK_TRUE);
 
+	m_optional_extensions.vk_ext_fragment_shader_interlock &=
+		(fragment_shader_interlock_ext_feature.fragmentShaderPixelInterlock == VK_TRUE);
+
 	Console.WriteLn(
 		"VK_EXT_provoking_vertex is %s", m_optional_extensions.vk_ext_provoking_vertex ? "supported" : "NOT supported");
 	Console.WriteLn(
@@ -847,6 +864,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		m_optional_extensions.vk_khr_driver_properties ? "supported" : "NOT supported");
 	Console.WriteLn("VK_EXT_attachment_feedback_loop_layout is %s",
 		m_optional_extensions.vk_ext_attachment_feedback_loop_layout ? "supported" : "NOT supported");
+	Console.WriteLn("VK_EXT_fragment_shader_interlock is %s",
+		m_optional_extensions.vk_ext_fragment_shader_interlock ? "supported" : "NOT supported");
 
 	return true;
 }
@@ -2114,6 +2133,12 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		return false;
 	}
 
+	if ((m_null_framebuffer = GSTextureVK::CreateNullFramebuffer()) == VK_NULL_HANDLE)
+	{
+		Host::ReportErrorAsync("GS", "Failed to create dummy framebuffer");
+		return false;
+	}
+
 	{
 		std::optional<std::string> shader = ReadShaderSource("shaders/vulkan/tfx.glsl");
 		if (!shader.has_value())
@@ -2746,6 +2771,9 @@ bool GSDeviceVK::CheckFeatures()
 
 	m_max_texture_size = m_device_properties.limits.maxImageDimension2D;
 
+	m_features.rov = GSConfig.HWROV && m_optional_extensions.vk_ext_fragment_shader_interlock &&
+		m_device_features.fragmentStoresAndAtomics;
+
 	return true;
 }
 
@@ -2819,6 +2847,18 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	{
 		GL_INS("VK: CopyRect rect empty.");
 		return;
+	}
+
+	if (sTex && sTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
+		sTex->SetTargetModeStandard();
+	}
+
+	if (dTex && dTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
+		dTex->SetTargetModeStandard();
 	}
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -2929,12 +2969,25 @@ void GSDeviceVK::DrawMultiStretchRects(
 	for (u32 i = 0; i < num_rects; i++)
 	{
 		GSTextureVK* const stex = static_cast<GSTextureVK*>(rects[i].src);
+
+		if (stex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
+			stex->SetTargetModeStandard();
+		}
+
 		stex->CommitClear();
 		if (stex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 		{
 			EndRenderPass();
 			stex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		}
+	}
+
+	if (dTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
+		dTex->SetTargetModeStandard();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -3075,6 +3128,18 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSTextureVK* dTex, const GSVector4& dRect,
 	VkPipeline pipeline, bool linear, bool allow_discard)
 {
+	if (sTex && sTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		sTex->SetTargetModeStandard();
+	}
+
+	if (dTex && dTex->IsTargetModeUAV())
+	{
+		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		dTex->SetTargetModeStandard();
+	}
+
 	if (sTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 	{
 		// can't transition in a render pass
@@ -3237,6 +3302,15 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	// If either 2nd output is disabled or SLBG is 1, a background color will be used.
 	// Note: background color is also used when outside of the unit rectangle area
 	EndRenderPass();
+
+	for (int i = 0; i < 3; i++)
+	{
+		if (sTex[i] && !sTex[i]->IsTargetModeStandard())
+		{
+			GL_INS("Target mode transition UAV -> Standard in DoMerge()");
+			sTex[i]->SetTargetModeStandard();
+		}
+	}
 
 	// transition everything before starting the new render pass
 	const bool has_input_0 = (sTex[0] &&
@@ -3432,14 +3506,25 @@ void GSDeviceVK::IASetIndexBuffer(const void* index, size_t count)
 }
 
 void GSDeviceVK::OMSetRenderTargets(
-	GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, FeedbackLoopFlag feedback_loop)
+	GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, FeedbackLoopFlag feedback_loop,
+	const GSVector2i& viewport_size)
 {
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
-	pxAssert(vkRt || vkDs);
+
+	for (GSTexture* tex : std::array{ vkRt, vkDs })
+	{
+		if (tex && tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
+			EndRenderPass();
+			tex->SetTargetModeStandard();
+		}
+	}
 
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs ||
-		m_current_framebuffer_feedback_loop != feedback_loop)
+		m_current_framebuffer_feedback_loop != feedback_loop ||
+		m_current_framebuffer == VK_NULL_HANDLE)
 	{
 		// framebuffer change or feedback loop enabled/disabled
 		EndRenderPass();
@@ -3451,11 +3536,15 @@ void GSDeviceVK::OMSetRenderTargets(
 					(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT) != 0,
 					(feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0);
 		}
-		else
+		else if (vkDs)
 		{
 			pxAssert(!(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT));
 			m_current_framebuffer = vkDs->GetLinkedFramebuffer(
 				nullptr, false, (feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0);
+		}
+		else
+		{
+			m_current_framebuffer = m_null_framebuffer;
 		}
 	}
 	else if (InRenderPass())
@@ -3595,7 +3684,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	}
 
 	// This is used to set/initialize the framebuffer for tfx rendering.
-	const GSVector2i size = vkRt ? vkRt->GetSize() : vkDs->GetSize();
+	const GSVector2i size = (vkRt ? vkRt->GetSize() : (vkDs ? vkDs->GetSize() : viewport_size));
 	const VkViewport vp{0.0f, 0.0f, static_cast<float>(size.x), static_cast<float>(size.y), 0.0f, 1.0f};
 
 	SetViewport(vp);
@@ -3835,6 +3924,8 @@ bool GSDeviceVK::CreatePipelineLayouts()
 		(m_features.texture_barrier && !UseFeedbackLoopLayout()) ? VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT :
 		                                                           VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 		1, VK_SHADER_STAGE_FRAGMENT_BIT);
+	dslb.AddBinding(TFX_TEXTURE_RT_ROV, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+	dslb.AddBinding(TFX_TEXTURE_DEPTH_ROV, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 	if ((m_tfx_texture_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
 		return false;
 	Vulkan::SetObjectName(dev, m_tfx_texture_ds_layout, "TFX texture descriptor layout");
@@ -4713,6 +4804,11 @@ void GSDeviceVK::DestroyResources()
 	if (m_utility_ds_layout != VK_NULL_HANDLE)
 		vkDestroyDescriptorSetLayout(m_device, m_utility_ds_layout, nullptr);
 
+	if (m_null_framebuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyFramebuffer(m_device, m_null_framebuffer, nullptr);
+	}
+
 	if (m_null_texture)
 	{
 		m_null_texture->Destroy(false);
@@ -4842,6 +4938,8 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ZTST", sel.ztst);
 	AddMacro(ss, "PS_COLOR_FEEDBACK", sel.color_feedback);
 	AddMacro(ss, "PS_DEPTH_FEEDBACK", sel.depth_feedback);
+	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
+	AddMacro(ss, "PS_ROV_DEPTH", sel.rov_depth);
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
@@ -5162,21 +5260,79 @@ void GSDeviceVK::SetLineWidth(float width)
 	m_dirty_flags |= DIRTY_FLAG_LINE_WIDTH;
 }
 
-void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state)
+void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, bool read, bool write)
+{
+	pxAssertRel(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV, "Only use this to set ROV textures");
+
+	const u32 dirty_flag = (i == TFX_TEXTURE_RT_ROV)
+		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV)
+		: (i == TFX_TEXTURE_DEPTH_ROV)
+		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV)
+		: 0;
+
+	u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT
+		: (i == TFX_TEXTURE_DEPTH_ROV) ? TFX_TEXTURE_DEPTH : -1;
+
+	if (tex)
+	{
+		pxAssertMsg(m_features.rov, "ROV enabled");
+
+		if (!tex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition * -> UAV in PSSetUnorderedAccess()");
+			tex->SetTargetModeUAV();
+		}
+
+		PSSetShaderResource(i, tex, true, false);
+		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
+
+		if (m_tfx_textures[i_conflict] == tex)
+		{
+			// Unbind to avoid conflicts.
+			PSSetShaderResource(i_conflict, nullptr, false);
+		}
+
+		if (read)
+		{
+			// UAV is read in the draw. Issue UAV barrier (clears UAV dirty flag).
+			if (InRenderPass())
+			{
+				GL_INS("Ending render pass due to UAV barrier");
+				EndRenderPass();
+			}
+			tex->IssueUAVBarrier();
+		}
+
+		if (write)
+		{
+			// UAV is written in the draw. Set the UAV dirty flag.
+			tex->SetState(GSTexture::State::Dirty);
+		}
+	}
+	else
+	{
+		// Unbind explicitly to avoid conflicts with OM targets.
+		PSSetShaderResource(i, nullptr, false);
+	}
+}
+
+void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool read_only)
 {
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(sr);
 	if (vkTex)
 	{
 		if (check_state)
 		{
-			if (vkTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly && InRenderPass())
+			GSTextureVK::Layout layout = read_only ? GSTextureVK::Layout::ShaderReadOnly : GSTextureVK::Layout::ReadWriteImage;
+
+			if (vkTex->GetLayout() != layout && InRenderPass())
 			{
-				GL_INS("Ending render pass due to resource transition");
+				GL_INS("Ending render pass due to resource transition/barrier");
 				EndRenderPass();
 			}
 
 			vkTex->CommitClear();
-			vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
+			vkTex->TransitionToLayout(layout);
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
 	}
@@ -5207,6 +5363,11 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
 	if (vkTex)
 	{
+		if (vkTex->IsTargetModeUAV())
+		{
+			GL_INS("Target mode transition UAV -> Standard in SetUtilityTexture()");
+			vkTex->SetTargetModeStandard();
+		}
 		vkTex->CommitClear();
 		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
@@ -5501,6 +5662,16 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 					m_tfx_textures[TFX_TEXTURE_DEPTH]->GetVkLayout());
 			}
 		}
+		if (flags & DIRTY_FLAG_TFX_TEXTURE_RT_ROV)
+		{
+			dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, TFX_TEXTURE_RT_ROV, m_tfx_textures[TFX_TEXTURE_RT_ROV]->GetView(),
+				m_tfx_textures[TFX_TEXTURE_RT_ROV]->GetVkLayout(), false);
+		}
+		if (flags & DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV)
+		{
+			dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, TFX_TEXTURE_DEPTH_ROV, m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetView(),
+				m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetVkLayout(), false);
+		}
 
 		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_tfx_pipeline_layout, TFX_DESCRIPTOR_SET_TEXTURES);
 	}
@@ -5661,8 +5832,10 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
-	GSTextureVK* draw_rt = static_cast<GSTextureVK*>(config.rt);
-	GSTextureVK* draw_ds = static_cast<GSTextureVK*>(config.ds);
+	GSTextureVK* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTextureVK*>(config.rt);
+	GSTextureVK* draw_ds = config.ps.rov_depth ? nullptr : static_cast<GSTextureVK*>(config.ds);
+	GSTextureVK* draw_rt_rov = config.ps.rov_color ? static_cast<GSTextureVK*>(config.rt) : nullptr;
+	GSTextureVK* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTextureVK*>(config.ds) : nullptr;
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
 
@@ -5673,11 +5846,11 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// bind textures before checking the render pass, in case we need to transition them
 	if (config.tex)
 	{
-		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds);
+		PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, config.tex != config.rt && config.tex != config.ds);
 		PSSetSampler(config.sampler);
 	}
 	if (config.pal)
-		PSSetShaderResource(1, config.pal, true);
+		PSSetShaderResource(TFX_TEXTURE_PALETTE, config.pal, true);
 
 	if (config.blend.constant_enable)
 		SetBlendConstants(config.blend.constant);
@@ -5852,7 +6025,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// colclip hw requires blitting.
 		EndRenderPass();
 	}
-	else if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds))
+	else if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds) &&
+		!(config.ps.rov_color || config.ps.rov_depth))
 	{
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth
@@ -5907,8 +6081,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (draw_ds)
 		skip_first_barrier = skip_first_barrier && draw_ds->GetLayout() != GSTextureVK::Layout::FeedbackLoop;
 
-	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
-	if (pipe.IsRTFeedbackLoop())
+	if (pipe.IsRTFeedbackLoop() && draw_rt)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		PSSetShaderResource(TFX_TEXTURE_RT, draw_rt, false);
@@ -5916,8 +6089,20 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// If this is the first draw to the target as a feedback loop, make sure we re-generate the texture descriptor.
 		// Otherwise, we might have a previous descriptor left over, that has the RT in a different state.
 		m_dirty_flags |= (skip_first_barrier ? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT) : 0);
+
+		if (m_tfx_textures[TFX_TEXTURE_RT_ROV] == draw_rt)
+		{
+			// Unbind to avoid conflicts.
+			PSSetShaderResource(TFX_TEXTURE_RT_ROV, nullptr, false);
+			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
+		}
 	}
-	if (pipe.IsDepthFeedbackLoop())
+	else
+	{
+		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
+	}
+	
+	if (pipe.IsDepthFeedbackLoop() && draw_ds)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, draw_ds, false);
@@ -5925,7 +6110,25 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// If this is the first draw to the target as a feedback loop, make sure we re-generate the texture descriptor.
 		// Otherwise, we might have a previous descriptor left over, that has the RT in a different state.
 		m_dirty_flags |= (skip_first_barrier ? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH) : 0);
+
+		if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] == draw_ds)
+		{
+			// Unbind to avoid conflicts.
+			PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, nullptr, false);
+			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
+		}
 	}
+	else
+	{
+		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
+	}
+	
+	PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, config.ps.color_feedback, !config.ps.no_color);
+	PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, config.ps.depth_feedback, config.ps.zclamp);
+
+	// Set framebuffer after settings feedback textures/UAVs in case a depth UAV update requires a render pass.
+	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
+
 	// Begin render pass if new target or out of the area.
 	if (!InRenderPass())
 	{
@@ -6105,24 +6308,24 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.vs.key = config.vs.key;
 	pipe.ps.key_hi = config.ps.key_hi;
 	pipe.ps.key_lo = config.ps.key_lo;
-	pipe.dss.key = config.depth.key;
-	pipe.bs.key = config.blend.key;
+	pipe.dss.key = config.ps.rov_depth ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
+	pipe.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	pipe.bs.constant = 0; // don't dupe states with different alpha values
-	pipe.cms.key = config.colormask.key;
+	pipe.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	pipe.topology = static_cast<u32>(config.topology);
-	pipe.rt = config.rt != nullptr;
-	pipe.ds = config.ds != nullptr;
+	pipe.rt = config.rt != nullptr && !config.ps.rov_color;
+	pipe.ds = config.ds != nullptr && !config.ps.rov_depth;
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
 	{
-		if (config.ps.IsFeedbackLoopRT())
+		if (pipe.rt && config.ps.IsFeedbackLoopRT())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 
-		if (config.ps.IsFeedbackLoopDepth())
+		if (pipe.ds && config.ps.IsFeedbackLoopDepth())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
 	}
-	if (!(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
+	if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
 	{
 		pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
 	}
@@ -6190,6 +6393,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 	if ((one_barrier || full_barrier) && !(m_pipeline_selector.ps.IsFeedbackLoopRT() || m_pipeline_selector.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("VK: Possible unnecessary barrier detected.");
 #endif
+
 	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
 
 	std::array<VkImageMemoryBarrier, 2> barriers;
