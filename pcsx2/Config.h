@@ -851,11 +851,14 @@ struct Pcsx2Config
 		TriFiltering TriFilter = TriFiltering::Automatic;
 		s8 OverrideTextureBarriers = -1;
 
-		u32 HWROVHistoryTextures = 32;
-		u32 HWROVHistoryDraws = 1024;
-		float HWROVHistoryDecay = 0.9625f;
-		float HWROVDrawsEnable = 2.0f;
-		float HWROVDrawsDisable = 1.25f;
+		u32 HWROVHistoryTextures = 16;
+		u32 HWROVHistoryDraws = 32;
+		float HWROVHistoryWeightColor = 0.75f;
+		float HWROVHistoryWeightDepth = 0.75f;
+		float HWROVBarriersEnableColor = 2.0f;
+		float HWROVBarriersEnableDepth = 4.0f;
+		float HWROVBarriersDisableColor = 1.125f;
+		float HWROVBarriersDisableDepth = 1.25f;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;

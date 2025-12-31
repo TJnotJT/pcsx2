@@ -216,7 +216,7 @@ private:
 	};
 
 	std::vector<TextureAverageBarriers> m_average_barriers_history;
-	float GetTextureAverageBarriers(GSTexture* tex, float barriers);
+	float GetTextureAverageBarriers(GSTexture* tex, float barriers, float history_weight);
 	
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
