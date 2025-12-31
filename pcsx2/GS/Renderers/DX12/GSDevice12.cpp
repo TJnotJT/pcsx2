@@ -1238,7 +1238,8 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
-	m_features.depth_as_rt_feedback = m_features.texture_barrier;
+	m_features.depth_feedback = false;
+	m_features.depth_as_rt_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
