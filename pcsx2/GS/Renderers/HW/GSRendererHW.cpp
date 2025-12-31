@@ -6488,42 +6488,46 @@ void GSRendererHW::SetupROV()
 		(using_barriers || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
 			colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask);
 	bool feedback_depth = depth_write &&
-		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) || afail_needs_depth);
+		(m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
+			afail_needs_depth || ztst);
 
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
 	bool use_rov_color = using_barriers && m_conf.ps.IsFeedbackLoopRT();
 	bool use_rov_depth = using_barriers && m_conf.ps.IsFeedbackLoopDepth();
 
-	// If depth and color have feedback and one uses ROV, the other must also.
-	// We currently don't have a way of using barriers in one and ROV in the other.
-	if ((m_conf.ps.IsFeedbackLoopRT() && use_rov_depth) || (m_conf.ps.IsFeedbackLoopDepth() && use_rov_color))
+	// In certain cases using a ROV with depth or color will force the other one.
+	// We have to use this twice: once before when deciding whether to use ROV
+	// and later when we commit to using ROV.
+	auto GetForcedROVUsage = [this, color_write, depth_write, ztst]
+		(bool& rov_color, bool& rov_depth, bool& feedback_color, bool& feedback_depth)
 	{
-		GL_INS("Feedback compatibility forces color and depth ROV");
-		use_rov_color = true;
-		use_rov_depth = true;
-	}
+		// If depth and color have feedback and one uses ROV, the other must also.
+		// We currently don't have a way of using barriers in one and ROV in the other.
+		if ((m_conf.ps.IsFeedbackLoopRT() && rov_depth) || (m_conf.ps.IsFeedbackLoopDepth() && rov_color))
+		{
+			GL_INS("Feedback compatibility forces color and depth ROV");
+			rov_color = true;
+			rov_depth = true;
+		}
 
-	// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
-	if (m_conf.ds && use_rov_color && m_conf.ps.HasShaderDiscard())
-	{
-		GL_INS("Color ROV with shader discard forces depth ROV");
-		use_rov_depth = true;
-		feedback_depth = true;
-	}
+		// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
+		if (m_conf.ds && depth_write && rov_color && m_conf.ps.HasShaderDiscard())
+		{
+			GL_INS("Color ROV with shader discard forces depth ROV");
+			rov_depth = true;
+			feedback_depth = true;
+		}
 
-	// If we use ROV depth and have depth testing, we must read the old value.
-	if (use_rov_depth && ztst)
-	{
-		feedback_depth = true;
-	}
+		// If we have SW depth testing we must also use color ROV so that color discard works correctly.
+		if (m_conf.rt && color_write && rov_depth && ztst)
+		{
+			GL_INS("Depth ROV with Z test forces color ROV");
+			rov_color = true;
+			feedback_color = true;
+		}
+	};
 
-	// If we have SW depth testing we must also use color ROV so that color discard works correctly.
-	if (m_conf.rt && use_rov_depth && ztst)
-	{
-		GL_INS("Depth ROV with Z test forces color ROV");
-		use_rov_color = true;
-		feedback_color = true;
-	}
+	GetForcedROVUsage(use_rov_color, use_rov_depth, feedback_color, feedback_depth);
 
 	// Get the number of barriers that would be used with the current config.
 	u32 num_drawcalls_i; 
@@ -6571,7 +6575,7 @@ void GSRendererHW::SetupROV()
 	}
 	
 	// There's a lot of flags here that implement a simple state machine to
-	// decide when to enable/disble/continue color and/or depth ROVs depending
+	// decide when to enable/disable/continue color and/or depth ROVs depending
 	// on how many barriers have been used, whether the textures are already
 	// in UAV mode, etc. Depth and color are treated asymmetrically because
 	// depth is more expensive to use as ROV and switching require a copy.
@@ -6609,13 +6613,16 @@ void GSRendererHW::SetupROV()
 		{
 			use_rov_depth_final = false; // No reason to use it.
 		}
+
+		GetForcedROVUsage(use_rov_color_final, use_rov_depth_final, feedback_color, feedback_depth);
 		
 		if (GSConfig.HWROVLogging)
 		{
-			Console.Warning("ROV: Draw=%d | C=%08x | D=%08x | BAR=%.2f | AVGBAR=%.2f >= %.2f => %s | C=%d => %d | D=%d => %d.",
-				s_n, (u32)m_conf.rt, (u32)m_conf.ds, barriers, test_barriers, threshold,
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} >= {:.2} => {} | C={} => {} | D={} => {}.",
+				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
 				needs_enabling ? "Enable ROV" : "Continue ROV",
-				use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
+				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
+				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
 	}
 	else
@@ -6625,10 +6632,11 @@ void GSRendererHW::SetupROV()
 		use_rov_depth_final = false;
 		if (GSConfig.HWROVLogging)
 		{
-			Console.Warning("ROV: Draw=%d | C=%08x | D=%08x | BAR=%.2f | AVGBAR=%.2f < %.2f => %s | C=%d => %d | D=%d => %d.",
-				s_n, (u32)m_conf.rt, (u32)m_conf.ds, barriers, test_barriers, threshold,
-				needs_enabling ? "Continue non-ROV" : "Disable ROV",
-				use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
+			Console.Warning("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
+				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
+				needs_enabling ? "Enable ROV" : "Continue ROV",
+				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
+				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
 	}
 
