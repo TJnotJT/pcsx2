@@ -741,7 +741,8 @@ bool GSDeviceOGL::CheckFeatures()
 	m_features.prefer_new_textures = false;
 	m_features.stencil_buffer = true;
 	m_features.test_and_sample_depth = m_features.texture_barrier;
-	m_features.depth_as_rt_feedback = m_features.texture_barrier;
+	m_features.depth_feedback = false;
+	m_features.depth_as_rt_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
 
 	if (GLAD_GL_ARB_shader_storage_buffer_object)
 	{
