@@ -900,7 +900,8 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool depth_as_rt_feedback : 1; ///< Depth feedback loops/barriers by converting depth to a temporary color target.
+		bool depth_feedback       : 1; ///< Depth feedback loops by directly binding DepthStencil target for read/write.
+		bool depth_as_rt_feedback : 1; ///< Depth feedback loops by converting depth to a temporary color target.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
