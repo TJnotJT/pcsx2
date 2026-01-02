@@ -3134,12 +3134,14 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 	if (sTex && sTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		EndRenderPass();
 		sTex->SetTargetModeStandard();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		EndRenderPass();
 		dTex->SetTargetModeStandard();
 	}
 

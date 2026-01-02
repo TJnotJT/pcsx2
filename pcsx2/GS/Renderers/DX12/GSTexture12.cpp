@@ -619,6 +619,7 @@ bool GSTexture12::Map(GSMap& m, const GSVector4i* r, int layer)
 	if (IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in Map()");
+		GSDevice12::GetInstance()->EndPresent();
 		SetTargetModeStandard();
 	}
 
@@ -878,7 +879,9 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 	else
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		// Don't use GetWriteDescriptor() since we might be in UAV mode. Clearing is an exception to access the write descriptor
+		// in UAV mode since it's not binding the resource as a render target.
+		cmdlist->ClearRenderTargetView(m_write_descriptor, color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);

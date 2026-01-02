@@ -1703,12 +1703,14 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 	if (sTex && sTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		EndRenderPass();
 		sTex->SetTargetModeStandard();
 	}
 
 	if (dTex && dTex->IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
+		EndRenderPass();
 		dTex->SetTargetModeStandard();
 	}
 
@@ -4105,7 +4107,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	UpdateHWPipelineSelector(config);
 
 	// Handle RT hazard when no barrier was requested
-	if (m_features.texture_barrier && config.tex && (config.tex == config.rt) && !(config.require_one_barrier || config.require_full_barrier))
+	if (m_features.texture_barrier && config.tex && (config.tex == config.rt) && !(config.require_one_barrier || config.require_full_barrier) && !config.ps.rov_color)
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
 
