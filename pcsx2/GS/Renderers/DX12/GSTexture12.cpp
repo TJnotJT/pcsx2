@@ -870,18 +870,26 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 	}
 	else if (IsDepthStencil() && IsTargetModeUAV())
 	{
-		ClearUAVDirty(); // Avoid assertions when transitioning.
+		ClearUAVDirty(); // Forget dirty state since we're clearing
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET); // Actually transitions the UAV copy
 		float cv[4] = { m_clear_value.depth, 0.0f, 0.0f, 0.0f };
 		cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_uav_depth.get())->GetWriteDescriptor(),
 			color ? color : cv, 0, nullptr);
 	}
-	else
+	else if (IsRenderTarget() && IsTargetModeUAV())
+	{
+		ClearUAVDirty(); // Forget dirty state since we're clearing
+		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		cmdlist->ClearRenderTargetView(m_write_descriptor, color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+	}
+	else if (IsRenderTarget() && IsTargetModeStandard())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		// Don't use GetWriteDescriptor() since we might be in UAV mode. Clearing is an exception to access the write descriptor
-		// in UAV mode since it's not binding the resource as a render target.
 		cmdlist->ClearRenderTargetView(m_write_descriptor, color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+	}
+	else
+	{
+		pxAssert("Invalid target for clearing");
 	}
 
 	SetState(GSTexture::State::Dirty);
