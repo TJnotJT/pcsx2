@@ -5956,9 +5956,11 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			g_gs_device->SetColorClipTexture(nullptr);
 
 			colclip_rt = nullptr;
+			draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTextureVK*>(config.rt);
 		}
 		else
 		{
+			pxAssert(!config.ps.rov_color);
 			pipe.ps.colclip_hw = 1;
 			draw_rt = colclip_rt;
 		}

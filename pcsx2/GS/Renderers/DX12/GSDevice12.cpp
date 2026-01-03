@@ -4154,9 +4154,13 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 			Recycle(colclip_rt);
 			g_gs_device->SetColorClipTexture(nullptr);
+
+			colclip_rt = nullptr;
+			draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
 		}
 		else
 		{
+			pxAssert(!config.ps.rov_color);
 			draw_rt = colclip_rt;
 			pipe.ps.colclip_hw = 1;
 		}
