@@ -3312,9 +3312,15 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	{
 		if (sTex[i] && !sTex[i]->IsTargetModeStandard())
 		{
-			GL_INS("Target mode transition UAV -> Standard in DoMerge()");
+			GL_INS("Target mode transition * -> Standard in DoMerge()");
 			sTex[i]->SetTargetModeStandard();
 		}
+	}
+
+	if (dTex && !dTex->IsTargetModeStandard())
+	{
+		GL_INS("Target mode transition * -> Standard in DoMerge()");
+		dTex->SetTargetModeStandard();
 	}
 
 	// transition everything before starting the new render pass
@@ -3424,6 +3430,9 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 void GSDeviceVK::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderInterlace shader, bool linear, const InterlaceConstantBuffer& cb)
 {
+	pxAssert(!sTex || sTex->IsTargetModeStandard());
+	pxAssert(!dTex || dTex->IsTargetModeStandard());
+
 	static_cast<GSTextureVK*>(dTex)->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
 
 	const GSVector4i rc = GSVector4i(dRect);
@@ -3443,6 +3452,9 @@ void GSDeviceVK::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 
 void GSDeviceVK::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4])
 {
+	pxAssert(!sTex || sTex->IsTargetModeStandard());
+	pxAssert(!dTex || dTex->IsTargetModeStandard());
+
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -3460,6 +3472,9 @@ void GSDeviceVK::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 
 void GSDeviceVK::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 {
+	pxAssert(!sTex || sTex->IsTargetModeStandard());
+	pxAssert(!dTex || dTex->IsTargetModeStandard());
+
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -3519,9 +3534,9 @@ void GSDeviceVK::OMSetRenderTargets(
 
 	for (GSTexture* tex : std::array{ vkRt, vkDs })
 	{
-		if (tex && tex->IsTargetModeUAV())
+		if (tex && !tex->IsTargetModeStandard())
 		{
-			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
+			GL_INS("Target mode transition * -> Standard in OMSetRenderTarget()");
 			EndRenderPass();
 			tex->SetTargetModeStandard();
 		}
@@ -5368,11 +5383,6 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
 	if (vkTex)
 	{
-		if (vkTex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in SetUtilityTexture()");
-			vkTex->SetTargetModeStandard();
-		}
 		vkTex->CommitClear();
 		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());

@@ -160,11 +160,11 @@ public:
 	}
 
 	__fi State GetState() const { return m_state; }
-	void SetState(State state)
+	void SetState(State state, bool dirty_uav = false)
 	{
 		if (IsTargetModeUAV())
 		{
-			if (state == State::Dirty)
+			if (state == State::Dirty && dirty_uav)
 			{
 				SetUAVDirty();
 			}

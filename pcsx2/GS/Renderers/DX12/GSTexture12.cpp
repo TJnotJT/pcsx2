@@ -522,9 +522,9 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 	if (layer >= m_mipmap_levels)
 		return false;
 
-	if (IsTargetModeUAV())
+	if (!IsTargetModeStandard())
 	{
-		GL_INS("Target mode transition UAV -> Standard in Update()");
+		GL_INS("Target mode transition * -> Standard in Update()");
 		SetTargetModeStandard();
 	}
 
