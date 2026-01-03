@@ -6532,8 +6532,15 @@ void GSRendererHW::SetupROV()
 	u32 num_drawcalls_i; 
 	if (using_barriers)
 	{
-		num_drawcalls_i = 16; // Tell drawlist computation to cap at 16 to lower CPU burden.
-		GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
+		if (m_drawlist.size() > 0)
+		{
+			num_drawcalls_i = static_cast<u32>(m_drawlist.size()); // Already computed
+		}
+		else
+		{
+			num_drawcalls_i = 16; // Tell drawlist computation to cap at 16 to lower CPU burden.
+			GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
+		}
 	}
 	else
 	{

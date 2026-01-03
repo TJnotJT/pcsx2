@@ -160,11 +160,13 @@ public:
 	}
 
 	__fi State GetState() const { return m_state; }
-	void SetState(State state)
+	void SetState(State state, bool dirty_uav = false)
 	{
 		if (IsTargetModeUAV())
 		{
-			if (state == State::Dirty)
+			// Even in UAV mode we want to only set the dirty UAV flag if we performed UAV writes.
+			// Only DX12 requires this as UAVs require a separate barrier not handled by transitions.
+			if (state == State::Dirty && dirty_uav)
 			{
 				SetUAVDirty();
 			}

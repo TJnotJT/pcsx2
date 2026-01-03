@@ -6,6 +6,7 @@
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSGL.h"
+#include "GS/GSState.h"
 
 #include "common/Assertions.h"
 #include "common/Console.h"
@@ -619,7 +620,6 @@ bool GSTexture12::Map(GSMap& m, const GSVector4i* r, int layer)
 	if (IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in Map()");
-		GSDevice12::GetInstance()->EndRenderPass();
 		SetTargetModeStandard();
 	}
 
@@ -775,7 +775,9 @@ void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RE
 
 	if (IsTargetModeUAV() && m_uav_dirty)
 	{
-		pxFailRel("Transitioning texture from dirty UAV without barrier.");
+		std::string str = fmt::format("Transitioning texture from dirty UAV without barrier (draw: {}, stateFrom: {}, stateTo: {}).",
+			GSState::s_n, (u32)GetResourceState(), (u32)state);
+		pxFailRel(str.c_str());
 	}
 
 	// Read only depth requires special handling as we might want to write stencil.
