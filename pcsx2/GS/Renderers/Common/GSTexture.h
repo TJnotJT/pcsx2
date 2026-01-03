@@ -162,9 +162,16 @@ public:
 	__fi State GetState() const { return m_state; }
 	void SetState(State state)
 	{
-		if (IsTargetModeUAV() && state == State::Dirty)
+		if (IsTargetModeUAV())
 		{
-			SetUAVDirty();
+			if (state == State::Dirty)
+			{
+				SetUAVDirty();
+			}
+			else if (state == State::Cleared)
+			{
+				ClearUAVDirty();
+			}
 		}
 		m_state = state;
 	}

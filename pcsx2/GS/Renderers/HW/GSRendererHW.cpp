@@ -6570,6 +6570,11 @@ void GSRendererHW::SetupROV()
 	if (!(needs_enabling || needs_disabling))
 	{
 		GL_INS("ROV: Draw=%d => No action taken.");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
+				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers);
+		}
 		return;
 	}
 	
@@ -6631,9 +6636,9 @@ void GSRendererHW::SetupROV()
 		use_rov_depth_final = false;
 		if (GSConfig.HWROVLogging)
 		{
-			Console.Warning("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
 				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
-				needs_enabling ? "Enable ROV" : "Continue ROV",
+				needs_enabling ? "Continue non-ROV" : "Disable ROV",
 				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
 				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
