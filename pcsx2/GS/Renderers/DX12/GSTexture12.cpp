@@ -619,7 +619,7 @@ bool GSTexture12::Map(GSMap& m, const GSVector4i* r, int layer)
 	if (IsTargetModeUAV())
 	{
 		GL_INS("Target mode transition UAV -> Standard in Map()");
-		GSDevice12::GetInstance()->EndPresent();
+		GSDevice12::GetInstance()->EndRenderPass();
 		SetTargetModeStandard();
 	}
 
