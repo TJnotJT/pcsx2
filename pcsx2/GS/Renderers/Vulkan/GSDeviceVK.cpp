@@ -5329,7 +5329,7 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 		if (write)
 		{
 			// UAV is written in the draw. Set the UAV dirty flag.
-			tex->SetState(GSTexture::State::Dirty);
+			tex->SetState(GSTexture::State::Dirty, true);
 		}
 	}
 	else
