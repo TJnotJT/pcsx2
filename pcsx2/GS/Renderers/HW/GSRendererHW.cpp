@@ -6529,16 +6529,18 @@ void GSRendererHW::SetupROV()
 	GetForcedROVUsage(use_rov_color, use_rov_depth, feedback_color, feedback_depth);
 
 	// Get the number of barriers that would be used with the current config.
+	constexpr u32 MAX_DRAWS = 16; // Tell drawlist computation to cap at 16 to lower CPU burden and prevent
+	                              // outliers from influencing heuristic too much.
 	u32 num_drawcalls_i; 
 	if (using_barriers)
 	{
 		if (m_drawlist.size() > 0)
 		{
-			num_drawcalls_i = static_cast<u32>(m_drawlist.size()); // Already computed
+			num_drawcalls_i = std::min(MAX_DRAWS, static_cast<u32>(m_drawlist.size())); // Already computed
 		}
 		else
 		{
-			num_drawcalls_i = 16; // Tell drawlist computation to cap at 16 to lower CPU burden.
+			num_drawcalls_i = MAX_DRAWS; // Tells drawlist computation to cap at MAX_DRAWS.
 			GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
 		}
 	}
@@ -6749,19 +6751,17 @@ void GSRendererHW::SetupROV()
 		// Alpha test setup
 		if (ate)
 		{
-			GL_INS("ROV: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
-				" and disabling alpha second pass" : "");
+				GL_INS("ROV: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
+					" and disabling alpha second pass" : "");
+				m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::FEEDBACK;
+				u32 ps_atst;
+				float ps_aref;
+				GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
+				m_conf.ps.atst = ps_atst;
+				m_conf.ps.afail = m_cached_ctx.TEST.AFAIL;
+				m_conf.cb_ps.FogColor_AREF.a = ps_aref;
 
-			m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::FEEDBACK;
-
-			u32 ps_atst;
-			float ps_aref;
-			GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
-			m_conf.ps.atst = ps_atst;
-			m_conf.ps.afail = m_cached_ctx.TEST.AFAIL;
-			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
-			
-			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
+				GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
 
 			if (m_conf.alpha_second_pass.enable)
 				m_conf.alpha_second_pass = {};
@@ -7965,7 +7965,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		m_conf.alpha_second_pass.require_full_barrier = m_conf.require_full_barrier;
 	}
 
-	// Finally, if the the first pass is never used (i.e., ATST=NEVER, do only the second pass).
+	// Finally, if the the first pass is never used (i.e., ATST=NEVER) do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
 		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
