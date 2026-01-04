@@ -1340,7 +1340,8 @@ void main()
 {
 	FragCoord = gl_FragCoord;
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_RETURN_COLOR_ROV || PS_RETURN_DEPTH_ROV
+	// Only interlock if writing to color and/or depth ROV.
 	beginInvocationInterlockARB();
 #endif
 
@@ -1587,7 +1588,8 @@ void main()
 		imageStore(DepthImageRov, ivec2(FragCoord.xy), vec4(FragCoord.z, 0, 0, 1.0f));
 	#endif
 
-	#if PS_ROV_COLOR || PS_ROV_DEPTH
+	#if PS_RETURN_COLOR_ROV || PS_RETURN_DEPTH_ROV
+		// Only interlock if writing to color and/or depth ROV.
 		endInvocationInterlockARB();
 	#endif
 #endif // PS_DATE
