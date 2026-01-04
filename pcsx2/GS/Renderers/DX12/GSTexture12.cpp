@@ -774,7 +774,7 @@ void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RE
 
 	if (IsTargetModeUAV() && m_uav_dirty)
 	{
-		pxFailRel("Transitioning texture from dirty UAV without barrier.");
+		pxFailRel("Transitioning texture from dirty UAV without barrier");
 	}
 
 	// Read only depth requires special handling as we might want to write stencil.
@@ -869,16 +869,26 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 	}
 	else if (IsDepthStencil() && IsTargetModeUAV())
 	{
-		ClearUAVDirty(); // Avoid assertions when transitioning.
+		ClearUAVDirty(); // Forget dirty state since we're clearing
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET); // Actually transitions the UAV copy
 		float cv[4] = { m_clear_value.depth, 0.0f, 0.0f, 0.0f };
 		cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_uav_depth.get())->GetWriteDescriptor(),
 			color ? color : cv, 0, nullptr);
 	}
-	else
+	else if (IsRenderTarget() && IsTargetModeUAV())
+	{
+		ClearUAVDirty(); // Forget dirty state since we're clearing
+		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		cmdlist->ClearRenderTargetView(m_write_descriptor, color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+	}
+	else if (IsRenderTarget() && IsTargetModeStandard())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		cmdlist->ClearRenderTargetView(m_write_descriptor, color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+	}
+	else
+	{
+		pxAssert("Invalid target for clearing");
 	}
 
 	SetState(GSTexture::State::Dirty);
