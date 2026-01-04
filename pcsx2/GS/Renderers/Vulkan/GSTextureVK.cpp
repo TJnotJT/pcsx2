@@ -358,7 +358,6 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 	{
 		GL_INS("Target mode transition UAV -> Standard in Update()");
 		SetTargetModeStandard();
-		GSDeviceVK::GetInstance()->EndRenderPass();
 	}
 
 	g_perfmon.Put(GSPerfMon::TextureUploads, 1);
@@ -434,7 +433,6 @@ bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
 	{
 		GL_INS("Target mode transition UAV -> Standard in Map()");
 		SetTargetModeStandard();
-		GSDeviceVK::GetInstance()->EndRenderPass();
 	}
 
 	// map for writing

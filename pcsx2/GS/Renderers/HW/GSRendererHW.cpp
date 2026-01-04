@@ -6529,11 +6529,20 @@ void GSRendererHW::SetupROV()
 	GetForcedROVUsage(use_rov_color, use_rov_depth, feedback_color, feedback_depth);
 
 	// Get the number of barriers that would be used with the current config.
+	constexpr u32 MAX_DRAWS = 16; // Tell drawlist computation to cap at 16 to lower CPU burden and prevent
+	                              // outliers from influencing heuristic too much.
 	u32 num_drawcalls_i; 
 	if (using_barriers)
 	{
-		num_drawcalls_i = 16; // Tell drawlist computation to cap at 16 to lower CPU burden.
-		GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
+		if (m_drawlist.size() > 0)
+		{
+			num_drawcalls_i = std::min(MAX_DRAWS, static_cast<u32>(m_drawlist.size())); // Already computed
+		}
+		else
+		{
+			num_drawcalls_i = MAX_DRAWS; // Tells drawlist computation to cap at MAX_DRAWS.
+			GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
+		}
 	}
 	else
 	{
@@ -6570,6 +6579,11 @@ void GSRendererHW::SetupROV()
 	if (!(needs_enabling || needs_disabling))
 	{
 		GL_INS("ROV: Draw=%d => No action taken.");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
+				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers);
+		}
 		return;
 	}
 	
@@ -6631,9 +6645,9 @@ void GSRendererHW::SetupROV()
 		use_rov_depth_final = false;
 		if (GSConfig.HWROVLogging)
 		{
-			Console.Warning("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
 				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
-				needs_enabling ? "Enable ROV" : "Continue ROV",
+				needs_enabling ? "Continue non-ROV" : "Disable ROV",
 				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
 				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
@@ -7953,7 +7967,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		m_conf.alpha_second_pass.require_full_barrier = m_conf.require_full_barrier;
 	}
 
-	// Finally, if the the first pass is never used (i.e., ATST=NEVER, do only the second pass).
+	// Finally, if the the first pass is never used (i.e., ATST=NEVER) do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
 		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
