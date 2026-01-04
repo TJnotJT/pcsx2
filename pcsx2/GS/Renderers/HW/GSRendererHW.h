@@ -124,6 +124,7 @@ private:
 	bool EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
 	void EmulateBlending(int rt_alpha_min, int rt_alpha_max, const bool DATE, bool& DATE_PRIMID, bool& DATE_BARRIER, GSTextureCache::Target* rt,
 		bool can_scale_rt_alpha, bool& new_rt_alpha_scale);
+	void SetupROV();
 	void CleanupDraw(bool invalidate_temp_src);
 
 	void EmulateTextureSampler(const GSTextureCache::Target* rt, const GSTextureCache::Target* ds,
@@ -200,6 +201,23 @@ private:
 
 	GSVector2i m_lod = {}; // Min & Max level of detail
 
+	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
+
+	struct TextureAverageBarriers
+	{
+		GSTexture* tex = nullptr; // Texture being tracked.
+		u32 last_draw = 0; // Last draw this was updated.
+		float average_barriers = 1.0f; // Average number of barriers per draw.
+
+		TextureAverageBarriers(GSTexture* tex)
+			: tex(tex)
+		{
+		}
+	};
+
+	std::vector<TextureAverageBarriers> m_average_barriers_history;
+	float GetTextureAverageBarriers(GSTexture* tex, float barriers, float history_weight);
+	
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
 
