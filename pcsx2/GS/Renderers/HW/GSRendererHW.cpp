@@ -6529,8 +6529,13 @@ void GSRendererHW::SetupROV()
 			              afail_needs_depth || ztst;
 
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
-	bool use_rov_color = using_barriers && (m_conf.ps.IsFeedbackLoopRT() && color_write);
-	bool use_rov_depth = using_barriers && (m_conf.ps.IsFeedbackLoopDepth() && depth_write);
+	bool use_rov_color = color_write &&
+	                     ((using_barriers && m_conf.ps.IsFeedbackLoopRT()) ||
+	                     m_conf.alpha_second_pass.enable ||
+	                     m_conf.blend_multi_pass.enable);
+	bool use_rov_depth = depth_write &&
+	                     ((using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ||
+	                     m_conf.alpha_second_pass.enable);
 
 	// In certain cases using a ROV with depth or color will force the other one.
 	// We have to use this twice: once before when deciding whether to use ROV
