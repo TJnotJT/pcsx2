@@ -2852,16 +2852,16 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 		return;
 	}
 
-	if (sTex && sTex->IsTargetModeUAV())
+	if (sTex && sTex->IsDepthColor())
 	{
-		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
-		sTex->SetTargetModeStandard();
+		GL_INS("Color -> DS in CopyRect()");
+		sTex->UpdateDepthColor(true);
 	}
 
-	if (dTex && dTex->IsTargetModeUAV())
+	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
-		dTex->SetTargetModeStandard();
+		GL_INS("Color -> DS in CopyRect()");
+		dTex->UpdateDepthColor(true);
 	}
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -2973,26 +2973,12 @@ void GSDeviceVK::DrawMultiStretchRects(
 	{
 		GSTextureVK* const stex = static_cast<GSTextureVK*>(rects[i].src);
 
-		if (stex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
-			EndRenderPass();
-			stex->SetTargetModeStandard();
-		}
-
 		stex->CommitClear();
 		if (stex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 		{
 			EndRenderPass();
 			stex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		}
-	}
-
-	if (dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
-		EndRenderPass();
-		dTex->SetTargetModeStandard();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -3017,9 +3003,6 @@ void GSDeviceVK::DrawMultiStretchRects(
 void GSDeviceVK::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvert shader)
 {
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-	pxAssert(num_rects == 0 || !rects[0].src || !rects[0].src->IsTargetModeUAV());
-
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -3101,6 +3084,7 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 
 	if (dTex->GetType() == GSTexture::Type::DepthStencil)
 	{
+		pxAssert(!dTex->IsDepthColor());
 		if (load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
 			BeginClearRenderPass(m_utility_depth_render_pass_clear, dtex_rc, dTex->GetClearDepth(), 0);
 		else
@@ -3136,20 +3120,6 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSTextureVK* dTex, const GSVector4& dRect,
 	VkPipeline pipeline, bool linear, bool allow_discard)
 {
-	if (sTex && sTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
-		EndRenderPass();
-		sTex->SetTargetModeStandard();
-	}
-
-	if (dTex && dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
-		EndRenderPass();
-		dTex->SetTargetModeStandard();
-	}
-
 	if (sTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 	{
 		// can't transition in a render pass
@@ -3313,21 +3283,6 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	// Note: background color is also used when outside of the unit rectangle area
 	EndRenderPass();
 
-	for (int i = 0; i < 3; i++)
-	{
-		if (sTex[i] && sTex[i]->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in DoMerge()");
-			sTex[i]->SetTargetModeStandard();
-		}
-	}
-
-	if (dTex && dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoMerge()");
-		dTex->SetTargetModeStandard();
-	}
-
 	// transition everything before starting the new render pass
 	const bool has_input_0 = (sTex[0] &&
 		(sTex[0]->GetState() == GSTexture::State::Dirty || (sTex[0]->GetState() == GSTexture::State::Cleared || sTex[0]->GetClearColor() != 0)));
@@ -3435,9 +3390,6 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 void GSDeviceVK::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderInterlace shader, bool linear, const InterlaceConstantBuffer& cb)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	static_cast<GSTextureVK*>(dTex)->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
 
 	const GSVector4i rc = GSVector4i(dRect);
@@ -3457,9 +3409,6 @@ void GSDeviceVK::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 
 void GSDeviceVK::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4])
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -3477,9 +3426,6 @@ void GSDeviceVK::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 
 void GSDeviceVK::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -3537,22 +3483,18 @@ void GSDeviceVK::OMSetRenderTargets(
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
 
-	for (GSTexture* tex : std::array{ vkRt, vkDs })
-	{
-		if (tex && tex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
-			EndRenderPass();
-			tex->SetTargetModeStandard();
-		}
-	}
-
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs ||
 		m_current_framebuffer_feedback_loop != feedback_loop ||
 		m_current_framebuffer == VK_NULL_HANDLE)
 	{
 		// framebuffer change or feedback loop enabled/disabled
 		EndRenderPass();
+
+		if (vkDs && vkDs->IsDepthColor())
+		{
+			GL_INS("Color -> DS in OMSetRenderTargets()");
+			vkDs->UpdateDepthColor(true);
+		}
 
 		if (vkRt)
 		{
@@ -4701,9 +4643,6 @@ void GSDeviceVK::RenderBlankFrame()
 bool GSDeviceVK::DoCAS(
 	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	EndRenderPass();
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -5292,16 +5231,11 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 {
 	pxAssertRel(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV, "Only use this to set ROV textures");
 
-	if (tex)
+	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
+
+	if (vkTex)
 	{
 		pxAssertMsg(m_features.rov, "ROV enabled");
-
-		if (tex->IsTargetModeStandard())
-		{
-			GL_INS("Target mode transition Standard -> UAV in PSSetUnorderedAccess()");
-			EndRenderPass();
-			tex->SetTargetModeUAV();
-		}
 
 		PSSetShaderResource(i, tex, true, false);
 
@@ -5312,26 +5246,14 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 			PSSetShaderResource(i_conflict, nullptr, false);
 		}
 
-		if (read && tex->GetUAVDirty())
-		{
-			// UAV is read in the draw. Issue UAV barrier (clears UAV dirty flag).
-			if (InRenderPass())
-			{
-				GL_INS("Ending render pass due to UAV barrier");
-				EndRenderPass();
-			}
-			tex->IssueUAVBarrier();
-		}
-
 		if (write)
 		{
-			// UAV is written in the draw. Set the UAV dirty flag.
-			tex->SetState(GSTexture::State::Dirty, true);
+			tex->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
 	{
-		// Unbind explicitly to avoid conflicts with OM targets.
+		// Unbind to avoid conflicts with OM targets.
 		PSSetShaderResource(i, nullptr, false);
 	}
 }

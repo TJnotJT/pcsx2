@@ -32,9 +32,9 @@ public:
 	
 	__fi const D3D12DescriptorHandle& GetSRVDescriptor() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_uav_depth.get())->m_srv_descriptor;
+			return static_cast<GSTexture12*>(m_depth_color.get())->m_srv_descriptor;
 		}
 		else
 		{
@@ -44,15 +44,15 @@ public:
 	
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const
 	{
-		pxAssertRel(!IsTargetModeUAV(), "Trying to access write descriptor in UAV mode");
+		pxAssertRel(!IsDepthColor(), "Trying to access write descriptor for depth as color");
 		return m_write_descriptor;
 	}
 
 	__fi const D3D12DescriptorHandle& GetUAVDescriptor() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_uav_depth.get())->m_uav_descriptor;
+			return static_cast<GSTexture12*>(m_depth_color.get())->m_uav_descriptor;
 		}
 		else
 		{
@@ -62,15 +62,15 @@ public:
 
 	__fi const D3D12DescriptorHandle& GetFBLDescriptor() const
 	{
-		pxAssertRel(!IsTargetModeUAV(), "Trying to access FBL descriptor in UAV mode");
+		pxAssertRel(!IsDepthColor(), "Trying to access FBL descriptor for depth as color");
 		return m_fbl_descriptor;
 	}
 
 	__fi D3D12_RESOURCE_STATES GetResourceState() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_uav_depth.get())->m_resource_state;
+			return static_cast<GSTexture12*>(m_depth_color.get())->m_resource_state;
 		}
 		else
 		{
@@ -80,9 +80,9 @@ public:
 
 	__fi void SetResourceState(D3D12_RESOURCE_STATES state)
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			static_cast<GSTexture12*>(m_uav_depth.get())->m_resource_state = state;
+			static_cast<GSTexture12*>(m_depth_color.get())->m_resource_state = state;
 		}
 		else
 		{
@@ -94,9 +94,9 @@ public:
 
 	__fi ID3D12Resource* GetResource() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_uav_depth.get())->m_resource.get();
+			return static_cast<GSTexture12*>(m_depth_color.get())->m_resource.get();
 		}
 		else
 		{
@@ -118,6 +118,8 @@ public:
 	void SaveDepthUAV(const std::string& fn) const;
 #endif
 
+	void UpdateDepthColor(bool color_to_ds) override;
+
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear(const float* color = nullptr);
 	void CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color = nullptr);
@@ -130,19 +132,11 @@ public:
 	void TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RESOURCE_STATES state);
 	void TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlist, int level,
 		D3D12_RESOURCE_STATES before_state, D3D12_RESOURCE_STATES after_state);
-
-	D3D12_RESOURCE_BARRIER GetUAVBarrier();
-	void IssueUAVBarrier(ID3D12GraphicsCommandList* cmdlist);
-	void IssueUAVBarrier() override;
-	
-	void SetTargetMode(TargetMode mode) override;
 	
 	// Call when the texture is bound to the pipeline, or read from in a copy.
 	__fi void SetUseFenceCounter(u64 val) { m_use_fence_counter = val; }
 
 private:
-	void UpdateDepthUAV(bool uav_to_ds) override;
-
 	enum class WriteDescriptorType : u8
 	{
 		None,

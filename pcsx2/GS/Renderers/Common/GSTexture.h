@@ -68,18 +68,14 @@ public:
 	};
 
 protected:
-	// Helper to copy data to/from color UAV copy for depth.
-	virtual void UpdateDepthUAV(bool uav_to_ds) { pxFailRel("Not implemented."); }
-	void SetTargetModeInternal(TargetMode mode, bool need_barrier); // Helper to combine common code in VK/DX12
-
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
 	TargetMode m_target_mode = TargetMode::Invalid;
-	std::unique_ptr<GSTexture> m_uav_depth; // For depth texture points to the parallel color texture.
-	bool m_uav_dirty = false; // Tracks if the UAV has been drawn to. Issuing a UAV barrier clears it.
+	std::unique_ptr<GSTexture> m_depth_color; // For depth texture points to the parallel color texture.
+	bool m_depth_color_active = false; // Tracks if depth is being used as color.
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -148,60 +144,20 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
-
-	__fi bool IsTargetModeStandard()
+	__fi bool IsDepthColor() const
 	{
-		return m_target_mode == TargetMode::Standard;
+		return m_depth_color_active;
 	}
-
-	__fi bool IsTargetModeUAV() const
+	__fi void ForgetDepthColor()
 	{
-		return m_target_mode == TargetMode::UAV;
+		m_depth_color_active = false;
 	}
 
 	__fi State GetState() const { return m_state; }
-	void SetState(State state, bool dirty_uav = false)
-	{
-		//if (IsTargetModeUAV())
-		//{
-		//	// We want to only set the dirty UAV flag if we performed UAV writes.
-		//	// Importantly mainly for DX12, which requires UAV barriers.
-		//	if (state == State::Dirty && dirty_uav)
-		//	{
-		//		SetUAVDirty();
-		//	}
-		//	else if (state == State::Cleared)
-		//	{
-		//		ClearUAVDirty();
-		//	}
-		//}
-		m_state = state;
-	}
+	void SetState(State state) { m_state = state; }
 
-	// Managing whether a target is being used as a UAV or Standard OM target.
-	// We do this because transitioning out in/out of UAV usage is complicated by the fact that
-	// depth textures must create a color copy to be used as UAVs.
-	__fi TargetMode GetTargetMode() const { return m_target_mode; }
-	virtual void SetTargetMode(TargetMode mode) { pxFail("Not implemented.");  }
-	void CreateDepthUAV();
-	void SetTargetModeStandard() { SetTargetMode(TargetMode::Standard); }
-	void SetTargetModeUAV() { SetTargetMode(TargetMode::UAV); }
-	void ResetTargetMode()
-	{
-		if (GetTargetMode() == TargetMode::UAV)
-		{
-			// Forget UAV dirty state but keep the depth UAV copy around in case
-			// it is needed in the future.
-			m_uav_dirty = false;
-		}
-
-		m_target_mode = IsRenderTargetOrDepthStencil() ? TargetMode::Standard : TargetMode::Invalid;
-	}
-	virtual void IssueUAVBarrier() { pxFailRel("Not implemented."); }
-	bool GetUAVDirty() const { return m_uav_dirty; }
-	//void SetUAVDirty() { m_uav_dirty = true; }
-	void SetUAVDirty() { }
-	void ClearUAVDirty() { m_uav_dirty = false; }
+	void CreateDepthColor();
+	virtual void UpdateDepthColor(bool color_to_ds) { pxFailRel("Not implemented."); }
 
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
@@ -228,8 +184,8 @@ public:
 	u32 GetMemUsage() const
 	{
 		u32 mem =  m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4);
-		if (m_uav_depth)
-			return mem += m_uav_depth.get()->GetMemUsage();
+		if (m_depth_color)
+			return mem += m_depth_color.get()->GetMemUsage();
 		return mem;
 	}
 
