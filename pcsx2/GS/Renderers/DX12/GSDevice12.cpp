@@ -2272,10 +2272,11 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 		}
 	}
 
-	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt || m_current_depth_target != d12Ds ||
-		m_current_depth_read_only != depth_read)
+	const bool framebuffer_changed = m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt ||
+	                                 m_current_depth_target != d12Ds || m_current_depth_read_only != depth_read;
+
+	if (framebuffer_changed)
 	{
-		// framebuffer change
 		EndRenderPass();
 	}
 	else if (InRenderPass())
@@ -2317,7 +2318,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	SetViewport(vp);
 	SetScissor(scissor);
 
-	if (dirty_flag)
+	if (framebuffer_changed && dirty_flag)
 		m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET; // Only do when not using render passes.
 
 	// Unbind conflicting UAVs
@@ -3348,7 +3349,7 @@ void GSDevice12::SetStencilRef(u8 ref)
 
 void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback)
 {
-	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Trying to bind UAV slot with wrong function");
+	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Texture index too large");
 
 	D3D12DescriptorHandle handle;
 	if (sr)
@@ -3400,12 +3401,6 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	pxAssertRel(TEXTURE_RT_UAV <= i && i <= TEXTURE_DEPTH_UAV, "Trying to bind UAV in wrong slot");
 
-	if (InRenderPass())
-	{
-		GL_INS("Ending render pass due to binding UAV.");
-		EndRenderPass();
-	}
-
 	GSTexture12* bind_uav;
 	if (uav)
 	{
@@ -3416,10 +3411,17 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 			if (dtex->IsTargetModeStandard())
 			{
 				GL_INS("Target mode transition Standard -> UAV in PSSetUnorderedAccess()");
+				EndRenderPass();
 				dtex->SetTargetModeUAV();
-				// Clears will be handled in SendHWDraw().
 			}
 
+			if (dtex->GetResourceState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS && InRenderPass())
+			{
+				GL_INS("Ending render pass due to resource transition");
+				EndRenderPass();
+			}
+
+			// Clears will be handled in SendHWDraw().
 			dtex->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		dtex->SetUseFenceCounter(GetCurrentFenceValue());
@@ -3440,13 +3442,17 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 	m_tfx_textures[i] = static_cast<GSTexture12*>(bind_uav)->GetUAVDescriptor();
 	m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
 
-	std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
-	for (GSTexture12** rt : curr_rts)
+	// Unbind conflicting RTs if needed.
+	if (uav)
 	{
-		if (*rt == m_tfx_textures_uav[i_uav])
+		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
+		for (GSTexture12** rt : curr_rts)
 		{
-			*rt = nullptr;
-			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
+			if (*rt == static_cast<GSTexture12*>(uav))
+			{
+				*rt = nullptr;
+				m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
+			}
 		}
 	}
 }

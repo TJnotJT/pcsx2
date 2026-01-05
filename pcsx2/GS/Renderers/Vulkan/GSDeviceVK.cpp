@@ -5292,15 +5292,6 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 {
 	pxAssertRel(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV, "Only use this to set ROV textures");
 
-	const u32 dirty_flag = (i == TFX_TEXTURE_RT_ROV)
-		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV)
-		: (i == TFX_TEXTURE_DEPTH_ROV)
-		? static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV)
-		: 0;
-
-	u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT
-		: (i == TFX_TEXTURE_DEPTH_ROV) ? TFX_TEXTURE_DEPTH : -1;
-
 	if (tex)
 	{
 		pxAssertMsg(m_features.rov, "ROV enabled");
@@ -5313,15 +5304,15 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 		}
 
 		PSSetShaderResource(i, tex, true, false);
-		m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
 
+		const u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT : TFX_TEXTURE_DEPTH;
 		if (m_tfx_textures[i_conflict] == tex)
 		{
 			// Unbind to avoid conflicts.
 			PSSetShaderResource(i_conflict, nullptr, false);
 		}
 
-		if (read)
+		if (read && tex->GetUAVDirty())
 		{
 			// UAV is read in the draw. Issue UAV barrier (clears UAV dirty flag).
 			if (InRenderPass())
@@ -5908,7 +5899,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	UpdateHWPipelineSelector(config, pipe);
 
 	// If we don't have a barrier but the texture was drawn to last draw, end the pass to insert a barrier.
-	if (InRenderPass())
+	if (InRenderPass() && config.tex)
 	{
 		if ((!pipe.IsRTFeedbackLoop() && config.tex == m_current_render_target) ||
 			(!pipe.IsDepthFeedbackLoop() && config.tex == m_current_depth_target))
