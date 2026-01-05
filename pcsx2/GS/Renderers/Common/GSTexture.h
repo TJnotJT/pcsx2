@@ -162,19 +162,19 @@ public:
 	__fi State GetState() const { return m_state; }
 	void SetState(State state, bool dirty_uav = false)
 	{
-		if (IsTargetModeUAV())
-		{
-			// We want to only set the dirty UAV flag if we performed UAV writes.
-			// Importantly mainly for DX12, which requires UAV barriers.
-			if (state == State::Dirty && dirty_uav)
-			{
-				SetUAVDirty();
-			}
-			else if (state == State::Cleared)
-			{
-				ClearUAVDirty();
-			}
-		}
+		//if (IsTargetModeUAV())
+		//{
+		//	// We want to only set the dirty UAV flag if we performed UAV writes.
+		//	// Importantly mainly for DX12, which requires UAV barriers.
+		//	if (state == State::Dirty && dirty_uav)
+		//	{
+		//		SetUAVDirty();
+		//	}
+		//	else if (state == State::Cleared)
+		//	{
+		//		ClearUAVDirty();
+		//	}
+		//}
 		m_state = state;
 	}
 
@@ -199,7 +199,8 @@ public:
 	}
 	virtual void IssueUAVBarrier() { pxFailRel("Not implemented."); }
 	bool GetUAVDirty() const { return m_uav_dirty; }
-	void SetUAVDirty() { m_uav_dirty = true; }
+	//void SetUAVDirty() { m_uav_dirty = true; }
+	void SetUAVDirty() { }
 	void ClearUAVDirty() { m_uav_dirty = false; }
 
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
