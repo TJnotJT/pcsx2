@@ -4965,6 +4965,32 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	}
 }
 
+// FIXME: Handle both provoking vertex first and this together to avoid multiple unnecessary copies.
+// We need vertices to be deindexes for integer Z because is relies on passing the barycentric
+// coordinates and depth values to the fragment shader, so every triangle/line vertex must be unique.
+void GSRendererHW::HandleIntegerZVertices()
+{
+	if (!g_gs_device->Features().depth_integer ||
+		m_vt.m_primclass == GS_POINT_CLASS ||
+		m_vt.m_primclass == GS_SPRITE_CLASS ||
+		!m_conf.ds_as_rt ||
+		m_conf.ds_as_rt->GetFormat() != GSTexture::Format::UInt32)
+	{
+		return;
+	}
+
+	// De-index the vertices using the copy buffer
+	while (m_vertex.maxcount < m_index.tail)
+		GrowVertexBuffer();
+	for (int i = static_cast<int>(m_index.tail) - 1; i >= 0; i--)
+	{
+		m_vertex.buff_copy[i] = m_vertex.buff[m_index.buff[i]];
+		m_index.buff[i] = static_cast<u16>(i);
+	}
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+	m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail;
+}
+
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup)
 {
 	GL_PUSH("HW: IA");
@@ -4979,6 +5005,31 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	const GSDevice::FeatureSupport features = g_gs_device->Features();
 
 	pxAssert(VerifyIndices());
+
+	const bool z_integer = features.depth_integer && m_conf.ds_as_rt &&
+		m_conf.ds_as_rt->GetFormat() == GSTexture::Format::UInt32;
+	if (z_integer)
+	{
+		m_conf.vs.zint = true;
+		m_conf.ps.zint = true;
+		m_conf.ps.primclass = m_vt.m_primclass;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.ps.zint = true;
+			m_conf.alpha_second_pass.ps.primclass = m_vt.m_primclass;
+		}
+	}
+	else
+	{
+		m_conf.vs.zint = false;
+		m_conf.ps.zint = false;
+		m_conf.ps.primclass = GS_INVALID_CLASS;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.ps.zint = false;
+			m_conf.alpha_second_pass.ps.primclass = GS_INVALID_CLASS;
+		}
+	}
 
 	switch (m_vt.m_primclass)
 	{
@@ -5013,6 +5064,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					// M1 requires point size output on *all* points.
 					m_conf.vs.point_size = true;
 				}
+
+				if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::PointZInt;
+				}
 			}
 			break;
 
@@ -5034,6 +5090,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 						m_conf.indices_per_prim = 6;
 						ExpandLineIndices();
 					}
+				}
+
+				if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineZInt;
 				}
 			}
 			break;
@@ -5093,6 +5154,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 						GSVector4::store<true>(&v[i].ST, v_st);
 					}
 				}
+
+					if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+					{
+						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInt;
+					}
 			}
 			break;
 
@@ -5117,7 +5183,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	m_conf.nindices = m_index.tail;
 }
 
-void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps)
+void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps, const bool z_integer)
 {
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
@@ -5139,8 +5205,8 @@ void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps)
 		
 	if (clamp_ps)
 	{
-		m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
-		m_conf.ps.zclamp = 1;
+		m_conf.cb_ps.TA_MaxDepth_Af.z = z_integer ? std::bit_cast<float>(max_z) : static_cast<float>(max_z) * 0x1p-32f;
+		m_conf.ps.zclamp = true;
 	}
 }
 
@@ -8329,6 +8395,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 	
 	// Create a temporary depth color target
+	if (0) // FIXME: Consider interaction between this and depth as integers
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
@@ -8352,6 +8419,53 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 	}
 
+	// Handle integer depth
+	if (features.depth_integer && m_conf.ds && m_conf.ds->GetFormat() == GSTexture::Format::UInt32)
+	{
+		m_conf.ds_as_rt = m_conf.ds;
+
+		// Enable SW Z writing for both passes if necessary.
+		if (m_conf.depth.zwe)
+		{
+			GetZClampConfigVSPS(true, true); // Enable SW Z writing
+		}
+		if (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)
+		{
+			// Only set zclamp since alpha second pass uses the same constant buffer.
+			m_conf.alpha_second_pass.ps.zclamp = true;
+		}
+
+		// Enable SW depth test for both passes if needed.
+		if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
+		{
+			m_conf.ps.ztst = m_conf.depth.ztst;
+			m_conf.ps.depth_feedback = true;
+		}
+		if (m_conf.alpha_second_pass.enable &&
+			(m_conf.alpha_second_pass.depth.ztst == ZTST_GEQUAL ||
+				m_conf.alpha_second_pass.depth.ztst == ZTST_GREATER))
+		{
+			m_conf.alpha_second_pass.ps.ztst = m_conf.alpha_second_pass.depth.ztst;
+			m_conf.alpha_second_pass.ps.depth_feedback = true;
+		}
+
+		// Disable HW depth
+		m_conf.depth.zwe = 0;
+		m_conf.depth.ztst = ZTST_ALWAYS;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.depth.zwe = 0;
+			m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
+		}
+		m_conf.ds = nullptr;
+
+		m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+		}
+	}
+
 	// rs
 	const GSVector4i hacked_scissor = m_channel_shuffle ? GSVector4i::cxpr(0, 0, 1024, 1024) : m_context->scissor.in;
 	const GSVector4i scissor(GSVector4i(GSVector4(rtscale) * GSVector4(hacked_scissor)).rintersect(GSVector4i::loadh(rtsize)));
@@ -8369,6 +8483,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	HandleProvokingVertexFirst();
 
+	HandleIntegerZVertices();
+
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
 	
 	if (!m_channel_shuffle_width)
@@ -8377,6 +8493,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_last_rt = rt;
 
 	// Resolve temporary depth as color
+	if (0) // FIXME: Consider interaction between this and depth as integers
 	if (m_conf.ds_as_rt)
 	{
 		GL_PUSH("HW: Resolving temporary R32 RT after depth feedback");

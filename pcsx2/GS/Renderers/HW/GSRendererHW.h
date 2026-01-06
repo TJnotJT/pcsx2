@@ -119,6 +119,7 @@ private:
 
 	void ResetStates();
 	void HandleProvokingVertexFirst();
+	void HandleIntegerZVertices();
 	void SetupIA(float target_scale, float sx, float sy, bool req_vert_backup);
 	void EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	bool EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
@@ -134,7 +135,7 @@ private:
 	bool CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextureCache::Source* tex,
 		const TextureMinMaxResult& tmm);
 
-	void GetZClampConfigVSPS(const bool force_enable_ps);
+	void GetZClampConfigVSPS(const bool force_enable_ps, const bool z_integer = false);
 	void EmulateZbuffer(const GSTextureCache::Target* ds);
 	static void GetAlphaTestConfigPS(const u32 atst, const u8 aref, const bool invert_test, u32& ps_atst_out, float& aref_out);
 	void EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& DATE_one, bool& DATE_PRIMID);

@@ -306,6 +306,9 @@ struct alignas(16) GSHWDrawConfig
 		Point,
 		Line,
 		Sprite,
+		TriangleZInt,
+		LineZInt,
+		PointZInt
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -318,8 +321,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 2;
-				u8 _free : 2;
+				VSExpand expand : 3;
+				u8 zint : 1;
 			};
 			u8 key;
 		};
@@ -442,6 +445,11 @@ struct alignas(16) GSHWDrawConfig
 				// Feedback
 				u32 color_feedback : 1;
 				u32 depth_feedback : 1;
+
+				// Integer depth
+				u32 z_rt_slot : 2;
+				u32 zint : 1;
+				u32 primclass : 3;
 			};
 
 			struct
@@ -902,6 +910,7 @@ public:
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool depth_feedback       : 1; ///< Depth feedback loops by directly binding DepthStencil target for read/write.
 		bool depth_as_rt_feedback : 1; ///< Depth feedback loops by converting depth to a temporary color target.
+		bool depth_integer        : 1; ///< Supports 32 bit integer for depth buffer.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
