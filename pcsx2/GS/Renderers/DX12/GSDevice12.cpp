@@ -1346,7 +1346,14 @@ std::unique_ptr<GSDownloadTexture> GSDevice12::CreateDownloadTexture(u32 width, 
 
 void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY)
 {
-		if (sTex && sTex->IsDepthColor())
+	// Empty rect, abort copy.
+	if (r.rempty())
+	{
+		GL_INS("D3D12: CopyRect rect empty.");
+		return;
+	}
+
+	if (sTex && sTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyRect()");
 		sTex->UpdateDepthColor(true);
@@ -1356,12 +1363,6 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	{
 		GL_INS("Color -> DS in CopyRect()");
 		dTex->UpdateDepthColor(true);
-	}
-	// Empty rect, abort copy.
-	if (r.rempty())
-	{
-		GL_INS("D3D12: CopyRect rect empty.");
-		return;
 	}
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -2212,6 +2213,12 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	if (framebuffer_changed)
 	{
 		EndRenderPass();
+
+		if (d12Ds && d12Ds->IsDepthColor())
+		{
+			GL_INS("Color -> DS in OMSetRenderTargets()");
+			d12Ds->UpdateDepthColor(true);
+		}
 	}
 	else if (InRenderPass())
 	{
@@ -4022,8 +4029,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
-	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt); // FIXME: Use same style as VK
+	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds); // FIXME: Use same style as VK
 	GSTexture12* draw_rt_clone = nullptr;
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
@@ -4222,6 +4229,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		// Denormalize clear color for hw colclip.
 		clear_color *= GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
 	}
+	// Fixme; use same style as VK
 	if (config.ps.rov_color || config.ps.rov_depth)
 	{
 		// Do not use render pass for ROV.

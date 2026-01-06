@@ -6621,7 +6621,7 @@ void GSRendererHW::SetupROV()
 
 	if (!(needs_enabling || needs_disabling))
 	{
-		GL_INS("ROV: Draw=%d => No action taken.");
+		GL_INS("ROV: Draw=%d => No action taken.", GSState::s_n);
 		if (GSConfig.HWROVLogging)
 		{
 			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
