@@ -472,7 +472,7 @@ public:
 	void PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
-		bool depth_read = false, const GSVector2i& viewport_size = {}, bool dirty_flag = false);
+		bool depth_read = false, const GSVector2i& viewport_size = {});
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
@@ -480,8 +480,9 @@ public:
 
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-		GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, const bool feedback_rt,
-		const bool feedback_depth, const bool one_barrier, const bool full_barrier, const float* clear_color = nullptr);
+		GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
+		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier,
+		const float* clear_color = nullptr);
 
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);

@@ -5964,19 +5964,18 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// colclip hw requires blitting.
 		EndRenderPass();
 	}
-	else if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds) &&
-		!(config.ps.rov_color || config.ps.rov_depth))
+	else if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds))
 	{
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth
-		if (!draw_rt && m_current_render_target && config.tex != m_current_render_target &&
-			m_current_render_target->GetSize() == draw_ds->GetSize())
+		if (!(draw_rt || draw_rt_rov) && m_current_render_target && config.tex != m_current_render_target &&
+			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
 			m_pipeline_selector.rt = true;
 		}
-		else if (!draw_ds && m_current_depth_target && config.tex != m_current_depth_target &&
-				 m_current_depth_target->GetSize() == draw_rt->GetSize())
+		else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
+				 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 		{
 			draw_ds = m_current_depth_target;
 			m_pipeline_selector.ds = true;
@@ -6036,8 +6035,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_RT_ROV);
 		}
 	}
-	else
+	else if (draw_rt)
 	{
+		// Unbind to avoid conflicts with framebuffer
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 	}
 	
@@ -6057,8 +6057,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
 		}
 	}
-	else
+	else if (draw_ds)
 	{
+		// Unbind to avoid conflicts with framebuffer
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 	}
 	

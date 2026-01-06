@@ -855,14 +855,14 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 		if (IsDepthColor())
 		{
 			static_cast<GSTexture12*>(m_depth_color.get())->TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			cmdlist->ClearRenderTargetView(GetWriteDescriptor(),
+			cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_depth_color.get())->GetWriteDescriptor(),
 				color ? color : GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
 		}
 		else
 		{
 			TransitionToState(cmdlist, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-			cmdlist->ClearDepthStencilView(
-				GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, color ? *color : m_clear_value.depth, 0, 0, nullptr);
+			cmdlist->ClearDepthStencilView(GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH,
+				color ? *color : m_clear_value.depth, 0, 0, nullptr);
 		}
 	}
 	else
