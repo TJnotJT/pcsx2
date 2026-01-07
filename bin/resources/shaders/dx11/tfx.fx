@@ -1579,8 +1579,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
 	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_INPUT raw2 = load_vertex(vid_base + 2);
-	VS_OUPTUT vtx = vs_main(load_vertex(vid));
-	vtx.zi = uint3(raw0.zi.x, raw1.zi.x, raw2.zi.x);
+	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+	vtx.zi = uint3(raw0.z, raw1.z, raw2.z);
 
 	return vtx;
 
@@ -1590,7 +1590,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
 	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));
-	vtx.zi = uint3(raw0.zi.x, raw1.zi.x, 0);
+	vtx.zi = uint3(raw0.z, raw1.z, 0);
 	
 	return vtx;
 

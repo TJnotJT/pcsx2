@@ -3790,7 +3790,8 @@ void GSRendererHW::Draw()
 							static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 						GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 
@@ -3807,7 +3808,8 @@ void GSRendererHW::Draw()
 					sRect = sRect.min(GSVector4(1.0f));
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
-					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect),
+						GetDepthCopyShader(ds->m_texture, g_texture_cache->GetTemporaryZ(), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);
@@ -3855,7 +3857,8 @@ void GSRendererHW::Draw()
 
 					if (m_cached_ctx.TEST.ZTST > ZTST_ALWAYS || !dRect.rintersect(GSVector4i(GSVector4(m_r) * ds->m_scale)).eq(dRect))
 					{
-						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect),
+							GetDepthCopyShader(ds->m_texture, tex), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 					g_texture_cache->SetTemporaryZ(tex);
@@ -4469,7 +4472,8 @@ void GSRendererHW::Draw()
 					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, GSTexture::Format::DepthStencil, true))
 					{
 						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect),
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), tex), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 						g_texture_cache->InvalidateTemporaryZ();
 						g_texture_cache->SetTemporaryZ(tex);
@@ -4772,7 +4776,8 @@ void GSRendererHW::Draw()
 						static_cast<float>((real_rect.w + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d rt_vert_offset %d z_horz_offset %d rt_horz_offset %d", s_n, z_vertical_offset, vertical_offset, z_horizontal_offset, horizontal_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 				else if (m_temp_z_full_copy)
@@ -4785,7 +4790,8 @@ void GSRendererHW::Draw()
 						static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 
@@ -5006,31 +5012,6 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 	pxAssert(VerifyIndices());
 
-	const bool z_integer = features.depth_integer && m_conf.ds_as_rt &&
-		m_conf.ds_as_rt->GetFormat() == GSTexture::Format::UInt32;
-	if (z_integer)
-	{
-		m_conf.vs.zint = true;
-		m_conf.ps.zint = true;
-		m_conf.ps.primclass = m_vt.m_primclass;
-		if (m_conf.alpha_second_pass.enable)
-		{
-			m_conf.alpha_second_pass.ps.zint = true;
-			m_conf.alpha_second_pass.ps.primclass = m_vt.m_primclass;
-		}
-	}
-	else
-	{
-		m_conf.vs.zint = false;
-		m_conf.ps.zint = false;
-		m_conf.ps.primclass = GS_INVALID_CLASS;
-		if (m_conf.alpha_second_pass.enable)
-		{
-			m_conf.alpha_second_pass.ps.zint = false;
-			m_conf.alpha_second_pass.ps.primclass = GS_INVALID_CLASS;
-		}
-	}
-
 	switch (m_vt.m_primclass)
 	{
 		case GS_POINT_CLASS:
@@ -5065,7 +5046,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.vs.point_size = true;
 				}
 
-				if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
 				{
 					m_conf.vs.expand = GSHWDrawConfig::VSExpand::PointZInt;
 				}
@@ -5092,7 +5073,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					}
 				}
 
-				if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
 				{
 					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineZInt;
 				}
@@ -5155,10 +5136,10 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					}
 				}
 
-					if (z_integer && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
-					{
-						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInt;
-					}
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInt;
+				}
 			}
 			break;
 
@@ -5975,6 +5956,15 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 			accumulation_blend = false;
 			blend_mix = false;
 		}
+	}
+
+	if (UsingMultipleRenderTargets(m_conf.rt, m_conf.ds))
+	{
+		// MRTs interact badly with dual source blend so just use SW blending.
+		sw_blending = true;
+		color_dest_blend = false;
+		accumulation_blend = false;
+		blend_mix = false;
 	}
 
 	// Color clip
@@ -7090,7 +7080,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-				src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+				src_target->m_texture->IsDepthStencil() ? GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+				false);
 		}
 		else
 		{
@@ -7125,7 +7116,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
 
 		g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-			src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+			src_target->m_texture->IsDepthStencil() ? GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+			false);
 	}
 	m_conf.tex = src_copy.get();
 }
@@ -8422,47 +8414,76 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Handle integer depth
 	if (features.depth_integer && m_conf.ds && m_conf.ds->GetFormat() == GSTexture::Format::UInt32)
 	{
+		// Should not be using dual source blend with MRTs
+		pxAssert(m_conf.ps.no_color1);
+
+		m_conf.vs.zint = true;
+		m_conf.ps.zint = true;
+		m_conf.ps.primclass = m_vt.m_primclass;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.ps.zint = true;
+			m_conf.alpha_second_pass.ps.primclass = m_vt.m_primclass;
+		}
+		
 		m_conf.ds_as_rt = m_conf.ds;
 
 		// Enable SW Z writing for both passes if necessary.
-		if (m_conf.depth.zwe)
 		{
-			GetZClampConfigVSPS(true, true); // Enable SW Z writing
-		}
-		if (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)
-		{
-			// Only set zclamp since alpha second pass uses the same constant buffer.
-			m_conf.alpha_second_pass.ps.zclamp = true;
+			if (m_conf.depth.zwe)
+			{
+				GetZClampConfigVSPS(true, true); // Enable SW Z writing
+			}
+			if (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)
+			{
+				// Only set zclamp since alpha second pass uses the same constant buffer.
+				m_conf.alpha_second_pass.ps.zclamp = true;
+			}
 		}
 
 		// Enable SW depth test for both passes if needed.
-		if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
 		{
-			m_conf.ps.ztst = m_conf.depth.ztst;
-			m_conf.ps.depth_feedback = true;
-		}
-		if (m_conf.alpha_second_pass.enable &&
-			(m_conf.alpha_second_pass.depth.ztst == ZTST_GEQUAL ||
-				m_conf.alpha_second_pass.depth.ztst == ZTST_GREATER))
-		{
-			m_conf.alpha_second_pass.ps.ztst = m_conf.alpha_second_pass.depth.ztst;
-			m_conf.alpha_second_pass.ps.depth_feedback = true;
+			if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
+			{
+				m_conf.ps.ztst = m_conf.depth.ztst;
+				m_conf.ps.depth_feedback = true;
+			}
+			if (m_conf.alpha_second_pass.enable &&
+				(m_conf.alpha_second_pass.depth.ztst == ZTST_GEQUAL ||
+					m_conf.alpha_second_pass.depth.ztst == ZTST_GREATER))
+			{
+				m_conf.alpha_second_pass.ps.ztst = m_conf.alpha_second_pass.depth.ztst;
+				m_conf.alpha_second_pass.ps.depth_feedback = true;
+			}
 		}
 
 		// Disable HW depth
-		m_conf.depth.zwe = 0;
-		m_conf.depth.ztst = ZTST_ALWAYS;
-		if (m_conf.alpha_second_pass.enable)
 		{
-			m_conf.alpha_second_pass.depth.zwe = 0;
-			m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
+			m_conf.depth.zwe = 0;
+			m_conf.depth.ztst = ZTST_ALWAYS;
+			m_conf.ds = nullptr;
+			if (m_conf.alpha_second_pass.enable)
+			{
+				m_conf.alpha_second_pass.depth.zwe = 0;
+				m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
+			}
 		}
-		m_conf.ds = nullptr;
 
-		m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+		// Make sure pixel shader knows which slot the depth as integer textures is bound to.
+		{
+			m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+			if (m_conf.alpha_second_pass.enable)
+			{
+				m_conf.alpha_second_pass.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+			}
+		}
+	}
+	else
+	{
+		m_conf.ps.primclass = GS_INVALID_CLASS;
 		if (m_conf.alpha_second_pass.enable)
 		{
-			m_conf.alpha_second_pass.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+			m_conf.alpha_second_pass.ps.primclass = GS_INVALID_CLASS;
 		}
 	}
 
@@ -9940,4 +9961,10 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 		GetPrimitiveOverlapDrawlist(true, save_bbox, scale);
 	}
 	return m_drawlist.size();
+}
+
+
+bool GSRendererHW::UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds)
+{
+	return ds && ds->GetFormat() == GSTexture::Format::UInt32; // Using MRTs for integer depth.
 }

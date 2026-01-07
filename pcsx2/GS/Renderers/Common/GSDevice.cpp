@@ -39,9 +39,9 @@ const char* shaderName(ShaderConvert value)
 {
 	switch (value)
 	{
-			// clang-format off
+		// clang-format off
 		case ShaderConvert::COPY:                   return "ps_copy";
-		case ShaderConvert::RGBA8_TO_16_BITS:       return "ps_convert_rgba8_16bits";
+		case ShaderConvert::COPY_UINT:              return "ps_copy_uint";
 		case ShaderConvert::DATM_1:                 return "ps_datm1";
 		case ShaderConvert::DATM_0:                 return "ps_datm0";
 		case ShaderConvert::DATM_1_RTA_CORRECTION:  return "ps_datm1_rta_correction";
@@ -52,21 +52,35 @@ const char* shaderName(ShaderConvert value)
 		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
 		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
 		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_32bits";
-		case ShaderConvert::FLOAT32_TO_32_BITS:     return "ps_convert_float32_32bits";
+		case ShaderConvert::FLOAT32_TO_UINT32:      return "ps_convert_float32_uint32";
 		case ShaderConvert::FLOAT32_TO_RGBA8:       return "ps_convert_float32_rgba8";
 		case ShaderConvert::FLOAT32_TO_RGB8:        return "ps_convert_float32_rgba8";
+		case ShaderConvert::UINT32_TO_16_BITS:      return "ps_copy_uint";
+		case ShaderConvert::UINT32_TO_FLOAT32:      return "ps_convert_uint32_float32";
+		case ShaderConvert::UINT32_TO_RGBA8:        return "ps_convert_uint32_rgba8";
+		case ShaderConvert::UINT32_TO_RGB8:         return "ps_convert_uint32_rgba8";
 		case ShaderConvert::FLOAT16_TO_RGB5A1:      return "ps_convert_float16_rgb5a1";
+		case ShaderConvert::UINT16_TO_RGB5A1:       return "ps_convert_uint16_rgb5a1";
 		case ShaderConvert::RGBA8_TO_FLOAT32:       return "ps_convert_rgba8_float32";
 		case ShaderConvert::RGBA8_TO_FLOAT24:       return "ps_convert_rgba8_float24";
 		case ShaderConvert::RGBA8_TO_FLOAT16:       return "ps_convert_rgba8_float16";
+		case ShaderConvert::RGBA8_TO_UINT32:        return "ps_convert_rgba8_uint32";
+		case ShaderConvert::RGBA8_TO_UINT24:        return "ps_convert_rgba8_uint24";
+		case ShaderConvert::RGBA8_TO_UINT16:        return "ps_convert_rgba8_uint16";
 		case ShaderConvert::RGB5A1_TO_FLOAT16:      return "ps_convert_rgb5a1_float16";
+		case ShaderConvert::RGB5A1_TO_UINT16:       return "ps_convert_rgb5a1_uint16";
 		case ShaderConvert::RGBA8_TO_FLOAT32_BILN:  return "ps_convert_rgba8_float32_biln";
 		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:  return "ps_convert_rgba8_float24_biln";
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:  return "ps_convert_rgba8_float16_biln";
+		case ShaderConvert::RGBA8_TO_UINT32_BILN:   return "ps_convert_rgba8_uint32_biln";
+		case ShaderConvert::RGBA8_TO_UINT24_BILN:   return "ps_convert_rgba8_uint24_biln";
+		case ShaderConvert::RGBA8_TO_UINT16_BILN:   return "ps_convert_rgba8_uint16_biln";
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN: return "ps_convert_rgb5a1_float16_biln";
+		case ShaderConvert::RGB5A1_TO_UINT16_BILN:  return "ps_convert_rgb5a1_uint16_biln";
 		case ShaderConvert::FLOAT32_DEPTH_TO_COLOR: return "ps_convert_float32_depth_to_color";
 		case ShaderConvert::FLOAT32_COLOR_TO_DEPTH: return "ps_convert_float32_color_to_depth";
 		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
+		case ShaderConvert::UINT32_TO_UINT24:       return "ps_convert_uint32_uint24";
 		case ShaderConvert::DEPTH_COPY:             return "ps_depth_copy";
 		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
 		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
@@ -729,6 +743,8 @@ void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRe
 	GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear)
 {
 	pxAssert((dTex && dTex->IsDepthStencil()) == HasDepthOutput(shader));
+	pxAssert((dTex && dTex->IsIntegerFormat()) == HasIntegerOutput(shader));
+	pxAssert((sTex && sTex->IsIntegerFormat()) == HasIntegerInput(shader));
 	pxAssert(linear ? SupportsBilinear(shader) : SupportsNearest(shader));
 	GL_INS("StretchRect(%d) {%d,%d} %dx%d -> {%d,%d) %dx%d", shader, int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),

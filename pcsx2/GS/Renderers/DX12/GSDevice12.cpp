@@ -2469,12 +2469,23 @@ bool GSDevice12::CompileConvertPipelines()
 		{
 			case ShaderConvert::RGBA8_TO_16_BITS:
 			case ShaderConvert::FLOAT32_TO_16_BITS:
+			case ShaderConvert::UINT32_TO_16_BITS:
 			{
 				gpb.SetRenderTarget(0, DXGI_FORMAT_R16_UINT);
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
 			}
 			break;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
+			case ShaderConvert::COPY_UINT:
+			case ShaderConvert::FLOAT32_TO_UINT32:
+			case ShaderConvert::RGBA8_TO_UINT32:
+			case ShaderConvert::RGBA8_TO_UINT24:
+			case ShaderConvert::RGBA8_TO_UINT16:
+			case ShaderConvert::RGB5A1_TO_UINT16:
+			case ShaderConvert::RGBA8_TO_UINT32_BILN:
+			case ShaderConvert::RGBA8_TO_UINT24_BILN:
+			case ShaderConvert::RGBA8_TO_UINT16_BILN:
+			case ShaderConvert::RGB5A1_TO_UINT16_BILN:
+			case ShaderConvert::UINT32_TO_UINT24:
 			{
 				gpb.SetRenderTarget(0, DXGI_FORMAT_R32_UINT);
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
@@ -3933,7 +3944,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt_clone = nullptr;
 
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
-	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
+	const GSVector2i rtsize(draw_rt ? draw_rt->GetSize() : (draw_ds ? draw_ds->GetSize() : draw_ds_as_rt->GetSize()));
 
 	PipelineSelector& pipe = m_pipeline_selector;
 
@@ -4078,14 +4089,14 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth
 		if (!draw_rt && m_current_render_target && config.tex != m_current_render_target &&
-			m_current_render_target->GetSize() == draw_ds->GetSize())
+			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
 			m_pipeline_selector.rt = true;
 		}
 	}
 	else if (!draw_ds && m_current_depth_target && config.tex != m_current_depth_target &&
-			 m_current_depth_target->GetSize() == draw_rt->GetSize())
+			 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 	{
 		draw_ds = m_current_depth_target;
 		m_pipeline_selector.ds = true;
@@ -4348,6 +4359,10 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 		{
 			pxFail("Wrong format for DS as RT.");
 		}
+	}
+	else
+	{
+		m_pipeline_selector.ds_as_rt = 0;
 	}
 }
 

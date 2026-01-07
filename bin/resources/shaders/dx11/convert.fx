@@ -30,7 +30,17 @@ static const float3x3 rgb2yuv =
 	{-0.419, -0.081, 0.500}
 };
 
+#if defined(ps_convert_copy_uint)      || \
+    defined(ps_convert_uint32_float32) || \
+	defined(ps_convert_uint32_float32) || \
+	defined(ps_convert_uint32_rgba8)   || \
+	defined(ps_convert_uint32_rgba8)   || \
+	defined(ps_convert_uint16_rgb5a1)  || \
+	defined(ps_convert_uint32_24bits)
+Texture2D<uint> Texture;
+#else
 Texture2D Texture;
+#endif
 SamplerState TextureSampler;
 
 float4 sample_c(float2 uv)
@@ -65,6 +75,15 @@ PS_OUTPUT ps_copy(PS_INPUT input)
 {
 	PS_OUTPUT output;
 	
+	output.c = sample_c(input.t);
+
+	return output;
+}
+
+PS_OUTPUT ps_copy(PS_INPUT input)
+{
+	PS_OUTPUT output;
+
 	output.c = sample_c(input.t);
 
 	return output;
@@ -163,7 +182,7 @@ PS_OUTPUT ps_colclip_resolve(PS_INPUT input)
 	return output;
 }
 
-uint ps_convert_float32_32bits(PS_INPUT input) : SV_Target0
+uint ps_convert_float32_uint32(PS_INPUT input) : SV_Target0
 {
 	// Convert a FLOAT32 depth texture into a 32 bits UINT texture
 	return uint(exp2(32.0f) * sample_c(input.t).r);
@@ -180,6 +199,23 @@ PS_OUTPUT ps_convert_float32_rgba8(PS_INPUT input)
 	return output;
 }
 
+float ps_convert_uint32_float32(PS_INPUT input) : SV_Depth
+{
+	// Convert a 32 bits UINT texture to FLOAT32 depth texture
+	return float(exp2(-32.0f) * sample_c(input.t).r);
+}
+
+PS_OUTPUT ps_convert_uint32_rgba8(PS_INPUT input)
+{
+	PS_OUTPUT output;
+
+	// Convert a 32 bits UINT texture into a RGBA color texture
+	uint d = sample_c(input.t).r;
+	output.c = float4(uint4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24))) / 255.0f;
+
+	return output;
+}
+
 PS_OUTPUT ps_convert_float16_rgb5a1(PS_INPUT input)
 {
 	PS_OUTPUT output;
@@ -190,28 +226,58 @@ PS_OUTPUT ps_convert_float16_rgb5a1(PS_INPUT input)
 	return output;
 }
 
-float rgba8_to_depth32(float4 val)
+PS_OUTPUT ps_convert_uint32_rgb5a1(PS_INPUT input)
+{
+	PS_OUTPUT output;
+
+	// Convert a 16 bits UINT into a RGB5A1 color texture
+	uint d = sample_c(input.t).r;
+	output.c = float4(uint4(d << 3, d >> 2, d >> 7, d >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
+	return output;
+}
+
+uint rgba8_to_uint32(float4 val)
 {
 	uint4 c = uint4(val * 255.5f);
-	return float(c.r | (c.g << 8) | (c.b << 16) | (c.a << 24)) * exp2(-32.0f);
+	return c.r | (c.g << 8) | (c.b << 16) | (c.a << 24);
+}
+
+uint rgba8_to_uint24(float4 val)
+{
+	uint3 c = uint3(val.rgb * 255.5f);
+	return c.r | (c.g << 8) | (c.b << 16);
+}
+
+uint rgba8_to_uint16(float4 val)
+{
+	uint2 c = uint2(val.rg * 255.5f);
+	return c.r | (c.g << 8);
+}
+
+float rgba8_to_depth32(float4 val)
+{
+	return float(rgba8_to_uint32(val)) * exp2(-32.0f);
 }
 
 float rgba8_to_depth24(float4 val)
 {
-	uint3 c = uint3(val.rgb * 255.5f);
-	return float(c.r | (c.g << 8) | (c.b << 16)) * exp2(-32.0f);
+	return float(rgba8_to_uint24(val)) * exp2(-32.0f);
 }
 
 float rgba8_to_depth16(float4 val)
 {
-	uint2 c = uint2(val.rg * 255.5f);
-	return float(c.r | (c.g << 8)) * exp2(-32.0f);
+	return float(rgba8_to_uin16(val)) * exp2(-32.0f);
+}
+
+uint rgb5a1_to_uint16(float4 val)
+{
+	uint4 c = uint4(val * 255.5f);
+	return ((c.r & 0xF8u) >> 3) | ((c.g & 0xF8u) << 2) | ((c.b & 0xF8u) << 7) | ((c.a & 0x80u) << 8));
 }
 
 float rgb5a1_to_depth16(float4 val)
 {
-	uint4 c = uint4(val * 255.5f);
-	return float(((c.r & 0xF8u) >> 3) | ((c.g & 0xF8u) << 2) | ((c.b & 0xF8u) << 7) | ((c.a & 0x80u) << 8)) * exp2(-32.0f);
+	return float(rgb5a1_to_uin16(val)) * exp2(-32.0f);
 }
 
 float ps_convert_float32_depth_to_color(PS_INPUT input) : SV_Target0
@@ -229,6 +295,12 @@ float ps_convert_float32_float24(PS_INPUT input) : SV_Depth
 	// Truncates depth value to 24bits
 	uint d = uint(sample_c(input.t).r * exp2(32.0f)) & 0xFFFFFFu;
 	return float(d) * exp2(-32.0f);
+}
+
+uint ps_convert_uint32_uint24(PS_INPUT input) : SV_Target0
+{
+	// Truncates depth value to 24bits
+	return sample_c(input.t).r & 0xFFFFFFu;
 }
 
 float ps_convert_rgba8_float32(PS_INPUT input) : SV_Depth
@@ -253,10 +325,38 @@ float ps_convert_rgba8_float16(PS_INPUT input) : SV_Depth
 	return rgba8_to_depth16(sample_c(input.t));
 }
 
+uint ps_convert_rgba8_uint32(PS_INPUT input) : SV_Target0
+{
+	// Convert an RGBA texture into a 32 bits UINT texture
+	return rgba8_to_uint32(sample_c(input.t));
+}
+
+float ps_convert_rgba8_uint24(PS_INPUT input) : SV_Target0
+{
+	// Same as above but without the alpha channel (24 bits Z)
+
+	// Convert an RGBA texture into a 32 bits UINT texture
+	return rgba8_to_uint24(sample_c(input.t));
+}
+
+uint ps_convert_rgba8_uint16(PS_INPUT input) : SV_Target0
+{
+	// Same as above but without the A/B channels (16 bits Z)
+
+	// Convert an RGBA texture into a 32 bits UINT texture
+	return rgba8_to_uint16(sample_c(input.t));
+}
+
 float ps_convert_rgb5a1_float16(PS_INPUT input) : SV_Depth
 {
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
 	return rgb5a1_to_depth16(sample_c(input.t));
+}
+
+uint ps_convert_rgb5a1_uint16(PS_INPUT input) : SV_Target0
+{
+	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
+	return rgb5a1_to_uint16(sample_c(input.t));
 }
 
 #define SAMPLE_RGBA_DEPTH_BILN(CONVERT_FN) \
@@ -271,6 +371,20 @@ float ps_convert_rgb5a1_float16(PS_INPUT input) : SV_Depth
 	float depthBL = CONVERT_FN(Texture.Load(int3(coords.xw, 0))); \
 	float depthBR = CONVERT_FN(Texture.Load(int3(coords.zw, 0))); \
 	return lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y);
+
+#define SAMPLE_RGBA_DEPTH_BILN_INT(CONVERT_FN) \
+	uint width, height; \
+	Texture.GetDimensions(width, height); \
+	float2 top_left_f = input.t * float2(width, height) - 0.5f; \
+	int2 top_left = int2(floor(top_left_f)); \
+	int4 coords = clamp(int4(top_left, top_left + 1), int4(0, 0, 0, 0), int2(width - 1, height - 1).xyxy); \
+	float2 mix_vals = frac(top_left_f); \
+	float4 colorTL = Texture.Load(int3(coords.xy, 0)); \
+	float4 colorTR = Texture.Load(int3(coords.zy, 0)); \
+	float4 colorBL = Texture.Load(int3(coords.xw, 0)); \
+	float4 colorBR = Texture.Load(int3(coords.zw, 0)); \
+	return CONVERT_FN(lerp(lerp(colorTL, colorTR, mix_vals.x), lerp(colorBL, colorBR, mix_vals.x), mix_vals.y));
+
 
 float ps_convert_rgba8_float32_biln(PS_INPUT input) : SV_Depth
 {
@@ -294,10 +408,38 @@ float ps_convert_rgba8_float16_biln(PS_INPUT input) : SV_Depth
 	SAMPLE_RGBA_DEPTH_BILN(rgba8_to_depth16);
 }
 
+uint ps_convert_rgba8_uint32_biln(PS_INPUT input) : SV_Target0
+{
+	// Convert an RGBA texture into a 32 bits UINT texture
+	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint32);
+}
+
+uint ps_convert_rgba8_uint24_biln(PS_INPUT input) : SV_Target0
+{
+	// Same as above but without the alpha channel (24 bits Z)
+
+	// Convert an RGBA texture into a 32 bits UINT texture
+	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint24);
+}
+
+uint ps_convert_rgba8_uint16_biln(PS_INPUT input) : SV_Target0
+{
+	// Same as above but without the A/B channels (16 bits Z)
+
+	// Convert an RGBA texture into a 32 bits UINT texture
+	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint16);
+}
+
 float ps_convert_rgb5a1_float16_biln(PS_INPUT input) : SV_Depth
 {
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
 	SAMPLE_RGBA_DEPTH_BILN(rgb5a1_to_depth16);
+}
+
+uint ps_convert_rgb5a1_uint16_biln(PS_INPUT input) : SV_Target0
+{
+	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
+	SAMPLE_RGBA_DEPTH_BILN_INT(rgb5a1_to_uint16);
 }
 
 PS_OUTPUT ps_convert_rgb5a1_8i(PS_INPUT input)

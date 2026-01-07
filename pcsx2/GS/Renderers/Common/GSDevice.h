@@ -13,9 +13,12 @@
 #include "GS/GSExtra.h"
 #include <array>
 
+// Warning: the order of certain values matters here. In particular, shaders that have a 32, 24, and 16
+// bit versions must be kept contiguously in that order.
 enum class ShaderConvert
 {
 	COPY = 0,
+	COPY_UINT,
 	RGBA8_TO_16_BITS,
 	DATM_1,
 	DATM_0,
@@ -27,21 +30,35 @@ enum class ShaderConvert
 	RTA_DECORRECTION,
 	TRANSPARENCY_FILTER,
 	FLOAT32_TO_16_BITS,
-	FLOAT32_TO_32_BITS,
+	FLOAT32_TO_UINT32,
 	FLOAT32_TO_RGBA8,
 	FLOAT32_TO_RGB8,
+	UINT32_TO_16_BITS,
+	UINT32_TO_FLOAT32,
+	UINT32_TO_RGBA8,
+	UINT32_TO_RGB8,
 	FLOAT16_TO_RGB5A1,
+	UINT16_TO_RGB5A1,
 	RGBA8_TO_FLOAT32,
 	RGBA8_TO_FLOAT24,
 	RGBA8_TO_FLOAT16,
+	RGBA8_TO_UINT32,
+	RGBA8_TO_UINT24,
+	RGBA8_TO_UINT16,
 	RGB5A1_TO_FLOAT16,
+	RGB5A1_TO_UINT16,
 	RGBA8_TO_FLOAT32_BILN,
 	RGBA8_TO_FLOAT24_BILN,
 	RGBA8_TO_FLOAT16_BILN,
+	RGBA8_TO_UINT32_BILN,
+	RGBA8_TO_UINT24_BILN,
+	RGBA8_TO_UINT16_BILN,
 	RGB5A1_TO_FLOAT16_BILN,
+	RGB5A1_TO_UINT16_BILN,
 	FLOAT32_DEPTH_TO_COLOR,
 	FLOAT32_COLOR_TO_DEPTH,
 	FLOAT32_TO_FLOAT24,
+	UINT32_TO_UINT24,
 	DEPTH_COPY,
 	DOWNSAMPLE_COPY,
 	RGBA_TO_8I,
@@ -106,6 +123,47 @@ static inline bool HasDepthOutput(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::UINT32_TO_FLOAT32:
+			return true;
+		default:
+			return false;
+	}
+}
+
+static inline bool HasIntegerInput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::COPY_UINT:
+		case ShaderConvert::UINT32_TO_16_BITS:
+		case ShaderConvert::UINT32_TO_FLOAT32:
+		case ShaderConvert::UINT32_TO_RGBA8:
+		case ShaderConvert::UINT32_TO_RGB8:
+		case ShaderConvert::UINT16_TO_RGB5A1:
+		case ShaderConvert::UINT32_TO_UINT24:
+			return true;
+		default:
+			return false;
+	}
+}
+
+static inline bool HasIntegerOutput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::COPY_UINT:
+		case ShaderConvert::FLOAT32_TO_16_BITS:
+		case ShaderConvert::FLOAT32_TO_UINT32:
+		case ShaderConvert::UINT32_TO_16_BITS:
+		case ShaderConvert::RGBA8_TO_UINT32:
+		case ShaderConvert::RGBA8_TO_UINT24:
+		case ShaderConvert::RGBA8_TO_UINT16:
+		case ShaderConvert::RGB5A1_TO_UINT16:
+		case ShaderConvert::RGBA8_TO_UINT32_BILN:
+		case ShaderConvert::RGBA8_TO_UINT24_BILN:
+		case ShaderConvert::RGBA8_TO_UINT16_BILN:
+		case ShaderConvert::RGB5A1_TO_UINT16_BILN:
+		case ShaderConvert::UINT32_TO_UINT24:
 			return true;
 		default:
 			return false;
@@ -133,7 +191,11 @@ static inline bool SupportsNearest(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
+		case ShaderConvert::RGBA8_TO_UINT32_BILN:
+		case ShaderConvert::RGBA8_TO_UINT24_BILN:
+		case ShaderConvert::RGBA8_TO_UINT16_BILN:
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+		case ShaderConvert::RGB5A1_TO_UINT16_BILN:
 			return false;
 		default:
 			return true;
@@ -147,7 +209,11 @@ static inline bool SupportsBilinear(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT32:
 		case ShaderConvert::RGBA8_TO_FLOAT24:
 		case ShaderConvert::RGBA8_TO_FLOAT16:
+		case ShaderConvert::RGBA8_TO_UINT32:
+		case ShaderConvert::RGBA8_TO_UINT24:
+		case ShaderConvert::RGBA8_TO_UINT16:
 		case ShaderConvert::RGB5A1_TO_FLOAT16:
+		case ShaderConvert::RGB5A1_TO_UINT16:
 			return false;
 		default:
 			return true;
@@ -162,6 +228,52 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 			return 0x7;
 		default:
 			return 0xf;
+	}
+}
+
+static ShaderConvert GetDepthCopyShader(GSTexture* src, GSTexture* dst)
+{
+	const bool int_src = src->IsIntegerFormat();
+	const bool int_dst = dst->IsIntegerFormat();
+	if (int_src && int_dst)
+	{
+		return ShaderConvert::COPY_UINT;
+	}
+	else if (int_src && !int_dst)
+	{
+		return ShaderConvert::UINT32_TO_FLOAT32;
+	}
+	else if (!int_src && int_dst)
+	{
+		return ShaderConvert::FLOAT32_TO_UINT32;
+	}
+	else
+	{
+		// !int_src && !int_dst
+		return ShaderConvert::DEPTH_COPY;
+	}
+}
+
+static ShaderConvert GetDepth32to24Shader(GSTexture* src, GSTexture* dst)
+{
+	const bool int_src = src->IsIntegerFormat();
+	const bool int_dst = dst->IsIntegerFormat();
+	if (int_src && int_dst)
+	{
+		return ShaderConvert::UINT32_TO_UINT24;
+	}
+	else if (int_src && !int_dst)
+	{
+		return ShaderConvert::UINT32_TO_FLOAT24;
+	}
+	else if (!int_src && int_dst)
+	{
+		return ShaderConvert::FLOAT32_TO_UINT24;
+	}
+	else
+	{
+		// !int_src && !int_dst
+		return ShaderConvert::FLOAT32_TO_UINT32;
 	}
 }
 

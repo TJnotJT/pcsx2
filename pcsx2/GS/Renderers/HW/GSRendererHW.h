@@ -277,4 +277,7 @@ public:
 
 	/// Compute the drawlist (if not already present) and bounding boxes for the current draw.
 	std::size_t ComputeDrawlistGetSize(float scale);
+
+	/// Determine if the upcoming draw will use multiple render targets
+	bool UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds);
 };

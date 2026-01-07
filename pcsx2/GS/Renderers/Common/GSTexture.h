@@ -57,6 +57,7 @@ public:
 	{
 		u32 color;
 		float depth;
+		u32 depth_int;
 	};
 
 protected:
@@ -133,6 +134,10 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
+	__fi bool IsIntegerFormat() const
+	{
+		return m_format == Format::UInt16 || m_format == Format::UInt32;
+	}
 
 	__fi State GetState() const { return m_state; }
 	__fi void SetState(State state) { m_state = state; }
@@ -153,6 +158,11 @@ public:
 	{
 		m_state = State::Cleared;
 		m_clear_value.depth = depth;
+	}
+	__fi void SetClearDepthInt(u32 depth)
+	{
+		m_state = State::Cleared;
+		m_clear_value.depth_int = depth;
 	}
 
 	void GenerateMipmapsIfNeeded();
