@@ -41,9 +41,9 @@ public:
 
 	__fi VkImage GetImage() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_image;
+			return static_cast<GSTextureVK*>(m_depth_color.get())->m_image;
 		}
 		else
 		{
@@ -53,9 +53,9 @@ public:
 
 	__fi VkImageView GetView() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_view;
+			return static_cast<GSTextureVK*>(m_depth_color.get())->m_view;
 		}
 		else
 		{
@@ -65,9 +65,9 @@ public:
 
 	__fi Layout GetLayout() const
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			return static_cast<GSTextureVK*>(m_uav_depth.get())->m_layout;
+			return static_cast<GSTextureVK*>(m_depth_color.get())->m_layout;
 		}
 		else
 		{
@@ -94,18 +94,16 @@ public:
 	void CommitClear();
 	void CommitClear(VkCommandBuffer cmdbuf);
 
+	void UpdateDepthColor(bool color_to_ds) override;
+
 	// Used when the render pass is changing the image layout, or to force it to
 	// VK_IMAGE_LAYOUT_UNDEFINED, if the existing contents of the image is
 	// irrelevant and will not be loaded.
 	void OverrideImageLayout(Layout new_layout);
 
-	void TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout, bool allow_same_layout = false);
+	void TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout);
 	void TransitionSubresourcesToLayout(
 		VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout);
-
-	void IssueUAVBarrier() override;
-	
-	void SetTargetMode(TargetMode mode) override;
 
 	static VkFramebuffer CreateNullFramebuffer();
 
@@ -118,12 +116,11 @@ public:
 	__fi void SetUseFenceCounter(u64 counter) { m_use_fence_counter = counter; }
 
 private:
-	void UpdateDepthUAV(bool uav_to_ds) override;
 	__fi void SetLayout(Layout new_layout)
 	{
-		if (IsDepthStencil() && IsTargetModeUAV())
+		if (IsDepthColor())
 		{
-			static_cast<GSTextureVK*>(m_uav_depth.get())->m_layout = new_layout;
+			static_cast<GSTextureVK*>(m_depth_color.get())->m_layout = new_layout;
 		}
 		else
 		{

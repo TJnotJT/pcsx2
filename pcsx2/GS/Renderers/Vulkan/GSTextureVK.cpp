@@ -215,12 +215,12 @@ void GSTextureVK::Destroy(bool defer)
 {
 	GSDeviceVK::GetInstance()->UnbindTexture(this);
 
-	if (m_uav_depth)
+	if (m_depth_color)
 	{
-		static_cast<GSTextureVK*>(m_uav_depth.get())->Destroy(defer);
-		m_uav_depth.release();
+		static_cast<GSTextureVK*>(m_depth_color.get())->Destroy(defer);
+		m_depth_color.release();
+		m_depth_color_active = false;
 	}
-	ResetTargetMode();
 
 	if (m_type == Type::RenderTarget || m_type == Type::DepthStencil)
 	{
@@ -331,7 +331,7 @@ VkBuffer GSTextureVK::AllocateUploadStagingBuffer(const void* data, u32 pitch, u
 void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32 y, u32 width, u32 height,
 	u32 buffer_height, u32 row_length, VkBuffer buffer, u32 buffer_offset)
 {
-	pxAssert(!IsTargetModeUAV());
+	pxAssert(!IsDepthColor());
 
 	const Layout old_layout = m_layout;
 	if (old_layout == Layout::Undefined)
@@ -351,14 +351,14 @@ void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32
 
 bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int layer)
 {
+	if (IsDepthColor())
+	{
+		GL_INS("Color -> DS in Update()");
+		UpdateDepthColor(true);
+	}
+
 	if (layer >= m_mipmap_levels)
 		return false;
-
-	if (IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in Update()");
-		SetTargetModeStandard();
-	}
 
 	g_perfmon.Put(GSPerfMon::TextureUploads, 1);
 
@@ -426,14 +426,10 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 
 bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
 {
+	pxAssert(!IsDepthColor());
+
 	if (layer >= m_mipmap_levels || IsCompressedFormat())
 		return false;
-
-	if (IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in Map()");
-		SetTargetModeStandard();
-	}
 
 	// map for writing
 	m_map_area = r ? *r : GetRect();
@@ -462,7 +458,7 @@ bool GSTextureVK::Map(GSMap& m, const GSVector4i* r, int layer)
 
 void GSTextureVK::Unmap()
 {
-	pxAssert(!IsTargetModeUAV());
+	pxAssert(!IsDepthColor());
 
 	// this can't handle blocks/compressed formats at the moment.
 	pxAssert(m_map_level < m_mipmap_levels && !IsCompressedFormat());
@@ -505,7 +501,8 @@ void GSTextureVK::Unmap()
 
 void GSTextureVK::GenerateMipmap()
 {
-	pxAssert(!IsTargetModeUAV());
+	pxAssert(!IsDepthColor());
+
 	const VkCommandBuffer cmdbuf = GetCommandBufferForUpdate();
 
 	if (m_layout == Layout::Undefined)
@@ -564,23 +561,26 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 {
 	TransitionToLayout(cmdbuf, Layout::ClearDst);
 
-	if (IsDepthStencil() && IsTargetModeStandard())
+	if (IsDepthStencil())
 	{
-		const VkClearDepthStencilValue cv = {m_clear_value.depth};
-		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 1u, 0u, 1u};
-		vkCmdClearDepthStencilImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
-	}
-	else if (IsDepthStencil() && IsTargetModeUAV())
-	{
-		alignas(16) VkClearColorValue cv = {{m_clear_value.depth, 0.0f, 0.0f, 0.0f}};
-		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
-		vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+		if (IsDepthColor())
+		{
+			alignas(16) VkClearColorValue cv = {{m_clear_value.depth, 0.0f, 0.0f, 0.0f}};
+			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
+			vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+		}
+		else
+		{
+			const VkClearDepthStencilValue cv = {m_clear_value.depth};
+			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 1u, 0u, 1u};
+			vkCmdClearDepthStencilImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+		}
 	}
 	else if (IsRenderTarget())
 	{
 		alignas(16) VkClearColorValue cv;
 		GSVector4::store<true>(cv.float32, GetUNormClearColor());
-		const VkImageSubresourceRange srr = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u };
+		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
 		vkCmdClearColorImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
 	}
 	else
@@ -593,88 +593,52 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 
 void GSTextureVK::OverrideImageLayout(Layout new_layout)
 {
-	pxAssert(!IsTargetModeUAV());
+	pxAssert(!IsDepthColor());
 	m_layout = new_layout;
 }
 
-
-void GSTextureVK::UpdateDepthUAV(bool uav_to_ds)
+void GSTextureVK::UpdateDepthColor(bool color_to_ds)
 {
-	// Not being in TargetMode::Standard could lead to state becoming inconsistent when using TransitionToState();
-	pxAssert(IsDepthStencil() && IsTargetModeStandard());
+	pxAssertRel(IsDepthStencil() && IsDepthColor() == color_to_ds, "Wrong use of UpdateDepthColor()");
 
-	GL_PUSH("Updating %s", uav_to_ds ? "UAV -> DS" : "DS -> UAV");
+	GL_PUSH("Updating %s", color_to_ds ? "Color -> DS" : "DS -> Color");
 
 	GSDeviceVK* device = GSDeviceVK::GetInstance();
 
-	if (device->InRenderPass())
-	{
-		Console.Warning("Updating depth UAV in a render pass.");
-		device->EndRenderPass();
-	}
+	pxAssert(!device->InRenderPass());
 
-	CreateDepthUAV();
+	CreateDepthColor();
 
 	SetUseFenceCounter(device->GetCurrentFenceCounter());
 
-	if (GetState() == State::Cleared)
+	if (color_to_ds && IsDepthColor())
 	{
-		// Clears will be handled when the resource is actually used.
-		GL_INS("Resource in Cleared state; early exit.");
-		return;
-	}
+		m_depth_color_active = false;
 
-	if (uav_to_ds)
+		// For cleared state simply propagate it.
+		if (GetState() != State::Cleared)
+		{
+			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
+			device->StretchRect(m_depth_color.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+			device->EndRenderPass();
+
+			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
+		}
+	}
+	else if (!color_to_ds && !IsDepthColor())
 	{
-		// UAV to DS
+		// For cleared state simply propagate it.
+		if (GetState() != State::Cleared)
+		{
+			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
+			device->StretchRect(this, m_depth_color.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+			device->EndRenderPass();
 
-		static_cast<GSTextureVK*>(m_uav_depth.get())->TransitionToLayout(Layout::ShaderReadOnly);
-		TransitionToLayout(Layout::DepthStencilAttachment);
+			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
+		}
 
-		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-		device->StretchRect(m_uav_depth.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
-		device->EndRenderPass();
-
-		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
+		m_depth_color_active = true;
 	}
-	else
-	{
-		// DS to UAV
-		static_cast<GSTextureVK*>(m_uav_depth.get())->TransitionToLayout(Layout::ColorAttachment);
-		TransitionToLayout(Layout::ShaderReadOnly);
-
-		GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-		device->StretchRect(this, m_uav_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
-		device->EndRenderPass();
-
-		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
-	}
-}
-
-void GSTextureVK::IssueUAVBarrier()
-{
-	pxAssert(IsTargetModeUAV());
-
-	GSDeviceVK* dev = GSDeviceVK::GetInstance();
-
-	if (dev->InRenderPass())
-	{
-		Console.Warning("Issuing UAV barrier in a render pass.");
-		dev->EndRenderPass();
-	}
-
-	if (GetUAVDirty())
-	{
-		g_perfmon.Put(GSPerfMon::Barriers, 1.0);
-		TransitionToLayout(dev->GetCurrentCommandBuffer(), GetLayout(), true); // Clears the dirty flag
-	}
-}
-
-void GSTextureVK::SetTargetMode(TargetMode mode)
-{
-	// Do not request a barrier for transitioning out of UAV mode as layout transitions
-	// (handled by the caller) count as a memory barrier.
-	SetTargetModeInternal(mode, false);
 }
 
 void GSTextureVK::TransitionToLayout(Layout layout)
@@ -682,44 +646,37 @@ void GSTextureVK::TransitionToLayout(Layout layout)
 	TransitionToLayout(GSDeviceVK::GetInstance()->GetCurrentCommandBuffer(), layout);
 }
 
-void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout, bool allow_same_layout)
+void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout)
 {
-	// Allowing the same layout allow us to use this for memory barriers.
-	if ((GetLayout() == new_layout) && !allow_same_layout)
+	if (GetLayout() == new_layout)
 		return;
 
 	TransitionSubresourcesToLayout(command_buffer, 0, m_mipmap_levels, GetLayout(), new_layout);
 
 	SetLayout(new_layout);
-
-	if (IsTargetModeUAV() && GetUAVDirty())
-	{
-		ClearUAVDirty();
-	}
 }
 
 void GSTextureVK::TransitionSubresourcesToLayout(
 	VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout)
 {
-	if (IsDepthStencil() && !IsTargetModeUAV() && (old_layout == Layout::ReadWriteImage || new_layout == Layout::ReadWriteImage))
+	if (IsDepthStencil())
 	{
-		pxFailRel("Transitioning to/from ReadWriteImage when not in UAV mode.");
-	}
-
-	if (IsTargetModeUAV() && (old_layout == Layout::DepthStencilAttachment || new_layout == Layout::DepthStencilAttachment))
-	{
-		pxFailRel("Transitioning to DepthStencilAttachment in UAV mode.");
-	}
-
-	if (!IsRenderTargetOrDepthStencil() &&
-		(old_layout == Layout::ColorAttachment || old_layout == Layout::DepthStencilAttachment ||
-			new_layout == Layout::ColorAttachment || new_layout == Layout::DepthStencilAttachment))
-	{
-		pxFailRel("Transitioning to inconsistent layout for non RT/DS texture.");
+		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
+		{
+			// DS -> Color
+			UpdateDepthColor(false);
+			old_layout = GetLayout();
+		}
+		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
+		{
+			// Color -> DS
+			UpdateDepthColor(true);
+			old_layout = GetLayout();
+		}
 	}
 
 	VkImageAspectFlags aspect;
-	if (IsDepthStencil() && IsTargetModeStandard())
+	if (IsDepthStencil() && !IsDepthColor())
 	{
 		aspect = g_gs_device->Features().stencil_buffer ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
 		                                                  VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -983,10 +940,10 @@ void GSDownloadTextureVK::CopyFromTexture(
 {
 	GSTextureVK* const vkTex = static_cast<GSTextureVK*>(stex);
 
-	if (vkTex->IsTargetModeUAV())
+	if (vkTex->IsDepthColor())
 	{
-		GL_INS("Target mode transition UAV -> Standard in CopyFromTexture()");
-		vkTex->SetTargetModeStandard();
+		GL_INS("Color -> DS in CopyFromTexture()");
+		vkTex->UpdateDepthColor(true);
 	}
 
 	pxAssert(vkTex->GetFormat() == m_format);

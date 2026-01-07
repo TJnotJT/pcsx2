@@ -1346,23 +1346,23 @@ std::unique_ptr<GSDownloadTexture> GSDevice12::CreateDownloadTexture(u32 width, 
 
 void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY)
 {
-	if (sTex && sTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
-		sTex->SetTargetModeStandard();
-	}
-
-	if (dTex && dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in CopyRect()");
-		dTex->SetTargetModeStandard();
-	}
-
 	// Empty rect, abort copy.
 	if (r.rempty())
 	{
 		GL_INS("D3D12: CopyRect rect empty.");
 		return;
+	}
+
+	if (sTex && sTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in CopyRect()");
+		sTex->UpdateDepthColor(true);
+	}
+
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in CopyRect()");
+		dTex->UpdateDepthColor(true);
 	}
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -1554,24 +1554,12 @@ void GSDevice12::DrawMultiStretchRects(
 	{
 		GSTexture12* const stex = static_cast<GSTexture12*>(rects[i].src);
 
-		if (stex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
-			stex->SetTargetModeStandard();
-		}
-
 		stex->CommitClear();
 		if (stex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 		{
 			EndRenderPass();
 			stex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		}
-	}
-
-	if (dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DrawMultiStretchRects()");
-		dTex->SetTargetModeStandard();
 	}
 
 	for (u32 i = 1; i < num_rects; i++)
@@ -1596,9 +1584,6 @@ void GSDevice12::DrawMultiStretchRects(
 void GSDevice12::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvert shader)
 {
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-	pxAssert(num_rects == 0 || !rects[0].src || !rects[0].src->IsTargetModeUAV());
-
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -1689,6 +1674,7 @@ void GSDevice12::BeginRenderPassForStretchRect(
 	}
 	else
 	{
+		pxAssert(!dTex->IsDepthColor());
 		BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, load_op, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
@@ -1699,20 +1685,6 @@ void GSDevice12::BeginRenderPassForStretchRect(
 void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSTexture12* dTex, const GSVector4& dRect,
 	const ID3D12PipelineState* pipeline, bool linear, bool allow_discard)
 {
-	if (sTex && sTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
-		EndRenderPass();
-		sTex->SetTargetModeStandard();
-	}
-
-	if (dTex && dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoStretchRect()");
-		EndRenderPass();
-		dTex->SetTargetModeStandard();
-	}
-
 	if (sTex->GetResourceState() != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 	{
 		// can't transition in a render pass
@@ -1783,21 +1755,6 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	// If either 2nd output is disabled or SLBG is 1, a background color will be used.
 	// Note: background color is also used when outside of the unit rectangle area
 	EndRenderPass();
-
-	for (int i = 0; i < 3; i++)
-	{
-		if (sTex[i] && sTex[i]->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in DoMerge()");
-			sTex[i]->SetTargetModeStandard();
-		}
-	}
-
-	if (dTex && dTex->IsTargetModeUAV())
-	{
-		GL_INS("Target mode transition UAV -> Standard in DoMerge()");
-		dTex->SetTargetModeStandard();
-	}
 
 	// transition everything before starting the new render pass
 	const bool has_input_0 =
@@ -1922,9 +1879,6 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderInterlace shader, bool linear, const InterlaceConstantBuffer& cb)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	const GSVector4i rc = GSVector4i(dRect);
 	const GSVector4i dtex_rc = dTex->GetRect();
 	const GSVector4i clamped_rc = rc.rintersect(dtex_rc);
@@ -1945,9 +1899,6 @@ void GSDevice12::DoInterlace(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 
 void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4])
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -1967,9 +1918,6 @@ void GSDevice12::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float para
 
 void GSDevice12::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	const GSVector4 sRect = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
 	const GSVector4i dRect = dTex->GetRect();
 	EndRenderPass();
@@ -2177,9 +2125,6 @@ void GSDevice12::RenderImGui()
 bool GSDevice12::DoCAS(
 	GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
 {
-	pxAssert(!sTex || !sTex->IsTargetModeUAV());
-	pxAssert(!dTex || !dTex->IsTargetModeUAV());
-
 	EndRenderPass();
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -2256,26 +2201,22 @@ void GSDevice12::IASetIndexBuffer(const void* index, size_t count)
 }
 
 void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, const GSVector4i& scissor,
-	bool depth_read, const GSVector2i& viewport_size, bool dirty_flag)
+	bool depth_read, const GSVector2i& viewport_size)
 {
 	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
 
-	for (GSTexture* tex : std::array{ d12Rt, d12DsRt, d12Ds })
+	if (d12Ds && d12Ds->IsDepthColor())
 	{
-		if (tex && tex->IsTargetModeUAV())
-		{
-			GL_INS("Target mode transition UAV -> Standard in OMSetRenderTarget()");
-			EndRenderPass();
-			tex->SetTargetModeStandard();
-		}
+		GL_INS("Color -> DS in OMSetRenderTargets()");
+		d12Ds->UpdateDepthColor(true);
 	}
 
-	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt || m_current_depth_target != d12Ds ||
-		m_current_depth_read_only != depth_read)
+	// Check if framebuffer changed
+	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt ||
+		m_current_depth_target != d12Ds || m_current_depth_read_only != depth_read)
 	{
-		// framebuffer change
 		EndRenderPass();
 	}
 	else if (InRenderPass())
@@ -2316,9 +2257,6 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 
 	SetViewport(vp);
 	SetScissor(scissor);
-
-	if (dirty_flag)
-		m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET; // Only do when not using render passes.
 
 	// Unbind conflicting UAVs
 	std::array<GSTexture12*, 3> curr_rts{ m_current_render_target, m_current_depth_render_target, m_current_depth_target };
@@ -3348,7 +3286,7 @@ void GSDevice12::SetStencilRef(u8 ref)
 
 void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback)
 {
-	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Trying to bind UAV slot with wrong function");
+	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Texture index too large");
 
 	D3D12DescriptorHandle handle;
 	if (sr)
@@ -3360,12 +3298,6 @@ void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 			{
 				GL_INS("Ending render pass due to resource transition");
 				EndRenderPass();
-			}
-
-			if (dtex->IsTargetModeUAV() && dtex->GetUAVDirty())
-			{
-				EndRenderPass();
-				dtex->IssueUAVBarrier();
 			}
 
 			dtex->CommitClear();
@@ -3400,12 +3332,6 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	pxAssertRel(TEXTURE_RT_UAV <= i && i <= TEXTURE_DEPTH_UAV, "Trying to bind UAV in wrong slot");
 
-	if (InRenderPass())
-	{
-		GL_INS("Ending render pass due to binding UAV.");
-		EndRenderPass();
-	}
-
 	GSTexture12* bind_uav;
 	if (uav)
 	{
@@ -3413,13 +3339,13 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		
 		if (check_state)
 		{
-			if (dtex->IsTargetModeStandard())
+			if (dtex->GetResourceState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS && InRenderPass())
 			{
-				GL_INS("Target mode transition Standard -> UAV in PSSetUnorderedAccess()");
-				dtex->SetTargetModeUAV();
-				// Clears will be handled in SendHWDraw().
+				GL_INS("Ending render pass due to resource transition");
+				EndRenderPass();
 			}
 
+			// Clears will be handled in SendHWDraw().
 			dtex->TransitionToState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
 		dtex->SetUseFenceCounter(GetCurrentFenceValue());
@@ -3440,13 +3366,17 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 	m_tfx_textures[i] = static_cast<GSTexture12*>(bind_uav)->GetUAVDescriptor();
 	m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
 
-	std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
-	for (GSTexture12** rt : curr_rts)
+	// Unbind conflicting RTs if needed.
+	if (uav)
 	{
-		if (*rt == m_tfx_textures_uav[i_uav])
+		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
+		for (GSTexture12** rt : curr_rts)
 		{
-			*rt = nullptr;
-			m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
+			if (*rt == static_cast<GSTexture12*>(uav))
+			{
+				*rt = nullptr;
+				m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
+			}
 		}
 	}
 }
@@ -3467,10 +3397,6 @@ void GSDevice12::SetUtilityTexture(GSTexture* dtex, const D3D12DescriptorHandle&
 	if (dtex)
 	{
 		GSTexture12* d12tex = static_cast<GSTexture12*>(dtex);
-		if (d12tex->IsTargetModeUAV() && d12tex->GetUAVDirty())
-		{
-			d12tex->IssueUAVBarrier();
-		}
 		d12tex->CommitClear();
 		d12tex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		d12tex->SetUseFenceCounter(GetCurrentFenceValue());
@@ -4099,8 +4025,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
-	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
+	GSTexture12* draw_ds = config.ps.rov_depth ? nullptr : static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_rt_rov = config.ps.rov_color ? static_cast<GSTexture12*>(config.rt) : nullptr;
+	GSTexture12* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
@@ -4233,10 +4161,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			else if (draw_rt->GetState() == GSTexture::State::Dirty)
 			{
 				GL_PUSH_("ColorClip Render Target Setup");
-				if (draw_rt->IsTargetModeUAV() && draw_rt->GetUAVDirty())
-				{
-					draw_rt->IssueUAVBarrier();
-				}
 				draw_rt->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 			}
 
@@ -4257,15 +4181,15 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	{
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth
-		if (!draw_rt && m_current_render_target && config.tex != m_current_render_target &&
-			m_current_render_target->GetSize() == draw_ds->GetSize())
+		if (!(draw_rt || draw_rt_rov) && m_current_render_target && config.tex != m_current_render_target &&
+			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
 			m_pipeline_selector.rt = true;
 		}
 	}
-	else if (!draw_ds && m_current_depth_target && config.tex != m_current_depth_target &&
-			 m_current_depth_target->GetSize() == draw_rt->GetSize())
+	else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
+			 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 	{
 		draw_ds = m_current_depth_target;
 		m_pipeline_selector.ds = true;
@@ -4303,41 +4227,28 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		// Denormalize clear color for hw colclip.
 		clear_color *= GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
 	}
-	if (config.ps.rov_color || config.ps.rov_depth)
+
+	PSSetUnorderedAccess(TEXTURE_RT_UAV, draw_rt_rov, true);
+	PSSetUnorderedAccess(TEXTURE_DEPTH_UAV, draw_ds_rov, true);
+
+	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
+	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
+		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe,
+		config.rt ? config.rt->GetSize() : config.ds->GetSize());
+
+	// Begin render pass if new target or out of the area.
+	if (!m_in_render_pass)
 	{
-		// Do not use render pass for ROV.
-		// Clearing/state change is handled in SendHWDraw().
-		EndRenderPass();
-
-		PSSetUnorderedAccess(TEXTURE_RT_UAV, config.ps.rov_color ? draw_rt : nullptr, true);
-		PSSetUnorderedAccess(TEXTURE_DEPTH_UAV, config.ps.rov_depth ? draw_ds : nullptr, true);
-
-		// Warning: PSSetUnorderedAccess may use StretchRect() to update depth UAV so we must
-		// call OMSetRenderTargets() after to clear any unused RTs. Otherwise the UAV may end up
-		// being bound as both RT and UAV, which is probably undefined behavior.
-		OMSetRenderTargets(config.ps.rov_color ? nullptr : draw_rt, nullptr, config.ps.rov_depth ? nullptr : draw_ds,
-			config.scissor, false, (draw_rt ? draw_rt->GetSize() : draw_ds->GetSize()), true);
-	}
-	else
-	{
-		// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
-		OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
-			config.tex && (config.tex == config.ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.rov_depth);
-
-		// Begin render pass if new target or out of the area.
-		if (!m_in_render_pass)
-		{
-			BeginRenderPass(GetLoadOpForTexture(draw_rt),
-				draw_rt ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				GetLoadOpForTexture(draw_ds),
-				draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				stencil_DATE ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE :
-				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-				stencil_DATE ? ((feedback_rt || feedback_depth) ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE :
-					D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD) :
-				D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				clear_color, draw_ds ? draw_ds->GetClearDepth() : 0.0f, 1);
-		}
+		BeginRenderPass(GetLoadOpForTexture(draw_rt),
+			draw_rt ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			GetLoadOpForTexture(draw_ds),
+			draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			stencil_DATE ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE :
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+			stencil_DATE ? ((feedback_rt || feedback_depth) ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE :
+				D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD) :
+			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			clear_color, draw_ds ? draw_ds->GetClearDepth() : 0.0f, 1);
 	}
 
 	// rt -> colclip hw blit if enabled
@@ -4365,8 +4276,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, feedback_rt, feedback_depth,
-		config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, draw_rt_rov, draw_ds_rov,
+		feedback_rt, feedback_depth, config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
 	if (config.blend_multi_pass.enable)
@@ -4396,8 +4307,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.cms = config.alpha_second_pass.colormask;
 		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, feedback_rt, feedback_depth,
-			config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_ds, draw_rt_rov, draw_ds_rov,
+			feedback_rt, feedback_depth, config.alpha_second_pass.require_one_barrier,
+			config.alpha_second_pass.require_full_barrier);
 	}
 
 	if (date_image)
@@ -4441,116 +4353,73 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 }
 
 void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-	GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth,
+	GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
+	const bool feedback_rt, const bool feedback_depth,
 	const bool one_barrier, const bool full_barrier, const float* clear_color)
 {
+	// Should not be mixing ROVs with barriers.
+	pxAssert(!(draw_rt_rov || draw_ds_rov) || !(one_barrier || full_barrier));
+
 	if (BindDrawPipeline(pipe) && !m_features.texture_barrier) [[unlikely]]
 	{
 		DrawIndexedPrimitive();
 		return;
 	}
 
-	if (config.ps.rov_color || config.ps.rov_depth)
+	// Handle ROV draws if needed.
+	if (draw_rt_rov || draw_ds_rov)
 	{
-		// Sanity check to make sure we are in the correct mode.
-		pxAssert(!draw_rt || (static_cast<bool>(config.ps.rov_color) == draw_rt->IsTargetModeUAV()));
-		pxAssert(!draw_ds || (static_cast<bool>(config.ps.rov_depth) == draw_ds->IsTargetModeUAV()));
-
-		if (InRenderPass())
-		{
-			Console.Warning("ROV draw while in a render pass.");
-			EndRenderPass();
-		}
-
-		if ((feedback_rt && !config.ps.rov_color) || (feedback_depth && !config.ps.rov_depth))
-		{
-			Console.Warning("ROV feedback for color and depth is inconsistent.");
-		}
-
 		if (BindDrawPipeline(pipe))
 		{
 			GL_INS("ROV Pass (Color=%s/%s, D=%s/%s)",
-				draw_rt ? (draw_rt->GetState() == GSTexture::State::Dirty ? "Preserve" :
-					draw_rt->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
-						draw_rt->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
-				draw_rt ? (config.ps.rov_color ? "UAV" : "Standard") : "None",
-				draw_ds ? (draw_ds->GetState() == GSTexture::State::Dirty ? "Preserve" :
-					draw_ds->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
-						draw_ds->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
-				draw_ds ? (config.ps.rov_depth ? "UAV" : "Standard") : "None");
+				draw_rt_rov ? (draw_rt_rov->GetState() == GSTexture::State::Dirty ? "Preserve" :
+					draw_rt_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+					draw_rt_rov->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
+				draw_rt_rov ? (config.ps.rov_color ? "UAV" : "Standard") : "None",
+				draw_ds_rov ? (draw_ds_rov->GetState() == GSTexture::State::Dirty ? "Preserve" :
+					draw_ds_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+					draw_ds_rov->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
+				draw_ds_rov ? (config.ps.rov_depth ? "UAV" : "Standard") : "None");
 
-			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = {
-				m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
-				(TEXTURE_RT_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
-			};
-			D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = {
-				m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
-				(TEXTURE_DEPTH_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
-			};
-
-			// Do state updates here as we need the GPU descriptor handles to be allocated in
-			// BindDrawPipeline() for UAV clears.
-			if (draw_rt)
+			// Do UAV state updates here as we need the GPU descriptor handles to be allocated in BindDrawPipeline() for UAV clears.
+			if (draw_rt_rov)
 			{
-				if (draw_rt->GetState() == GSTexture::State::Cleared)
+				D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = {
+					m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
+					(TEXTURE_RT_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
+				};
+				if (draw_rt_rov->GetState() == GSTexture::State::Cleared)
 				{
-					if (config.ps.rov_color)
-					{
-						// Small optimization: clear directly as UAV without transitioning.
-						draw_rt->CommitClearUAV(gpu_handle_rt, clear_color);
-					}
-					else
-					{
-						draw_rt->CommitClear(clear_color);
-					}
+					// Small optimization: clear directly as UAV.
+					draw_rt_rov->CommitClearUAV(gpu_handle_rt, clear_color);
 				}
-
-				if (config.ps.rov_color && config.ps.color_feedback)
+				if (!config.ps.no_color)
 				{
-					// Color UAV is read.
-					draw_rt->IssueUAVBarrier();
-				}
-
-				if (config.ps.rov_color && !config.ps.no_color)
-				{
-					// Color UAV is written. Warning: do this after issuing the barrier
-					// so that the UAV is correctly marked as dirty.
-					draw_rt->SetState(GSTexture::State::Dirty, true);
+					// Color UAV is written.
+					draw_rt_rov->SetState(GSTexture::State::Dirty);
 				}
 			}
 
-			if (draw_ds)
+			if (draw_ds_rov)
 			{
-				if (draw_ds->GetState() == GSTexture::State::Cleared)
+				D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = {
+					m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
+					(TEXTURE_DEPTH_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
+				};
+				if (draw_ds_rov->GetState() == GSTexture::State::Cleared)
 				{
-					if (config.ps.rov_depth)
-					{
-						// Small optimization: clear directly as UAV without transitioning.
-						draw_ds->CommitClearUAV(gpu_handle_ds);
-					}
-					else
-					{
-						draw_ds->CommitClear();
-					}
+					// Small optimization: clear directly as UAV.
+					draw_ds_rov->CommitClearUAV(gpu_handle_ds);
 				}
-
-				if (config.ps.rov_depth && config.ps.depth_feedback)
+				if (config.ps.zclamp)
 				{
-					// Depth UAV is read.
-					draw_ds->IssueUAVBarrier();
-				}
-
-				if (config.ps.rov_depth && config.ps.zclamp)
-				{
-					// Depth UAV is written. Warning: do this after issuing the barrier
-					// so that the UAV is correctly marked as dirty.
-					draw_ds->SetState(GSTexture::State::Dirty, true);
+					// Depth UAV is written.
+					draw_ds_rov->SetState(GSTexture::State::Dirty);
 				}
 			}
 
 			DrawIndexedPrimitive();
 		}
-
 		return;
 	}
 

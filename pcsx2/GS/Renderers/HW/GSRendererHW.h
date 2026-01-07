@@ -203,20 +203,23 @@ private:
 
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
 
-	struct TextureAverageBarriers
+	struct TextureROVHistory
 	{
-		GSTexture* tex = nullptr; // Texture being tracked.
-		u32 last_draw = 0; // Last draw this was updated.
-		float average_barriers = 1.0f; // Average number of barriers per draw.
+		GSTexture* m_tex = nullptr; // Texture being tracked.
+		u32 m_last_draw = 0; // Last draw this was updated.
+		float m_average_barriers = 1.0f; // Average number of barriers per draw.
+		bool m_rov = false; // Was last used as ROV.
 
-		TextureAverageBarriers(GSTexture* tex)
-			: tex(tex)
+		TextureROVHistory(GSTexture* tex) : m_tex(tex)
 		{
 		}
 	};
 
-	std::vector<TextureAverageBarriers> m_average_barriers_history;
-	float GetTextureAverageBarriers(GSTexture* tex, float barriers, float history_weight);
+	u32 m_rov_preset = 0;
+	u32 m_rov_max_drawcalls = 16;
+	std::vector<TextureROVHistory> m_texture_rov_history;
+	__fi std::pair<float, bool> GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight);
+	__fi void SetTextureIsROV(GSTexture* tex, bool rov);
 	
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;

@@ -185,68 +185,20 @@ void GSTexture::GenerateMipmapsIfNeeded()
 	GenerateMipmap();
 }
 
-void GSTexture::CreateDepthUAV()
+void GSTexture::CreateDepthColor()
 {
 	pxAssert(IsDepthStencil());
 
-	if (!m_uav_depth)
+	if (!m_depth_color)
 	{
-		m_uav_depth.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
+		m_depth_color.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
 #ifdef PCSX2_DEVBUILD
 		if (GSConfig.UseDebugDevice)
 		{
-			m_uav_depth->SetDebugName(fmt::format("0x{:x} Depth UAV for @ 0x{:x}",
-				reinterpret_cast<u64>(m_uav_depth.get()), reinterpret_cast<u64>(this)));
+			m_depth_color->SetDebugName(fmt::format("0x{:x} Depth color for @ 0x{:x}",
+				reinterpret_cast<u64>(m_depth_color.get()), reinterpret_cast<u64>(this)));
 		}
 #endif
-	}
-}
-
-void GSTexture::SetTargetModeInternal(TargetMode mode, bool need_barrier)
-{
-	pxAssert(IsRenderTargetOrDepthStencil() && (IsTargetModeStandard() || IsTargetModeUAV()));
-
-	if (GetTargetMode() == mode)
-		return;
-
-	// Handles updating DepthStencil <-> UAV dirty depth.
-	// Does not do the actual state/layout transition. The caller should do that.
-
-	g_perfmon.Put(GSPerfMon::TargetTransitions, 1.0);
-
-	if (GetTargetMode() == TargetMode::Standard && mode == TargetMode::UAV)
-	{
-		GL_INS("Target mode transition Standard -> UAV");
-
-		if (IsDepthStencil())
-		{
-			UpdateDepthUAV(false);
-		}
-
-		m_target_mode = TargetMode::UAV; // After UpdateDepthUAV() to avoid assertion.
-	}
-	else if (GetTargetMode() == TargetMode::UAV && mode == TargetMode::Standard)
-	{
-		// UAV -> Standard
-		GL_INS("Target mode transition UAV -> Standard");
-
-		// DX12 needs a UAV barrier (in addition to state transitions handled by the caller).
-		// VK does not because layout transitions count as a memory barrier.
-		if (need_barrier)
-		{
-			IssueUAVBarrier();
-		}
-
-		m_target_mode = TargetMode::Standard; // Before UpdateDepthUAV() to avoid assertion.
-
-		if (IsDepthStencil())
-		{
-			UpdateDepthUAV(true);
-		}
-	}
-	else
-	{
-		pxFailRel("Setting invalid target mode");
 	}
 }
 

@@ -912,7 +912,8 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(DisableVertexShaderExpand) &&
 		   OpEqu(DisableDepthFeedback) &&
 		   OpEqu(OverrideTextureBarriers) &&
-		   OpEqu(ExclusiveFullscreenControl);
+		   OpEqu(ExclusiveFullscreenControl) &&
+		   OpEqu(HWROV);
 }
 
 void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
@@ -1044,6 +1045,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapEntry(HWROVBarriersEnableDepth);
 	SettingsWrapEntry(HWROVBarriersDisableColor);
 	SettingsWrapEntry(HWROVBarriersDisableDepth);
+	SettingsWrapEntry(HWROVPreset);
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");

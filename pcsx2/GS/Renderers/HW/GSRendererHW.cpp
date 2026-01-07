@@ -6403,42 +6403,49 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	}
 }
 
-// Gets a weighted average of the number of draw calls in the history
-// of the given texture. Used as a heuristic to determine when to
-// start/stop using ROVs in a scene.
-__fi float GSRendererHW::GetTextureAverageBarriers(GSTexture* tex, float barriers, float history_weight)
+// Gets the history tracking info for the given texture using a LRU queue.
+__fi std::pair<float, bool> GSRendererHW::GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight)
 {
 	auto it = std::find_if(
-		m_average_barriers_history.begin(), m_average_barriers_history.end(),
-		[&](const TextureAverageBarriers& e) { return e.tex == tex; });
+		m_texture_rov_history.begin(), m_texture_rov_history.end(),
+		[&](const TextureROVHistory& h) { return h.m_tex == tex; });
 
-	if (it == m_average_barriers_history.end())
+	if (it == m_texture_rov_history.end())
 	{
 		// Add new texture to the history cache
-		if (m_average_barriers_history.size() >= GSConfig.HWROVHistoryDraws)
-			m_average_barriers_history.pop_back(); // Evict last element
+		if (m_texture_rov_history.size() >= GSConfig.HWROVHistoryDraws)
+			m_texture_rov_history.pop_back(); // Evict last element
 
-		m_average_barriers_history.push_back(TextureAverageBarriers(tex));
+		m_texture_rov_history.push_back(TextureROVHistory(tex));
 
-		it = std::prev(m_average_barriers_history.end());
+		it = std::prev(m_texture_rov_history.end());
 	}
 
 	// Move current element to the front
-	std::rotate(m_average_barriers_history.begin(), it, it + 1);
+	std::rotate(m_texture_rov_history.begin(), it, it + 1);
 
-	TextureAverageBarriers& e = m_average_barriers_history.front();
+	TextureROVHistory& h = m_texture_rov_history.front();
 
 	// Be careful of wrap around in 32 bit s_n
-	if (std::max(static_cast<int>(s_n - e.last_draw), 0) >= static_cast<int>(GSConfig.HWROVHistoryDraws))
+	if (std::max(static_cast<int>(s_n - h.m_last_draw), 0) >= static_cast<int>(GSConfig.HWROVHistoryDraws))
 	{
-		e.average_barriers = 1.0f;
+		h.m_average_barriers = 1.0f;
 	}
 
 	const float w = std::clamp(history_weight, 0.0f, 1.0f);
-	e.average_barriers = w * e.average_barriers + (1 - w) * barriers;
-	e.last_draw = s_n;
+	h.m_average_barriers = w * h.m_average_barriers + (1 - w) * barriers;
+	h.m_last_draw = s_n;
 
-	return e.average_barriers;
+	return { h.m_average_barriers, h.m_rov };
+}
+
+__fi void GSRendererHW::SetTextureIsROV(GSTexture* tex, bool rov)
+{
+	auto it = std::find_if(
+		m_texture_rov_history.begin(), m_texture_rov_history.end(),
+		[&](const TextureROVHistory& h) { return h.m_tex == tex; });
+	if (it != m_texture_rov_history.end())
+		it->m_rov = rov;
 }
 
 static FILE* debug_fp = nullptr;
@@ -6450,6 +6457,41 @@ void GSRendererHW::SetupROV()
 
 	if (!features.rov)
 		return;
+
+	if (m_rov_preset != GSConfig.HWROVPreset)
+	{
+		m_rov_preset = GSConfig.HWROVPreset;
+		if (m_rov_preset == 1)
+		{
+			GSConfig.HWROVHistoryWeightColor = 0.75f;
+			GSConfig.HWROVHistoryWeightDepth = 0.75f;
+			GSConfig.HWROVBarriersEnableColor = 2.0f;
+			GSConfig.HWROVBarriersEnableDepth = 4.0f;
+			GSConfig.HWROVBarriersDisableColor = 1.125f;
+			GSConfig.HWROVBarriersDisableDepth = 1.25f;
+			m_rov_max_drawcalls = 16;
+		}
+		else if (m_rov_preset == 2)
+		{
+			GSConfig.HWROVHistoryWeightColor = 0.75f;
+			GSConfig.HWROVHistoryWeightDepth = 0.75f;
+			GSConfig.HWROVBarriersEnableColor = 8.0f;
+			GSConfig.HWROVBarriersEnableDepth = 16.0f;
+			GSConfig.HWROVBarriersDisableColor = 1.5f;
+			GSConfig.HWROVBarriersDisableDepth = 2.0f;
+			m_rov_max_drawcalls = 64;
+		}
+		else if (m_rov_preset == 3)
+		{
+			GSConfig.HWROVHistoryWeightColor = 0.0f;
+			GSConfig.HWROVHistoryWeightDepth = 0.0f;
+			GSConfig.HWROVBarriersEnableColor = 2.0f;
+			GSConfig.HWROVBarriersEnableDepth = 2.0f;
+			GSConfig.HWROVBarriersDisableColor = 1.0f;
+			GSConfig.HWROVBarriersDisableDepth = 1.0f;
+			m_rov_max_drawcalls = 2;
+		}
+	}
 
 	GL_PUSH("HW: ROV Setup");
 
@@ -6491,8 +6533,13 @@ void GSRendererHW::SetupROV()
 			              afail_needs_depth || ztst;
 
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
-	bool use_rov_color = using_barriers && (m_conf.ps.IsFeedbackLoopRT() && color_write);
-	bool use_rov_depth = using_barriers && (m_conf.ps.IsFeedbackLoopDepth() && depth_write);
+	bool use_rov_color = color_write &&
+	                     ((using_barriers && m_conf.ps.IsFeedbackLoopRT()) ||
+	                     m_conf.alpha_second_pass.enable ||
+	                     m_conf.blend_multi_pass.enable);
+	bool use_rov_depth = depth_write &&
+	                     ((using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ||
+	                     m_conf.alpha_second_pass.enable);
 
 	// In certain cases using a ROV with depth or color will force the other one.
 	// We have to use this twice: once before when deciding whether to use ROV
@@ -6529,18 +6576,18 @@ void GSRendererHW::SetupROV()
 	GetForcedROVUsage(use_rov_color, use_rov_depth, feedback_color, feedback_depth);
 
 	// Get the number of barriers that would be used with the current config.
-	constexpr u32 MAX_DRAWS = 16; // Tell drawlist computation to cap at 16 to lower CPU burden and prevent
-	                              // outliers from influencing heuristic too much.
 	u32 num_drawcalls_i; 
 	if (using_barriers)
 	{
 		if (m_drawlist.size() > 0)
 		{
-			num_drawcalls_i = std::min(MAX_DRAWS, static_cast<u32>(m_drawlist.size())); // Already computed
+			num_drawcalls_i = std::min(m_rov_max_drawcalls, static_cast<u32>(m_drawlist.size())); // Already computed
 		}
 		else
 		{
-			num_drawcalls_i = MAX_DRAWS; // Tells drawlist computation to cap at MAX_DRAWS.
+			// Tells drawlist computation to stop after reaching a certain limit to reduce CPU burden
+			// as well as prevent outliers from influencing history too much.
+			num_drawcalls_i = m_rov_max_drawcalls;
 			GetPrimitiveOverlapDrawlist(false, false, 1.0f, &num_drawcalls_i);
 		}
 	}
@@ -6553,12 +6600,32 @@ void GSRendererHW::SetupROV()
 		                            (m_conf.blend_multi_pass.enable ? 1.0f : 0.0f);
 	const float barriers = multiplier * num_drawcalls;
 
-	// Weight these barriers with the saved history. Only record the  barriers in the history
+	// Weight these barriers with the saved history. Only record the barriers in the history
 	// if the ROV is needed to save barriers for this draw, otherwise average in 1.0.
-	const float average_barriers_color = m_conf.rt ?
-		GetTextureAverageBarriers(m_conf.rt, use_rov_color ? barriers : 1.0f, GSConfig.HWROVHistoryWeightColor) : 0.0f;
-	const float average_barriers_depth = m_conf.ds ?
-		GetTextureAverageBarriers(m_conf.ds, use_rov_depth ? barriers : 1.0f, GSConfig.HWROVHistoryWeightDepth) : 0.0f;
+	auto [average_barriers_color, color_is_rov] = m_conf.rt ?
+		GetTextureROVHistory(m_conf.rt, use_rov_color ? barriers : 1.0f, GSConfig.HWROVHistoryWeightColor) :
+		std::make_pair<float, bool>(0.0f, false);
+	auto [average_barriers_depth, depth_is_rov] = m_conf.ds ?
+		GetTextureROVHistory(m_conf.ds, use_rov_depth ? barriers : 1.0f, GSConfig.HWROVHistoryWeightDepth) :
+		std::make_pair<float, bool>(0.0f, false);
+	depth_is_rov = depth_is_rov && m_conf.ds->IsDepthColor(); // Make sure depth is still in color mode.
+
+	const bool color_needs_enabling = use_rov_color && !color_is_rov;
+	const bool depth_needs_enabling = use_rov_depth && !depth_is_rov;
+
+	const bool needs_enabling = color_needs_enabling || depth_needs_enabling;
+	const bool needs_disabling = color_is_rov || depth_is_rov;
+
+	if (!(needs_enabling || needs_disabling))
+	{
+		GL_INS("ROV: Draw=%d => No action taken.", GSState::s_n);
+		if (GSConfig.HWROVLogging)
+		{
+			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
+				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers);
+		}
+		return;
+	}
 
 	// Thresholds for enabling/disabling.
 	// We have two thresholds depending on whether depth ROV would be
@@ -6567,25 +6634,6 @@ void GSRendererHW::SetupROV()
 	const float enable_threshold_depth = GSConfig.HWROVBarriersEnableDepth;
 	const float disable_threshold_color = GSConfig.HWROVBarriersDisableColor;
 	const float disable_threshold_depth = GSConfig.HWROVBarriersDisableDepth;
-
-	const bool color_needs_enabling = use_rov_color && !m_conf.rt->IsTargetModeUAV();
-	const bool depth_needs_enabling = use_rov_depth && !m_conf.ds->IsTargetModeUAV();
-	const bool color_in_uav = m_conf.rt && m_conf.rt->IsTargetModeUAV();
-	const bool depth_in_uav = m_conf.ds && m_conf.ds->IsTargetModeUAV();
-
-	const bool needs_enabling = color_needs_enabling || depth_needs_enabling;
-	const bool needs_disabling = color_in_uav || depth_in_uav;
-
-	if (!(needs_enabling || needs_disabling))
-	{
-		GL_INS("ROV: Draw=%d => No action taken.");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
-				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers);
-		}
-		return;
-	}
 	
 	// There's a lot of flags here that implement a simple state machine to
 	// decide when to enable/disable/continue color and/or depth ROVs depending
@@ -6594,11 +6642,11 @@ void GSRendererHW::SetupROV()
 	// depth is more expensive to use as ROV and switching require a copy.
 
 	const float test_barriers_enable = depth_needs_enabling ? average_barriers_depth : average_barriers_color;
-	const float test_barriers_disable = color_in_uav ? average_barriers_color : average_barriers_depth;
+	const float test_barriers_disable = color_is_rov ? average_barriers_color : average_barriers_depth;
 	const float test_barriers = needs_enabling ? test_barriers_enable : test_barriers_disable;
 
 	const float enable_threshold = depth_needs_enabling ? enable_threshold_depth : enable_threshold_color;
-	const float disable_threshold = color_in_uav ? disable_threshold_color : disable_threshold_depth;
+	const float disable_threshold = color_is_rov ? disable_threshold_color : disable_threshold_depth;
 	const float threshold = needs_enabling ? enable_threshold : disable_threshold;
 
 	// The previous use_rov flags are suggestions to determine the heuristic.
@@ -6609,14 +6657,14 @@ void GSRendererHW::SetupROV()
 	if (test_barriers >= threshold)
 	{
 		// Enable or continue color
-		use_rov_color_final = use_rov_color || color_in_uav;
+		use_rov_color_final = use_rov_color || color_is_rov;
 
 		// Use depth only if needed for correctness or else try to disable it.
 		if (use_rov_depth)
 		{
 			use_rov_depth_final = true; // We must use depth ROV for correctness.
 		}
-		else if (depth_in_uav)
+		else if (depth_is_rov)
 		{
 			// We are in depth UAV but don't need it; only use if historical barriers
 			// suggest it is useful.
@@ -6652,6 +6700,12 @@ void GSRendererHW::SetupROV()
 				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
 	}
+
+	// Update history of ROV usage.
+	if (m_conf.rt)
+		SetTextureIsROV(m_conf.rt, use_rov_color_final);
+	if (m_conf.ds)
+		SetTextureIsROV(m_conf.ds, use_rov_depth_final);
 
 	// Do the actual config for depth.
 	if (use_rov_depth_final)
