@@ -351,7 +351,11 @@ void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32
 
 bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int layer)
 {
-	pxAssert(!IsDepthColor());
+	if (IsDepthColor())
+	{
+		GL_INS("Color -> DS in Update()");
+		UpdateDepthColor(true);
+	}
 
 	if (layer >= m_mipmap_levels)
 		return false;
@@ -657,7 +661,6 @@ void GSTextureVK::TransitionToLayout(Layout layout)
 
 void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_layout)
 {
-	// Allowing the same layout allow us to use this for memory barriers.
 	if (GetLayout() == new_layout)
 		return;
 

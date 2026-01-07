@@ -3183,6 +3183,18 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel, 
 
 	EndRenderPass();
 
+	if (sTex && sTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in BlitRect()");
+		sTex->UpdateDepthColor(true);
+	}
+
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in BlitRect()");
+		dTex->UpdateDepthColor(true);
+	}
+
 	sTexVK->TransitionToLayout(GSTextureVK::Layout::TransferSrc);
 	dTexVK->TransitionToLayout(GSTextureVK::Layout::TransferDst);
 
@@ -3483,18 +3495,19 @@ void GSDeviceVK::OMSetRenderTargets(
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
 
+	if (vkDs && vkDs->IsDepthColor())
+	{
+		GL_INS("Color -> DS in OMSetRenderTargets()");
+		EndRenderPass();
+		vkDs->UpdateDepthColor(true);
+	}
+
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs ||
 		m_current_framebuffer_feedback_loop != feedback_loop ||
 		m_current_framebuffer == VK_NULL_HANDLE)
 	{
 		// framebuffer change or feedback loop enabled/disabled
 		EndRenderPass();
-
-		if (vkDs && vkDs->IsDepthColor())
-		{
-			GL_INS("Color -> DS in OMSetRenderTargets()");
-			vkDs->UpdateDepthColor(true);
-		}
 
 		if (vkRt)
 		{

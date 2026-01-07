@@ -912,7 +912,8 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(DisableVertexShaderExpand) &&
 		   OpEqu(DisableDepthFeedback) &&
 		   OpEqu(OverrideTextureBarriers) &&
-		   OpEqu(ExclusiveFullscreenControl);
+		   OpEqu(ExclusiveFullscreenControl) &&
+	       OpEqu(HWROV);
 }
 
 void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
