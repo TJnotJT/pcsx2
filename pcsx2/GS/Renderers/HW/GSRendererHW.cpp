@@ -8749,13 +8749,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.require_full_barrier = false;
 	}
 
-	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
-	{
-		ComputeDrawlistGetSize(rt->m_scale);
-		m_conf.drawlist = &m_drawlist;
-		m_conf.drawlist_bbox = &m_drawlist_bbox;
-	}
-
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
 
