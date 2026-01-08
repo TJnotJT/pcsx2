@@ -38,7 +38,9 @@ Texture2D<uint> Texture;
 
 uint sample_c(float2 uv)
 {
-	return Texture.Load(int3(uv, 0));
+	uint w, h;
+	Texture.GetDimensions(w, h);
+	return Texture.Load(int3(w * uv.x, h * uv.y, 0));
 }
 
 #else
@@ -450,19 +452,6 @@ uint ps_convert_rgb5a1_uint16(PS_INPUT input) : SV_Target0
 	float depthBR = CONVERT_FN(Texture.Load(int3(coords.zw, 0))); \
 	return lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
-#define SAMPLE_RGBA_DEPTH_BILN_INT(CONVERT_FN) \
-	uint width, height; \
-	Texture.GetDimensions(width, height); \
-	float2 top_left_f = input.t * float2(width, height) - 0.5f; \
-	int2 top_left = int2(floor(top_left_f)); \
-	int4 coords = clamp(int4(top_left, top_left + 1), int4(0, 0, 0, 0), int2(width - 1, height - 1).xyxy); \
-	float2 mix_vals = frac(top_left_f); \
-	float4 colorTL = Texture.Load(int3(coords.xy, 0)); \
-	float4 colorTR = Texture.Load(int3(coords.zy, 0)); \
-	float4 colorBL = Texture.Load(int3(coords.xw, 0)); \
-	float4 colorBR = Texture.Load(int3(coords.zw, 0)); \
-	return CONVERT_FN(lerp(lerp(colorTL, colorTR, mix_vals.x), lerp(colorBL, colorBR, mix_vals.x), mix_vals.y));
-
 #if !HAS_INTEGER_INPUT
 float ps_convert_rgba8_float32_biln(PS_INPUT input) : SV_Depth
 {
@@ -494,28 +483,33 @@ float ps_convert_rgba8_float16_biln(PS_INPUT input) : SV_Depth
 #if !HAS_INTEGER_INPUT
 uint ps_convert_rgba8_uint32_biln(PS_INPUT input) : SV_Target0
 {
+	// Note: Bilinear is not implemented for integer.
 	// Convert an RGBA texture into a 32 bits UINT texture
-	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint32);
+	return rgba8_to_uint32(sample_c(input.t));
 }
 #endif
 
 #if !HAS_INTEGER_INPUT
 uint ps_convert_rgba8_uint24_biln(PS_INPUT input) : SV_Target0
 {
+	// Note: Bilinear is not implemented for integer.
+
 	// Same as above but without the alpha channel (24 bits Z)
 
 	// Convert an RGBA texture into a 32 bits UINT texture
-	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint24);
+	return rgba8_to_uint24(sample_c(input.t));
 }
 #endif
 
 #if !HAS_INTEGER_INPUT
 uint ps_convert_rgba8_uint16_biln(PS_INPUT input) : SV_Target0
 {
+	// Note: Bilinear is not implemented for integer.
+	
 	// Same as above but without the A/B channels (16 bits Z)
 
 	// Convert an RGBA texture into a 32 bits UINT texture
-	SAMPLE_RGBA_DEPTH_BILN_INT(rgba8_to_uint16);
+	return rgba8_to_uint16(sample_c(input.t));
 }
 #endif
 
@@ -530,8 +524,9 @@ float ps_convert_rgb5a1_float16_biln(PS_INPUT input) : SV_Depth
 #if !HAS_INTEGER_INPUT
 uint ps_convert_rgb5a1_uint16_biln(PS_INPUT input) : SV_Target0
 {
+	// Note: Bilinear is not implemented for integer.
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
-	SAMPLE_RGBA_DEPTH_BILN_INT(rgb5a1_to_uint16);
+	return rgb5a1_to_uint16(sample_c(input.t));
 }
 #endif
 

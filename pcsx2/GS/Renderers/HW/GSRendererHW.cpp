@@ -5164,14 +5164,14 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	m_conf.nindices = m_index.tail;
 }
 
-void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps, const bool z_integer)
+void GSRendererHW::GetZClampConfigVSPS(GSHWDrawConfig::PSSelector& ps, const bool force_enable_ps, const bool z_integer)
 {
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
 
 	m_conf.cb_vs.max_depth = GSVector2i(0xFFFFFFFF);
 	m_conf.cb_ps.TA_MaxDepth_Af.z = 0.0f;
-	m_conf.ps.zclamp = 0;
+	ps.zclamp = false;
 
 	// Clamp in the vertex shader for primitives that have flat colors.
 	const bool clamp_vs = large_z && (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS) && !force_enable_ps;
@@ -5186,8 +5186,8 @@ void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps, const bool z_
 		
 	if (clamp_ps)
 	{
-		m_conf.cb_ps.TA_MaxDepth_Af.z = z_integer ? std::bit_cast<float>(max_z) : static_cast<float>(max_z) * 0x1p-32f;
-		m_conf.ps.zclamp = true;
+		m_conf.cb_ps.TA_MaxDepth_Af.z = z_integer ? std::bit_cast<float>(max_z) : (static_cast<float>(max_z) * 0x1p-32f);
+		ps.zclamp = true;
 	}
 }
 
@@ -5204,7 +5204,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
-	GetZClampConfigVSPS(false);
+	GetZClampConfigVSPS(m_conf.ps, false);
 }
 
 void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
@@ -7466,7 +7466,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		if (afail_needs_depth && zwe)
 		{
 			GL_INS("Enable SW depth write for depth feedback");
-			GetZClampConfigVSPS(true); // Z clamp is a proxy for SW Z write.
+			GetZClampConfigVSPS(m_conf.ps, true); // Z clamp is a proxy for SW Z write.
 
 			if (m_cached_ctx.DepthRead())
 			{
@@ -8432,12 +8432,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		{
 			if (m_conf.depth.zwe)
 			{
-				GetZClampConfigVSPS(true, true); // Enable SW Z writing
+				GetZClampConfigVSPS(m_conf.ps, true, true); // Enable SW Z writing
 			}
 			if (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)
 			{
-				// Only set zclamp since alpha second pass uses the same constant buffer.
-				m_conf.alpha_second_pass.ps.zclamp = true;
+				GetZClampConfigVSPS(m_conf.alpha_second_pass.ps, true, true); // Enable SW Z writing
 			}
 		}
 
