@@ -3977,6 +3977,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 			break;
 			case ShaderConvert::COPY_UINT:
 			case ShaderConvert::FLOAT32_TO_UINT32:
+			case ShaderConvert::FLOAT32_TO_UINT24:
 			case ShaderConvert::RGBA8_TO_UINT32:
 			case ShaderConvert::RGBA8_TO_UINT24:
 			case ShaderConvert::RGBA8_TO_UINT16:

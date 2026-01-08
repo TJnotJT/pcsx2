@@ -3809,7 +3809,7 @@ void GSRendererHW::Draw()
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
 					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect),
-						GetDepthCopyShader(ds->m_texture, g_texture_cache->GetTemporaryZ(), false);
+						GetDepthCopyShader(ds->m_texture, g_texture_cache->GetTemporaryZ()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);

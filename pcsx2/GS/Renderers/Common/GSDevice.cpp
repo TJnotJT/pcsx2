@@ -42,6 +42,7 @@ const char* shaderName(ShaderConvert value)
 		// clang-format off
 		case ShaderConvert::COPY:                   return "ps_copy";
 		case ShaderConvert::COPY_UINT:              return "ps_copy_uint";
+		case ShaderConvert::RGBA8_TO_16_BITS:       return "ps_convert_rgba8_16bits";
 		case ShaderConvert::DATM_1:                 return "ps_datm1";
 		case ShaderConvert::DATM_0:                 return "ps_datm0";
 		case ShaderConvert::DATM_1_RTA_CORRECTION:  return "ps_datm1_rta_correction";
@@ -51,12 +52,14 @@ const char* shaderName(ShaderConvert value)
 		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";
 		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
 		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
-		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_32bits";
+		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_uint32";
 		case ShaderConvert::FLOAT32_TO_UINT32:      return "ps_convert_float32_uint32";
+		case ShaderConvert::FLOAT32_TO_UINT24:      return "ps_convert_float32_uint24";
 		case ShaderConvert::FLOAT32_TO_RGBA8:       return "ps_convert_float32_rgba8";
 		case ShaderConvert::FLOAT32_TO_RGB8:        return "ps_convert_float32_rgba8";
 		case ShaderConvert::UINT32_TO_16_BITS:      return "ps_copy_uint";
 		case ShaderConvert::UINT32_TO_FLOAT32:      return "ps_convert_uint32_float32";
+		case ShaderConvert::UINT32_TO_FLOAT24:      return "ps_convert_uint32_float24";
 		case ShaderConvert::UINT32_TO_RGBA8:        return "ps_convert_uint32_rgba8";
 		case ShaderConvert::UINT32_TO_RGB8:         return "ps_convert_uint32_rgba8";
 		case ShaderConvert::FLOAT16_TO_RGB5A1:      return "ps_convert_float16_rgb5a1";

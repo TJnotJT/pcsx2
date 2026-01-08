@@ -31,10 +31,12 @@ enum class ShaderConvert
 	TRANSPARENCY_FILTER,
 	FLOAT32_TO_16_BITS,
 	FLOAT32_TO_UINT32,
+	FLOAT32_TO_UINT24,
 	FLOAT32_TO_RGBA8,
 	FLOAT32_TO_RGB8,
 	UINT32_TO_16_BITS,
 	UINT32_TO_FLOAT32,
+	UINT32_TO_FLOAT24,
 	UINT32_TO_RGBA8,
 	UINT32_TO_RGB8,
 	FLOAT16_TO_RGB5A1,
@@ -124,6 +126,7 @@ static inline bool HasDepthOutput(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
 		case ShaderConvert::UINT32_TO_FLOAT32:
+		case ShaderConvert::UINT32_TO_FLOAT24:
 			return true;
 		default:
 			return false;
@@ -137,6 +140,7 @@ static inline bool HasIntegerInput(ShaderConvert shader)
 		case ShaderConvert::COPY_UINT:
 		case ShaderConvert::UINT32_TO_16_BITS:
 		case ShaderConvert::UINT32_TO_FLOAT32:
+		case ShaderConvert::UINT32_TO_FLOAT24:
 		case ShaderConvert::UINT32_TO_RGBA8:
 		case ShaderConvert::UINT32_TO_RGB8:
 		case ShaderConvert::UINT16_TO_RGB5A1:
@@ -151,9 +155,11 @@ static inline bool HasIntegerOutput(ShaderConvert shader)
 {
 	switch (shader)
 	{
+		case ShaderConvert::RGBA8_TO_16_BITS:
 		case ShaderConvert::COPY_UINT:
 		case ShaderConvert::FLOAT32_TO_16_BITS:
 		case ShaderConvert::FLOAT32_TO_UINT32:
+		case ShaderConvert::FLOAT32_TO_UINT24:
 		case ShaderConvert::UINT32_TO_16_BITS:
 		case ShaderConvert::RGBA8_TO_UINT32:
 		case ShaderConvert::RGBA8_TO_UINT24:

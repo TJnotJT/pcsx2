@@ -2348,9 +2348,10 @@ GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityVertexShader(const std::strin
 	return m_shader_cache.GetVertexShader(source, sm_model.GetPtr(), entry_point);
 }
 
-GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string& source, const char* entry_point)
+GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string& source, const char* entry_point, bool integer_input)
 {
 	ShaderMacro sm_model;
+	sm_model.AddMacro("HAS_INTEGER_INPUT", integer_input ? "1" : "0");
 	return m_shader_cache.GetPixelShader(source, sm_model.GetPtr(), entry_point);
 }
 
@@ -2477,6 +2478,7 @@ bool GSDevice12::CompileConvertPipelines()
 			break;
 			case ShaderConvert::COPY_UINT:
 			case ShaderConvert::FLOAT32_TO_UINT32:
+			case ShaderConvert::FLOAT32_TO_UINT24:
 			case ShaderConvert::RGBA8_TO_UINT32:
 			case ShaderConvert::RGBA8_TO_UINT24:
 			case ShaderConvert::RGBA8_TO_UINT16:
@@ -2529,7 +2531,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 		gpb.SetColorWriteMask(0, ShaderConvertWriteMask(i));
 
-		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, shaderName(i)));
+		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, shaderName(i), HasIntegerInput(i)));
 		if (!ps)
 			return false;
 
