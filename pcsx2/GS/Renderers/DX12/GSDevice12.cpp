@@ -1655,7 +1655,7 @@ void GSDevice12::BeginRenderPassForStretchRect(
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			dTex->GetUNormClearColor());
+			dTex->IsIntegerFormat() ? GSVector4(static_cast<float>(dTex->GetClearColor()), 0.0f, 0.0f, 0.0f) : dTex->GetUNormClearColor());
 	}
 	else
 	{
@@ -3869,7 +3869,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 					D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 		config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-		GSVector4::zero(), config.ds ? config.ds->GetClearDepth() : 0.0f);
+		GSVector4::zero(), 0.0f, config.ds ? config.ds->GetClearDepth() : 0.0f);
 
 	// draw the quad to prefill the image
 	const GSVector4 src = GSVector4(config.drawarea) / GSVector4(rtsize).xyxy();
@@ -3987,7 +3987,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 				GetLoadOpForTexture(draw_ds),
 				draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				draw_rt->GetUNormClearColor(), 0.0f, 0);
+				draw_rt->GetUNormClearColor(),
+				draw_ds_as_rt ? static_cast<float>(draw_ds_as_rt->GetClearColor()) : 0.0f);
 
 			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(rtsize.x, rtsize.y).xyxy());
 			SetPipeline(m_colclip_finish_pipelines[pipe.ds].get());
@@ -4151,7 +4152,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			stencil_DATE ? ((feedback_rt || feedback_depth) ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE :
 			               D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD) :
 						   D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			clear_color, 0.0f, draw_ds ? draw_ds->GetClearDepth() : 0.0f, 1); // FIXME: Do the depth RT clear
+			clear_color,
+			draw_ds_as_rt ? static_cast<float>(draw_ds_as_rt->GetClearColor()) : 0.0f,
+			draw_ds ? draw_ds->GetClearDepth() : 0.0f, 1); // FIXME: Do the depth RT clear
 	}
 
 	// rt -> colclip hw blit if enabled

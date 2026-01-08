@@ -778,20 +778,19 @@ void GSTexture12::CommitClear()
 
 void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
 {
+	pxAssert(IsRenderTargetOrDepthStencil());
+
 	if (IsDepthStencil())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 		cmdlist->ClearDepthStencilView(
 			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
 	}
-	else if (IsRenderTarget() && IsIntegerFormat())
-	{
-		// FIXME: Do soemthing here.
-	}
-	else
+	else if (IsRenderTarget())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		cmdlist->ClearRenderTargetView(GetWriteDescriptor(),
+			(IsIntegerFormat() ? GSVector4(m_clear_value.color, 0, 0, 0) : GSVector4::unorm8(m_clear_value.color)).v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
