@@ -3003,6 +3003,13 @@ void GSDeviceVK::DrawMultiStretchRects(
 void GSDeviceVK::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvert shader)
 {
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in DoMultiStretchRects()");
+		EndRenderPass();
+		dTex->UpdateDepthColor(true);
+	}
+
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -3125,6 +3132,13 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 		// can't transition in a render pass
 		EndRenderPass();
 		sTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
+	}
+
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in DoStretchRect()");
+		EndRenderPass();
+		dTex->UpdateDepthColor(true);
 	}
 
 	SetUtilityTexture(sTex, linear ? m_linear_sampler : m_point_sampler);
@@ -3495,12 +3509,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
 
-	if (vkDs && vkDs->IsDepthColor())
-	{
-		GL_INS("Color -> DS in OMSetRenderTargets()");
-		EndRenderPass();
-		vkDs->UpdateDepthColor(true);
-	}
+	pxAssert(!vkDs || !vkDs->IsDepthColor());
 
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs ||
 		m_current_framebuffer_feedback_loop != feedback_loop ||
@@ -5240,24 +5249,24 @@ void GSDeviceVK::SetLineWidth(float width)
 	m_dirty_flags |= DIRTY_FLAG_LINE_WIDTH;
 }
 
+// Note: Handling of UAVs is different from DX12 because in DX12 we handle clearing/dirty state
+// update closer to the actual draw to make use of DX12's functionality for UAV clearing
+// without transitioning to render target.
 void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, bool read, bool write)
 {
-	pxAssertRel(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV, "Only use this to set ROV textures");
+	pxAssert(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV);
 
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
 
 	if (vkTex)
 	{
-		pxAssertMsg(m_features.rov, "ROV enabled");
+		pxAssert(m_features.rov);
+		pxAssert(!vkTex->IsDepthStencil() || vkTex->IsDepthColor());
 
 		PSSetShaderResource(i, tex, true, false);
 
 		const u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT : TFX_TEXTURE_DEPTH;
-		if (m_tfx_textures[i_conflict] == tex)
-		{
-			// Unbind to avoid conflicts.
-			PSSetShaderResource(i_conflict, nullptr, false);
-		}
+		PSSetShaderResource(i_conflict, nullptr, false);
 
 		if (write)
 		{
@@ -5318,6 +5327,7 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
 	if (vkTex)
 	{
+		pxAssert(!vkTex->IsDepthColor());
 		vkTex->CommitClear();
 		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
@@ -5788,6 +5798,22 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTextureVK*>(config.ds) : nullptr;
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
+
+	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
+	{
+		// Do this before making other settings because uses a draw and could mess up render state.
+		GL_INS("DS -> Color in RenderHW()");
+		EndRenderPass();
+		draw_ds_rov->UpdateDepthColor(false);
+	}
+
+	if (draw_ds && draw_ds->IsDepthColor())
+	{
+		// Do this before making other settings because uses a draw and could mess up render state.
+		GL_INS("Color -> DS in RenderHW()");
+		EndRenderPass();
+		draw_ds->UpdateDepthColor(true);
+	}
 
 	// stream buffer in first, in case we need to exec
 	SetVSConstantBuffer(config.cb_vs);

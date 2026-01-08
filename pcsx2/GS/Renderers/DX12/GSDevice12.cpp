@@ -1584,6 +1584,13 @@ void GSDevice12::DrawMultiStretchRects(
 void GSDevice12::DoMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvert shader)
 {
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in DoMultiStretchRects()");
+		EndRenderPass();
+		dTex->UpdateDepthColor(true);
+	}
+
 	// Set up vertices first.
 	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
 	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
@@ -1690,6 +1697,13 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 		// can't transition in a render pass
 		EndRenderPass();
 		sTex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	}
+
+	if (dTex && dTex->IsDepthColor())
+	{
+		GL_INS("Color -> DS in DoStretchRect()");
+		EndRenderPass();
+		dTex->UpdateDepthColor(true);
 	}
 
 	SetUtilityRootSignature();
@@ -2207,11 +2221,7 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
 
-	if (d12Ds && d12Ds->IsDepthColor())
-	{
-		GL_INS("Color -> DS in OMSetRenderTargets()");
-		d12Ds->UpdateDepthColor(true);
-	}
+	pxAssert(!d12Ds || !d12Ds->IsDepthColor());
 
 	// Check if framebuffer changed
 	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt ||
@@ -3286,7 +3296,7 @@ void GSDevice12::SetStencilRef(u8 ref)
 
 void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback)
 {
-	pxAssertRel(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES, "Texture index too large");
+	pxAssert(i < NUM_TFX_TEXTURES + NUM_TFX_RT_TEXTURES);
 
 	D3D12DescriptorHandle handle;
 	if (sr)
@@ -3328,14 +3338,20 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
 }
 
+// Note: Handling of UAVs is different from VK because in DX12 we handle clearing/dirty state
+// update closer to the actual draw to make use of DX12's functionality for UAV clearing
+// without transitioning to render target.
 void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
-	pxAssertRel(TEXTURE_RT_UAV <= i && i <= TEXTURE_DEPTH_UAV, "Trying to bind UAV in wrong slot");
+	pxAssert(i == TEXTURE_RT_UAV || i == TEXTURE_DEPTH_UAV);
 
 	GSTexture12* bind_uav;
 	if (uav)
 	{
 		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
+
+		pxAssert(m_features.rov);
+		pxAssert(!dtex->IsDepthStencil() || dtex->IsDepthColor());
 		
 		if (check_state)
 		{
@@ -3369,6 +3385,9 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 	// Unbind conflicting RTs if needed.
 	if (uav)
 	{
+		const u32 i_conflict = (i == TEXTURE_RT_UAV) ? TEXTURE_RT : TEXTURE_DEPTH;
+		PSSetShaderResource(i_conflict, nullptr, false);
+
 		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
 		for (GSTexture12** rt : curr_rts)
 		{
@@ -3396,6 +3415,7 @@ void GSDevice12::SetUtilityTexture(GSTexture* dtex, const D3D12DescriptorHandle&
 	D3D12DescriptorHandle handle;
 	if (dtex)
 	{
+		pxAssert(!dtex->IsDepthColor());
 		GSTexture12* d12tex = static_cast<GSTexture12*>(dtex);
 		d12tex->CommitClear();
 		d12tex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -4030,6 +4050,22 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt_rov = config.ps.rov_color ? static_cast<GSTexture12*>(config.rt) : nullptr;
 	GSTexture12* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
+
+	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
+	{
+		// Do this before making other settings because uses a draw and could mess up render state.
+		GL_INS("DS -> Color in RenderHW()");
+		EndRenderPass();
+		draw_ds_rov->UpdateDepthColor(false);
+	}
+
+	if (draw_ds && draw_ds->IsDepthColor())
+	{
+		// Do this before making other settings because uses a draw and could mess up render state.
+		GL_INS("Color -> DS in RenderHW()");
+		EndRenderPass();
+		draw_ds->UpdateDepthColor(true);
+	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
