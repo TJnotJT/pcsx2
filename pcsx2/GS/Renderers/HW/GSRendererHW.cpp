@@ -7688,6 +7688,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		area_out.x, area_out.y, area_out.z, area_out.w);
 #endif
 
+	const GSDevice::FeatureSupport features = g_gs_device->Features();
+
 	const GSDrawingEnvironment& env = *m_draw_env;
 	bool DATE = rt && m_cached_ctx.TEST.DATE && m_cached_ctx.FRAME.PSM != PSMCT24;
 	bool DATE_PRIMID = false;
@@ -7700,6 +7702,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.ps.scanmsk = env.SCANMSK.MSK;
 	m_conf.rt = rt ? rt->m_texture : nullptr;
 	m_conf.ds = ds ? (m_using_temp_z ? g_texture_cache->GetTemporaryZ() : ds->m_texture) : nullptr;
+	m_conf.ds_as_rt = (features.depth_integer && m_conf.ds && m_conf.ds->IsIntegerFormat()) ? m_conf.ds : nullptr;
 
 	pxAssert(!ds || !rt || (m_conf.ds->GetSize().x == m_conf.rt->GetSize().x && m_conf.ds->GetSize().y == m_conf.rt->GetSize().y));
 
@@ -7728,8 +7731,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			return;
 		}
 	}
-
-	const GSDevice::FeatureSupport features = g_gs_device->Features();
 
 	if (DATE)
 	{
@@ -7978,7 +7979,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.colormask.wa = 0;
 	}
 
-
 	// Not gonna spend too much time with this, it's not likely to be used much, can't be less accurate than it was.
 	if (ds)
 	{
@@ -8172,29 +8172,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	// If we're doing stencil DATE and we don't have a depth buffer, we need to allocate a temporary one.
 	GSDevice::RecycledTexture temp_ds;
-	if (m_conf.destination_alpha >= GSHWDrawConfig::DestinationAlphaMode::Stencil &&
-		m_conf.destination_alpha <= GSHWDrawConfig::DestinationAlphaMode::StencilOne && !m_conf.ds)
-	{
-		const bool is_one_barrier = (features.texture_barrier && m_conf.require_full_barrier && (m_prim_overlap == PRIM_OVERLAP_NO || m_conf.ps.shuffle || m_channel_shuffle));
-		if ((temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), GSTexture::Format::DepthStencil, false)), temp_ds))
-		{
-			m_conf.ds = temp_ds.get();
-		}
-		else if (features.primitive_id && !(m_conf.ps.scanmsk & 2) && (!m_conf.require_full_barrier || is_one_barrier))
-		{
-			DATE_one = false;
-			DATE_PRIMID = true;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking;
-			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date. Fallback to PrimIDTracking.");
-		}
-		else
-		{
-			DATE = false;
-			DATE_one = false;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
-			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date.");
-		}
-	}
+	HandleTemporaryDSForDATE(temp_ds, DATE, DATE_one, DATE_PRIMID);
 
 	// vs
 
@@ -8387,8 +8365,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 	
 	// Create a temporary depth color target
-	if (0) // FIXME: Consider interaction between this and depth as integers
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback)
+	GSDevice::RecycledTexture temp_color_depth;
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && features.depth_as_rt_feedback && !m_conf.ds_as_rt)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 
@@ -8404,15 +8382,17 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		}
 		
 		// Create the temporary depth copy
-		m_conf.ds_as_rt = g_gs_device->CreateRenderTarget(m_conf.ds->GetWidth(), m_conf.ds->GetHeight(),
-			GSTexture::Format::Float32, false, true);
+		temp_color_depth.reset(g_gs_device->CreateRenderTarget(m_conf.ds->GetWidth(), m_conf.ds->GetHeight(),
+			GSTexture::Format::Float32, false, true));
 		const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(m_conf.ds->GetWidth()), static_cast<float>(m_conf.ds->GetHeight()));
-		g_gs_device->StretchRect(m_conf.ds, m_conf.ds_as_rt, dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+		g_gs_device->StretchRect(m_conf.ds, temp_color_depth.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
+
+		m_conf.ds_as_rt = temp_color_depth.get();
 	}
 
 	// Handle integer depth
-	if (features.depth_integer && m_conf.ds && m_conf.ds->GetFormat() == GSTexture::Format::UInt32)
+	if (features.depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsIntegerFormat())
 	{
 		// Should not be using dual source blend with MRTs
 		pxAssert(m_conf.ps.no_color1);
@@ -8426,8 +8406,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			m_conf.alpha_second_pass.ps.primclass = m_vt.m_primclass;
 		}
 		
-		m_conf.ds_as_rt = m_conf.ds;
-
 		// Enable SW Z writing for both passes if necessary.
 		{
 			if (m_conf.depth.zwe)
@@ -8458,9 +8436,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		// Disable HW depth
 		{
+			// Must do this check in case a temporary DS was created just for the stencil.
+			if (m_conf.ds == m_conf.ds_as_rt)
+			{
+				m_conf.ds = nullptr;
+			}
 			m_conf.depth.zwe = 0;
 			m_conf.depth.ztst = ZTST_ALWAYS;
-			m_conf.ds = nullptr;
 			if (m_conf.alpha_second_pass.enable)
 			{
 				m_conf.alpha_second_pass.depth.zwe = 0;
@@ -8491,6 +8473,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				m_conf.alpha_second_pass.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
 			}
 		}
+
+		// Make sure we didn't mess up and assign the color depth to the depth.
+		pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
 	}
 	else
 	{
@@ -8528,15 +8513,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_last_rt = rt;
 
 	// Resolve temporary depth as color
-	if (0) // FIXME: Consider interaction between this and depth as integers
-	if (m_conf.ds_as_rt)
+	if (temp_color_depth)
 	{
 		GL_PUSH("HW: Resolving temporary R32 RT after depth feedback");
 		const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(m_conf.ds->GetWidth()), static_cast<float>(m_conf.ds->GetHeight()));
-		g_gs_device->StretchRect(m_conf.ds_as_rt, m_conf.ds, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
-		g_gs_device->Recycle(m_conf.ds_as_rt);
-		m_conf.ds_as_rt = nullptr;
+		g_gs_device->StretchRect(temp_color_depth.get(), m_conf.ds, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 		g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
+		// Temporary depth will be auto recycled
 	}
 }
 
@@ -9252,7 +9235,14 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const u32 z = std::min(max_z, m_vertex.buff[1].XYZ.Z);
 			const float d = static_cast<float>(z) * 0x1p-32f;
 			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			g_gs_device->ClearDepth(ds->m_texture, d);
+			if (ds->m_texture->IsIntegerFormat())
+			{
+				g_gs_device->ClearRenderTarget(ds->m_texture, z);
+			}
+			else
+			{
+				g_gs_device->ClearDepth(ds->m_texture, d);
+			}
 			ds->m_dirty.clear();
 			ds->m_alpha_max = z >> 24;
 			ds->m_alpha_min = z >> 24;
@@ -9981,4 +9971,35 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 bool GSRendererHW::UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds)
 {
 	return ds && ds->GetFormat() == GSTexture::Format::UInt32; // Using MRTs for integer depth.
+}
+
+void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, bool& DATE, bool& DATE_one, bool& DATE_PRIMID)
+{
+	const GSDevice::FeatureSupport& features = g_gs_device->Features();
+
+	if (m_conf.destination_alpha >= GSHWDrawConfig::DestinationAlphaMode::Stencil &&
+		m_conf.destination_alpha <= GSHWDrawConfig::DestinationAlphaMode::StencilOne &&
+		(!m_conf.ds || m_conf.ds->IsIntegerFormat()))
+	{
+		const bool is_one_barrier = (features.texture_barrier && m_conf.require_full_barrier && (m_prim_overlap == PRIM_OVERLAP_NO || m_conf.ps.shuffle || m_channel_shuffle));
+		temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), GSTexture::Format::DepthStencil, false));
+		if (temp_ds)
+		{
+			m_conf.ds = temp_ds.get();
+		}
+		else if (features.primitive_id && !(m_conf.ps.scanmsk & 2) && (!m_conf.require_full_barrier || is_one_barrier))
+		{
+			DATE_one = false;
+			DATE_PRIMID = true;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking;
+			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date. Fallback to PrimIDTracking.");
+		}
+		else
+		{
+			DATE = false;
+			DATE_one = false;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
+			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date.");
+		}
+	}
 }

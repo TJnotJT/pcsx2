@@ -784,6 +784,10 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
 		cmdlist->ClearDepthStencilView(
 			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
 	}
+	else if (IsRenderTarget() && IsIntegerFormat())
+	{
+		// FIXME: Do soemthing here.
+	}
 	else
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);

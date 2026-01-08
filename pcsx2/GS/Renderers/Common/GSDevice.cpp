@@ -408,11 +408,13 @@ void GSDevice::ThrottlePresentation()
 
 void GSDevice::ClearRenderTarget(GSTexture* t, u32 c)
 {
+	pxAssert(t->IsRenderTarget());
 	t->SetClearColor(c);
 }
 
 void GSDevice::ClearDepth(GSTexture* t, float d)
 {
+	pxAssert(t->IsDepthStencil());
 	t->SetClearDepth(d);
 }
 
