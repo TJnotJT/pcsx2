@@ -1106,8 +1106,9 @@ void mul64(uint x, uint y, out uint lo, out uint hi)
 
 uint interp_int_z(float2 bary, uint3 z)
 {
+	// Convert weights from floating to 24 bit fixed point.
 	const uint pow24 = 1u << 24;
-	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24 - 1);
+	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24);
 	uint w1 = 0;
 	uint w2 = 0;
 
@@ -1120,6 +1121,7 @@ uint interp_int_z(float2 bary, uint3 z)
 	w2 = pow24 - w1 - w0;
 #endif
 
+	// Get the 64 bit products w * z
 	uint z0_lo = 0, z0_hi = 0;
 	uint z1_lo = 0, z1_hi = 0;
 	uint z2_lo = 0, z2_hi = 0;
@@ -1130,6 +1132,7 @@ uint interp_int_z(float2 bary, uint3 z)
 	mul64(w2, z.z, z2_lo, z2_hi);
 #endif
 
+	// Emulate 64 bit addition to avoid using higher feature levels.
 	uint z_lo = z0_lo + z1_lo;
 	uint z_hi = z0_hi + z1_hi + uint(z_lo < z1_lo);
 
@@ -1140,7 +1143,7 @@ uint interp_int_z(float2 bary, uint3 z)
 	z_lo += 1 << 23;
 	z_hi += uint(z_lo < (1 << 23));
 
-	// The weights are 24 bits so want bits 24:55 of the result.
+	// The weights are 24 bits so get bits 24:55 of the result.
 	return (z_hi << 8) + (z_lo >> 24);
 }
 
