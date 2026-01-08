@@ -3415,7 +3415,6 @@ void GSDevice12::SetUtilityTexture(GSTexture* dtex, const D3D12DescriptorHandle&
 	D3D12DescriptorHandle handle;
 	if (dtex)
 	{
-		pxAssert(!dtex->IsDepthColor());
 		GSTexture12* d12tex = static_cast<GSTexture12*>(dtex);
 		d12tex->CommitClear();
 		d12tex->TransitionToState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);

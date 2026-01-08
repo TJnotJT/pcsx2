@@ -5327,7 +5327,6 @@ void GSDeviceVK::SetUtilityTexture(GSTexture* tex, VkSampler sampler)
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
 	if (vkTex)
 	{
-		pxAssert(!vkTex->IsDepthColor());
 		vkTex->CommitClear();
 		vkTex->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
