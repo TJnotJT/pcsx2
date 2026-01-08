@@ -133,6 +133,10 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
+	__fi bool IsIntegerFormat() const
+	{
+		return m_format == Format::UInt16 || m_format == Format::UInt32;
+	}
 
 	__fi State GetState() const { return m_state; }
 	__fi void SetState(State state) { m_state = state; }

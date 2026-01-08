@@ -42,6 +42,14 @@
 #define PS_ATST_NOTEQUAL 4
 #endif
 
+#ifndef POINT_CLASS
+#define POINT_CLASS 0
+#define LINE_CLASS 1
+#define TRIANGLE_CLASS 2
+#define SPRITE_CLASS 3
+#define INVALID_CLASS 7
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -102,6 +110,8 @@
 #define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
+#define PS_Z_INTEGER 0
+#define PS_PRIMCLASS 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -119,6 +129,9 @@ struct VS_INPUT
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
 	float4 f : COLOR1;
+#if VS_Z_INTEGER
+	float2 bary : COLOR2;
+#endif
 };
 
 struct VS_OUTPUT
@@ -131,6 +144,13 @@ struct VS_OUTPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
+#endif
+
+#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+	nointerpolation uint3 zi : COLOR1;
+	#if VS_EXPAND == 4 || VS_EXPAND == 5
+		float2 bary : COLOR2;
+	#endif
 #endif
 };
 
@@ -147,6 +167,12 @@ struct PS_INPUT
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
 #endif
+#if PS_Z_INTEGER
+	nointerpolation uint3 zi : COLOR1;
+	#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
+		float2 bary : COLOR2;
+	#endif
+#endif
 };
 
 #ifdef PIXEL_SHADER
@@ -159,32 +185,41 @@ struct PS_OUTPUT
 	float c : SV_Target;
 #else
 	float4 c0 : SV_Target0;
-	#undef NUM_RTS
-	#define NUM_RTS 1
 #if !PS_NO_COLOR1
 	float4 c1 : SV_Target1;
 #endif
 #endif
 #endif
 #if PS_ZCLAMP
-	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
-		#if NUM_RTS > 0
-			float depth : SV_Target1;
+	#if PS_Z_INTEGER
+		#if PS_Z_RT_SLOT
+			uint depth : SV_Target1;
 		#else
-			float depth : SV_Target0;
+			uint depth : SV_Target0;
 		#endif
 	#else
-		float depth : SV_Depth;
+		#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
+			#if PS_Z_RT_SLOT
+				float depth : SV_Target1;
+			#else
+				float depth : SV_Target0;
+			#endif
+		#else
+			float depth : SV_Depth;
+		#endif
 	#endif
 #endif
-#undef NUM_RTS
 };
 
 Texture2D<float4> Texture : register(t0);
 Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
+#if PS_Z_INTEGER
+Texture2D<uint> DepthTexture : register(t4);
+#else
 Texture2D<float> DepthTexture : register(t4);
+#endif
 SamplerState TextureSampler : register(s0);
 
 #ifdef DX12
@@ -197,7 +232,11 @@ cbuffer cb1
 	float AREF;
 	float4 WH;
 	float2 TA;
+#if PS_Z_INTEGER
+	uint MaxDepthPS;
+#else
 	float MaxDepthPS;
+#endif
 	float Af;
 	uint4 FbMask;
 	float4 HalfTexel;
@@ -1053,14 +1092,93 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 	}
 }
 
+// Emulate 64 bit multiplication to avoid using higher feature levels.
+void mul64(uint x, uint y, out uint lo, out uint hi)
+{
+	uint hh = (x >> 16) * (y >> 16);
+	uint hl = (x >> 16) * (y & 0xFFFF);
+	uint lh = (x & 0xFFFF) * (y >> 16);
+	uint ll = (x & 0xFFFF) * (y & 0xFFFF);
+	lo = ll + (hl << 16) + (lh << 16);
+	uint c = ((hl & 0xFFFF) + (lh & 0xFFFF) + (ll >> 16)) >> 16; // carry bit
+	hi = hh + (hl >> 16) + (lh >> 16) + c;
+}
+
+uint interp_zint(float2 bary, uint3 z)
+{
+	// Convert weights from floating to 24 bit fixed point.
+	const uint pow24 = 1u << 24;
+	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24);
+	uint w1 = 0;
+	uint w2 = 0;
+
+	// Make sure all weights sum up to 2^24 and are in the correct range
+#if PS_PRIMCLASS == LINE_CLASS
+	w1 = pow24 - w0;
+#elif PS_PRIMCLASS == TRIANGLE_CLASS
+	w1 = uint(float(pow24) * bary.y);
+	w1 = min(w1, pow24 - w0);
+	w2 = pow24 - w1 - w0;
+#endif
+
+	// Get the 64 bit products w * z
+	uint z0_lo = 0, z0_hi = 0;
+	uint z1_lo = 0, z1_hi = 0;
+	uint z2_lo = 0, z2_hi = 0;
+
+	mul64(w0, z.x, z0_lo, z0_hi);
+	mul64(w1, z.y, z1_lo, z1_hi);
+#if PS_PRIMCLASS == TRIANGLE_CLASS
+	mul64(w2, z.z, z2_lo, z2_hi);
+#endif
+
+	// Emulate 64 bit addition to avoid using higher feature levels.
+	uint z_lo = z0_lo;
+	uint z_hi = z0_hi;
+
+	z_lo += z1_lo;
+	z_hi += z1_hi + uint(z_lo < z1_lo);
+
+#if PS_PRIMCLASS == TRIANGLE_CLASS
+	z_lo += z2_lo;
+	z_hi += z2_hi + uint(z_lo < z2_lo);
+#endif
+
+	// Add 2^23 to the result before truncating so that it rounds.
+	z_lo += 1 << 23;
+	z_hi += uint(z_lo < (1 << 23));
+
+	// The weights are 24 bits so get bits 24:55 of the result.
+	return (z_hi << 8) + (z_lo >> 24);
+}
+
 PS_OUTPUT ps_main(PS_INPUT input)
 {
+#if PS_Z_INTEGER
+	#if (PS_PRIMCLASS == TRIANGLE_CLASS || PS_PRIMCLASS == LINE_CLASS)
+		// Interpolate integer Z from barycentric coordinates.
+		uint input_z = interp_zint(input.bary, input.zi);
+	#else
+		uint input_z = input.zi.x; // No interpolation
+	#endif
+#else
+	float input_z = input.p.z;
+#endif
+
+#if PS_DEPTH_FEEDBACK
+	#if PS_Z_INTEGER
+		uint curr_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
+	#else
+		float curr_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
+	#endif
+#endif
+
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
-		if (input.p.z < DepthTexture.Load(int3(input.p.xy, 0)).r)
+		if (input_z < DepthTexture.Load(int3(input.p.xy, 0)).r)
 			discard;
 	#elif PS_ZTST == ZTST_GREATER
-	if (input.p.z <= DepthTexture.Load(int3(input.p.xy, 0)).r)
+	if (input_z <= DepthTexture.Load(int3(input.p.xy, 0)).r)
 		discard;
 	#endif
 #endif // PS_ZTST
@@ -1247,7 +1365,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	// Alpha test with feedback
 #if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
 	if (!atst_pass)
-		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r;
+		input_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
 		output.c0 = RtTexture.Load(int3(input.p.xy, 0));
@@ -1258,7 +1376,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 		output.c0.a = RtTexture.Load(int3(input.p.xy, 0)).a;
 	#endif
 	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
-		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r; 
+		input_z = DepthTexture.Load(int3(input.p.xy, 0)).r; 
 	#endif
 	}
 #endif
@@ -1268,7 +1386,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // PS_DATE != 1/2
 
 #if PS_ZCLAMP
-	output.depth = min(input.p.z, MaxDepthPS);	
+	output.depth = min(input_z, MaxDepthPS);	
 #endif
 
 	return output;
@@ -1346,6 +1464,13 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.c = input.c;
 	output.t.z = input.f.r;
 
+#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+	output.zi = uint3(input.z, 0, 0);
+#if VS_EXPAND == 4 || VS_EXPAND == 5
+	output.bary = input.bary;
+#endif
+#endif
+
 	return output;
 }
 
@@ -1380,6 +1505,19 @@ VS_INPUT load_vertex(uint index)
 	vert.z = raw.Z;
 	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
+
+	// Barycentric coordinates handling
+#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+#if VS_EXPAND == 4
+	uint index_mod = index % 3;
+#elif VS_EXPAND == 5
+	uint index_mod = index & 1;
+#else
+	uint index_mod = 0;
+#endif
+	vert.bary = float2(index_mod == 0, index_mod == 1);
+#endif
+
 	return vert;
 }
 
@@ -1410,6 +1548,10 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	float2 offset = (is_bottom ^ is_right) ? line_width : -line_width;
 	vtx.p.xy += offset;
 
+#if VS_Z_INTEGER
+	vtx.zi = (vid_base & 1) ? uint3(vtx.zi.x, other.zi.y, 0) : uint3(other.zi.y, vtx.zi.x, 0);
+#endif
+
 	// Lines will be run as (0 1 2) (1 2 3)
 	// This means that both triangles will have a point based off the top line point as their first point
 	// So we don't have to do anything for !IIP
@@ -1439,6 +1581,29 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
+#elif VS_EXPAND == 4 // Triangle for integer Z
+
+	uint vid_base = (vid / 3) * 3;
+	VS_INPUT raw0 = load_vertex(vid_base + 0);
+	VS_INPUT raw1 = load_vertex(vid_base + 1);
+	VS_INPUT raw2 = load_vertex(vid_base + 2);
+	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+	vtx.zi = uint3(raw0.z, raw1.z, raw2.z);
+
+	return vtx;
+
+#elif VS_EXPAND == 5 // Lines
+
+	uint vid_base = vid & ~2;
+	VS_INPUT raw0 = load_vertex(vid_base + 0);
+	VS_INPUT raw1 = load_vertex(vid_base + 1);
+	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+	vtx.zi = uint3(raw0.z, raw1.z, 0);
+	
+	return vtx;
+
+#elif VS_EXPAND == 6 // Points
+	return vs_main(load_vertex(vid));
 #endif
 }
 

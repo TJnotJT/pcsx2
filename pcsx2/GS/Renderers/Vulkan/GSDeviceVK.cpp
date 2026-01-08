@@ -3967,19 +3967,34 @@ bool GSDeviceVK::CompileConvertPipelines()
 		VkRenderPass rp;
 		switch (i)
 		{
+			// 16 bit integer output
 			case ShaderConvert::RGBA8_TO_16_BITS:
 			case ShaderConvert::FLOAT32_TO_16_BITS:
+			case ShaderConvert::UINT32_TO_16_BITS:
 			{
 				rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::UInt16), VK_FORMAT_UNDEFINED,
 					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 			}
 			break;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
+			// Integer output
+			case ShaderConvert::COPY_UINT:
+			case ShaderConvert::FLOAT32_TO_UINT32:
+			case ShaderConvert::FLOAT32_TO_UINT24:
+			case ShaderConvert::RGBA8_TO_UINT32:
+			case ShaderConvert::RGBA8_TO_UINT24:
+			case ShaderConvert::RGBA8_TO_UINT16:
+			case ShaderConvert::RGB5A1_TO_UINT16:
+			case ShaderConvert::RGBA8_TO_UINT32_BILN:
+			case ShaderConvert::RGBA8_TO_UINT24_BILN:
+			case ShaderConvert::RGBA8_TO_UINT16_BILN:
+			case ShaderConvert::RGB5A1_TO_UINT16_BILN:
+			case ShaderConvert::UINT32_TO_UINT24:
 			{
 				rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::UInt32), VK_FORMAT_UNDEFINED,
 					VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 			}
 			break;
+			// Stencil output
 			case ShaderConvert::DATM_0:
 			case ShaderConvert::DATM_1:
 			case ShaderConvert::DATM_0_RTA_CORRECTION:
@@ -3988,6 +4003,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 				rp = m_date_setup_render_pass;
 			}
 			break;
+			// R32 float output
 			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
 			{
 				rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::Float32), VK_FORMAT_UNDEFINED,
