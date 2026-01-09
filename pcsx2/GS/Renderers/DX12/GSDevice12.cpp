@@ -1655,7 +1655,7 @@ void GSDevice12::BeginRenderPassForStretchRect(
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			dTex->IsIntegerFormat() ? GSVector4(static_cast<float>(dTex->GetClearColor()), 0.0f, 0.0f, 0.0f) : dTex->GetUNormClearColor());
+			dTex->IsDepthInteger() ? GSVector4(static_cast<float>(dTex->GetClearColor()), 0.0f, 0.0f, 0.0f) : dTex->GetUNormClearColor());
 	}
 	else
 	{

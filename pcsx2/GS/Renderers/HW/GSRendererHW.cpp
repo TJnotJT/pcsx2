@@ -4980,7 +4980,7 @@ void GSRendererHW::HandleZIntegerVertices()
 		m_vt.m_primclass == GS_POINT_CLASS ||
 		m_vt.m_primclass == GS_SPRITE_CLASS ||
 		!m_conf.ds_as_rt ||
-		!m_conf.ds_as_rt->IsIntegerFormat())
+		!m_conf.ds_as_rt->IsDepthInteger())
 	{
 		return; // Not using integer depth.
 	}
@@ -7716,7 +7716,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.ps.scanmsk = env.SCANMSK.MSK;
 	m_conf.rt = rt ? rt->m_texture : nullptr;
 	m_conf.ds = ds ? (m_using_temp_z ? g_texture_cache->GetTemporaryZ() : ds->m_texture) : nullptr;
-	m_conf.ds_as_rt = (features.depth_integer && m_conf.ds && m_conf.ds->IsIntegerFormat()) ? m_conf.ds : nullptr;
+	m_conf.ds_as_rt = (features.depth_integer && m_conf.ds && m_conf.ds->IsDepthInteger()) ? m_conf.ds : nullptr;
 
 	pxAssert(!ds || !rt || (m_conf.ds->GetSize().x == m_conf.rt->GetSize().x && m_conf.ds->GetSize().y == m_conf.rt->GetSize().y));
 
@@ -8409,7 +8409,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Handle integer depth
-	if (features.depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsIntegerFormat())
+	if (features.depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsDepthInteger())
 	{
 		// Should not be using dual source blend with MRTs
 		pxAssert(m_conf.ps.no_color1);
@@ -9252,7 +9252,7 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const u32 z = std::min(max_z, m_vertex.buff[1].XYZ.Z);
 			const float d = static_cast<float>(z) * 0x1p-32f;
 			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			if (ds->m_texture->IsIntegerFormat())
+			if (ds->m_texture->IsDepthInteger())
 			{
 				g_gs_device->ClearRenderTarget(ds->m_texture, z);
 			}
@@ -9996,7 +9996,7 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 
 	if (m_conf.destination_alpha >= GSHWDrawConfig::DestinationAlphaMode::Stencil &&
 		m_conf.destination_alpha <= GSHWDrawConfig::DestinationAlphaMode::StencilOne &&
-		(!m_conf.ds || m_conf.ds->IsIntegerFormat()))
+		(!m_conf.ds || m_conf.ds->IsDepthInteger()))
 	{
 		const bool is_one_barrier = (features.texture_barrier && m_conf.require_full_barrier && (m_prim_overlap == PRIM_OVERLAP_NO || m_conf.ps.shuffle || m_channel_shuffle));
 		temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), GSTexture::Format::DepthStencil, false));

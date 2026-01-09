@@ -237,49 +237,53 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 	}
 }
 
-static ShaderConvert GetDepthCopyShader(GSTexture* src, GSTexture* dst)
+static ShaderConvert GetDepthCopyShader(bool src_int, bool dst_int)
 {
-	const bool int_src = src->IsIntegerFormat();
-	const bool int_dst = dst->IsIntegerFormat();
-	if (int_src && int_dst)
+	return src_int ? (dst_int ? ShaderConvert::COPY_UINT : ShaderConvert::UINT32_TO_FLOAT32) :
+		             (dst_int ? ShaderConvert::FLOAT32_TO_UINT32 : ShaderConvert::DEPTH_COPY);
+}
+
+static ShaderConvert GetColorDepthShader(bool color_to_depth, u32 bpp, bool src_int, bool dst_int)
+{
+	switch (bpp)
 	{
-		return ShaderConvert::COPY_UINT;
-	}
-	else if (int_src && !int_dst)
-	{
-		return ShaderConvert::UINT32_TO_FLOAT32;
-	}
-	else if (!int_src && int_dst)
-	{
-		return ShaderConvert::FLOAT32_TO_UINT32;
-	}
-	else
-	{
-		// !int_src && !int_dst
-		return ShaderConvert::DEPTH_COPY;
+	case 32:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGBA8_TO_UINT32 : ShaderConvert::RGBA8_TO_FLOAT32) :
+			(src_int ? ShaderConvert::UINT32_TO_RGBA8 : ShaderConvert::FLOAT32_TO_RGBA8);
+	case 24:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGBA8_TO_UINT24 : ShaderConvert::RGBA8_TO_FLOAT24) :
+			(src_int ? ShaderConvert::UINT32_TO_RGBA8 : ShaderConvert::FLOAT32_TO_RGBA8);
+	case 16:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGB5A1_TO_UINT16 : ShaderConvert::RGB5A1_TO_FLOAT16) :
+			(src_int ? ShaderConvert::UINT16_TO_RGB5A1 : ShaderConvert::FLOAT16_TO_RGB5A1);
+	default:
+		pxFailRel("Incorrect bpp");
+		return static_cast<ShaderConvert>(-1);
 	}
 }
 
-static ShaderConvert GetDepth32to24Shader(GSTexture* src, GSTexture* dst)
+static ShaderConvert GetDepth32to24Shader(bool src_int, bool dst_int)
 {
-	const bool int_src = src->IsIntegerFormat();
-	const bool int_dst = dst->IsIntegerFormat();
-	if (int_src && int_dst)
+	return src_int ? (dst_int ? ShaderConvert::UINT32_TO_UINT24 : ShaderConvert::UINT32_TO_FLOAT24) :
+		             (dst_int ? ShaderConvert::FLOAT32_TO_UINT24 : ShaderConvert::FLOAT32_TO_FLOAT24);
+}
+
+static ShaderConvert GetBilinearVersion(ShaderConvert shader)
+{
+	switch (shader)
 	{
-		return ShaderConvert::UINT32_TO_UINT24;
-	}
-	else if (int_src && !int_dst)
-	{
-		return ShaderConvert::UINT32_TO_FLOAT24;
-	}
-	else if (!int_src && int_dst)
-	{
-		return ShaderConvert::FLOAT32_TO_UINT24;
-	}
-	else
-	{
-		// !int_src && !int_dst
-		return ShaderConvert::FLOAT32_TO_UINT32;
+		case ShaderConvert::RGBA8_TO_FLOAT32: return ShaderConvert::RGBA8_TO_FLOAT32_BILN;
+		case ShaderConvert::RGBA8_TO_FLOAT24: return ShaderConvert::RGBA8_TO_FLOAT24_BILN;
+		case ShaderConvert::RGBA8_TO_FLOAT16: return ShaderConvert::RGBA8_TO_FLOAT16_BILN;
+		case ShaderConvert::RGBA8_TO_UINT32: return ShaderConvert::RGBA8_TO_UINT32_BILN;
+		case ShaderConvert::RGBA8_TO_UINT24: return ShaderConvert::RGBA8_TO_UINT24_BILN;
+		case ShaderConvert::RGBA8_TO_UINT16: return ShaderConvert::RGBA8_TO_UINT16_BILN;
+		case ShaderConvert::RGB5A1_TO_FLOAT16: return ShaderConvert::RGB5A1_TO_FLOAT16_BILN;
+		case ShaderConvert::RGB5A1_TO_UINT16: return ShaderConvert::RGB5A1_TO_UINT16_BILN;
+		default: pxFail("Does not support bilinear."); return static_cast<ShaderConvert>(-1);
 	}
 }
 
