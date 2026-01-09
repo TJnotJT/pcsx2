@@ -215,8 +215,17 @@ private:
 		}
 	};
 
+	// Settings for the ROV enable/disable heuristic.
+	u32 m_rov_history_textures = 16;
+	u32 m_rov_history_draws = 32;
+	u32 m_rov_max_barriers = 16;
+	float m_rov_history_weight_color = 0.75f;
+	float m_rov_history_weight_depth = 0.75f;
+	float m_rov_barriers_enable_color = 2.0f;
+	float m_rov_barriers_enable_depth = 4.0f;
+	float m_rov_barriers_disable_color = 1.125f;
+	float m_rov_barriers_disable_depth = 1.25f;
 	u32 m_rov_preset = 0;
-	u32 m_rov_max_drawcalls = 16;
 	std::vector<TextureROVHistory> m_texture_rov_history;
 	__fi std::pair<float, bool> GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight);
 	__fi void SetTextureIsROV(GSTexture* tex, bool rov);

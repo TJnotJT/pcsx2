@@ -756,6 +756,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWROVLogging = false;
 	HWROVHistoryTextures = 16;
 	HWROVHistoryDraws = 32;
+	HWROVMaxBarriers = 16;
 	HWROVHistoryWeightColor = 0.75f;
 	HWROVHistoryWeightDepth = 0.75f;
 	HWROVBarriersEnableColor = 2.0f;
@@ -1039,6 +1040,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(HWROVLogging);
 	SettingsWrapEntry(HWROVHistoryDraws);
 	SettingsWrapEntry(HWROVHistoryTextures);
+	SettingsWrapEntry(HWROVMaxBarriers);
 	SettingsWrapEntry(HWROVHistoryWeightColor);
 	SettingsWrapEntry(HWROVHistoryWeightDepth);
 	SettingsWrapEntry(HWROVBarriersEnableColor);

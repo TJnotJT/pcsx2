@@ -853,6 +853,7 @@ struct Pcsx2Config
 
 		u32 HWROVHistoryTextures = 16;
 		u32 HWROVHistoryDraws = 32;
+		u32 HWROVMaxBarriers = 16;
 		float HWROVHistoryWeightColor = 0.75f;
 		float HWROVHistoryWeightDepth = 0.75f;
 		float HWROVBarriersEnableColor = 2.0f;
