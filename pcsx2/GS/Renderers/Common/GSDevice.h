@@ -568,6 +568,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 z_rt_slot : 2;
 				u32 zint : 1;
 				u32 primclass : 3;
+				u32 texint : 1;
 			};
 
 			struct

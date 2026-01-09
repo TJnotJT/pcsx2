@@ -6564,7 +6564,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	// Depth + bilinear filtering isn't done yet. But if the game has just set a Z24 swizzle on a colour texture, we can
 	// just pretend it's not a depth format, since in the texture cache, it's not.
 	// Other games worth testing: Area 51, Burnout
-	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthStencil())
+	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthStencilOrDepthInteger())
 		GL_INS("HW: WARNING: Depth + bilinear filtering not supported");
 
 	// Performance note:
@@ -6583,7 +6583,15 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		// Require a float conversion if the texure is a depth otherwise uses Integral scaling
 		if (psm.depth)
 		{
-			m_conf.ps.depth_fmt = (tex->m_texture->GetType() != GSTexture::Type::DepthStencil) ? 3 : tex->m_32_bits_fmt ? 1 : 2;
+			if (tex->m_texture->IsDepthStencilOrDepthInteger())
+			{
+				m_conf.ps.depth_fmt = tex->m_32_bits_fmt ? 1 : 2;
+				m_conf.ps.texint = g_gs_device->Features().depth_integer && tex->m_texture->IsDepthInteger();
+			}
+			else
+			{
+				m_conf.ps.depth_fmt = 3;
+			}
 		}
 
 		// Shuffle is a 16 bits format, so aem is always required
@@ -6662,13 +6670,17 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		}
 
 		// Depth format
-		if (tex->m_texture->IsDepthStencil())
+		if (tex->m_texture->IsDepthStencilOrDepthInteger())
 		{
 			// Require a float conversion if the texure is a depth format
 			m_conf.ps.depth_fmt = (psm.bpp == 16) ? 2 : 1;
 
 			// Don't force interpolation on depth format
 			bilinear &= m_vt.IsLinear();
+
+			// Use integer directly if using integer depth
+			m_conf.ps.texint = g_gs_device->Features().depth_integer && tex->m_texture->IsDepthInteger();
+			bilinear &= !m_conf.ps.texint; // No bilinear for integer
 		}
 
 		const GSVector4 half_pixel = RealignTargetTextureCoordinate(tex);
@@ -7075,12 +7087,13 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 
 		// Can't use box filtering on depth (yet), or fractional scales.
-		if (src_target->m_texture->IsDepthStencil() || std::floor(src_target->GetScale()) != src_target->GetScale())
+		if (src_target->m_texture->IsDepthStencilOrDepthInteger() || std::floor(src_target->GetScale()) != src_target->GetScale())
 		{
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-				src_target->m_texture->IsDepthStencil() ? GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+				src_target->m_texture->IsDepthStencilOrDepthInteger() ?
+					GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
 				false);
 		}
 		else
@@ -7116,7 +7129,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
 
 		g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-			src_target->m_texture->IsDepthStencil() ? GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+			src_target->m_texture->IsDepthStencilOrDepthInteger() ?
+				GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
 			false);
 	}
 	m_conf.tex = src_copy.get();

@@ -112,6 +112,7 @@
 #define PS_DEPTH_FEEDBACK 0
 #define PS_Z_INTEGER 0
 #define PS_PRIMCLASS 0
+#define PS_TEX_INTEGER 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -211,7 +212,11 @@ struct PS_OUTPUT
 #endif
 };
 
+#if PS_TEX_INTEGER
+Texture2D<uint> Texture : register(t0);
+#else
 Texture2D<float4> Texture : register(t0);
+#endif
 Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 Texture2D<float> PrimMinTexture : register(t3);
@@ -255,6 +260,8 @@ float4 sample_c(float2 uv, float uv_w, int2 xy)
 {
 #if PS_TEX_IS_FB == 1
 	return RtTexture.Load(int3(int2(xy), 0));
+#elif PS_TEX_INTEGER == 1
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
 #elif PS_REGION_RECT == 1
 	return Texture.Load(int3(int2(uv), 0));
 #else
@@ -455,20 +462,26 @@ float4x4 sample_4p(uint4 u)
 	return c;
 }
 
-int fetch_raw_depth(int2 xy)
+uint fetch_raw_depth(int2 xy)
 {
+#if PS_TEX_INTEGER
+	return Texture.Load(int3(xy, 0));
+#else
 #if PS_TEX_IS_FB == 1
 	float4 col = RtTexture.Load(int3(xy, 0));
 #else
 	float4 col = Texture.Load(int3(xy, 0));
 #endif
-	return (int)(col.r * exp2(32.0f));
+	return (uint)(col.r * exp2(32.0f));
+#endif
 }
 
 float4 fetch_raw_color(int2 xy)
 {
 #if PS_TEX_IS_FB == 1
 	return RtTexture.Load(int3(xy, 0));
+#elif PS_TEX_INTEGER
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
 #else
 	return Texture.Load(int3(xy, 0));
 #endif
@@ -478,6 +491,8 @@ float4 fetch_c(int2 uv)
 {
 #if PS_TEX_IS_FB == 1
 	return RtTexture.Load(int3(uv, 0));
+#elif PS_TEX_INTEGER
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
 #else
 	return Texture.Load(int3(uv, 0));
 #endif
@@ -537,10 +552,10 @@ float4 sample_depth(float2 st, float2 pos)
 	if (PS_TALES_OF_ABYSS_HLE == 1)
 	{
 		// Warning: UV can't be used in channel effect
-		int depth = fetch_raw_depth(pos);
+		uint depth = fetch_raw_depth(pos);
 
 		// Convert msb based on the palette
-		t = Palette.Load(int3((depth >> 8) & 0xFF, 0, 0)) * 255.0f;
+		t = Palette.Load(uint3((depth >> 8) & 0xFF, 0, 0)) * 255.0f;
 	}
 	else if (PS_URBAN_CHAOS_HLE == 1)
 	{
@@ -551,7 +566,7 @@ float4 sample_depth(float2 st, float2 pos)
 		// To be faster both steps (msb&lsb) are done in a single pass.
 
 		// Warning: UV can't be used in channel effect
-		int depth = fetch_raw_depth(pos);
+		uint depth = fetch_raw_depth(pos);
 
 		// Convert lsb based on the palette
 		t = Palette.Load(int3(depth & 0xFF, 0, 0)) * 255.0f;
@@ -566,7 +581,11 @@ float4 sample_depth(float2 st, float2 pos)
 		// Based on ps_convert_float32_rgba8 of convert
 
 		// Convert a FLOAT32 depth texture into a RGBA color texture
+#if PS_TEX_INTEGER
+		uint d = fetch_raw_depth(uv);
+#else
 		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+#endif
 		t = float4(uint4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24)));
 	}
 	else if (PS_DEPTH_FMT == 2)
@@ -574,7 +593,11 @@ float4 sample_depth(float2 st, float2 pos)
 		// Based on ps_convert_float16_rgb5a1 of convert
 
 		// Convert a FLOAT32 (only 16 lsb) depth into a RGB5A1 color texture
+#if PS_TEX_INTEGER
+		uint d = fetch_raw_depth(uv);
+#else
 		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+#endif
 		t = float4(uint4((d & 0x1Fu), ((d >> 5) & 0x1Fu), ((d >> 10) & 0x1Fu), (d >> 15) & 0x01u)) * float4(8.0f, 8.0f, 8.0f, 128.0f);
 	}
 	else if (PS_DEPTH_FMT == 3)

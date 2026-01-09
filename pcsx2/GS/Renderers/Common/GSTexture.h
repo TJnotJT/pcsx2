@@ -129,6 +129,14 @@ public:
 	{
 		return (m_type == Type::DepthStencil);
 	}
+	__fi bool IsDepthInteger() const
+	{
+		return (m_type == Type::RenderTarget && m_format == Format::UInt32);
+	}
+	__fi bool IsDepthStencilOrDepthInteger() const
+	{
+		return IsDepthStencil() || IsDepthInteger();
+	}
 	__fi bool IsTexture() const
 	{
 		return (m_type == Type::Texture);
