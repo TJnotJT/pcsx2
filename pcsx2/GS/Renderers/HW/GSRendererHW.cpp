@@ -6543,7 +6543,7 @@ void GSRendererHW::SetupROV()
 
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
-	const bool ztst = m_conf.ps.IsZTesting() || (m_conf.depth.ztst != ZTST_ALWAYS);
+	const bool ztst = m_cached_ctx.DepthRead();
 
 	const bool using_barriers = m_conf.require_one_barrier || m_conf.require_full_barrier;
 
@@ -6733,15 +6733,17 @@ void GSRendererHW::SetupROV()
 	{
 		GL_INS("ROV: Using depth ROV");
 
-		if (m_conf.depth.ztst != ZTST_ALWAYS)
+		if (ztst)
 		{
-			GL_INS("ROV: Replace HW with SW depth test");
-			m_conf.ps.ztst = m_conf.depth.ztst;
+			GL_INS("ROV: Using SW depth test%s", m_conf.depth.ztst != ZTST_ALWAYS ? " and disabling HW" : "");
+			m_conf.ps.ztst = m_cached_ctx.TEST.ZTST;
 		}
 
-		if (m_conf.depth.zwe)
+		if (depth_write)
 		{
-			GL_INS("ROV: Replace HW with SW depth write");
+			GL_INS("ROV: Using SW depth write%s",
+				(m_conf.depth.zwe || (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)) ?
+				" and disabling HW" : "");
 			GetZClampConfigVSPS(true); // Z clamp is a proxy for SW Z write.
 		}
 		
@@ -6776,8 +6778,8 @@ void GSRendererHW::SetupROV()
 
 			// Disable HW or mixed blend or multipass blend
 			m_conf.blend = {};
-			m_conf.ps.blend_hw = 0;
-			m_conf.ps.blend_mix = 0;
+			m_conf.ps.blend_hw = false;
+			m_conf.ps.blend_mix = false;
 			m_conf.blend_multi_pass = {};
 
 			if (!m_conf.ps.no_color1)
@@ -6841,7 +6843,9 @@ void GSRendererHW::SetupROV()
 			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
 
 			if (m_conf.alpha_second_pass.enable)
+			{
 				m_conf.alpha_second_pass = {};
+			}
 		}
 
 		m_conf.ps.rov_color = true;
