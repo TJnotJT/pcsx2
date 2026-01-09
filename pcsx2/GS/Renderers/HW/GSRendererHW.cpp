@@ -6573,15 +6573,16 @@ void GSRendererHW::SetupROV()
 		// We currently don't have a way of using barriers in one and ROV in the other.
 		if ((m_conf.ps.IsFeedbackLoopRT() && rov_depth) || (m_conf.ps.IsFeedbackLoopDepth() && rov_color))
 		{
-			GL_INS("Feedback compatibility forces color and depth ROV");
+			GL_INS("ROV: Feedback compatibility forces color and depth ROV");
 			rov_color = true;
 			rov_depth = true;
 		}
 
-		// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
-		if (m_conf.ds && depth_write && rov_color && m_conf.ps.HasShaderDiscard())
+		// If we use color ROV with discard of the pixel shader write to depth,
+		// we cannot use early depth stencil, so must use depth ROV with feedback.
+		if (m_conf.ds && depth_write && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.zclamp))
 		{
-			GL_INS("Color ROV with shader discard forces depth ROV");
+			GL_INS("ROV: Color ROV with shader discard/depth write forces depth ROV");
 			rov_depth = true;
 			feedback_depth = true;
 		}
@@ -6589,7 +6590,7 @@ void GSRendererHW::SetupROV()
 		// If we have SW depth testing we must also use color ROV so that color discard works correctly.
 		if (m_conf.rt && color_write && rov_depth && ztst)
 		{
-			GL_INS("Depth ROV with Z test forces color ROV");
+			GL_INS("ROV: Depth ROV with Z test forces color ROV");
 			rov_color = true;
 			feedback_color = true;
 		}
