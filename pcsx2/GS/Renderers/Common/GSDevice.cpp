@@ -418,6 +418,24 @@ void GSDevice::ClearDepth(GSTexture* t, float d)
 	t->SetClearDepth(d);
 }
 
+void GSDevice::ClearDepthInteger(GSTexture* t, u32 d)
+{
+	pxAssert(t->IsDepthInteger());
+	t->SetClearColor(d);
+}
+
+void GSDevice::ClearDepthOrDepthInteger(GSTexture* t, u32 d)
+{
+	if (t->IsDepthInteger())
+	{
+		ClearDepthInteger(t, d);
+	}
+	else
+	{
+		ClearDepth(t, static_cast<float>(d) * 0x1p-32);
+	}
+}
+
 bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy)
 {
 	pxAssert(sTex->GetState() == GSTexture::State::Cleared && dTex->IsRenderTargetOrDepthStencil());

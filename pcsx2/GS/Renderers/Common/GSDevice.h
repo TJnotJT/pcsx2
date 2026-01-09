@@ -1242,6 +1242,8 @@ public:
 
 	void ClearRenderTarget(GSTexture* t, u32 c);
 	void ClearDepth(GSTexture* t, float d);
+	void ClearDepthInteger(GSTexture* t, u32 d);
+	void ClearDepthOrDepthInteger(GSTexture* t, u32 d);
 	bool ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy);
 	void InvalidateRenderTarget(GSTexture* t);
 

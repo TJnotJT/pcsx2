@@ -1655,7 +1655,7 @@ void GSDevice12::BeginRenderPassForStretchRect(
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			dTex->IsDepthInteger() ? GSVector4(static_cast<float>(dTex->GetClearColor()), 0.0f, 0.0f, 0.0f) : dTex->GetUNormClearColor());
+			dTex->GetUNormClearColor());
 	}
 	else
 	{
@@ -4250,7 +4250,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 				GetLoadOpForTexture(draw_ds),
 				draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				draw_rt->GetUNormClearColor(), 0.0f, 0);
+				draw_rt->GetUNormClearColor(), 0.0f, 0.0f, 0);
 
 			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(rtsize.x, rtsize.y).xyxy());
 			SetPipeline(m_colclip_finish_pipelines[pipe.ds].get());

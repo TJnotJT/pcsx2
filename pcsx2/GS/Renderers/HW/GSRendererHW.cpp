@@ -9252,14 +9252,7 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const u32 z = std::min(max_z, m_vertex.buff[1].XYZ.Z);
 			const float d = static_cast<float>(z) * 0x1p-32f;
 			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			if (ds->m_texture->IsDepthInteger())
-			{
-				g_gs_device->ClearRenderTarget(ds->m_texture, z);
-			}
-			else
-			{
-				g_gs_device->ClearDepth(ds->m_texture, d);
-			}
+			g_gs_device->ClearDepthOrDepthInteger(ds->m_texture, z);
 			ds->m_dirty.clear();
 			ds->m_alpha_max = z >> 24;
 			ds->m_alpha_min = z >> 24;

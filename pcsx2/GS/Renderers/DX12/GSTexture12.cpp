@@ -789,8 +789,7 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
 	else if (IsRenderTarget())
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(),
-			(IsDepthInteger() ? GSVector4(m_clear_value.color, 0, 0, 0) : GSVector4::unorm8(m_clear_value.color)).v, 0, nullptr);
+		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), GetUNormClearColor().v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);

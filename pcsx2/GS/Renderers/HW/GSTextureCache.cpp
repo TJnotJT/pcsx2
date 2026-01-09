@@ -3257,7 +3257,6 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 							{
 								const u32 cd = dst_match->m_texture->GetClearColor();
 								g_gs_device->ClearRenderTarget(dst->m_texture, cd);
-
 							}
 							else
 							{
