@@ -3577,7 +3577,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	}
 
 	m_current_render_target = vkRt;
-	m_current_depth_render_target = vkRt;
+	m_current_depth_render_target = vkDsRt;
 	m_current_depth_target = vkDs;
 	m_current_framebuffer_feedback_loop = feedback_loop;
 
@@ -3611,8 +3611,11 @@ void GSDeviceVK::OMSetRenderTargets(
 		// If they are both present it's only because the read depthstencil is needed for stencil.
 		pxAssert(!(static_cast<bool>(feedback_loop & FeedbackLoopFlag_ReadAndWriteDepthRT) &&
 			static_cast<bool>(feedback_loop & (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth))));
+
 		HandleTransition(vkRt, false, (feedback_loop & FeedbackLoopFlag_ReadAndWriteRT) != 0, TFX_TEXTURE_RT);
+
 		HandleTransition(vkDsRt, false, (feedback_loop & FeedbackLoopFlag_ReadAndWriteDepthRT) != 0, TFX_TEXTURE_DEPTH);
+
 		if ((feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0)
 		{
 			HandleTransition(vkDs, true, true, TFX_TEXTURE_DEPTH);
@@ -3628,7 +3631,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	}
 
 	// This is used to set/initialize the framebuffer for tfx rendering.
-	const GSVector2i size = vkRt ? vkRt->GetSize() : vkDs->GetSize();
+	const GSVector2i size = vkRt ? vkRt->GetSize() : (vkDsRt ? vkDsRt->GetSize() : vkDs->GetSize());
 	const VkViewport vp{0.0f, 0.0f, static_cast<float>(size.x), static_cast<float>(size.y), 0.0f, 1.0f};
 
 	SetViewport(vp);
@@ -5735,7 +5738,8 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
-	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
+	const GSVector2i rtsize(config.rt ? config.rt->GetSize() :
+		(config.ds_as_rt ? config.ds_as_rt->GetSize() : config.ds->GetSize()));
 	GSTextureVK* draw_rt = static_cast<GSTextureVK*>(config.rt);
 	GSTextureVK* draw_ds_as_rt = static_cast<GSTextureVK*>(config.ds_as_rt);
 	GSTextureVK* draw_ds = static_cast<GSTextureVK*>(config.ds);
@@ -5749,7 +5753,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// bind textures before checking the render pass, in case we need to transition them
 	if (config.tex)
 	{
-		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds);
+		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds_as_rt && config.tex != config.ds);
 		PSSetSampler(config.sampler);
 	}
 	if (config.pal)
@@ -6300,7 +6304,6 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config,
 	std::array<VkImageMemoryBarrier, 2> barriers_color;
 	u32 n_barriers_color = 0;
 	VkImageMemoryBarrier barrier_depth;
-	u32 n_barriers = 0;
 	if (full_barrier || one_barrier)
 	{
 		if (draw_rt)
@@ -6316,9 +6319,10 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config,
 			barrier_depth = GetDepthStencilBufferFeedbackBarrier(draw_ds);
 		}
 	}
+	const u32 n_barriers = n_barriers_color + (draw_ds ? 1 : 0);
 
 	const auto IssueBarriers = [&]() {
-		if (draw_rt)
+		if (n_barriers_color)
 		{
 			vkCmdPipelineBarrier(GetCurrentCommandBuffer(),
 				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,

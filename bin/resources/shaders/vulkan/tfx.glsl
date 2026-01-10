@@ -280,7 +280,7 @@ void main()
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
 
-#if VS_INTEGER_Z
+#if VS_Z_INTEGER
 	vsOut.zi = zi;
 	#if VS_EXPAND == 4 || VS_EXPAND == 5
 		vsOut.bary = vtx.bary;
@@ -407,9 +407,10 @@ void main()
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
+#define SW_Z_TESTING (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5) || PS_COLOR_FEEDBACK)
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK && AFAIL_NEEDS_DEPTH)
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (PS_DEPTH_FEEDBACK && (AFAIL_NEEDS_DEPTH || SW_Z_TESTING))
 
 #define NEEDS_TEX (PS_TFX != 4)
 
@@ -464,7 +465,7 @@ layout(location = 0, index = 1) out vec4 o_col1;
 layout(location = 0) out vec4 o_col0;
 #endif
 
-#if PS_ZCLAMP && PS_Z_INTEGER && PS_NO_COLOR1
+#if PS_Z_INTEGER && PS_NO_COLOR1
 	#if PS_Z_RT_SLOT
 		layout(location = 1) out uint o_depth;
 	#else
@@ -484,7 +485,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(FragCoord.xy), 0); }
 		#endif
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-			#if PS_TEX_INTEGER
+			#if PS_Z_INTEGER
 				layout(set = 1, binding = 4) uniform utexture2D DepthSampler;
 				uint sample_from_depth() { return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0).r; }
 			#else
@@ -496,13 +497,13 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 		// Must consider each case separately since the input attachment indices must be consecutive.
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-			#if PS_TEX_INTEGER
+			#if PS_Z_INTEGER
 				layout(input_attachment_index = 1, set = 1, binding = 4) uniform usubpassInput DepthSampler;
 			#else
 				layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			#endif
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-			#if PS_TEX_INTEGER
+			#if PS_Z_INTEGER
 				uint sample_from_depth() { return subpassLoad(DepthSampler).r; }
 			#else
 				float sample_from_depth() { return subpassLoad(DepthSampler).r; }
@@ -511,7 +512,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
 		#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-			#if PS_TEX_INTEGER
+			#if PS_Z_INTEGER
 				layout(input_attachment_index = 0, set = 1, binding = 4) uniform usubpassInput DepthSampler;
 				uint sample_from_depth() { return subpassLoad(DepthSampler).r; }
 			#else
@@ -1495,7 +1496,7 @@ void main()
 	#endif
 #endif
 
-#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && SW_Z_TESTING
 	#if PS_ZTST == ZTST_GEQUAL
 		if (input_z < curr_z)
 			discard;
