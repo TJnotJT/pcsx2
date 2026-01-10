@@ -2332,8 +2332,7 @@ void GSTextureCache::CombineAlignedInsideTargets(Target* target, GSTextureCache:
 							{
 								if (!valid_color || (!valid_alpha && (GSUtil::GetChannelMask(t->m_TEX0.PSM) & 0x8)))
 									GL_CACHE("Warning: CombineAlignedInsideTargets: Depth copy with invalid lower 24 bits or invalid upper 8 bits.");
-								const ShaderConvert shader = GetDepthCopyShader(t->m_texture->IsDepthInteger(),
-									target->m_texture->IsDepthInteger());
+								const ShaderConvert shader = GetDepthCopyShader(t->m_texture->IsDepthInteger(), target->m_texture->IsDepthInteger());
 								g_gs_device->StretchRect(t->m_texture, source_rect, target->m_texture, target_drect, shader);
 							}
 
@@ -5236,11 +5235,10 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 			const GSVector4 src_rect = GSVector4(scaled_sx, scaled_sy, scaled_sx + scaled_w, scaled_sy + scaled_h);
 			const GSVector4 tmp_rect = src_rect / (GSVector4(tmp_texture->GetSize()).xyxy());
 			const GSVector4 dst_rect = GSVector4(scaled_dx, scaled_dy, (scaled_dx + scaled_w), (scaled_dy + scaled_h));
-			const bool src_int = src->m_texture->IsDepthInteger();
-			const bool tmp_int = tmp_texture->IsDepthInteger();
-			const bool dst_int = tmp_texture->IsDepthInteger();
-			g_gs_device->StretchRect(src->m_texture, tmp_rect, tmp_texture, src_rect, GetDepthCopyShader(src_int, tmp_int), false);
-			g_gs_device->StretchRect(tmp_texture, tmp_rect, dst->m_texture, dst_rect, GetDepthCopyShader(tmp_int, dst_int), false);
+			g_gs_device->StretchRect(src->m_texture, tmp_rect, tmp_texture, src_rect,
+				GetDepthCopyShader(src->m_texture->IsDepthInteger(), tmp_texture->IsDepthInteger()), false);
+			g_gs_device->StretchRect(tmp_texture, tmp_rect, dst->m_texture, dst_rect,
+				GetDepthCopyShader(tmp_texture->IsDepthInteger(), tmp_texture->IsDepthInteger()), false);
 		}
 		else
 		{

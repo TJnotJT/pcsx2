@@ -3791,7 +3791,7 @@ void GSRendererHW::Draw()
 
 						GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
 						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
-							GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 
@@ -3809,7 +3809,7 @@ void GSRendererHW::Draw()
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
 					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect),
-						GetDepthCopyShader(ds->m_texture, g_texture_cache->GetTemporaryZ()), false);
+						GetDepthCopyShader(ds->m_texture->IsDepthInteger(), g_texture_cache->GetTemporaryZ()->IsDepthInteger()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);
@@ -3858,7 +3858,7 @@ void GSRendererHW::Draw()
 					if (m_cached_ctx.TEST.ZTST > ZTST_ALWAYS || !dRect.rintersect(GSVector4i(GSVector4(m_r) * ds->m_scale)).eq(dRect))
 					{
 						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect),
-							GetDepthCopyShader(ds->m_texture, tex), false);
+							GetDepthCopyShader(ds->m_texture->IsDepthInteger(), tex->IsDepthInteger()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 					g_texture_cache->SetTemporaryZ(tex);
@@ -4473,7 +4473,7 @@ void GSRendererHW::Draw()
 					{
 						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
 						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect),
-							GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), tex), false);
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), tex->IsDepthInteger()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 						g_texture_cache->InvalidateTemporaryZ();
 						g_texture_cache->SetTemporaryZ(tex);
@@ -4777,7 +4777,7 @@ void GSRendererHW::Draw()
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d rt_vert_offset %d z_horz_offset %d rt_horz_offset %d", s_n, z_vertical_offset, vertical_offset, z_horizontal_offset, horizontal_offset);
 					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
-						GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 				else if (m_temp_z_full_copy)
@@ -4791,7 +4791,7 @@ void GSRendererHW::Draw()
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
 					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
-						GetDepthCopyShader(g_texture_cache->GetTemporaryZ(), ds->m_texture), false);
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 
@@ -7093,7 +7093,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
 				src_target->m_texture->IsDepthStencilOrDepthInteger() ?
-					GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+					GetDepthCopyShader(src_target->m_texture->IsDepthInteger(), src_copy.get()->IsDepthInteger()) : ShaderConvert::COPY,
 				false);
 		}
 		else
