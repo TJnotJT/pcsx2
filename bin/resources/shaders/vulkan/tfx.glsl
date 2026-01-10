@@ -1465,9 +1465,10 @@ uint interp_zint(vec2 bary, uvec3 z)
 	z_hi += z2_hi + uint(z_lo < z2_lo);
 #endif
 
+	// Note: truncating rather than round seems to be more accurate.
 	// Add 2^23 to the result before truncating so that it rounds.
-	z_lo += 1 << 23;
-	z_hi += uint(z_lo < (1 << 23));
+	// z_lo += 1 << 23;
+	// z_hi += uint(z_lo < (1 << 23));
 
 	// The weights are 24 bits so get bits 24:55 of the result.
 	return (z_hi << 8) + (z_lo >> 24);
