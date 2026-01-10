@@ -8476,7 +8476,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			}
 		}
 
-		// We need barriers if we read/write depth.
+		// We need at least one barrier if we read depth.
+		if (m_conf.ps.depth_feedback)
+		{
+			m_conf.require_one_barrier = true;
+		}
+
+		// We need barriers if we read and write depth.
 		if (m_conf.ps.zclamp && m_conf.ps.depth_feedback)
 		{
 			m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
