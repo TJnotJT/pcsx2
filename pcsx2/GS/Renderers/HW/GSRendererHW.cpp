@@ -9967,6 +9967,8 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
 	                      (!GSDevice::IsDualSourceBlendFactor(config.blend.src_factor) &&
 	                       !GSDevice::IsDualSourceBlendFactor(config.blend.dst_factor));
 
+	config.ps.texint = config.tex && config.tex->IsIntegerFormat();
+
 	g_gs_device->RenderHW(m_conf);
 
 	if (copy)
