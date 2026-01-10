@@ -5268,6 +5268,9 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 		const u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT : TFX_TEXTURE_DEPTH;
 		PSSetShaderResource(i_conflict, nullptr, false);
 
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == tex)
+			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
+
 		if (write)
 		{
 			tex->SetState(GSTexture::State::Dirty);
