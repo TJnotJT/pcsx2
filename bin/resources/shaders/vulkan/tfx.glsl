@@ -264,7 +264,7 @@ void main()
 	uint vid_base = vid & ~2;
 	ProcessedVertex raw0 = load_vertex(vid_base + 0);
 	ProcessedVertex raw1 = load_vertex(vid_base + 1);
-	vtx = vs_main(load_vertex(vid));
+	vtx = load_vertex(vid);
 
 	// All vertices of the same primitive must have z in same order
 	zi = uvec3(raw0.z, raw1.z, 0);
