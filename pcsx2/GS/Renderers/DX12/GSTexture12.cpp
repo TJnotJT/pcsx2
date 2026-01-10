@@ -902,6 +902,7 @@ void GSTexture12::UpdateDepthColor(bool color_to_ds)
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 			device->StretchRect(m_depth_color.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 			device->EndRenderPass();
+			device->UnbindTexture(static_cast<GSTexture12*>(m_depth_color.get()));
 			
 			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 		}
@@ -914,6 +915,7 @@ void GSTexture12::UpdateDepthColor(bool color_to_ds)
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 			device->StretchRect(this, m_depth_color.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 			device->EndRenderPass();
+			device->UnbindTexture(static_cast<GSTexture12*>(m_depth_color.get()));
 
 			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 		}
