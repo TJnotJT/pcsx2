@@ -3238,10 +3238,12 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 					{
 						if (type == DepthStencil)
 						{
-							if (dst_match_int)
+							if (dst_int)
 							{
 								const u32 cc = dst_match->m_texture->GetClearColor();
-								g_gs_device->ClearRenderTarget(dst->m_texture, cc);
+								const u32 cd = ConvertColorToDepthInteger(cc, shader);
+								GL_INS("TC: Convert clear color[%08X] to depth[%f]", cc, cd);
+								g_gs_device->ClearDepthInteger(dst->m_texture, cd);
 							}
 							else
 							{
@@ -3253,9 +3255,11 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 						}
 						else
 						{
-							if (dst_int)
+							if (dst_match_int)
 							{
-								const u32 cd = dst_match->m_texture->GetClearColor();
+								const u32 cd = dst_match->m_texture->GetClearDepthInteger();
+								const u32 cc = ConvertDepthIntegerToColor(cd, shader);
+								GL_INS("TC: Convert clear depth[%u] to color[%08X]", cd, cc);
 								g_gs_device->ClearRenderTarget(dst->m_texture, cd);
 							}
 							else
@@ -4082,25 +4086,47 @@ void GSTextureCache::ScaleTargetForDisplay(Target* t, const GIFRegTEX0& dispfb, 
 	GetTargetSize(t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM, new_width, static_cast<u32>(needed_height));
 }
 
-float GSTextureCache::ConvertColorToDepth(u32 c, ShaderConvert convert)
+u32 GSTextureCache::ConvertColorToDepthInteger(u32 c, ShaderConvert convert)
 {
-	const float mult = std::exp2(-32.0f);
 	switch (convert)
 	{
-		case ShaderConvert::RGB5A1_TO_FLOAT16:
-			return static_cast<float>(((c & 0xF8u) >> 3) | (((c >> 8) & 0xF8u) << 2) | (((c >> 16) & 0xF8u) << 7) |
-			                          (((c >> 24) & 0x80u) << 8)) *
-			       mult;
+	case ShaderConvert::RGB5A1_TO_UINT16:
+	case ShaderConvert::RGB5A1_TO_FLOAT16:
+		return ((c & 0xF8u) >> 3) | (((c >> 8) & 0xF8u) << 2) | (((c >> 16) & 0xF8u) << 7) |
+			(((c >> 24) & 0x80u) << 8);
 
-		case ShaderConvert::RGBA8_TO_FLOAT16:
-			return static_cast<float>(c & 0x0000FFFF) * mult;
+	case ShaderConvert::RGBA8_TO_UINT16:
+	case ShaderConvert::RGBA8_TO_FLOAT16:
+		return c & 0x0000FFFF;
 
-		case ShaderConvert::RGBA8_TO_FLOAT24:
-			return static_cast<float>(c & 0x00FFFFFF) * mult;
+	case ShaderConvert::RGBA8_TO_UINT24:
+	case ShaderConvert::RGBA8_TO_FLOAT24:
+		return c & 0x00FFFFFF;
 
-		case ShaderConvert::RGBA8_TO_FLOAT32:
-		default:
-			return static_cast<float>(c) * mult;
+	case ShaderConvert::RGBA8_TO_UINT32:
+	case ShaderConvert::RGBA8_TO_FLOAT32:
+	default:
+		return c;
+	}
+}
+
+float GSTextureCache::ConvertColorToDepth(u32 c, ShaderConvert convert)
+{
+	return std::exp2(-32.0f) * static_cast<float>(ConvertColorToDepthInteger(c, convert));
+}
+
+u32 GSTextureCache::ConvertDepthIntegerToColor(u32 d, ShaderConvert convert)
+{
+	switch (convert)
+	{
+	case ShaderConvert::UINT16_TO_RGB5A1:
+	case ShaderConvert::FLOAT16_TO_RGB5A1:
+		return ((d & 0x1F) << 3) | ((d & 0x3E0) << 6) | ((d & 0x7C00) << 9) | ((d & 0x8000) << 16);
+
+	case ShaderConvert::UINT32_TO_RGBA8:
+	case ShaderConvert::FLOAT32_TO_RGBA8:
+	default:
+		return d;
 	}
 }
 
@@ -7749,10 +7775,13 @@ void GSTextureCache::Target::Update(bool cannot_scale)
 		}
 
 		const bool linear = upscaled && GSConfig.UserHacks_BilinearHack != GSBilinearDirtyMode::ForceNearest;
-		const bool depth_int = m_texture->IsDepthInteger();
-		ShaderConvert depth_shader = GetColorDepthShader(true, GSLocalMemory::m_psm[m_TEX0.PSM].trbpp, false, depth_int);
-		if (linear)
-			depth_shader = GetBilinearVersion(depth_shader);
+		ShaderConvert depth_shader = ShaderConvert::DEPTH_COPY;
+		if (m_type == DepthStencil)
+		{
+			depth_shader = GetColorDepthShader(true, GSLocalMemory::m_psm[m_TEX0.PSM].trbpp, false, m_texture->IsDepthInteger());
+			if (linear)
+				depth_shader = GetBilinearVersion(depth_shader);
+		}
 
 		const ShaderConvert rt_shader = m_rt_alpha_scale ? ShaderConvert::RTA_CORRECTION : ShaderConvert::COPY;
 		// No need to sort here, it's all the one texture.

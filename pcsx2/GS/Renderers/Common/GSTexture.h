@@ -58,6 +58,7 @@ public:
 	{
 		u32 color;
 		float depth;
+		u32 depth_integer;
 	};
 
 protected:
@@ -155,6 +156,7 @@ public:
 
 	__fi u32 GetClearColor() const { return m_clear_value.color; }
 	__fi float GetClearDepth() const { return m_clear_value.depth; }
+	__fi float GetClearDepthInteger() const { return m_clear_value.depth_integer; }
 	__fi GSVector4 GetUNormClearColor() const // FIXME: Rename to GetVectorClearColor
 	{
 		// FIXME: Do this properly with virtual function
@@ -183,6 +185,11 @@ public:
 	{
 		m_state = State::Cleared;
 		m_clear_value.depth = depth;
+	}
+	__fi void SetClearDepthInteger(u32 depth)
+	{
+		m_state = State::Cleared;
+		m_clear_value.depth_integer = depth;
 	}
 
 	void GenerateMipmapsIfNeeded();
