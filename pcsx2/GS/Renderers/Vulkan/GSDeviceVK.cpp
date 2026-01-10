@@ -463,6 +463,7 @@ bool GSDeviceVK::SelectDeviceFeatures()
 	m_device_features.textureCompressionBC = available_features.textureCompressionBC;
 	m_device_features.samplerAnisotropy = available_features.samplerAnisotropy;
 	m_device_features.geometryShader = available_features.geometryShader;
+	m_device_features.independentBlend = available_features.independentBlend;
 
 	return true;
 }
@@ -2737,7 +2738,8 @@ bool GSDeviceVK::CheckFeatures()
 
 	m_features.depth_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
 	m_features.depth_as_rt_feedback = false;
-	m_features.depth_integer = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
+	m_features.depth_integer = m_features.test_and_sample_depth && m_device_features.independentBlend &&
+		                       !GSConfig.DisableDepthFeedback;
 
 	DevCon.WriteLn("Optional features:%s%s%s%s%s", m_features.primitive_id ? " primitive_id" : "",
 		m_features.texture_barrier ? " texture_barrier" : "", m_features.framebuffer_fetch ? " framebuffer_fetch" : "",
@@ -5037,7 +5039,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	if (p.ds_as_rt)
 	{
 		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.cms.wrgba);
+			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD);
 	}
 
 	// Tests have shown that it's faster to just enable rast order on the entire pass, rather than alternating
