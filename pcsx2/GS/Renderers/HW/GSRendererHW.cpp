@@ -6458,6 +6458,27 @@ void GSRendererHW::SetupROV()
 	if (!features.rov)
 		return;
 
+	// Moon hack
+	if (m_cached_ctx.FRAME.Block() == 0x1c00 && m_cached_ctx.ZBUF.Block() == 0xe00 && m_cached_ctx.TEX0.TBP0 == 0x2a00 &&
+		m_cached_ctx.TEST.ATST == 5 && m_cached_ctx.TEST.AFAIL == 1 && m_vertex.buff[0].XYZ.Z == 1328 && GSConfig.Moon)
+	{
+		Console.Warning("Trying to show the moon %d\n", s_n);
+		m_cached_ctx.TEST.ZTE = 1;
+		m_cached_ctx.TEST.ZTST = ZTST_ALWAYS;
+		m_conf.depth.ztst = ZTST_ALWAYS;
+		m_conf.depth.zwe = 1;
+		m_conf.ps.ztst = 0;
+		m_conf.ps.depth_feedback = 0;
+		m_cached_ctx.TEST.ATE = 0;
+		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::NONE;
+		m_conf.alpha_second_pass = {};
+		m_conf.ps.atst = 0;
+		m_conf.ps.afail = 0;
+		m_conf.ps.color_feedback = 0;
+		m_conf.ps.blend_a = m_conf.ps.blend_b = m_conf.ps.blend_c = m_conf.ps.blend_d = 0;
+		m_conf.colormask.wrgba = 0xF;
+	}
+
 	if (m_rov_preset != GSConfig.HWROVPreset)
 	{
 		m_rov_preset = GSConfig.HWROVPreset;

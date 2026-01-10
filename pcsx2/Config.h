@@ -861,6 +861,7 @@ struct Pcsx2Config
 		float HWROVBarriersDisableColor = 1.125f;
 		float HWROVBarriersDisableDepth = 1.25f;
 		u32 HWROVPreset = 1;
+		bool Moon = false;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;

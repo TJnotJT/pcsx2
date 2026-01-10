@@ -1048,6 +1048,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapEntry(HWROVBarriersDisableColor);
 	SettingsWrapEntry(HWROVBarriersDisableDepth);
 	SettingsWrapEntry(HWROVPreset);
+	SettingsWrapEntry(Moon);
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
