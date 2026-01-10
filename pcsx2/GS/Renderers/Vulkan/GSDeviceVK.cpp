@@ -5300,6 +5300,11 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 
 			vkTex->CommitClear();
 			vkTex->TransitionToLayout(layout);
+
+			if (layout == GSTextureVK::Layout::ReadWriteImage)
+			{
+				vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), vkTex->GetLayout());
+			}
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
 	}
