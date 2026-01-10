@@ -3494,7 +3494,7 @@ void GSDeviceVK::OMSetRenderTargets(
 		else if (vkDsRt)
 		{
 			m_current_framebuffer =
-				vkRt->GetLinkedFramebuffer(nullptr, vkDs, false,
+				vkDsRt->GetLinkedFramebuffer(nullptr, vkDs, false,
 					(feedback_loop & FeedbackLoopFlag_ReadAndWriteDepthRT) != 0,
 					(feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0);
 		}
