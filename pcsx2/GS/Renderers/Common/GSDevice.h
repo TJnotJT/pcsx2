@@ -231,6 +231,7 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 	switch (shader)
 	{
 		case ShaderConvert::FLOAT32_TO_RGB8:
+		case ShaderConvert::UINT32_TO_RGB8:
 			return 0x7;
 		default:
 			return 0xf;
