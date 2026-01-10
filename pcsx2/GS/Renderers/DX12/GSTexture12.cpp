@@ -755,11 +755,13 @@ void GSTexture12::TransitionToState(ID3D12GraphicsCommandList* cmdlist, D3D12_RE
 		{
 			// DS -> Color
 			pxAssert(state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			pxFail("Implicit update");
 			UpdateDepthColor(false);
 		}
 		else if ((state & (D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_DEPTH_READ)) && IsDepthColor())
 		{
 			// Color -> DS
+			pxFail("Implicit update");
 			UpdateDepthColor(true);
 		}
 	}
