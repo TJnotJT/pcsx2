@@ -3260,7 +3260,7 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 								const u32 cd = dst_match->m_texture->GetClearDepthInteger();
 								const u32 cc = ConvertDepthIntegerToColor(cd, shader);
 								GL_INS("TC: Convert clear depth[%u] to color[%08X]", cd, cc);
-								g_gs_device->ClearRenderTarget(dst->m_texture, cd);
+								g_gs_device->ClearRenderTarget(dst->m_texture, cc);
 							}
 							else
 							{
