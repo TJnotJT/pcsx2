@@ -110,6 +110,7 @@
 #define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
+#define PS_Z_RT_SLOT 0
 #define PS_Z_INTEGER 0
 #define PS_PRIMCLASS 0
 #define PS_TEX_INTEGER 0
@@ -580,7 +581,7 @@ float4 sample_depth(float2 st, float2 pos)
 	{
 		// Based on ps_convert_float32_rgba8 of convert
 
-		// Convert a FLOAT32 depth texture into a RGBA color texture
+		// Convert a FLOAT32 or UINT32 depth texture into a RGBA color texture
 #if PS_TEX_INTEGER
 		uint d = fetch_raw_depth(uv);
 #else
@@ -1127,6 +1128,7 @@ void mul64(uint x, uint y, out uint lo, out uint hi)
 	hi = hh + (hl >> 16) + (lh >> 16) + c;
 }
 
+// Interpolate Z using barycentric triangle/line coordinates
 uint interp_zint(float2 bary, uint3 z)
 {
 	// Convert weights from floating to 24 bit fixed point.
@@ -1198,11 +1200,11 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
-		if (input_z < DepthTexture.Load(int3(input.p.xy, 0)).r)
+		if (input_z < curr_z)
 			discard;
 	#elif PS_ZTST == ZTST_GREATER
-	if (input_z <= DepthTexture.Load(int3(input.p.xy, 0)).r)
-		discard;
+		if (input_z <= curr_z)
+			discard;
 	#endif
 #endif // PS_ZTST
 
@@ -1388,7 +1390,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	// Alpha test with feedback
 #if (PS_AFAIL == AFAIL_FB_ONLY) && PS_DEPTH_FEEDBACK && PS_ZCLAMP
 	if (!atst_pass)
-		input_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
+		input_z = curr_z;
 #elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_COLOR_FEEDBACK
 	if (!atst_pass)
 		output.c0 = RtTexture.Load(int3(input.p.xy, 0));
@@ -1399,7 +1401,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 		output.c0.a = RtTexture.Load(int3(input.p.xy, 0)).a;
 	#endif
 	#if PS_DEPTH_FEEDBACK && PS_ZCLAMP
-		input_z = DepthTexture.Load(int3(input.p.xy, 0)).r; 
+		input_z = curr_z;
 	#endif
 	}
 #endif
@@ -1571,8 +1573,9 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	float2 offset = (is_bottom ^ is_right) ? line_width : -line_width;
 	vtx.p.xy += offset;
 
+	// All vertices of the same primitive must have z in same order
 #if VS_Z_INTEGER
-	vtx.zi = (vid_base & 1) ? uint3(vtx.zi.x, other.zi.y, 0) : uint3(other.zi.y, vtx.zi.x, 0);
+	vtx.zi = (vid_base & 1) ? uint3(vtx.zi.x, other.zi.x, 0) : uint3(other.zi.x, vtx.zi.x, 0);
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
@@ -1604,28 +1607,32 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == 4 // Triangle for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == 4) // Triangle for integer Z
 
 	uint vid_base = (vid / 3) * 3;
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
 	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_INPUT raw2 = load_vertex(vid_base + 2);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+
+	// All vertices of the same primitive must have z in same order
 	vtx.zi = uint3(raw0.z, raw1.z, raw2.z);
 
 	return vtx;
 
-#elif VS_EXPAND == 5 // Lines
+#elif VS_Z_INTEGER && (VS_EXPAND == 5) // Lines for integer Z
 
 	uint vid_base = vid & ~2;
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
 	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+
+	// All vertices of the same primitive must have z in same order
 	vtx.zi = uint3(raw0.z, raw1.z, 0);
 	
 	return vtx;
 
-#elif VS_EXPAND == 6 // Points
+#elif VS_Z_INTEGER && (VS_EXPAND == 6) // Points for integer Z
 	return vs_main(load_vertex(vid));
 #endif
 }

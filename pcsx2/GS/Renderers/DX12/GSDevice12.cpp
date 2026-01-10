@@ -1241,7 +1241,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
 	m_features.depth_feedback = false;
 	m_features.depth_as_rt_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
-	m_features.depth_integer = m_features.test_and_sample_depth;
+	m_features.depth_integer = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -3558,7 +3558,7 @@ void GSDevice12::BeginRenderPass(
 	}
 
 	GetCommandList()->BeginRenderPass(num_rts, rt.data(), m_current_depth_target ? &ds : nullptr,
-		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAG_BIND_READ_ONLY_DEPTH) : D3D12_RENDER_PASS_FLAG_NONE);
+		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAGS(8)) : D3D12_RENDER_PASS_FLAG_NONE);
 }
 
 void GSDevice12::EndRenderPass()
@@ -4092,7 +4092,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		(draw_ds && static_cast<GSTexture12*>(draw_ds)->GetSRVDescriptor() == m_tfx_textures[0])))
 		PSSetShaderResource(0, nullptr, false);
 
-	if (m_in_render_pass && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds))
+	if (m_in_render_pass && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds) && !draw_ds_as_rt)
 	{
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth
@@ -4104,7 +4104,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 	else if (!draw_ds && m_current_depth_target && config.tex != m_current_depth_target &&
-			 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
+			 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize() && !draw_ds_as_rt)
 	{
 		draw_ds = m_current_depth_target;
 		m_pipeline_selector.ds = true;

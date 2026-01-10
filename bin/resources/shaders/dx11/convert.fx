@@ -434,7 +434,7 @@ float ps_convert_rgb5a1_float16(PS_INPUT input) : SV_Depth
 #if !HAS_INTEGER_INPUT
 uint ps_convert_rgb5a1_uint16(PS_INPUT input) : SV_Target0
 {
-	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
+	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit UINT
 	return rgb5a1_to_uint16(sample_c(input.t));
 }
 #endif
