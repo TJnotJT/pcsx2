@@ -990,6 +990,12 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 		case GSHWDrawConfig::VSExpand::Sprite:
 			// Sprite expand does a 2-4 expansion, and relies on the low bit of the vertex ID to figure out if it's the first or second coordinate.
 			return 2;
+		case GSHWDrawConfig::VSExpand::TriangleZInt:
+			// Triangle Z integer relies on vertex ID modulo 3 to figure out which vertex it is.
+			return 3;
+		case GSHWDrawConfig::VSExpand::LineZInt:
+			// Line Z integer relies on vertex ID modulo 2 to figure out which vertex it is.
+			return 3;
 		default:
 			return 1;
 	}
