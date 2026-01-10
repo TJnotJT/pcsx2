@@ -5292,7 +5292,8 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 		{
 			GSTextureVK::Layout layout = read_only ? GSTextureVK::Layout::ShaderReadOnly : GSTextureVK::Layout::ReadWriteImage;
 
-			if (vkTex->GetLayout() != layout && InRenderPass())
+			// FIXME: Remove barrier.
+			if ((vkTex->GetLayout() != layout || layout == GSTextureVK::Layout::ReadWriteImage) && InRenderPass())
 			{
 				GL_INS("Ending render pass due to resource transition/barrier");
 				EndRenderPass();

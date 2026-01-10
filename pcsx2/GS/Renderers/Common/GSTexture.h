@@ -148,9 +148,10 @@ public:
 	{
 		return m_depth_color_active;
 	}
-	__fi void ForgetDepthColor()
+	__fi GSTexture* ForgetDepthColor()
 	{
 		m_depth_color_active = false;
+		return m_depth_color.release();
 	}
 
 	__fi State GetState() const { return m_state; }

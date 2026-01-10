@@ -649,7 +649,9 @@ void GSDevice::Recycle(GSTexture* t)
 		return;
 
 	if (t->IsDepthColor())
-		t->ForgetDepthColor();
+	{
+		Recycle(t->ForgetDepthColor());
+	}
 
 	t->SetLastFrameUsed(m_frame);
 
