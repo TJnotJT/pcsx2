@@ -1174,7 +1174,19 @@ BEGIN_HOTKEY_LIST(g_gs_hotkeys){"Screenshot", TRANSLATE_NOOP("Hotkeys", "Graphic
 		[](s32 pressed) {
 			if (!pressed)
 			{
-				MTGS::RunOnGSThread([]() { GSQueueSnapshot(std::string(), 1); });
+				MTGS::RunOnGSThread([]() {
+					//GSQueueSnapshot(std::string(), 1);
+					GSConfig.DumpGSData = true;
+					GSConfig.SaveDrawStart = GSState::s_n;
+					GSConfig.SaveDrawCount = 1000;
+					GSConfig.SaveFrameStart = 0;
+					GSConfig.SaveFrameCount = 0x7FFFFFFF;
+					GSConfig.SaveAlpha = 1;
+					GSConfig.SaveRT = 1;
+					GSConfig.SaveDepth = 1;
+					GSConfig.SaveInfo = 1;
+					GSConfig.SaveTexture = 1;
+				});
 			}
 		}},
 	{"GSDumpMultiFrame", TRANSLATE_NOOP("Hotkeys", "Graphics"), TRANSLATE_NOOP("Hotkeys", "Save Multi Frame GS Dump"),

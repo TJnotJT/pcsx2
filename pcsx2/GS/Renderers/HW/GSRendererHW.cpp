@@ -6697,7 +6697,24 @@ void GSRendererHW::SetupROV()
 			use_rov_depth_final = false; // No reason to use it.
 		}
 
+		// Hack
+		if (0)
+		{
+			static bool init = false;
+			if (!init)
+			{
+				srand(123);
+				init = true;
+			}
+			const bool use_c = rand() & 1;
+			const bool use_d = rand() & 1;
+			use_rov_color_final = use_c && m_conf.rt;
+			use_rov_depth_final = use_d && m_conf.ds;
+		}
+
 		GetForcedROVUsage(use_rov_color_final, use_rov_depth_final, feedback_color, feedback_depth);
+
+
 		
 		if (GSConfig.HWROVLogging)
 		{

@@ -664,12 +664,14 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
 		{
 			// DS -> Color
+			pxFail("Implicit update");
 			UpdateDepthColor(false);
 			old_layout = GetLayout();
 		}
 		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
 		{
 			// Color -> DS
+			pxFail("Implicit update");
 			UpdateDepthColor(true);
 			old_layout = GetLayout();
 		}
