@@ -192,7 +192,7 @@ void main()
 	vtx.p.x += ((vid & 1u) != 0u) ? PointSize.x : 0.0f; 
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
 
-#if VS_INTEGER_Z
+#if VS_Z_INTEGER
 	zi = uvec3(vtx.z, 0, 0);
 #endif
 
@@ -244,7 +244,7 @@ void main()
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
-#if VS_INTEGER_Z
+#if VS_Z_INTEGER
 	zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
@@ -393,7 +393,6 @@ void main()
 #define PS_NO_COLOR 0
 #define PS_NO_COLOR1 0
 #define PS_DATE 0
-#define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
 #define PS_Z_RT_SLOT 0
@@ -474,7 +473,11 @@ layout(location = 0) out vec4 o_col0;
 #endif
 
 #if NEEDS_TEX
+#if PS_TEX_INTEGER
+layout(set = 1, binding = 0) uniform usampler2D Texture;
+#else
 layout(set = 1, binding = 0) uniform sampler2D Texture;
+#endif
 layout(set = 1, binding = 1) uniform texture2D Palette;
 #endif
 
@@ -720,17 +723,17 @@ mat4 sample_4p(uvec4 u)
 	return c;
 }
 
-int fetch_raw_depth(ivec2 xy)
+uint fetch_raw_depth(ivec2 xy)
 {
 #if PS_TEX_INTEGER
-	return texelFetch(DepthSampler, xy, 0);
+	return texelFetch(Texture, xy, 0).r;
 #else
 #if PS_TEX_IS_FB
 	vec4 col = sample_from_rt();
 #else
 	vec4 col = texelFetch(Texture, xy, 0);
 #endif
-	return int(col.r * exp2(32.0f));
+	return uint(col.r * exp2(32.0f));
 #endif
 }
 
@@ -814,7 +817,7 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 	#if (PS_TALES_OF_ABYSS_HLE == 1)
 	{
 		// Warning: UV can't be used in channel effect
-		int depth = fetch_raw_depth(pos);
+		uint depth = fetch_raw_depth(pos);
 
 		// Convert msb based on the palette
 		t = texelFetch(Palette, ivec2((depth >> 8) & 0xFF, 0), 0) * 255.0f;
@@ -828,7 +831,7 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 		// To be faster both steps (msb&lsb) are done in a single pass.
 
 		// Warning: UV can't be used in channel effect
-		int depth = fetch_raw_depth(pos);
+		uint depth = fetch_raw_depth(pos);
 
 		// Convert lsb based on the palette
 		t = texelFetch(Palette, ivec2(depth & 0xFF, 0), 0) * 255.0f;
@@ -895,7 +898,7 @@ vec4 fetch_red(ivec2 xy)
 	vec4 rt;
 
 	#if (PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2)
-		int depth = (fetch_raw_depth(xy)) & 0xFF;
+		uint depth = (fetch_raw_depth(xy)) & 0xFF;
 		rt = vec4(float(depth) / 255.0f);
 	#else
 		rt = fetch_raw_color(xy);
@@ -909,7 +912,7 @@ vec4 fetch_green(ivec2 xy)
 	vec4 rt;
 
 	#if (PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2)
-		int depth = (fetch_raw_depth(xy) >> 8) & 0xFF;
+		uint depth = (fetch_raw_depth(xy) >> 8) & 0xFF;
 		rt = vec4(float(depth) / 255.0f);
 	#else
 		rt = fetch_raw_color(xy);
@@ -923,7 +926,7 @@ vec4 fetch_blue(ivec2 xy)
 	vec4 rt;
 
 	#if (PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2)
-		int depth = (fetch_raw_depth(xy) >> 16) & 0xFF;
+		uint depth = (fetch_raw_depth(xy) >> 16) & 0xFF;
 		rt = vec4(float(depth) / 255.0f);
 	#else
 		rt = fetch_raw_color(xy);
@@ -948,8 +951,8 @@ vec4 fetch_rgb(ivec2 xy)
 vec4 fetch_gXbY(ivec2 xy)
 {
 	#if (PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2)
-		int depth = fetch_raw_depth(xy);
-		int bg = (depth >> (8 + ChannelShuffle.w)) & 0xFF;
+		uint depth = fetch_raw_depth(xy);
+		uint bg = (depth >> (8 + ChannelShuffle.w)) & 0xFF;
 		return vec4(bg);
 	#else
 		ivec4 rt = ivec4(fetch_raw_color(xy) * 255.0);
@@ -1685,7 +1688,7 @@ void main()
 				o_col0.a = sample_from_rt().a;
 			#endif
 			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
-				FragCoord.z = curr_z;
+				input_z = curr_z;
 			#endif
 			}
 		#endif

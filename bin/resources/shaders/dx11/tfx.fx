@@ -107,7 +107,6 @@
 #define PS_NO_COLOR 0
 #define PS_NO_COLOR1 0
 #define PS_DATE 0
-#define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
 #define PS_Z_RT_SLOT 0
@@ -634,7 +633,7 @@ float4 fetch_red(int2 xy)
 
 	if ((PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2))
 	{
-		int depth = (fetch_raw_depth(xy)) & 0xFF;
+		uint depth = (fetch_raw_depth(xy)) & 0xFF;
 		rt = (float4)(depth) / 255.0f;
 	}
 	else
@@ -651,7 +650,7 @@ float4 fetch_green(int2 xy)
 
 	if ((PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2))
 	{
-		int depth = (fetch_raw_depth(xy) >> 8) & 0xFF;
+		uint depth = (fetch_raw_depth(xy) >> 8) & 0xFF;
 		rt = (float4)(depth) / 255.0f;
 	}
 	else
@@ -668,7 +667,7 @@ float4 fetch_blue(int2 xy)
 
 	if ((PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2))
 	{
-		int depth = (fetch_raw_depth(xy) >> 16) & 0xFF;
+		uint depth = (fetch_raw_depth(xy) >> 16) & 0xFF;
 		rt = (float4)(depth) / 255.0f;
 	}
 	else
@@ -696,8 +695,8 @@ float4 fetch_gXbY(int2 xy)
 {
 	if ((PS_DEPTH_FMT == 1) || (PS_DEPTH_FMT == 2))
 	{
-		int depth = fetch_raw_depth(xy);
-		int bg = (depth >> (8 + ChannelShuffle.w)) & 0xFF;
+		uint depth = fetch_raw_depth(xy);
+		uint bg = (depth >> (8 + ChannelShuffle.w)) & 0xFF;
 		return (float4)(bg);
 	}
 	else
