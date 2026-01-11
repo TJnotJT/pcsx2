@@ -3548,7 +3548,7 @@ void GSDeviceVK::OMSetRenderTargets(
 					if (tex->GetState() == GSTexture::State::Cleared)
 					{
 						VkClearAttachment& ca = cas[num_ca++];
-						ca.aspectMask = depth ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
+						ca.aspectMask = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 						if (depth)
 						{
 							ca.colorAttachment = 0;
