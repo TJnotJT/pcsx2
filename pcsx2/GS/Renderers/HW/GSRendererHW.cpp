@@ -6539,9 +6539,9 @@ void GSRendererHW::SetupROV()
 	// Flags that determine the feedback we would need if we used ROVs for the current draw.
 	// Indicates that the texture is read (not necessarily written; feedback is probably the wrong word).
 	bool feedback_color = using_barriers || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
-			              colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask;
+	                      colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask;
 	bool feedback_depth = m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
-			              afail_needs_depth || ztst;
+	                      afail_needs_depth || ztst;
 
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
 	bool use_rov_color = color_write &&
@@ -6567,9 +6567,10 @@ void GSRendererHW::SetupROV()
 			rov_depth = true;
 		}
 
-		// If we use color ROV with discard of the pixel shader write to depth,
+		// If we use color ROV with discard or the pixel shader writes to depth,
 		// we cannot use early depth stencil, so must use depth ROV with feedback.
-		if (m_conf.ds && depth_write && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.zclamp))
+		if (m_conf.ds && depth_write && rov_color &&
+			(m_conf.ps.HasShaderDiscard() || m_conf.ps.zclamp || m_conf.ps.zfloor))
 		{
 			GL_INS("ROV: Color ROV with shader discard/depth write forces depth ROV");
 			rov_depth = true;
