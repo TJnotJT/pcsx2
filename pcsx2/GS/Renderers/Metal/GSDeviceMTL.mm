@@ -506,6 +506,7 @@ static constexpr MTLPixelFormat ConvertPixelFormat(GSTexture::Format format)
 {
 	switch (format)
 	{
+		case GSTexture::Format::Float32:      return MTLPixelFormatR32Float;
 		case GSTexture::Format::PrimID:       return MTLPixelFormatR32Float;
 		case GSTexture::Format::UInt32:       return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt16:       return MTLPixelFormatR16Uint;
@@ -1136,6 +1137,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				break;
 			case ShaderConvert::DEPTH_COPY:
 			case ShaderConvert::FLOAT32_TO_FLOAT24:
+			case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
 			case ShaderConvert::RGBA8_TO_FLOAT32:
 			case ShaderConvert::RGBA8_TO_FLOAT24:
 			case ShaderConvert::RGBA8_TO_FLOAT16:
@@ -1159,6 +1161,10 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::FLOAT16_TO_RGB5A1:
 			case ShaderConvert::YUV:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
+				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+				break;
+			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
+				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Float32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
 		}
