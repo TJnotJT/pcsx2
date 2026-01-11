@@ -9979,7 +9979,6 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 	return m_drawlist.size();
 }
 
-
 bool GSRendererHW::UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds)
 {
 	return ds && ds->GetFormat() == GSTexture::Format::UInt32; // Using MRTs for integer depth.
