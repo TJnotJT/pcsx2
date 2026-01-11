@@ -149,11 +149,11 @@ struct VS_OUTPUT
 	nointerpolation float4 c : COLOR0;
 #endif
 
-#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+#if VS_Z_INTEGER
 	nointerpolation uint3 zi : COLOR1;
-	#if VS_EXPAND == 4 || VS_EXPAND == 5
-		float2 bary : COLOR2;
-	#endif
+#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+	float2 bary : COLOR2;
+#endif
 #endif
 };
 
@@ -1499,9 +1499,9 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.c = input.c;
 	output.t.z = input.f.r;
 
-#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+#if VS_Z_INTEGER
 	output.zi = uint3(input.z, 0, 0);
-#if VS_EXPAND == 4 || VS_EXPAND == 5
+#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
 	output.bary = input.bary;
 #endif
 #endif
@@ -1542,10 +1542,10 @@ VS_INPUT load_vertex(uint index)
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
 
 	// Barycentric coordinates handling
-#if VS_Z_INTEGER && (VS_EXPAND >= 3 && VS_EXPAND <= 6)
+#if VS_Z_INTEGER
 #if VS_EXPAND == 4
 	uint index_mod = index % 3;
-#elif VS_EXPAND == 5
+#elif VS_EXPAND == 2 || VS_EXPAND == 5
 	uint index_mod = index & 1;
 #else
 	uint index_mod = 0;

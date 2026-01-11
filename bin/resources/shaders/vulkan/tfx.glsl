@@ -29,11 +29,11 @@ layout(location = 0) out VSOutput
 		flat vec4 c;
 	#endif
 
-#if VS_Z_INTEGER && VS_EXPAND >= 3 && VS_EXPAND <= 6
+#if VS_Z_INTEGER
 	flat uvec3 zi;
-	#if VS_EXPAND == 4 || VS_EXPAND == 5
-		vec2 bary;
-	#endif
+#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+	vec2 bary;
+#endif
 #endif
 } vsOut;
 
@@ -164,10 +164,10 @@ ProcessedVertex load_vertex(uint index)
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
 
-#if VS_Z_INTEGER && VS_EXPAND >= 3 && VS_EXPAND <= 6
+#if VS_Z_INTEGER
 	#if VS_EXPAND == 4
 		uint index_mod = index % 3;
-	#elif VS_EXPAND == 5
+	#elif VS_EXPAND == 2 || VS_EXPAND == 5
 		uint index_mod = index & 1;
 	#else
 		uint index_mod = 0;
@@ -282,9 +282,9 @@ void main()
 
 #if VS_Z_INTEGER
 	vsOut.zi = zi;
-	#if VS_EXPAND == 4 || VS_EXPAND == 5
-		vsOut.bary = vtx.bary;
-	#endif
+#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+	vsOut.bary = vtx.bary;
+#endif
 #endif
 }
 
