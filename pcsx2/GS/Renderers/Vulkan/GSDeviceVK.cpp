@@ -5296,19 +5296,31 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 		{
 			GSTextureVK::Layout layout = read_only ? GSTextureVK::Layout::ShaderReadOnly : GSTextureVK::Layout::ReadWriteImage;
 
-			// FIXME: Remove barrier.
-			if ((vkTex->GetLayout() != layout || layout == GSTextureVK::Layout::ReadWriteImage) && InRenderPass())
+			if (vkTex->GetLayout() != layout)
 			{
-				GL_INS("Ending render pass due to resource transition/barrier");
-				EndRenderPass();
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to resource transition");
+					EndRenderPass();
+				}
+				vkTex->CommitClear();
+				vkTex->TransitionToLayout(layout);
 			}
-
-			vkTex->CommitClear();
-			vkTex->TransitionToLayout(layout);
-
-			if (layout == GSTextureVK::Layout::ReadWriteImage)
+			else if (!read_only && vkTex->GetState() == GSTexture::State::Dirty)
 			{
+				// It seems we need a barrier even when using fragment shader interlock
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to UAV barrier");
+					EndRenderPass();
+				}
+				vkTex->CommitClear();
 				vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), vkTex->GetLayout());
+				g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+			}
+			else
+			{
+				vkTex->CommitClear();
 			}
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
