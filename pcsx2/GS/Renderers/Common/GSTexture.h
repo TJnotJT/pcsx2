@@ -155,7 +155,7 @@ public:
 
 	__fi u32 GetClearColor() const { return m_clear_value.color; }
 	__fi float GetClearDepth() const { return m_clear_value.depth; }
-	__fi float GetClearDepthInteger() const { return m_clear_value.depth_integer; }
+	__fi float GetClearDepthInteger() const { return m_clear_value.color; }
 	__fi GSVector4 GetUNormClearColor() const // FIXME: Rename to GetVectorClearColor
 	{
 		// FIXME: Do this properly with virtual function
