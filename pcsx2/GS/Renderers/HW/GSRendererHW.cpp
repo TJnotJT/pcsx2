@@ -6404,7 +6404,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 }
 
 // Gets the history tracking info for the given texture using a LRU queue.
-__fi std::pair<float, bool> GSRendererHW::GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight)
+__fi float GSRendererHW::GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight)
 {
 	auto it = std::find_if(
 		m_texture_rov_history.begin(), m_texture_rov_history.end(),
@@ -6436,16 +6436,7 @@ __fi std::pair<float, bool> GSRendererHW::GetTextureROVHistory(GSTexture* tex, f
 	h.m_average_barriers = w * h.m_average_barriers + (1 - w) * barriers;
 	h.m_last_draw = s_n;
 
-	return { h.m_average_barriers, h.m_rov };
-}
-
-__fi void GSRendererHW::SetTextureIsROV(GSTexture* tex, bool rov)
-{
-	auto it = std::find_if(
-		m_texture_rov_history.begin(), m_texture_rov_history.end(),
-		[&](const TextureROVHistory& h) { return h.m_tex == tex; });
-	if (it != m_texture_rov_history.end())
-		it->m_rov = rov;
+	return h.m_average_barriers;
 }
 
 void GSRendererHW::SetupROV()
@@ -6542,7 +6533,7 @@ void GSRendererHW::SetupROV()
 
 	const bool ztst = m_cached_ctx.DepthRead();
 
-	const bool using_barriers = m_conf.require_one_barrier || m_conf.require_full_barrier;
+	const bool using_barriers = m_conf.require_full_barrier;
 
 	// Flags that determine the feedback we would need if we used ROVs for the current draw.
 	// Indicates that the texture is read (not necessarily written; feedback is probably the wrong word).
@@ -6597,7 +6588,7 @@ void GSRendererHW::SetupROV()
 
 	// Get the number of barriers that would be used with the current config.
 	u32 barriers_i; 
-	if (m_conf.require_full_barrier)
+	if (using_barriers)
 	{
 		if (m_drawlist.size() > 0)
 		{
@@ -6621,13 +6612,13 @@ void GSRendererHW::SetupROV()
 
 	// Weight these barriers with the saved history. Only record the barriers in the history
 	// if the ROV is needed to save barriers for this draw, otherwise average in 1.0.
-	auto [average_barriers_color, color_is_rov] = m_conf.rt ?
-		GetTextureROVHistory(m_conf.rt, use_rov_color ? barriers : 1.0f, m_rov_history_weight_color) :
-		std::make_pair<float, bool>(0.0f, false);
-	auto [average_barriers_depth, depth_is_rov] = m_conf.ds ?
-		GetTextureROVHistory(m_conf.ds, use_rov_depth ? barriers : 1.0f, m_rov_history_weight_depth) :
-		std::make_pair<float, bool>(0.0f, false);
-	depth_is_rov = depth_is_rov && m_conf.ds->IsDepthColor(); // Make sure depth is still in color mode.
+	float average_barriers_color = m_conf.rt ?
+		GetTextureROVHistory(m_conf.rt, use_rov_color ? barriers : 1.0f, m_rov_history_weight_color) : 0.0f;
+	float average_barriers_depth = m_conf.ds ?
+		GetTextureROVHistory(m_conf.ds, use_rov_depth ? barriers : 1.0f, m_rov_history_weight_depth) : 0.0f;
+
+	const bool color_is_rov = m_conf.rt && m_conf.rt->IsUnorderedAccess();
+	const bool depth_is_rov = m_conf.ds && m_conf.ds->IsDepthColor();
 
 	const bool color_needs_enabling = use_rov_color && !color_is_rov;
 	const bool depth_needs_enabling = use_rov_depth && !depth_is_rov;
@@ -6719,12 +6710,6 @@ void GSRendererHW::SetupROV()
 				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
 		}
 	}
-
-	// Update history of ROV usage.
-	if (m_conf.rt)
-		SetTextureIsROV(m_conf.rt, use_rov_color_final);
-	if (m_conf.ds)
-		SetTextureIsROV(m_conf.ds, use_rov_depth_final);
 
 	// Do the actual config for depth.
 	if (use_rov_depth_final)

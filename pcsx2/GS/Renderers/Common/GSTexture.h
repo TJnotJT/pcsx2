@@ -152,6 +152,7 @@ public:
 	{
 		m_depth_color_active = false;
 	}
+	virtual bool IsUnorderedAccess() const { return false; }
 
 	__fi State GetState() const { return m_state; }
 	void SetState(State state) { m_state = state; }

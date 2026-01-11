@@ -208,7 +208,6 @@ private:
 		GSTexture* m_tex = nullptr; // Texture being tracked.
 		u32 m_last_draw = 0; // Last draw this was updated.
 		float m_average_barriers = 1.0f; // Average number of barriers per draw.
-		bool m_rov = false; // Was last used as ROV.
 
 		TextureROVHistory(GSTexture* tex) : m_tex(tex)
 		{
@@ -227,8 +226,7 @@ private:
 	float m_rov_barriers_disable_depth = 1.25f;
 	u32 m_rov_preset = 0;
 	std::vector<TextureROVHistory> m_texture_rov_history;
-	__fi std::pair<float, bool> GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight);
-	__fi void SetTextureIsROV(GSTexture* tex, bool rov);
+	__fi float GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight);
 	
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;

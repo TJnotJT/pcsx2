@@ -95,6 +95,7 @@ public:
 	void CommitClear(VkCommandBuffer cmdbuf);
 
 	void UpdateDepthColor(bool color_to_ds) override;
+	bool IsUnorderedAccess() const { return GetLayout() == Layout::ReadWriteImage; }
 
 	// Used when the render pass is changing the image layout, or to force it to
 	// VK_IMAGE_LAYOUT_UNDEFINED, if the existing contents of the image is
