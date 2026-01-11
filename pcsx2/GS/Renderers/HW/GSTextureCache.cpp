@@ -2787,10 +2787,14 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 		if (type == DepthStencil && dst->m_type == DepthStencil && GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp == 32 && GSLocalMemory::m_psm[TEX0.PSM].trbpp == 24 && dst->m_alpha_max > 0)
 		{
 			calcRescale(dst);
-			GSTexture* tex = g_gs_device->CreateDepthStencil(new_scaled_size.x, new_scaled_size.y, GSTexture::Format::DepthStencil, false);
+			// FIXME: Make a helper function to return the same format depth
+			GSTexture* tex = dst->m_texture->IsDepthInteger() ?
+				g_gs_device->CreateDepthStencil(new_scaled_size.x, new_scaled_size.y, GSTexture::Format::DepthStencil, false) :
+				g_gs_device->CreateRenderTarget(new_scaled_size.x, new_scaled_size.y, GSTexture::Format::UInt32, false);
 			if (!tex)
 				return nullptr;
-			g_gs_device->StretchRect(dst->m_texture, sRect, tex, dRect, GetDepth32to24Shader(dst->m_texture, tex), false);
+			g_gs_device->StretchRect(dst->m_texture, sRect, tex, dRect,
+				GetDepth32to24Shader(dst->m_texture->IsDepthInteger(), tex->IsDepthInteger()), false);
 			g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 			g_gs_device->Recycle(dst->m_texture);
 
