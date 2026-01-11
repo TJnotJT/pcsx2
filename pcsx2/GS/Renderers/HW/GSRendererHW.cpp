@@ -6744,6 +6744,7 @@ void GSRendererHW::SetupROV()
 		if (color_write)
 		{
 			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
+			GL_INS("ROV: ColorMask = %x", m_conf.colormask.wrgba);
 		}
 		else
 		{
