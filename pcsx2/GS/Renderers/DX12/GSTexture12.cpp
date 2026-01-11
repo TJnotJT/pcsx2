@@ -805,27 +805,27 @@ void GSTexture12::TransitionSubresourceToState(ID3D12GraphicsCommandList* cmdlis
 	cmdlist->ResourceBarrier(1, &barrier);
 }
 
-void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, const float* color)
+void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
 {
 	if (m_state != GSTexture::State::Cleared)
 		return;
 
 	GSDevice12::GetInstance()->EndRenderPass();
 
-	CommitClearUAV(GSDevice12::GetInstance()->GetCommandList(), gpu_handle, color);
+	CommitClearUAV(GSDevice12::GetInstance()->GetCommandList(), gpu_handle);
 }
 
-void GSTexture12::CommitClear(const float* color)
+void GSTexture12::CommitClear()
 {
 	if (m_state != GSTexture::State::Cleared)
 		return;
 
 	GSDevice12::GetInstance()->EndRenderPass();
 
-	CommitClear(GSDevice12::GetInstance()->GetCommandList(), color);
+	CommitClear(GSDevice12::GetInstance()->GetCommandList());
 }
 
-void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle, const float* color)
+void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
 {
 	if (GetResourceState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
 	{
@@ -837,19 +837,19 @@ void GSTexture12::CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_D
 	if (IsDepthStencil())
 	{
 		cmdlist->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
-			color ? color : GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
+			GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
 	}
 	else
 	{
 		GSVector4 default_color = GSVector4::unorm8(m_clear_value.color);
 		cmdlist->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
-			color ? color : default_color.v, 0, nullptr);
+			default_color.v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
 }
 
-void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color)
+void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist)
 {
 	if (IsDepthStencil())
 	{
@@ -857,19 +857,19 @@ void GSTexture12::CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* c
 		{
 			static_cast<GSTexture12*>(m_depth_color.get())->TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
 			cmdlist->ClearRenderTargetView(static_cast<GSTexture12*>(m_depth_color.get())->GetWriteDescriptor(),
-				color ? color : GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
+				GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
 		}
 		else
 		{
 			TransitionToState(cmdlist, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 			cmdlist->ClearDepthStencilView(GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH,
-				color ? *color : m_clear_value.depth, 0, 0, nullptr);
+				m_clear_value.depth, 0, 0, nullptr);
 		}
 	}
 	else
 	{
 		TransitionToState(cmdlist, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), color ? color : GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		cmdlist->ClearRenderTargetView(GetWriteDescriptor(), GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);

@@ -122,11 +122,10 @@ public:
 	bool IsUnorderedAccess() { return GetResourceState() == D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
 
 	void TransitionToState(D3D12_RESOURCE_STATES state);
-	void CommitClear(const float* color = nullptr);
-	void CommitClear(ID3D12GraphicsCommandList* cmdlist, const float* color = nullptr);
-	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v, const float* color = nullptr);
-	void CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle,
-		const float* color = nullptr);
+	void CommitClear();
+	void CommitClear(ID3D12GraphicsCommandList* cmdlist);
+	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v);
+	void CommitClearUAV(ID3D12GraphicsCommandList* cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle);
 
 	void Destroy(bool defer = true);
 

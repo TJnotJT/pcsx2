@@ -481,8 +481,7 @@ public:
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 		GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
-		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier,
-		const float* clear_color = nullptr);
+		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);

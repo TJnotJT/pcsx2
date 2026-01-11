@@ -3667,7 +3667,7 @@ void GSDevice12::BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE color_b
 	}
 
 	GetCommandList()->BeginRenderPass(num_rts, rt.data(), m_current_depth_target ? &ds : nullptr,
-		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAG_BIND_READ_ONLY_DEPTH) : D3D12_RENDER_PASS_FLAG_NONE);
+		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAGS(8)) : D3D12_RENDER_PASS_FLAG_NONE);
 }
 
 void GSDevice12::EndRenderPass()
@@ -4412,7 +4412,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 	GSTexture12* draw_ds_as_rt, GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
 	const bool feedback_rt, const bool feedback_depth,
-	const bool one_barrier, const bool full_barrier, const float* clear_color)
+	const bool one_barrier, const bool full_barrier)
 {
 	// Should not be mixing ROVs with barriers.
 	pxAssert(!(draw_rt_rov || draw_ds_rov) || !(one_barrier || full_barrier));
@@ -4448,7 +4448,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				if (draw_rt_rov->GetState() == GSTexture::State::Cleared)
 				{
 					// Small optimization: clear directly as UAV.
-					draw_rt_rov->CommitClearUAV(gpu_handle_rt, clear_color);
+					draw_rt_rov->CommitClearUAV(gpu_handle_rt);
 				}
 				if (!config.ps.no_color)
 				{
