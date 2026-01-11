@@ -13,9 +13,12 @@
 #include "GS/GSExtra.h"
 #include <array>
 
+// Warning: the order of certain values matters here. In particular, shaders that have a 32, 24, and 16
+// bit versions must be kept contiguously in that order.
 enum class ShaderConvert
 {
 	COPY = 0,
+	COPY_UINT,
 	RGBA8_TO_16_BITS,
 	DATM_1,
 	DATM_0,
@@ -27,21 +30,37 @@ enum class ShaderConvert
 	RTA_DECORRECTION,
 	TRANSPARENCY_FILTER,
 	FLOAT32_TO_16_BITS,
-	FLOAT32_TO_32_BITS,
+	FLOAT32_TO_UINT32,
+	FLOAT32_TO_UINT24,
 	FLOAT32_TO_RGBA8,
 	FLOAT32_TO_RGB8,
+	UINT32_TO_16_BITS,
+	UINT32_TO_FLOAT32,
+	UINT32_TO_FLOAT24,
+	UINT32_TO_RGBA8,
+	UINT32_TO_RGB8,
 	FLOAT16_TO_RGB5A1,
+	UINT16_TO_RGB5A1,
 	RGBA8_TO_FLOAT32,
 	RGBA8_TO_FLOAT24,
 	RGBA8_TO_FLOAT16,
+	RGBA8_TO_UINT32,
+	RGBA8_TO_UINT24,
+	RGBA8_TO_UINT16,
 	RGB5A1_TO_FLOAT16,
+	RGB5A1_TO_UINT16,
 	RGBA8_TO_FLOAT32_BILN,
 	RGBA8_TO_FLOAT24_BILN,
 	RGBA8_TO_FLOAT16_BILN,
+	RGBA8_TO_UINT32_BILN,
+	RGBA8_TO_UINT24_BILN,
+	RGBA8_TO_UINT16_BILN,
 	RGB5A1_TO_FLOAT16_BILN,
+	RGB5A1_TO_UINT16_BILN,
 	FLOAT32_DEPTH_TO_COLOR,
 	FLOAT32_COLOR_TO_DEPTH,
 	FLOAT32_TO_FLOAT24,
+	UINT32_TO_UINT24,
 	DEPTH_COPY,
 	DOWNSAMPLE_COPY,
 	RGBA_TO_8I,
@@ -106,6 +125,51 @@ static inline bool HasDepthOutput(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::UINT32_TO_FLOAT32:
+		case ShaderConvert::UINT32_TO_FLOAT24:
+			return true;
+		default:
+			return false;
+	}
+}
+
+static inline bool HasIntegerInput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::COPY_UINT:
+		case ShaderConvert::UINT32_TO_16_BITS:
+		case ShaderConvert::UINT32_TO_FLOAT32:
+		case ShaderConvert::UINT32_TO_FLOAT24:
+		case ShaderConvert::UINT32_TO_RGBA8:
+		case ShaderConvert::UINT32_TO_RGB8:
+		case ShaderConvert::UINT16_TO_RGB5A1:
+		case ShaderConvert::UINT32_TO_UINT24:
+			return true;
+		default:
+			return false;
+	}
+}
+
+static inline bool HasIntegerOutput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::RGBA8_TO_16_BITS:
+		case ShaderConvert::COPY_UINT:
+		case ShaderConvert::FLOAT32_TO_16_BITS:
+		case ShaderConvert::FLOAT32_TO_UINT32:
+		case ShaderConvert::FLOAT32_TO_UINT24:
+		case ShaderConvert::UINT32_TO_16_BITS:
+		case ShaderConvert::RGBA8_TO_UINT32:
+		case ShaderConvert::RGBA8_TO_UINT24:
+		case ShaderConvert::RGBA8_TO_UINT16:
+		case ShaderConvert::RGB5A1_TO_UINT16:
+		case ShaderConvert::RGBA8_TO_UINT32_BILN:
+		case ShaderConvert::RGBA8_TO_UINT24_BILN:
+		case ShaderConvert::RGBA8_TO_UINT16_BILN:
+		case ShaderConvert::RGB5A1_TO_UINT16_BILN:
+		case ShaderConvert::UINT32_TO_UINT24:
 			return true;
 		default:
 			return false;
@@ -133,7 +197,11 @@ static inline bool SupportsNearest(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
+		case ShaderConvert::RGBA8_TO_UINT32_BILN:
+		case ShaderConvert::RGBA8_TO_UINT24_BILN:
+		case ShaderConvert::RGBA8_TO_UINT16_BILN:
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+		case ShaderConvert::RGB5A1_TO_UINT16_BILN:
 			return false;
 		default:
 			return true;
@@ -147,7 +215,11 @@ static inline bool SupportsBilinear(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT32:
 		case ShaderConvert::RGBA8_TO_FLOAT24:
 		case ShaderConvert::RGBA8_TO_FLOAT16:
+		case ShaderConvert::RGBA8_TO_UINT32:
+		case ShaderConvert::RGBA8_TO_UINT24:
+		case ShaderConvert::RGBA8_TO_UINT16:
 		case ShaderConvert::RGB5A1_TO_FLOAT16:
+		case ShaderConvert::RGB5A1_TO_UINT16:
 			return false;
 		default:
 			return true;
@@ -159,9 +231,60 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 	switch (shader)
 	{
 		case ShaderConvert::FLOAT32_TO_RGB8:
+		case ShaderConvert::UINT32_TO_RGB8:
 			return 0x7;
 		default:
 			return 0xf;
+	}
+}
+
+static ShaderConvert GetDepthCopyShader(bool src_int, bool dst_int)
+{
+	return src_int ? (dst_int ? ShaderConvert::COPY_UINT : ShaderConvert::UINT32_TO_FLOAT32) :
+		             (dst_int ? ShaderConvert::FLOAT32_TO_UINT32 : ShaderConvert::DEPTH_COPY);
+}
+
+static ShaderConvert GetColorDepthShader(bool color_to_depth, u32 bpp, bool src_int, bool dst_int)
+{
+	switch (bpp)
+	{
+	case 32:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGBA8_TO_UINT32 : ShaderConvert::RGBA8_TO_FLOAT32) :
+			(src_int ? ShaderConvert::UINT32_TO_RGBA8 : ShaderConvert::FLOAT32_TO_RGBA8);
+	case 24:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGBA8_TO_UINT24 : ShaderConvert::RGBA8_TO_FLOAT24) :
+			(src_int ? ShaderConvert::UINT32_TO_RGBA8 : ShaderConvert::FLOAT32_TO_RGBA8);
+	case 16:
+		return color_to_depth ?
+			(dst_int ? ShaderConvert::RGB5A1_TO_UINT16 : ShaderConvert::RGB5A1_TO_FLOAT16) :
+			(src_int ? ShaderConvert::UINT16_TO_RGB5A1 : ShaderConvert::FLOAT16_TO_RGB5A1);
+	default:
+		pxFailRel("Incorrect bpp");
+		return static_cast<ShaderConvert>(-1);
+	}
+}
+
+static ShaderConvert GetDepth32to24Shader(bool src_int, bool dst_int)
+{
+	return src_int ? (dst_int ? ShaderConvert::UINT32_TO_UINT24 : ShaderConvert::UINT32_TO_FLOAT24) :
+		             (dst_int ? ShaderConvert::FLOAT32_TO_UINT24 : ShaderConvert::FLOAT32_TO_FLOAT24);
+}
+
+static ShaderConvert GetBilinearVersion(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::RGBA8_TO_FLOAT32: return ShaderConvert::RGBA8_TO_FLOAT32_BILN;
+		case ShaderConvert::RGBA8_TO_FLOAT24: return ShaderConvert::RGBA8_TO_FLOAT24_BILN;
+		case ShaderConvert::RGBA8_TO_FLOAT16: return ShaderConvert::RGBA8_TO_FLOAT16_BILN;
+		case ShaderConvert::RGBA8_TO_UINT32: return ShaderConvert::RGBA8_TO_UINT32_BILN;
+		case ShaderConvert::RGBA8_TO_UINT24: return ShaderConvert::RGBA8_TO_UINT24_BILN;
+		case ShaderConvert::RGBA8_TO_UINT16: return ShaderConvert::RGBA8_TO_UINT16_BILN;
+		case ShaderConvert::RGB5A1_TO_FLOAT16: return ShaderConvert::RGB5A1_TO_FLOAT16_BILN;
+		case ShaderConvert::RGB5A1_TO_UINT16: return ShaderConvert::RGB5A1_TO_UINT16_BILN;
+		default: pxFail("Does not support bilinear."); return static_cast<ShaderConvert>(-1);
 	}
 }
 
@@ -306,6 +429,9 @@ struct alignas(16) GSHWDrawConfig
 		Point,
 		Line,
 		Sprite,
+		TriangleZInt,
+		LineZInt,
+		PointZInt
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -318,8 +444,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 2;
-				u8 _free : 2;
+				VSExpand expand : 3;
+				u8 zint : 1;
 			};
 			u8 key;
 		};
@@ -443,6 +569,12 @@ struct alignas(16) GSHWDrawConfig
 				// Feedback
 				u32 color_feedback : 1;
 				u32 depth_feedback : 1;
+
+				// Integer depth
+				u32 z_rt_slot : 2;
+				u32 zint : 1;
+				u32 primclass : 3;
+				u32 texint : 1;
 			};
 
 			struct
@@ -859,6 +991,12 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 		case GSHWDrawConfig::VSExpand::Sprite:
 			// Sprite expand does a 2-4 expansion, and relies on the low bit of the vertex ID to figure out if it's the first or second coordinate.
 			return 2;
+		case GSHWDrawConfig::VSExpand::TriangleZInt:
+			// Triangle Z integer relies on vertex ID modulo 3 to figure out which vertex it is.
+			return 3;
+		case GSHWDrawConfig::VSExpand::LineZInt:
+			// Line Z integer relies on vertex ID modulo 2 to figure out which vertex it is.
+			return 3;
 		default:
 			return 1;
 	}
@@ -903,6 +1041,7 @@ public:
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
 		bool depth_feedback       : 1; ///< Depth feedback loops by directly binding DepthStencil target for read/write.
 		bool depth_as_rt_feedback : 1; ///< Depth feedback loops by converting depth to a temporary color target.
+		bool depth_integer        : 1; ///< Supports 32 bit integer for depth buffer.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
@@ -1111,6 +1250,8 @@ public:
 
 	void ClearRenderTarget(GSTexture* t, u32 c);
 	void ClearDepth(GSTexture* t, float d);
+	void ClearDepthInteger(GSTexture* t, u32 d);
+	void ClearDepthOrDepthInteger(GSTexture* t, u32 d);
 	bool ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy);
 	void InvalidateRenderTarget(GSTexture* t);
 
