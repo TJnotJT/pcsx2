@@ -3387,8 +3387,16 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 	// Unbind conflicting RTs if needed.
 	if (uav)
 	{
+		// Unbind conflicting RT texture
 		const u32 i_conflict = (i == TEXTURE_RT_UAV) ? TEXTURE_RT : TEXTURE_DEPTH;
 		PSSetShaderResource(i_conflict, nullptr, false);
+
+		// Unbind conflicting source texture
+		if ((m_tfx_textures[TEXTURE_TEXTURE] == static_cast<GSTexture12*>(uav)->GetSRVDescriptor()) ||
+			(!uav->IsDepthColor() && m_tfx_textures[TEXTURE_TEXTURE] == static_cast<GSTexture12*>(uav)->GetFBLDescriptor()))
+		{
+			PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
+		}
 
 		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
 		for (GSTexture12** rt : curr_rts)

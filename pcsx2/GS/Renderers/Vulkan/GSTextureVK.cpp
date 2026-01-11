@@ -621,6 +621,7 @@ void GSTextureVK::UpdateDepthColor(bool color_to_ds)
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 			device->StretchRect(m_depth_color.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 			device->EndRenderPass();
+			device->UnbindTexture(static_cast<GSTextureVK*>(m_depth_color.get()));
 
 			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 		}
@@ -633,6 +634,7 @@ void GSTextureVK::UpdateDepthColor(bool color_to_ds)
 			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 			device->StretchRect(this, m_depth_color.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
 			device->EndRenderPass();
+			device->UnbindTexture(static_cast<GSTextureVK*>(m_depth_color.get()));
 
 			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
 		}
@@ -659,19 +661,17 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
 void GSTextureVK::TransitionSubresourcesToLayout(
 	VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout)
 {
+	// Depth/color must be updated explicitly before transitioning
 	if (IsDepthStencil())
 	{
 		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
 		{
-			// DS -> Color
-			UpdateDepthColor(false);
-			old_layout = GetLayout();
+			pxFail("Transitioning to depth UAV without depth color.");
+
 		}
 		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
 		{
-			// Color -> DS
-			UpdateDepthColor(true);
-			old_layout = GetLayout();
+			pxFail("Transitioning to depth while in depth color.");
 		}
 	}
 

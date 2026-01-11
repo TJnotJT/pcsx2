@@ -6448,9 +6448,6 @@ __fi void GSRendererHW::SetTextureIsROV(GSTexture* tex, bool rov)
 		it->m_rov = rov;
 }
 
-static FILE* debug_fp = nullptr;
-extern std::string dump_name;
-
 void GSRendererHW::SetupROV()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
@@ -6543,7 +6540,7 @@ void GSRendererHW::SetupROV()
 
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
-	const bool ztst = m_conf.ps.IsZTesting() || (m_conf.depth.ztst != ZTST_ALWAYS);
+	const bool ztst = m_cached_ctx.DepthRead();
 
 	const bool using_barriers = m_conf.require_one_barrier || m_conf.require_full_barrier;
 
@@ -6573,15 +6570,16 @@ void GSRendererHW::SetupROV()
 		// We currently don't have a way of using barriers in one and ROV in the other.
 		if ((m_conf.ps.IsFeedbackLoopRT() && rov_depth) || (m_conf.ps.IsFeedbackLoopDepth() && rov_color))
 		{
-			GL_INS("Feedback compatibility forces color and depth ROV");
+			GL_INS("ROV: Feedback compatibility forces color and depth ROV");
 			rov_color = true;
 			rov_depth = true;
 		}
 
-		// If we use color ROV with discard, we cannot use early depth stencil, so must use depth ROV with feedback.
-		if (m_conf.ds && depth_write && rov_color && m_conf.ps.HasShaderDiscard())
+		// If we use color ROV with discard of the pixel shader write to depth,
+		// we cannot use early depth stencil, so must use depth ROV with feedback.
+		if (m_conf.ds && depth_write && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.zclamp))
 		{
-			GL_INS("Color ROV with shader discard forces depth ROV");
+			GL_INS("ROV: Color ROV with shader discard/depth write forces depth ROV");
 			rov_depth = true;
 			feedback_depth = true;
 		}
@@ -6589,7 +6587,7 @@ void GSRendererHW::SetupROV()
 		// If we have SW depth testing we must also use color ROV so that color discard works correctly.
 		if (m_conf.rt && color_write && rov_depth && ztst)
 		{
-			GL_INS("Depth ROV with Z test forces color ROV");
+			GL_INS("ROV: Depth ROV with Z test forces color ROV");
 			rov_color = true;
 			feedback_color = true;
 		}
@@ -6733,15 +6731,17 @@ void GSRendererHW::SetupROV()
 	{
 		GL_INS("ROV: Using depth ROV");
 
-		if (m_conf.depth.ztst != ZTST_ALWAYS)
+		if (ztst)
 		{
-			GL_INS("ROV: Replace HW with SW depth test");
-			m_conf.ps.ztst = m_conf.depth.ztst;
+			GL_INS("ROV: Using SW depth test%s", m_conf.depth.ztst != ZTST_ALWAYS ? " and disabling HW" : "");
+			m_conf.ps.ztst = m_cached_ctx.TEST.ZTST;
 		}
 
-		if (m_conf.depth.zwe)
+		if (depth_write)
 		{
-			GL_INS("ROV: Replace HW with SW depth write");
+			GL_INS("ROV: Using SW depth write%s",
+				(m_conf.depth.zwe || (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)) ?
+				" and disabling HW" : "");
 			GetZClampConfigVSPS(true); // Z clamp is a proxy for SW Z write.
 		}
 		
@@ -6776,8 +6776,8 @@ void GSRendererHW::SetupROV()
 
 			// Disable HW or mixed blend or multipass blend
 			m_conf.blend = {};
-			m_conf.ps.blend_hw = 0;
-			m_conf.ps.blend_mix = 0;
+			m_conf.ps.blend_hw = false;
+			m_conf.ps.blend_mix = false;
 			m_conf.blend_multi_pass = {};
 
 			if (!m_conf.ps.no_color1)
@@ -6841,7 +6841,9 @@ void GSRendererHW::SetupROV()
 			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
 
 			if (m_conf.alpha_second_pass.enable)
+			{
 				m_conf.alpha_second_pass = {};
+			}
 		}
 
 		m_conf.ps.rov_color = true;

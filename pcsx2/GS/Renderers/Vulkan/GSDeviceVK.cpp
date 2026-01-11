@@ -5265,8 +5265,15 @@ void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, b
 
 		PSSetShaderResource(i, tex, true, false);
 
+		// Unbind conflicting RT texture
 		const u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT : TFX_TEXTURE_DEPTH;
 		PSSetShaderResource(i_conflict, nullptr, false);
+
+		// Unbind conflicting source texture
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == tex)
+		{
+			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
+		}
 
 		if (write)
 		{
@@ -5289,7 +5296,8 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 		{
 			GSTextureVK::Layout layout = read_only ? GSTextureVK::Layout::ShaderReadOnly : GSTextureVK::Layout::ReadWriteImage;
 
-			if (vkTex->GetLayout() != layout && InRenderPass())
+			// FIXME: Remove barrier.
+			if ((vkTex->GetLayout() != layout || layout == GSTextureVK::Layout::ReadWriteImage) && InRenderPass())
 			{
 				GL_INS("Ending render pass due to resource transition/barrier");
 				EndRenderPass();
@@ -5297,6 +5305,11 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 
 			vkTex->CommitClear();
 			vkTex->TransitionToLayout(layout);
+
+			if (layout == GSTextureVK::Layout::ReadWriteImage)
+			{
+				vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), vkTex->GetLayout());
+			}
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
 	}
