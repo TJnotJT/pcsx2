@@ -6711,11 +6711,12 @@ void GSRendererHW::SetupROV()
 		}
 	}
 
+	GL_INS("ROV: %sColor ROV / %sDepth ROV", use_rov_color_final ? "" : "No",
+	                                         use_rov_depth_final ? "" : "No");
+
 	// Do the actual config for depth.
 	if (use_rov_depth_final)
 	{
-		GL_INS("ROV: Using depth ROV");
-
 		if (ztst)
 		{
 			GL_INS("ROV: Using SW depth test%s", m_conf.depth.ztst != ZTST_ALWAYS ? " and disabling HW" : "");
@@ -6738,8 +6739,6 @@ void GSRendererHW::SetupROV()
 	// Do the actual config for color.
 	if (use_rov_color_final)
 	{
-		GL_INS("ROV: Using color ROV");
-
 		// ColorMask setup
 		if (color_write)
 		{
