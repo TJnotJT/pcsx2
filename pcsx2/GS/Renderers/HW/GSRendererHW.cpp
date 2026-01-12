@@ -6552,6 +6552,12 @@ void GSRendererHW::SetupROV()
 	                     ((using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ||
 	                     m_conf.alpha_second_pass.enable);
 
+	if (use_rov_color && m_conf.ps.zfloor && !GSConfig.HWROVUseZFloor)
+	{
+		GL_INS("ROV: Disable Z floor to avoid depth ROV");
+		m_conf.ps.zfloor = false;
+	}
+
 	// In certain cases using a ROV with depth or color will force the other one.
 	// We have to use this twice: once before when deciding whether to use ROV
 	// and later when we commit to using ROV.

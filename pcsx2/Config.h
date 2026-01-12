@@ -870,6 +870,7 @@ struct Pcsx2Config
 		float HWROVBarriersDisableDepth = 1.25f;
 		u32 HWROVPreset = 1;
 		bool HWROVUseBarriersVK = true;
+		bool HWROVUseZFloor = true;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
