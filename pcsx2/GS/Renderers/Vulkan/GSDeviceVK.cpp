@@ -5308,7 +5308,7 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 				}
 				vkTex->TransitionToLayout(layout);
 			}
-			else if (!read_only)
+			else if (!read_only && GSConfig.HWROVUseBarriersVK)
 			{
 				// It seems we need a barrier even when using fragment shader interlock
 				if (InRenderPass())

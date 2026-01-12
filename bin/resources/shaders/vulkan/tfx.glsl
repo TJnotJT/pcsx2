@@ -402,9 +402,9 @@ layout(location = 0) in VSOutput
 	#if PS_RETURN_COLOR_ROV && PS_FEEDBACK_LOOP_IS_NEEDED_RT
 		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent image2D RtImageRov;
 	#elif PS_RETURN_COLOR_ROV
-		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent writeonly image2D RtImageRov;
+		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent image2D RtImageRov; // FIXME: writeonly
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
-		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent readonly image2D RtImageRov;
+		layout(set = 1, binding = 5, rgba32f) uniform restrict coherent image2D RtImageRov; // FIXME: readonly
 	#endif
 	#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
 		vec4 cachedRtValue;
@@ -416,9 +416,9 @@ layout(location = 0) in VSOutput
 	#if PS_RETURN_DEPTH_ROV && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
 	#elif PS_RETURN_DEPTH_ROV
-		layout(set = 1, binding = 6, r32f) uniform restrict coherent writeonly image2D DepthImageRov;
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov; // FIXME: writeonly
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		layout(set = 1, binding = 6, r32f) uniform restrict coherent readonly image2D DepthImageRov;
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov; // FIXME: readonly
 	#endif
 	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 		float cachedDepthValue;
