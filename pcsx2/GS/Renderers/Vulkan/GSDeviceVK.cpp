@@ -5727,6 +5727,12 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	pipe.ps.texint = false;
 	pipe.ps.zint = false;
 	pipe.vs.zint = false;
+	if ((pipe.vs.expand == GSHWDrawConfig::VSExpand::LineZInt) ||
+		(pipe.vs.expand == GSHWDrawConfig::VSExpand::TriangleZInt) ||
+		(pipe.vs.expand == GSHWDrawConfig::VSExpand::PointZInt))
+	{
+		pipe.vs.expand = GSHWDrawConfig::VSExpand::None;
+	}
 	if (BindDrawPipeline(pipe))
 		DrawIndexedPrimitive();
 
