@@ -3523,13 +3523,13 @@ void GSDeviceVK::OMSetRenderTargets(
 			m_current_framebuffer =
 				vkRt->GetLinkedFramebuffer(vkDs,
 					(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT) != 0,
-					(feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0);
+					(feedback_loop & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0);
 		}
 		else if (vkDs)
 		{
 			pxAssert(!(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT));
 			m_current_framebuffer = vkDs->GetLinkedFramebuffer(
-				nullptr, false, (feedback_loop & FeedbackLoopFlag_ReadAndWriteDepth) != 0);
+				nullptr, false, (feedback_loop & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0);
 		}
 		else
 		{

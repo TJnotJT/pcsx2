@@ -6512,6 +6512,18 @@ void GSRendererHW::SetupROV()
 		return;
 	}
 
+	if (m_conf.tex && m_conf.tex == m_conf.rt && !m_conf.ps.tex_is_fb)
+	{
+		GL_INS("ROV: Disabled because tex is RT and not sampling from current pixel");
+		return;
+	}
+
+	if (m_conf.tex && m_conf.tex == m_conf.ds)
+	{
+		GL_INS("ROV: Disabled because tex is depth");
+		return;
+	}
+
 	const bool color_write = m_conf.rt && m_conf.colormask.wrgba != 0;
 	const bool depth_write = m_conf.ds && m_cached_ctx.DepthWrite();
 
@@ -6534,22 +6546,22 @@ void GSRendererHW::SetupROV()
 
 	const bool ztst = m_cached_ctx.DepthRead();
 
-	const bool using_barriers = m_conf.require_full_barrier;
+	const bool full_barrier = m_conf.require_full_barrier;
 
 	// Flags that determine the feedback we would need if we used ROVs for the current draw.
 	// Indicates that the texture is read (not necessarily written; feedback is probably the wrong word).
-	bool feedback_color = using_barriers || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
+	bool feedback_color = m_conf.ps.IsFeedbackLoopRT() || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
 	                      colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask;
 	bool feedback_depth = m_conf.ps.IsFeedbackLoopDepth() || (m_conf.tex && m_conf.tex == m_conf.ds) ||
 	                      afail_needs_depth || ztst;
 
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
 	bool use_rov_color = color_write &&
-	                     ((using_barriers && m_conf.ps.IsFeedbackLoopRT()) ||
+	                     ((full_barrier && m_conf.ps.IsFeedbackLoopRT()) ||
 	                     m_conf.alpha_second_pass.enable ||
 	                     m_conf.blend_multi_pass.enable);
 	bool use_rov_depth = depth_write &&
-	                     ((using_barriers && m_conf.ps.IsFeedbackLoopDepth()) ||
+	                     ((full_barrier && m_conf.ps.IsFeedbackLoopDepth()) ||
 	                     m_conf.alpha_second_pass.enable);
 
 	if (use_rov_color && m_conf.ps.zfloor && !GSConfig.HWROVUseZFloor)
@@ -6596,7 +6608,7 @@ void GSRendererHW::SetupROV()
 
 	// Get the number of barriers that would be used with the current config.
 	u32 barriers_i; 
-	if (using_barriers)
+	if (full_barrier)
 	{
 		if (m_drawlist.size() > 0)
 		{
@@ -6751,7 +6763,7 @@ void GSRendererHW::SetupROV()
 		if (color_write)
 		{
 			m_conf.cb_ps.ColorMask = GSVector4i(m_conf.colormask.wr, m_conf.colormask.wg, m_conf.colormask.wb, m_conf.colormask.wa);
-			GL_INS("ROV: ColorMask = %x", m_conf.colormask.wrgba);
+			GL_INS("ROV: ColorMask = 0x%X", m_conf.colormask.wrgba);
 		}
 		else
 		{

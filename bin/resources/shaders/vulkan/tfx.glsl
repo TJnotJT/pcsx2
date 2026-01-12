@@ -317,7 +317,6 @@ void main()
 #define PS_NO_COLOR 0
 #define PS_NO_COLOR1 0
 #define PS_DATE 0
-#define PS_TEX_IS_FB 0
 #define PS_COLOR_FEEDBACK 0
 #define PS_DEPTH_FEEDBACK 0
 #define PS_ROV_COLOR 0
@@ -657,6 +656,8 @@ int fetch_raw_depth(ivec2 xy)
 {
 #if PS_TEX_IS_FB
 	vec4 col = sample_from_rt();
+#elif PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	vec4 col = sample_from_depth();
 #else
 	vec4 col = texelFetch(Texture, xy, 0);
 #endif
@@ -665,7 +666,7 @@ int fetch_raw_depth(ivec2 xy)
 
 vec4 fetch_raw_color(ivec2 xy)
 {
-#if PS_TEX_IS_FB
+#if PS_TEX_IS_FB || (PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT)
 	return sample_from_rt();
 #else
 	return texelFetch(Texture, xy, 0);
