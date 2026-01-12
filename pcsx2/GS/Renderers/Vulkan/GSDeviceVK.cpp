@@ -5720,9 +5720,13 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	pipe.bs = {};
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	pipe.rt = true;
+	pipe.ds_as_rt = false;
 	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
 	pipe.ps.no_color = false;
 	pipe.ps.no_color1 = true;
+	pipe.ps.texint = false;
+	pipe.ps.zint = false;
+	pipe.vs.zint = false;
 	if (BindDrawPipeline(pipe))
 		DrawIndexedPrimitive();
 

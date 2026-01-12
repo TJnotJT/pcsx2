@@ -3905,9 +3905,13 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.cms.wrgba = 0;
 	init_pipe.bs = {};
 	init_pipe.rt = true;
+	init_pipe.ds_as_rt = 0;
 	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
+	init_pipe.ps.texint = false;
+	init_pipe.ps.zint = false;
+	init_pipe.vs.zint = false;
 	if (BindDrawPipeline(init_pipe))
 		DrawIndexedPrimitive();
 
