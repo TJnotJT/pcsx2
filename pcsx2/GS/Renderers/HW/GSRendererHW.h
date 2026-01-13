@@ -225,9 +225,9 @@ private:
 	float m_rov_barriers_disable_color = 1.125f;
 	float m_rov_barriers_disable_depth = 1.25f;
 	u32 m_rov_preset = 0;
-	std::vector<TextureROVHistory> m_texture_rov_history;
-	__fi float GetTextureROVHistory(GSTexture* tex, float barriers, float history_weight);
-	
+	std::vector<TextureROVHistory*> m_texture_rov_history;
+	__fi TextureROVHistory* GetTextureROVHistory(GSTexture* tex);
+
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
 
