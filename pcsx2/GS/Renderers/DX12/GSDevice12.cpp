@@ -1358,12 +1358,20 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	if (sTex && sTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in CopyRect()");
+		}
 		sTex->UpdateDepthColor(true);
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in CopyRect()");
+		}
 		dTex->UpdateDepthColor(true);
 	}
 
@@ -1589,6 +1597,10 @@ void GSDevice12::DoMultiStretchRects(
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in DoMultiStretchRects()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in DoMultiStretchRects()");
+		}
 		EndRenderPass();
 		dTex->UpdateDepthColor(true);
 	}
@@ -1704,6 +1716,10 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in DoStretchRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in DoStretchRect()");
+		}
 		EndRenderPass();
 		dTex->UpdateDepthColor(true);
 	}
@@ -4044,6 +4060,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		GL_INS("DS -> Color in RenderHW()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("DS -> Color in RenderHW()");
+		}
 		EndRenderPass();
 		draw_ds_rov->UpdateDepthColor(false);
 	}
@@ -4052,6 +4072,10 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		GL_INS("Color -> DS in RenderHW()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in RenderHW()");
+		}
 		EndRenderPass();
 		draw_ds->UpdateDepthColor(true);
 	}

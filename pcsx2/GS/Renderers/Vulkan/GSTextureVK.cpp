@@ -354,6 +354,10 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 	if (IsDepthColor())
 	{
 		GL_INS("Color -> DS in Update()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in Update()");
+		}
 		UpdateDepthColor(true);
 	}
 
@@ -943,6 +947,10 @@ void GSDownloadTextureVK::CopyFromTexture(
 	if (vkTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyFromTexture()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in CopyFromTexture()");
+		}
 		vkTex->UpdateDepthColor(true);
 	}
 

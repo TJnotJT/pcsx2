@@ -2855,12 +2855,20 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 	if (sTex && sTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in CopyRect()");
+		}
 		sTex->UpdateDepthColor(true);
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in CopyRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in CopyRect()");
+		}
 		dTex->UpdateDepthColor(true);
 	}
 
@@ -3006,6 +3014,10 @@ void GSDeviceVK::DoMultiStretchRects(
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in DoMultiStretchRects()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in DoMultiStretchRects()");
+		}
 		EndRenderPass();
 		dTex->UpdateDepthColor(true);
 	}
@@ -3137,6 +3149,10 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in DoStretchRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in DoStretchRect()");
+		}
 		EndRenderPass();
 		dTex->UpdateDepthColor(true);
 	}
@@ -3200,12 +3216,20 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel, 
 	if (sTex && sTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in BlitRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in BlitRect()");
+		}
 		sTex->UpdateDepthColor(true);
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
 		GL_INS("Color -> DS in BlitRect()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in BlitRect()");
+		}
 		dTex->UpdateDepthColor(true);
 	}
 
@@ -5826,6 +5850,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		GL_INS("DS -> Color in RenderHW()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("DS -> Color in RenderHW()");
+		}
 		EndRenderPass();
 		draw_ds_rov->UpdateDepthColor(false);
 	}
@@ -5834,6 +5862,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		GL_INS("Color -> DS in RenderHW()");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Color -> DS in RenderHW()");
+		}
 		EndRenderPass();
 		draw_ds->UpdateDepthColor(true);
 	}
