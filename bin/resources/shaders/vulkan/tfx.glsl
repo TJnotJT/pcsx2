@@ -399,18 +399,14 @@ layout(location = 0) in VSOutput
 
 #if PS_ROV_COLOR
 	layout(set = 1, binding = 5, rgba32f) uniform restrict coherent image2D RtImageRov;
-	#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
-		vec4 cachedRtValue;
-		vec4 sample_from_rt() { return cachedRtValue; }
-	#endif
+	vec4 cachedRtValue;
+	vec4 sample_from_rt() { return cachedRtValue; }
 #endif
 
 #if PS_ROV_DEPTH
 	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		float cachedDepthValue;
-		vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
-	#endif
+	float cachedDepthValue;
+	vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
 #endif
 
 #if NEEDS_TEX
@@ -1334,11 +1330,11 @@ void main()
 	beginInvocationInterlockARB();
 #endif
 
-#if PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT
+#if PS_ROV_COLOR
 	cachedRtValue = imageLoad(RtImageRov, ivec2(FragCoord.xy));
 #endif
 
-#if PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+#if PS_ROV_DEPTH
 	cachedDepthValue = imageLoad(DepthImageRov, ivec2(FragCoord.xy)).r;
 #endif
 
@@ -1553,7 +1549,7 @@ void main()
 	#endif
 
 	// Writing back color (nothing to do for non-ROV)
-	#if PS_RETURN_COLOR_ROV
+	#if PS_ROV_COLOR
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
 			vec4 rt_col = sample_from_rt();
 
@@ -1576,7 +1572,7 @@ void main()
 	#endif
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = FragCoord.z;
-	#elif PS_RETURN_DEPTH_ROV
+	#elif PS_ROV_DEPTH
 		imageStore(DepthImageRov, ivec2(FragCoord.xy), vec4(FragCoord.z, 0, 0, 1.0f));
 	#endif
 
