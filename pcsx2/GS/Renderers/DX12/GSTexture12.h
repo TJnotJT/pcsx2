@@ -119,7 +119,7 @@ public:
 #endif
 
 	void UpdateDepthColor(bool color_to_ds) override;
-	bool IsUnorderedAccess() { return GetResourceState() == D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
+	virtual bool IsUnorderedAccess() const override { return GetResourceState() == D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
 
 	void TransitionToState(D3D12_RESOURCE_STATES state);
 	void CommitClear();
