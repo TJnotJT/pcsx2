@@ -763,6 +763,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWROVBarriersEnableDepth = 4.0f;
 	HWROVBarriersDisableColor = 1.125f;
 	HWROVBarriersDisableDepth = 1.25f;
+	HWROVUseBarriersVK = false;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
