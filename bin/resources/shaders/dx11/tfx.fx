@@ -162,19 +162,22 @@ struct PS_INPUT
 	float4 p : SV_Position;
 	float4 t : TEXCOORD0;
 	float4 ti : TEXCOORD2;
+
 #if VS_IIP != 0 || GS_IIP != 0 || PS_IIP != 0
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
 #endif
-#if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
-	uint primid : SV_PrimitiveID;
-#endif
+
 #if PS_Z_INTEGER
 	nointerpolation uint3 zi : COLOR1;
-	#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
-		float2 bary : COLOR2;
-	#endif
+#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
+	float2 bary : COLOR2;
+#endif
+#endif
+
+#if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
+	uint primid : SV_PrimitiveID;
 #endif
 };
 
