@@ -5340,10 +5340,13 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 					GL_INS("Ending render pass due to UAV barrier");
 					EndRenderPass();
 				}
-				// The subresources version does the barrier even when the before/after layout
-				// are the same since we want a memory barrier here, not just a layout change.
-				vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), layout);
-				g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+				if (GSConfig.HWROVUseBarriersVK > 1)
+				{
+					// The subresources version does the barrier even when the before/after layout
+					// are the same since we want a memory barrier here, not just a layout change.
+					vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), layout);
+					g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+				}
 			}
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
