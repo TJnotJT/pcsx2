@@ -393,7 +393,7 @@ layout(location = 0) in VSOutput
 	#elif !PS_NO_COLOR
 		layout(location = 0) out vec4 o_col0;
 	#endif
-#elif PS_RETURN_COLOR_ROV
+#elif PS_ROV_COLOR
 	vec4 o_col0;
 #endif
 
@@ -1519,6 +1519,8 @@ void main()
 		#if !PS_NO_COLOR1
 			o_col1 = alpha_blend;
 		#endif
+	#elif PS_ROV_COLOR
+		o_col0 = sample_from_rt();
 	#endif
 
 	#if PS_ZFLOOR
