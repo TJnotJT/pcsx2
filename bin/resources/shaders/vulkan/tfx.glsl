@@ -1530,6 +1530,10 @@ void main()
 	#if PS_ZCLAMP
 		FragCoord.z = min(FragCoord.z, MaxDepthPS);
 	#endif
+
+	#if PS_ROV_DEPTH && !PS_ZFLOOR && !PS_ZCLAMP
+		FragCoord.z = sample_from_depth().r;
+	#endif
 	
 	// Alpha test with feedback
 	#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
