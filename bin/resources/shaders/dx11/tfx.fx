@@ -168,15 +168,15 @@ struct PS_OUTPUT
 #endif
 #endif
 #if PS_ZCLAMP || PS_ZFLOOR
+	// In DX12 we do depth feedback loops with a color copy.
 	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
 		#if NUM_RTS > 0
-			float depth : SV_Target1;
+			float depth_color : SV_Target1;
 		#else
-			float depth : SV_Target0;
+			float depth_color : SV_Target0;
 		#endif
-	#else
-		float depth : SV_Depth;
 	#endif
+	float depth : SV_Depth;
 #endif
 #undef NUM_RTS
 };
@@ -1277,6 +1277,9 @@ input.p.z = min(input.p.z, MaxDepthPS);
 #endif
 
 #if PS_ZCLAMP || PS_ZFLOOR
+#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
+	output.depth_color = input.p.z;
+#endif
 	output.depth = input.p.z;
 #endif
 

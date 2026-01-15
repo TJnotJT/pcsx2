@@ -276,4 +276,8 @@ public:
 
 	/// Compute the drawlist (if not already present) and bounding boxes for the current draw.
 	std::size_t ComputeDrawlistGetSize(float scale);
+
+	/// Create a temporary color clone of depth for depth feedback (DX12 only right now)
+	void StartDepthAsRTFeedback();
+	void CleanupDepthAsRTFeedback();
 };
