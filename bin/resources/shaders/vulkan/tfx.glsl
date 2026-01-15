@@ -255,6 +255,15 @@ void main()
 #define AFAIL_FB_ONLY 1
 #define AFAIL_ZB_ONLY 2
 #define AFAIL_RGB_ONLY 3
+#define AFAIL_RGB_ONLY_DSB 4
+#endif
+
+#ifndef PS_ATST_NONE
+#define PS_ATST_NONE 0
+#define PS_ATST_LEQUAL 1
+#define PS_ATST_GEQUAL 2
+#define PS_ATST_EQUAL 3
+#define PS_ATST_NOTEQUAL 4
 #endif
 
 #ifndef PS_FST
@@ -316,7 +325,7 @@ void main()
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
-#define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || (PS_AFAIL == AFAIL_RGB_ONLY && PS_NO_COLOR1))
+#define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5) || PS_COLOR_FEEDBACK)
@@ -921,28 +930,27 @@ bool atst(vec4 C)
 {
 	float a = C.a;
 
-	#if (PS_ATST == 1)
-	{
-		return (a <= AREF);
-	}
-	#elif (PS_ATST == 2)
-	{
-		return (a >= AREF);
-	}
-	#elif (PS_ATST == 3)
-	{
-		return (abs(a - AREF) <= 0.5f);
-	}
-	#elif (PS_ATST == 4)
-	{
-		return (abs(a - AREF) >= 0.5f);
-	}
-	#else
-	{
-		// nothing to do
-		return true;
-	}
-	#endif
+#if PS_ATST == PS_ATST_LEQUAL
+
+	return (a <= AREF);
+
+#elif PS_ATST == PS_ATST_GEQUAL
+
+	return (a >= AREF);
+
+#elif PS_ATST == PS_ATST_EQUAL
+
+	return (abs(a - AREF) <= 0.5f);
+
+#elif PS_ATST == PS_ATST_NOTEQUAL
+
+	return (abs(a - AREF) >= 0.5f);
+
+#else
+
+	return true;
+
+#endif
 }
 
 vec4 fog(vec4 c, float f)
@@ -1427,7 +1435,7 @@ void main()
 
 	ps_fbmask(C);
 
-	#if (PS_AFAIL == AFAIL_RGB_ONLY) && !PS_NO_COLOR1
+	#if (PS_AFAIL == AFAIL_RGB_ONLY_DSB) && !PS_NO_COLOR1
 		// Use alpha blend factor to determine whether to update A.
 		alpha_blend.a = float(atst_pass);
 	#endif
@@ -1448,7 +1456,7 @@ void main()
 		#endif
 
 		// Alpha test with feedback
-		#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
 			if (!atst_pass)
 				FragCoord.z = sample_from_depth().r;
 		#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_RT
@@ -1457,10 +1465,10 @@ void main()
 		#elif (PS_AFAIL == AFAIL_RGB_ONLY) 
 			if (!atst_pass)
 			{
-			#if PS_FEEDBACK_LOOP_IS_NEEDED_RT && PS_NO_COLOR1 // No dual src blend
+			#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
 				o_col0.a = sample_from_rt().a;
 			#endif
-			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZCLAMP
 				FragCoord.z = sample_from_depth().r;
 			#endif
 			}
@@ -1470,10 +1478,12 @@ void main()
 	#if PS_ZFLOOR
 		FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
 	#endif
-	
+
 	#if PS_ZCLAMP
-		gl_FragDepth = min(FragCoord.z, MaxDepthPS);
-	#elif PS_ZFLOOR || (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && AFAIL_NEEDS_DEPTH)
+		FragCoord.z = min(FragCoord.z, MaxDepthPS);
+	#endif
+	
+	#if PS_ZCLAMP || PS_ZFLOOR
 		gl_FragDepth = FragCoord.z;
 	#endif
 #endif // PS_DATE

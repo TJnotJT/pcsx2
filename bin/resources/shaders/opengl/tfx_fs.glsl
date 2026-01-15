@@ -21,6 +21,15 @@
 #define AFAIL_FB_ONLY 1
 #define AFAIL_ZB_ONLY 2
 #define AFAIL_RGB_ONLY 3
+#define AFAIL_RGB_ONLY_DSB 4
+#endif
+
+#ifndef PS_ATST_NONE
+#define PS_ATST_NONE 0
+#define PS_ATST_LEQUAL 1
+#define PS_ATST_GEQUAL 2
+#define PS_ATST_EQUAL 3
+#define PS_ATST_NOTEQUAL 4
 #endif
 
 // TEX_COORD_DEBUG output the uv coordinate as color. It is useful
@@ -37,7 +46,7 @@
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define PS_PRIMID_INIT (PS_DATE == 1 || PS_DATE == 2)
 #define NEEDS_RT_EARLY (PS_TEX_IS_FB == 1 || PS_DATE >= 5)
-#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == PS_ZB_ONLY || (PS_AFAIL == AFAIL_RGB_ONLY && PS_NO_COLOR1))
+#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == PS_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)) || PS_COLOR_FEEDBACK)
 #define NEEDS_TEX (PS_TFX != 4)
@@ -128,6 +137,8 @@ layout(binding = 3) uniform sampler2D img_prim_min;
 #if NEEDS_DEPTH
 layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
+
+layout(binding = 5) uniform sampler2D dummySampler;
 
 vec4 sample_from_rt()
 {
@@ -655,17 +666,26 @@ bool atst(vec4 C)
 {
 	float a = C.a;
 
-#if (PS_ATST == 1)
+#if PS_ATST == PS_ATST_LEQUAL
+
 	return (a <= AREF);
-#elif (PS_ATST == 2)
+
+#elif PS_ATST == PS_ATST_GEQUAL
+
 	return (a >= AREF);
-#elif (PS_ATST == 3)
+
+#elif PS_ATST == PS_ATST_EQUAL
+
 	return (abs(a - AREF) <= 0.5f);
-#elif (PS_ATST == 4)
+
+#elif PS_ATST == PS_ATST_NOTEQUAL
+
 	return (abs(a - AREF) >= 0.5f);
+
 #else
-	// nothing to do
+
 	return true;
+
 #endif
 }
 
@@ -1154,7 +1174,7 @@ void ps_main()
 
 	ps_fbmask(C);
 
-#if PS_AFAIL == AFAIL_RGB && !PS_NO_COLOR1
+#if (PS_AFAIL == AFAIL_RGB_ONLY_DSB) && !PS_NO_COLOR1
 	// Use alpha blend factor to determine whether to update A.
 	alpha_blend.a = float(atst_pass);
 #endif
@@ -1172,7 +1192,7 @@ void ps_main()
 	#endif
 	
 	// Alpha test with feedback
-	#if (PS_AFAIL == AFAIL_FB_ONLY) && NEEDS_DEPTH
+	#if (PS_AFAIL == AFAIL_FB_ONLY) && NEEDS_DEPTH && PS_ZCLAMP
 		if (!atst_pass)
 			FragCoord.z = sample_from_depth().r;
 	#elif (PS_AFAIL == AFAIL_ZB_ONLY) && NEEDS_RT
@@ -1181,10 +1201,10 @@ void ps_main()
 	#elif (PS_AFAIL == AFAIL_RGB_ONLY) 
 		if (!atst_pass)
 		{
-		#if NEEDS_RT && PS_NO_COLOR1 // No dual src blend
+		#if NEEDS_RT
 			C.a = sample_from_rt().a;
 		#endif
-		#if NEEDS_DEPTH
+		#if NEEDS_DEPTH && PS_ZCLAMP
 			FragCoord.z = sample_from_depth().r;
 		#endif
 		}
@@ -1204,8 +1224,10 @@ FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 	
 #if PS_ZCLAMP
-	gl_FragDepth = min(FragCoord.z, MaxDepthPS);
-#elif PS_ZFLOOR || (NEEDS_DEPTH && AFAIL_NEEDS_DEPTH)
-	gl_FragDepth = FragCoord.z;
+FragCoord.z = min(FragCoord.z, MaxDepthPS);
+#endif
+
+#if PS_ZCLAMP || PS_ZFLOOR
+gl_FragDepth = FragCoord.z + texture(dummySampler, vec2(0.0)).r;
 #endif
 }

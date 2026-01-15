@@ -744,6 +744,8 @@ bool GSDeviceOGL::CheckFeatures()
 	m_features.prefer_new_textures = false;
 	m_features.stencil_buffer = true;
 	m_features.test_and_sample_depth = m_features.texture_barrier;
+	m_features.depth_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
+	m_features.depth_as_rt_feedback = false;
 
 	if (GLAD_GL_ARB_shader_storage_buffer_object)
 	{
@@ -2541,7 +2543,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(1, config.pal);
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
 		PSSetShaderResource(2, colclip_rt ? colclip_rt : config.rt);
-	if ((config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
+	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
 		PSSetShaderResource(4, config.ds);
 
 	SetupSampler(config.sampler);
