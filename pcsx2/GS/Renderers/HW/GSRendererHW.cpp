@@ -5638,7 +5638,6 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		if (PABE_skip || !(NeedsBlending() || AA1))
 		{
 			m_conf.blend = {};
-			m_conf.ps.no_color1 = true;
 
 			// TODO: Find games that may benefit from adding full coverage on RTA Scale when we're overwriting the whole target.
 
@@ -6046,7 +6045,6 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	{
 		// Blend output will be Cd, disable hw/sw blending.
 		m_conf.blend = {};
-		m_conf.ps.no_color1 = true;
 		m_conf.ps.blend_a = m_conf.ps.blend_b = m_conf.ps.blend_c = m_conf.ps.blend_d = 0;
 		sw_blending = false; // DATE_PRIMID
 
@@ -6118,7 +6116,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 			}
 
 			// Dual source output not needed (accumulation blend replaces it with ONE).
-			m_conf.ps.no_color1 = (m_conf.ps.pabe == 0);
+			m_conf.ps.no_color1 &= (m_conf.ps.pabe == 0);
 		}
 		else if (blend_mix)
 		{
@@ -6171,8 +6169,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 				m_conf.ps.blend_d = 0;
 			}
 
-			// Elide DSB colour output if not used by dest.
-			m_conf.ps.no_color1 = !GSDevice::IsDualSourceBlendFactor(blend.dst);
+			// Elide DSB colour output if not used by dest or alpha test.
+			m_conf.ps.no_color1 &= !GSDevice::IsDualSourceBlendFactor(blend.dst);
 
 			// For mixed blend, the source blend is done in the shader (so we use CONST_ONE as a factor).
 			m_conf.blend = {true, GSDevice::CONST_ONE, blend.dst, blend.op, GSDevice::CONST_ONE, GSDevice::CONST_ZERO, m_conf.ps.blend_c == 2, AFIX};
@@ -6182,7 +6180,6 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		{
 			// Disable HW blending
 			m_conf.blend = {};
-			m_conf.ps.no_color1 = true;
 
 			// No need to set a_masked bit for blend_ad_alpha_masked case
 			const bool blend_non_recursive_one_barrier = blend_non_recursive && blend_ad_alpha_masked;
@@ -6390,8 +6387,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		m_conf.blend = {true, blend.src, blend.dst, blend.op, src_factor_alpha, dst_factor_alpha, m_conf.ps.blend_c == 2, AFIX};
 
 		// Remove second color output when unused. Works around bugs in some drivers (e.g. Intel).
-		m_conf.ps.no_color1 = !GSDevice::IsDualSourceBlendFactor(m_conf.blend.src_factor) &&
-		                      !GSDevice::IsDualSourceBlendFactor(m_conf.blend.dst_factor);
+		m_conf.ps.no_color1 &= !GSDevice::IsDualSourceBlendFactor(m_conf.blend.src_factor) &&
+		                       !GSDevice::IsDualSourceBlendFactor(m_conf.blend.dst_factor);
 	}
 
 	// Notify the shader that it needs to invert rounding
@@ -7371,9 +7368,6 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	// Determine if we can use FB-fetch for color only feedback.
 	const bool free_fbfetch_feedback = features.framebuffer_fetch && !afail_needs_depth;
 
-	// Dual source blend comes with some restrictions, so detect and avoid them here.
-	const bool using_dual_source_blend = !m_conf.ps.no_color1;
-
 	// Determine if we have the correct features for depth feedback.
 	const bool depth_feedback_supported = features.depth_feedback != GSDevice::DepthFeedbackSupport::None;
 
@@ -7382,12 +7376,8 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	const bool depth_as_rt_feedback = afail_needs_depth &&
 		(features.depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT);
 
-	const bool avoid_feedback =
-		// Do not use dual source blend with FB-fetch, which breaks Intel GPUs on Metal.
-		// Also do not use dual source blend with multiple render targets, which is against spec.
-		((features.framebuffer_fetch || depth_as_rt_feedback) && using_dual_source_blend) ||
-		// We need depth feedback but do not have the correct features.
-		(afail_needs_depth && !depth_feedback_supported);
+	// We need depth feedback but do not have the correct features.
+	const bool avoid_feedback = afail_needs_depth && !depth_feedback_supported;
 
 	// Prefer feedback method only if it's free (color only feedback) or enabled.
 	const bool prefer_feedback = free_barrier_feedback || free_fbfetch_feedback ||
@@ -7451,25 +7441,6 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		m_conf.ps.afail = GSHWDrawConfig::PS_AFAIL_RGB_ONLY_DSB;
 		m_conf.ps.no_color1 = false;
 
-		if (!m_conf.blend.enable)
-		{
-			m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
-				GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
-		}
-		else
-		{
-			if (m_conf.blend_multi_pass.enable)
-			{
-				m_conf.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-				m_conf.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-			}
-			else
-			{
-				m_conf.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-				m_conf.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-			}
-		}
-
 		// Swap stencil DATE for PrimID DATE, for both Z on and off cases.
 		// Because we're making some pixels pass, but not updating A, the stencil won't be synced.
 		if (DATE && !DATE_BARRIER && features.primitive_id)
@@ -7480,6 +7451,8 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 			DATE_one = false;
 			DATE_PRIMID = true;
 		}
+
+		// The actual blend setup will be done later after determining blending.
 
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY;
 	}
@@ -7536,6 +7509,30 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 			m_conf.alpha_second_pass.ps.atst = ps_atst;
 			m_conf.alpha_second_pass.ps_aref = ps_aref;
 			m_conf.alpha_second_pass.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
+		}
+
+		pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
+		// Setup for RBG_ONLY dual source blend selection
+		if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
+		{
+			if (!m_conf.blend.enable)
+			{
+				m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
+					GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
+			}
+			else
+			{
+				if (m_conf.blend_multi_pass.enable)
+				{
+					m_conf.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+					m_conf.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+				}
+				else
+				{
+					m_conf.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+					m_conf.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+				}
+			}
 		}
 	}
 	else
@@ -8037,6 +8034,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.tfx = 4;
 	}
 
+	// Initialize to default assumption that we do not use dual source blend.
+	// Other stages may set this to false (enable dual source blend).
+	m_conf.ps.no_color1 = true;
+
 	// Perform alpha test first pass setup here as bending depends on it.
 	EmulateAlphaTest(DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
 
@@ -8050,7 +8051,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	else
 	{
 		m_conf.blend = {}; // No blending please
-		m_conf.ps.no_color1 = true;
 
 		if (can_scale_rt_alpha && !new_scale_rt_alpha && m_conf.colormask.wa)
 		{
