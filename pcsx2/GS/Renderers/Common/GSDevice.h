@@ -484,6 +484,18 @@ struct alignas(16) GSHWDrawConfig
 			// disable both outputs.
 			no_color = no_color1 = 1;
 		}
+
+		/// Disables depth output from the pixel shader.
+		__fi void DisableDepthOutput()
+		{
+			zclamp = zfloor = false;
+		}
+
+		/// Does the pixel shader write to depth (e.g., gl_FragDepth or SV_Depth) explicitly.
+		__fi bool HasDepthWrite() const
+		{
+			return zclamp || zfloor;
+		}
 	};
 	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
 #pragma pack(pop)

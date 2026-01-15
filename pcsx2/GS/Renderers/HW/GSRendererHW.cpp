@@ -5117,23 +5117,22 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	m_conf.nindices = m_index.tail;
 }
 
-void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps)
+void GSRendererHW::GetZWriteConfigVSPS(const bool force_zclamp_ps)
 {
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
 
 	m_conf.cb_vs.max_depth = GSVector2i(0xFFFFFFFF);
 	m_conf.cb_ps.TA_MaxDepth_Af.z = 0.0f;
-	m_conf.ps.zclamp = 0;
-	m_conf.ps.zfloor = !m_cached_ctx.ZBUF.ZMSK;
+	m_conf.ps.zclamp = false;
+	m_conf.ps.zfloor = m_cached_ctx.DepthWrite();
 
 	// Clamp in the vertex shader for primitives that have flat colors.
-	const bool clamp_vs = large_z && (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS) && !force_enable_ps;
+	const bool clamp_vs = m_cached_ctx.DepthWrite() && large_z &&
+	                      (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS) && !force_zclamp_ps;
 
 	// Otherwise clamp in the pixel shader (performance note: may prevent early Z test);
-	// Force clamping in the pixel shader is used when the pixels shader modifies Z for any other reason.
-	// We bundle these together to avoid creating extra pipeline combinations.
-	const bool clamp_ps = !clamp_vs && (large_z || force_enable_ps) && !m_cached_ctx.ZBUF.ZMSK;
+	const bool clamp_ps = m_cached_ctx.DepthWrite() && !clamp_vs && (large_z || force_zclamp_ps);
 
 	if (clamp_vs)
 		m_conf.cb_vs.max_depth = GSVector2i(max_z);
@@ -5141,7 +5140,7 @@ void GSRendererHW::GetZClampConfigVSPS(const bool force_enable_ps)
 	if (clamp_ps)
 	{
 		m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
-		m_conf.ps.zclamp = 1;
+		m_conf.ps.zclamp = true;
 	}
 }
 
@@ -5158,7 +5157,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
-	GetZClampConfigVSPS(false);
+	GetZWriteConfigVSPS(false);
 }
 
 void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
@@ -7410,7 +7409,8 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		if (afail_needs_depth && zwe)
 		{
 			GL_INS("Enable SW depth write for depth feedback");
-			GetZClampConfigVSPS(true); // Z clamp is a proxy for SW Z write.
+			if (!m_conf.ps.HasDepthWrite())
+				GetZWriteConfigVSPS(true); // Make sure pixel shader writes to depth.
 
 			if (m_cached_ctx.DepthRead())
 			{
@@ -7511,10 +7511,10 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 			m_conf.alpha_second_pass.ps.afail = GSHWDrawConfig::PS_AFAIL_KEEP;
 		}
 
-		pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
 		// Setup for RBG_ONLY dual source blend selection
 		if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
 		{
+			pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
 			if (!m_conf.blend.enable)
 			{
 				m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
@@ -7542,7 +7542,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		{
 			// Disable Z write on second pass
 			m_conf.alpha_second_pass.depth.zwe = false;
-			m_conf.alpha_second_pass.ps.zclamp = false;
+			m_conf.alpha_second_pass.ps.DisableDepthOutput();
 		}
 		else if (afail == AFAIL_ZB_ONLY)
 		{
@@ -7552,7 +7552,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		{
 			// Disable Z write on second pass
 			m_conf.alpha_second_pass.depth.zwe = false;
-			m_conf.alpha_second_pass.ps.zclamp = false;
+			m_conf.alpha_second_pass.ps.DisableDepthOutput();
 
 			m_conf.alpha_second_pass.colormask.wrgba = m_conf.colormask.wrgba & 7; // Disable A write on second pass
 		}
@@ -7569,11 +7569,6 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		}
 	}
 
-	if (m_conf.alpha_test != GSHWDrawConfig::AlphaTestMode::NEVER)
-	{
-		pxAssertRel(m_conf.colormask.wrgba || m_conf.depth.zwe,
-			"Alpha first pass has no color/depth write.");
-	}
 	if (m_conf.alpha_second_pass.enable)
 	{
 		pxAssertRel(m_conf.alpha_second_pass.colormask.wrgba || m_conf.alpha_second_pass.depth.zwe,
@@ -7591,7 +7586,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		m_conf.alpha_second_pass.require_full_barrier = m_conf.require_full_barrier;
 	}
 
-	// Finally, if the the first pass is never used (i.e., ATST=NEVER, do only the second pass).
+	// Finally, if the first pass is never used do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
 		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
