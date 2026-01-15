@@ -5836,7 +5836,10 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 	// Condition 2: One barrier is already enabled, prims don't overlap or is a channel shuffle so let's use sw blend instead.
 	// Condition 3: A texture shuffle is unlikely to overlap, so we can prefer full sw blend.
 	// Condition 4: If it's tex in fb draw and there's no overlap prefer sw blend, fb is already being read.
-	const bool prefer_sw_blend = ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || (m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) || m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt));
+	const bool prefer_sw_blend =
+		((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) ||
+		(m_conf.require_one_barrier && (no_prim_overlap || m_channel_shuffle)) ||
+		m_conf.ps.shuffle || (no_prim_overlap && (m_conf.tex == m_conf.rt));
 	const bool free_blend = blend_non_recursive // Free sw blending, doesn't require barriers or reading fb
 	                        || accumulation_blend; // Mix of hw/sw blending
 
@@ -5910,6 +5913,17 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 			accumulation_blend = false;
 			blend_mix = false;
 		}
+	}
+
+	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::FEEDBACK &&
+		features.depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT)
+	{
+		// If we are doing feedback alpha test with a second RT we must use SW blending to avoid
+		// mixing dual source blending with multiple render targets.
+		sw_blending = true;
+		color_dest_blend = false;
+		accumulation_blend = false;
+		blend_mix = false;
 	}
 
 	// Color clip
@@ -7347,22 +7361,26 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	// Determine whether the feedback methods require a single pass.
 	const bool feedback_one_pass = simple_fb_only || simple_rgb_only || simple_zb_only;
 
-	// Determine if the method for doing depth feedback uses multiple render targets.
-	// This should not be used in conjunction with dual source blend.
-	// This also requires 2 full screen copies of depth <-> color so avoid if possible.
-	const bool depth_as_rt_feedback = afail_needs_depth && features.depth_as_rt_feedback;
-
-	// If we are already have the required barriers for the accurate feedback path.
-	const bool free_to_use_barriers =
+	// If we are already have the required barriers for the accurate feedback path and
+	// do not require depth feedback.
+	const bool free_barrier_feedback =
 		((m_conf.require_one_barrier && feedback_one_pass) || m_conf.require_full_barrier) &&
 		(features.texture_barrier || features.multidraw_fb_copy) &&
-		!depth_as_rt_feedback;
+		!afail_needs_depth;
+
+	// Determine if we can use FB-fetch for color only feedback.
+	const bool free_fbfetch_feedback = features.framebuffer_fetch && !afail_needs_depth;
 
 	// Dual source blend comes with some restrictions, so detect and avoid them here.
 	const bool using_dual_source_blend = !m_conf.ps.no_color1;
 
 	// Determine if we have the correct features for depth feedback.
-	const bool depth_feedback_supported = features.depth_feedback || features.depth_as_rt_feedback;
+	const bool depth_feedback_supported = features.depth_feedback != GSDevice::DepthFeedbackSupport::None;
+
+	// Determine if the method for doing depth feedback uses multiple render targets.
+	// This should not be used in conjunction with dual source blend.
+	const bool depth_as_rt_feedback = afail_needs_depth &&
+		(features.depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT);
 
 	const bool avoid_feedback =
 		// Do not use dual source blend with FB-fetch, which breaks Intel GPUs on Metal.
@@ -7370,18 +7388,15 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		((features.framebuffer_fetch || depth_as_rt_feedback) && using_dual_source_blend) ||
 		// We need depth feedback but do not have the correct features.
 		(afail_needs_depth && !depth_feedback_supported);
-	
-	// Determine if we can use FB-fetch for color only feedback.
-	const bool free_fbfetch_feedback = features.framebuffer_fetch && !depth_as_rt_feedback;
 
-	// Prefer feedback method only if blend level requests it or it's free.
-	const bool prefer_feedback = (GSConfig.AccurateBlendingUnit >= AccBlendLevel::Maximum) ||
-	                             free_to_use_barriers || free_fbfetch_feedback;
+	// Prefer feedback method only if it's free (color only feedback) or enabled.
+	const bool prefer_feedback = free_barrier_feedback || free_fbfetch_feedback ||
+	                             GSConfig.HWAccurateAlphaTest;
 
-	// The two simple cases can be handle accurately in two passes so no point
-	// in requiring barriers if they are not already being used.
-	const bool prefer_two_pass = !(m_conf.require_full_barrier || m_conf.require_full_barrier) &&
-	                             (simple_fb_only || simple_rgb_only);
+	// The simple cases can be handle accurately in two passes so no point
+	// in requiring barriers if they are not already required.
+	const bool prefer_two_pass = !(free_fbfetch_feedback || free_barrier_feedback) &&
+	                             (simple_fb_only || simple_rgb_only || simple_zb_only);
 	
 	if (prefer_feedback && !prefer_two_pass && !avoid_feedback)
 	{
@@ -7395,11 +7410,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		m_conf.ps.color_feedback |= afail_needs_rt;
 		m_conf.ps.depth_feedback |= afail_needs_depth;
 
-		// Whether we can use FB-fetch for both color and/or depth.
-		// In that case, we don't need barriers.
-		const bool use_full_fbfetch = features.framebuffer_fetch &&
-		                              (!afail_needs_depth || features.depth_as_rt_feedback);
-		if (!use_full_fbfetch && (features.texture_barrier || features.multidraw_fb_copy))
+		if (!free_fbfetch_feedback && (features.texture_barrier || features.multidraw_fb_copy))
 		{
 			m_conf.require_one_barrier |= feedback_one_pass;
 			m_conf.require_full_barrier |= !feedback_one_pass;
@@ -8026,6 +8037,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.tfx = 4;
 	}
 
+	// Perform alpha test first pass setup here as bending depends on it.
+	EmulateAlphaTest(DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
+
 	// AA1: Set alpha source to coverage 128 when there is no alpha blending.
 	m_conf.ps.fixed_one_a = IsCoverageAlpha();
 
@@ -8080,9 +8094,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		rt->m_alpha_max = rt_new_alpha_max;
 		rt->m_alpha_min = rt_new_alpha_min;
 	}
-
-	// Perform alpha test first pass setup here as it may change DATE.
-	EmulateAlphaTest(DATE, DATE_BARRIER, DATE_one, DATE_PRIMID);
 
 	// No point outputting colours if we're just writing depth.
 	// We might still need the framebuffer for DATE, though.
@@ -8286,9 +8297,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (m_conf.require_one_barrier || m_conf.require_full_barrier)
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
-		// If depth feedback can use a color RT, we can use FB fetch.
-		// Otherwise we must keep barriers.
-		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() && !features.depth_as_rt_feedback;
+		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() &&
+		                               (features.depth_feedback != GSDevice::DepthFeedbackSupport::None);
 
 		if (!need_barriers_for_depth)
 		{
@@ -9791,7 +9801,8 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 void GSRendererHW::StartDepthAsRTFeedback()
 {
 	// Create a temporary depth color target
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && g_gs_device->Features().depth_as_rt_feedback)
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() &&
+		g_gs_device->Features().depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 
@@ -9807,7 +9818,7 @@ void GSRendererHW::StartDepthAsRTFeedback()
 			m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
 		}
 
-		// Create the temporary depth copy and copy the area needed for the draw.
+		// Create a temporary RT and copy the area needed for the draw.
 		const int w = m_conf.ds->GetWidth();
 		const int h = m_conf.ds->GetHeight();
 		m_conf.ds_as_rt = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::Float32, false, true);

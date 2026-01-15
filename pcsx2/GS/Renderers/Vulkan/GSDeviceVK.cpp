@@ -2705,8 +2705,8 @@ bool GSDeviceVK::CheckFeatures()
 	m_features.line_expand =
 		(m_device_features.wideLines && limits.lineWidthRange[0] <= f_upscale && limits.lineWidthRange[1] >= f_upscale);
 
-	m_features.depth_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
-	m_features.depth_as_rt_feedback = false;
+	m_features.depth_feedback = m_features.test_and_sample_depth ? GSDevice::DepthFeedbackSupport::Depth :
+	                                                               GSDevice::DepthFeedbackSupport::None;
 
 	DevCon.WriteLn("Optional features:%s%s%s%s%s", m_features.primitive_id ? " primitive_id" : "",
 		m_features.texture_barrier ? " texture_barrier" : "", m_features.framebuffer_fetch ? " framebuffer_fetch" : "",

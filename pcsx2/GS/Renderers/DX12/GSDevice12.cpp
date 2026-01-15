@@ -1241,8 +1241,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
-	m_features.depth_feedback = false;
-	m_features.depth_as_rt_feedback = m_features.test_and_sample_depth && !GSConfig.DisableDepthFeedback;
+	m_features.depth_feedback = GSDevice::DepthFeedbackSupport::DepthAsRT;
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -3515,7 +3514,7 @@ void GSDevice12::BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE color_b
 	}
 
 	GetCommandList()->BeginRenderPass(num_rts, rt.data(), m_current_depth_target ? &ds : nullptr,
-		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAG_BIND_READ_ONLY_DEPTH) : D3D12_RENDER_PASS_FLAG_NONE);
+		(m_current_depth_target && m_current_depth_read_only) ? (D3D12_RENDER_PASS_FLAGS(8)) : D3D12_RENDER_PASS_FLAG_NONE);
 }
 
 void GSDevice12::EndRenderPass()
