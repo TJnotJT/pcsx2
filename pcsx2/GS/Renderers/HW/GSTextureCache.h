@@ -535,8 +535,14 @@ public:
 	void ReplaceSourceTexture(Source* s, GSTexture* new_texture, float new_scale, const GSVector2i& new_unscaled_size,
 		HashCacheEntry* hc_entry, bool new_texture_is_shared);
 
+	/// Converts single color value to integer depth using the specified shader expression.
+	static u32 ConvertColorToDepthInteger(u32 c, ShaderConvert convert);
+
 	/// Converts single color value to depth using the specified shader expression.
 	static float ConvertColorToDepth(u32 c, ShaderConvert convert);
+
+	/// Converts single integer depth value to colour using the specified shader expression.
+	static u32 ConvertDepthIntegerToColor(u32 d, ShaderConvert convert);
 
 	/// Converts single depth value to colour using the specified shader expression.
 	static u32 ConvertDepthToColor(float d, ShaderConvert convert);
