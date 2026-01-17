@@ -4469,7 +4469,8 @@ void GSRendererHW::Draw()
 
 				if (z_width != new_w || z_height != new_h)
 				{
-					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, GSTexture::Format::DepthStencil, true))
+					if (GSTexture* tex = g_gs_device->CreateCompatibleTexture(
+						g_texture_cache->GetTemporaryZ(), new_w * ds->m_scale, new_h * ds->m_scale, true))
 					{
 						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
 						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect),
@@ -5183,12 +5184,16 @@ void GSRendererHW::GetZWriteConfigVSPS(GSHWDrawConfig::PSSelector& ps, const boo
 
 	if (clamp_vs)
 		m_conf.cb_vs.max_depth = GSVector2i(max_z);
-		
+	
 	if (clamp_ps)
 	{
 		m_conf.cb_ps.TA_MaxDepth_Af.z = z_integer ? std::bit_cast<float>(max_z) : (static_cast<float>(max_z) * 0x1p-32f);
 		ps.zclamp = true;
+		ps.depth_feedback |= z_integer && (max_z != 0xFFFFFFFF); // Need to read the old value to mask depth.
 	}
+
+	if (z_integer)
+		m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
 }
 
 void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
@@ -5197,7 +5202,15 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	{
 		m_conf.depth.ztst = m_cached_ctx.TEST.ZTST;
 		// AA1: Z is not written on lines since coverage is always less than 0x80.
-		m_conf.depth.zwe = (m_cached_ctx.ZBUF.ZMSK || (PRIM->AA1 && m_vt.m_primclass == GS_LINE_CLASS)) ? 0 : 1;
+		if (m_cached_ctx.ZBUF.ZMSK || (PRIM->AA1 && m_vt.m_primclass == GS_LINE_CLASS))
+		{
+			m_cached_ctx.ZBUF.ZMSK = true;
+			m_conf.depth.zwe = false;
+		}
+		else
+		{
+			m_conf.depth.zwe = true;
+		}
 	}
 	else
 	{
@@ -5391,7 +5404,7 @@ bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 
 __ri bool GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt)
 {
-	if ((src->m_texture->GetType() == GSTexture::Type::DepthStencil) && !src->m_32_bits_fmt)
+	if (src->m_texture->IsDepthStencilOrDepthInteger() && !src->m_32_bits_fmt)
 	{
 		// So far 2 games hit this code path. Urban Chaos and Tales of Abyss
 		// UC: will copy depth to green channel
@@ -5957,7 +5970,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, const boo
 		}
 	}
 
-	if (UsingMultipleRenderTargets(m_conf.rt, m_conf.ds))
+	if (UsingMultipleRenderTargets())
 	{
 		// MRTs interact badly with dual source blend so just use SW blending.
 		sw_blending = true;
@@ -7405,7 +7418,8 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 
 	// Flags to determine if we can achieve full accuracy with less passes.
 	const bool simple_fb_only = (afail == AFAIL_FB_ONLY) && independent_z;
-	const bool simple_rgb_only = (afail == AFAIL_RGB_ONLY) && independent_z && independent_rgb;
+	const bool simple_rgb_only = (afail == AFAIL_RGB_ONLY) && independent_z && independent_rgb &&
+	                             !UsingMultipleRenderTargets(); // Do not use simple RGB dual source blend with MRTs.
 	const bool simple_zb_only = (afail == AFAIL_ZB_ONLY) && independent_z;
 
 	// Determine where RT and/or depth are needed for the feedback methods.
@@ -7428,22 +7442,27 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	// Determine if we have the correct features for depth feedback.
 	const bool depth_feedback_supported = features.depth_feedback != GSDevice::DepthFeedbackSupport::None;
 
+	// Depth integer already involves feedback so we will select feedback in that case.
+	const bool using_integer_depth = m_conf.ds_as_rt && m_conf.ds_as_rt->IsDepthInteger();
+
 	// Determine if the method for doing depth feedback uses multiple render targets.
 	// This should not be used in conjunction with dual source blend.
 	const bool depth_as_rt_feedback = afail_needs_depth &&
-		(features.depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT);
+		(features.depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT) &&
+		!using_integer_depth;
 
 	// We need depth feedback but do not have the correct features.
 	const bool avoid_feedback = afail_needs_depth && !depth_feedback_supported;
 
 	// Prefer feedback method only if it's free (color only feedback) or enabled.
 	const bool prefer_feedback = free_barrier_feedback || free_fbfetch_feedback ||
-	                             GSConfig.HWAccurateAlphaTest;
+	                             GSConfig.HWAccurateAlphaTest || using_integer_depth;
 
 	// The simple cases can be handle accurately in two passes so no point
 	// in requiring barriers if they are not already required.
 	const bool prefer_two_pass = !(free_fbfetch_feedback || free_barrier_feedback) &&
-	                             (simple_fb_only || simple_rgb_only || simple_zb_only);
+	                             (simple_fb_only || simple_rgb_only || simple_zb_only) &&
+	                             !using_integer_depth;
 	
 	if (prefer_feedback && !prefer_two_pass && !avoid_feedback)
 	{
@@ -7467,7 +7486,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		if (afail_needs_depth && zwe)
 		{
 			GL_INS("Enable SW depth write for depth feedback");
-			if (!m_conf.ps.HasDepthWrite())
+			if (!m_conf.ps.DepthWrite())
 				GetZWriteConfigVSPS(m_conf.ps, true); // Make sure pixel shader writes to depth.
 
 			if (m_cached_ctx.DepthRead())
@@ -7647,6 +7666,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	// Finally, if the first pass is never used do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
+		GL_INS("Alpha test: First pass has no output, disabling.");
 		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
 		std::memcpy(&m_conf.colormask, &m_conf.alpha_second_pass.colormask, sizeof(m_conf.colormask));
 		std::memcpy(&m_conf.depth, &m_conf.alpha_second_pass.depth, sizeof(m_conf.depth));
@@ -8354,6 +8374,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.require_full_barrier = false;
 	}
 
+	// Handle integer depth
+	EmulateDepthInteger();
+
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
 
@@ -8361,109 +8384,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	{
 		GL_INS("HW: Aborting draw %s due to alpha test config.", s_n);
 		return;
-	}
-
-	// Handle integer depth
-	if (features.depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsDepthInteger())
-	{
-		// Should not be using dual source blend with MRTs
-		pxAssert(m_conf.ps.no_color1);
-
-		m_conf.vs.zint = true;
-		m_conf.ps.zint = true;
-		m_conf.ps.primclass = m_vt.m_primclass;
-		if (m_conf.alpha_second_pass.enable)
-		{
-			m_conf.alpha_second_pass.ps.zint = true;
-			m_conf.alpha_second_pass.ps.primclass = m_vt.m_primclass;
-		}
-		
-		// Enable SW Z writing for both passes if necessary.
-		{
-			if (m_conf.depth.zwe)
-			{
-				if (!m_conf.ps.zclamp)
-					GetZWriteConfigVSPS(m_conf.ps, true, true); // We need Z clamp to correctly mask depth.
-			}
-			if (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)
-			{
-				if (!m_conf.alpha_second_pass.ps.zclamp)
-					GetZWriteConfigVSPS(m_conf.alpha_second_pass.ps, true, true); // We need Z clamp to correctly mask depth.
-			}
-		}
-
-		// Enable SW depth test for both passes if needed.
-		{
-			if (m_conf.depth.ztst == ZTST_GEQUAL || m_conf.depth.ztst == ZTST_GREATER)
-			{
-				m_conf.ps.ztst = m_conf.depth.ztst;
-				m_conf.ps.depth_feedback = true;
-			}
-			if (m_conf.alpha_second_pass.enable &&
-				(m_conf.alpha_second_pass.depth.ztst == ZTST_GEQUAL ||
-					m_conf.alpha_second_pass.depth.ztst == ZTST_GREATER))
-			{
-				m_conf.alpha_second_pass.ps.ztst = m_conf.alpha_second_pass.depth.ztst;
-				m_conf.alpha_second_pass.ps.depth_feedback = true;
-			}
-		}
-
-		// Disable HW depth
-		{
-			// Must do this check in case a temporary DS was created just for the stencil.
-			if (m_conf.ds == m_conf.ds_as_rt)
-			{
-				m_conf.ds = nullptr;
-			}
-			m_conf.depth.zwe = 0;
-			m_conf.depth.ztst = ZTST_ALWAYS;
-			if (m_conf.alpha_second_pass.enable)
-			{
-				m_conf.alpha_second_pass.depth.zwe = 0;
-				m_conf.alpha_second_pass.depth.ztst = ZTST_ALWAYS;
-			}
-		}
-
-		// Tell pixel shader which slot the depth as integer textures is bound to.
-		{
-			m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
-			if (m_conf.alpha_second_pass.enable)
-			{
-				m_conf.alpha_second_pass.ps.z_rt_slot = m_conf.rt ? 1 : 0;
-			}
-		}
-
-		// We need at least one barrier if we read depth.
-		if (m_conf.ps.depth_feedback)
-		{
-			m_conf.require_one_barrier = true;
-		}
-
-		// We need barriers if we read and write depth.
-		if (m_conf.ps.HasDepthWrite() && m_conf.ps.depth_feedback)
-		{
-			m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
-			m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
-		}
-		if (m_conf.alpha_second_pass.enable)
-		{
-			if (m_conf.alpha_second_pass.ps.HasDepthWrite() && m_conf.alpha_second_pass.ps.depth_feedback)
-			{
-				m_conf.alpha_second_pass.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
-				m_conf.alpha_second_pass.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
-			}
-		}
-
-		// Make sure we didn't mess up and assign the color depth to the depth.
-		pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
-	}
-	else
-	{
-		m_conf.ps.primclass = GS_INVALID_CLASS;
-		if (m_conf.alpha_second_pass.enable)
-		{
-			m_conf.alpha_second_pass.ps.primclass = GS_INVALID_CLASS;
-		}
 	}
 
 	// rs
@@ -8476,7 +8396,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// ComputeDrawlistGetSize expects the original index layout, so needs to be called before we modify it via HandleProvokingVertexFirst/SetupIA.
 	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
 	{
-		ComputeDrawlistGetSize(rt->m_scale);
+		ComputeDrawlistGetSize(rt ? rt->m_scale : (ds ? ds->m_scale : 1.0f));
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
@@ -9940,7 +9860,8 @@ void GSRendererHW::StartDepthAsRTFeedback()
 {
 	// Create a temporary depth color target
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() &&
-		g_gs_device->Features().depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT)
+		g_gs_device->Features().depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT &&
+		!m_conf.ds_as_rt) // The DS as RT is already being used for something else.
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 
@@ -9985,14 +9906,14 @@ void GSRendererHW::CleanupDepthAsRTFeedback()
 		m_temp_ds_as_rt = false;
 	}
 }
-bool GSRendererHW::UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds)
+bool GSRendererHW::UsingMultipleRenderTargets()
 {
-	if (!ds)
-		return false; // Currently we only only MRTs for depth effects.
-	
-	const bool mrt_for_zint = ds->GetFormat() == GSTexture::Format::UInt32; // Using MRTs for integer depth.
+	const bool mrt_for_zint = m_conf.ds_as_rt &&
+		m_conf.ds_as_rt->GetFormat() == GSTexture::Format::UInt32;
+
 	const bool mrt_for_alpha_test = m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::FEEDBACK &&
 	                                g_gs_device->Features().depth_feedback == GSDevice::DepthFeedbackSupport::DepthAsRT;
+
 	return mrt_for_zint || mrt_for_alpha_test;
 }
 
@@ -10024,5 +9945,63 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
 			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date.");
 		}
+	}
+}
+
+void GSRendererHW::EmulateDepthInteger()
+{
+	// The primclass should be set to INVALID (not zero) by default.
+	m_conf.ps.primclass = GS_INVALID_CLASS;
+
+	// Do the depth integer setup if needed for the draw.
+	if (g_gs_device->Features().depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsDepthInteger())
+	{
+		// Should not be using dual source blend with MRTs
+		pxAssert(m_conf.ps.no_color1);
+
+		m_conf.vs.zint = true;
+		m_conf.ps.zint = true;
+		m_conf.ps.primclass = m_vt.m_primclass;
+
+		// Enable SW Z clamping if necessary.
+		if (m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite())
+		{
+			GetZWriteConfigVSPS(m_conf.ps, true, true); // We need Z clamp to correctly mask depth.
+		}
+
+		// Enable SW depth test if needed.
+		if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
+		{
+			m_conf.ps.ztst = m_conf.depth.ztst;
+			m_conf.ps.depth_feedback = true;
+		}
+
+		// Disable HW depth
+		if (m_conf.ds == m_conf.ds_as_rt)
+		{
+			// Make sure we don't use the depth integer as an actual depth buffer.
+			m_conf.ds = nullptr;
+		}
+		m_conf.depth.zwe = false;
+		m_conf.depth.ztst = ZTST_ALWAYS;
+
+		// Tell pixel shader which slot the depth as integer textures is bound to.
+		m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+
+		// We need at least one barrier if we read depth.
+		if (m_conf.ps.depth_feedback)
+		{
+			m_conf.require_one_barrier = true;
+		}
+
+		// We need barriers if we read and write depth.
+		if (m_conf.ps.DepthWrite() && m_conf.ps.depth_feedback)
+		{
+			m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
+			m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
+		}
+
+		// Make sure we didn't mess up and assign the color depth to the depth.
+		pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
 	}
 }

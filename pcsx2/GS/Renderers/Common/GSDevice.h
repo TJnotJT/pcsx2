@@ -635,9 +635,15 @@ struct alignas(16) GSHWDrawConfig
 		}
 
 		/// Does the pixel shader write to depth (e.g., gl_FragDepth or SV_Depth) explicitly.
-		__fi bool HasDepthWrite() const
+		__fi bool DepthWrite() const
 		{
 			return zclamp || zfloor;
+		}
+
+		/// Does the pixel shader do SW depth test.
+		__fi bool DepthTest() const
+		{
+			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 		}
 	};
 	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
@@ -1290,6 +1296,8 @@ public:
 
 	GSTexture* CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateCompatibleTexture(GSTexture* tex, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
 
 	virtual std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) = 0;

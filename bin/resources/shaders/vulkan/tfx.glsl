@@ -261,7 +261,7 @@ void main()
 
 #elif VS_Z_INTEGER && (VS_EXPAND == 5) // Lines for integer Z
 
-	uint vid_base = vid & ~2;
+	uint vid_base = vid & ~1;
 	ProcessedVertex raw0 = load_vertex(vid_base + 0);
 	ProcessedVertex raw1 = load_vertex(vid_base + 1);
 	vtx = load_vertex(vid);
@@ -1496,7 +1496,7 @@ void main()
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 	#if PS_Z_INTEGER
-		uint curr_z = sample_from_depth();
+		uint curr_z = sample_from_depth() & MaxDepthPS;
 	#else
 		float curr_z = sample_from_depth();
 	#endif
@@ -1702,9 +1702,9 @@ void main()
 
 	#if PS_ZCLAMP
 		input_z = min(input_z, MaxDepthPS);
-	#if PS_Z_INTEGER
+	#if PS_Z_INTEGER && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 		// Mask based on depth format
-		input_z |= (curr_z & ~MaxDepthPS);
+		input_z |= (sample_from_depth() & ~MaxDepthPS);
 	#endif
 	#endif
 	

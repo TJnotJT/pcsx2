@@ -286,8 +286,11 @@ public:
 	void CleanupDepthAsRTFeedback();
 
 	/// Determine if the upcoming draw will use multiple render targets
-	bool UsingMultipleRenderTargets(GSTexture* rt, GSTexture* ds);
+	bool UsingMultipleRenderTargets();
 
 	/// Handle cases where we need a temporary DS for DATE.
 	void HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, bool& DATE, bool& DATE_one, bool& DATE_PRIMID);
+
+	/// Setup depth integer if needed.
+	void EmulateDepthInteger();
 };

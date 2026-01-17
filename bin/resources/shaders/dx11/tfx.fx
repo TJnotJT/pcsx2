@@ -1197,7 +1197,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #if PS_DEPTH_FEEDBACK
 	#if PS_Z_INTEGER
-		uint curr_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
+		uint curr_z = DepthTexture.Load(int3(input.p.xy, 0)).r & MaxDepthPS;
 	#else
 		float curr_z = DepthTexture.Load(int3(input.p.xy, 0)).r;
 	#endif
@@ -1421,9 +1421,9 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #if PS_ZCLAMP
 	input_z = min(input_z, MaxDepthPS);
-#if PS_Z_INTEGER
+#if PS_Z_INTEGER && PS_DEPTH_FEEDBACK
 	// Mask based on depth format
-	input_z |= (curr_z & ~MaxDepthPS);
+	input_z |= (DepthTexture.Load(int3(input.p.xy, 0)).r & ~MaxDepthPS);
 #endif
 #endif
 
@@ -1643,7 +1643,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 #elif VS_Z_INTEGER && (VS_EXPAND == 5) // Lines for integer Z
 
-	uint vid_base = vid & ~2;
+	uint vid_base = vid & ~1;
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
 	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));

@@ -1311,8 +1311,10 @@ bool GSHwHack::MV_Growlanser(GSRendererHW& r)
 
 	GL_INS("MV_Growlanser: %x -> %x %dx%d", RSBP, RDBP, src->GetUnscaledWidth(), src->GetUnscaledHeight());
 
+	const ShaderConvert shader = dst->GetTexture()->IsDepthInteger() ? ShaderConvert::RGBA8_TO_UINT32 :
+	                                                                   ShaderConvert::RGBA8_TO_FLOAT32;
 	g_gs_device->StretchRect(src->GetTexture(), GSVector4(rc) / GSVector4(src->GetUnscaledSize()).xyxy(),
-		dst->GetTexture(), GSVector4(rc) * GSVector4(dst->GetScale()), ShaderConvert::RGBA8_TO_FLOAT32, false);
+		dst->GetTexture(), GSVector4(rc) * GSVector4(dst->GetScale()), shader, false);
 
 	s_last_hacked_move_n = r.s_n;
 	return true;

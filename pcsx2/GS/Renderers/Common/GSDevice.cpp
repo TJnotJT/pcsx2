@@ -755,6 +755,16 @@ GSTexture* GSDevice::CreateDepthStencil(int w, int h, GSTexture::Format format, 
 	return FetchSurface(GSTexture::Type::DepthStencil, w, h, 1, format, clear, !prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, bool clear, bool prefer_reuse)
+{
+	return CreateCompatibleTexture(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);
+}
+
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)
 {
 	pxAssert(mipmap_levels != 0 && (mipmap_levels < 0 || mipmap_levels <= GetMipmapLevelsForSize(w, h)));
