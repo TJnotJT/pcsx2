@@ -3301,7 +3301,7 @@ GSTextureCache::Target* GSTextureCache::LookupTarget(GIFRegTEX0 TEX0, const GSVe
 }
 
 GSTextureCache::Target* GSTextureCache::CreateTarget(GIFRegTEX0 TEX0, const GSVector2i& size, const GSVector2i& valid_size, float scale, int type,
-	bool used, u32 fbmask, bool is_frame, bool preload, bool preserve_target, const GSVector4i draw_rect, GSTextureCache::Source* src)
+	bool used, u32 fbmask, bool is_frame, bool preload, bool preserve_target, const GSVector4i draw_rect, GSTextureCache::Source* src, bool z_integer)
 {
 	if (type == DepthStencil)
 	{
@@ -3317,7 +3317,7 @@ GSTextureCache::Target* GSTextureCache::CreateTarget(GIFRegTEX0 TEX0, const GSVe
 	if (GSVector4i::loadh(size).rempty())
 		return nullptr;
 
-	Target* dst = Target::Create(TEX0, size.x, size.y, scale, type, true);
+	Target* dst = Target::Create(TEX0, size.x, size.y, scale, type, true, z_integer);
 	if (!dst) [[unlikely]]
 		return nullptr;
 
@@ -6946,14 +6946,15 @@ void GSTextureCache::AgeHashCache()
 	}
 }
 
-GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, int h, float scale, int type, bool clear)
+GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, int h, float scale, int type, bool clear, bool z_integer)
 {
 	pxAssert(type == RenderTarget || type == DepthStencil);
 
 	const int scaled_w = static_cast<int>(std::ceil(static_cast<float>(w) * scale));
 	const int scaled_h = static_cast<int>(std::ceil(static_cast<float>(h) * scale));
 	GSTexture* texture;
-	if (type == DepthStencil && g_gs_device->Features().depth_integer)
+	if (type == DepthStencil && g_gs_device->Features().depth_integer &&
+		(GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always || z_integer))
 	{
 		texture = g_gs_device->CreateRenderTarget(scaled_w, scaled_h, GSTexture::Format::UInt32, clear, PreferReusedLabelledTexture());
 	}

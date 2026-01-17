@@ -407,7 +407,7 @@ enum class GSHardwareDownloadMode : u8
 enum class GSHardwareZIntegerMode : u8
 {
 	Disabled,
-	Default,
+	Enabled,
 	Always
 };
 

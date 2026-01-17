@@ -3275,8 +3275,13 @@ void GSRendererHW::Draw()
 
 		if (!ds && m_cached_ctx.FRAME.FBP != m_cached_ctx.ZBUF.ZBP)
 		{
+			// Use Z integer if using Z32 and and incoming Zs are large.
+			const bool z_integer = g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
+				                   ((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && (static_cast<int>(m_vt.m_max.p.z) >> 24)) ||
+									   GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always);
+
 			ds = g_texture_cache->CreateTarget(ZBUF_TEX0, t_size, GetValidSize(src, possible_shuffle), target_scale, GSTextureCache::DepthStencil,
-				true, 0, false, force_preload, preserve_depth, m_r, src);
+				true, 0, false, force_preload, preserve_depth, m_r, src, z_integer);
 			if (!ds) [[unlikely]]
 			{
 				GL_INS("HW: ERROR: Failed to create ZBUF target, skipping.");
@@ -3462,6 +3467,37 @@ void GSRendererHW::Draw()
 					}
 				}
 			}
+		}
+
+		// Convert the Z buffer F32<->U32 depending on whether the Z integer feature is enabled and the maximum Z values.
+		if (ds->m_texture->IsDepthStencil() && g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
+			((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && ((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max)) ||
+				GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always))
+		{
+			// F32 -> U32
+			const int w = ds->m_texture->GetWidth();
+			const int h = ds->m_texture->GetHeight();
+			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) F32 to U32 (alpha curr=%x, alpha draw=%x).",
+				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
+			GSTexture* tmp = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::UInt32, false);
+			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::FLOAT32_TO_UINT32);
+			g_gs_device->Recycle(ds->m_texture);
+			ds->m_texture = tmp;
+		}
+		else if (ds->m_texture->IsDepthInteger() && GSConfig.HWZIntegerMode < GSHardwareZIntegerMode::Always &&
+			!((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max))
+		{
+			// U32 -> F32
+			const int w = ds->m_texture->GetWidth();
+			const int h = ds->m_texture->GetHeight();
+			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) U32 to F32 (alpha curr=%x, alpha draw=%x).",
+				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
+			GSTexture* tmp = g_gs_device->CreateDepthStencil(w, h, GSTexture::Format::DepthStencil, false);
+			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::UINT32_TO_FLOAT32);
+			g_gs_device->Recycle(ds->m_texture);
+			ds->m_texture = tmp;
 		}
 	}
 
