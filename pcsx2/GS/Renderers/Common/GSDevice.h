@@ -1025,7 +1025,7 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 			return 3;
 		case GSHWDrawConfig::VSExpand::LineZInt:
 			// Line Z integer relies on vertex ID modulo 2 to figure out which vertex it is.
-			return 3;
+			return 2;
 		default:
 			return 1;
 	}
