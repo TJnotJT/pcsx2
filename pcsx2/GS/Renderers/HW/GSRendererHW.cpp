@@ -3497,7 +3497,7 @@ void GSRendererHW::Draw()
 			}
 		}
 
-		// Convert the Z buffer F32<->U32 depending on whether the Z integer feature is enabled and the maximum Z values.
+		// Convert the Z buffer F32<->U32 depending on whether the Z integer feature is enabled and the upper bits of Z are set.
 		if (ds->m_texture->IsDepthStencil() && g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
 			((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && ((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max)) ||
 				GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always))
@@ -3509,7 +3509,7 @@ void GSRendererHW::Draw()
 				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
 			GSTexture* tmp = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::UInt32, false);
 			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
-			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::FLOAT32_TO_UINT32);
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::FLOAT32_TO_UINT32, false);
 			g_gs_device->Recycle(ds->m_texture);
 			ds->m_texture = tmp;
 		}
@@ -3523,7 +3523,7 @@ void GSRendererHW::Draw()
 				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
 			GSTexture* tmp = g_gs_device->CreateDepthStencil(w, h, GSTexture::Format::DepthStencil, false);
 			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
-			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::UINT32_TO_FLOAT32);
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::UINT32_TO_FLOAT32, false);
 			g_gs_device->Recycle(ds->m_texture);
 			ds->m_texture = tmp;
 		}
