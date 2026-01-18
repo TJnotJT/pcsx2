@@ -4909,6 +4909,8 @@ __forceinline void GSState::VertexKick(u32 skip)
 	constexpr u32 max_vertices = MaxVerticesForPrim(prim);
 	if (max_vertices != 0 && m_vertex.tail >= max_vertices)
 		Flush(VERTEXCOUNT);
+	if (max_vertices != 0 && g_gs_device->Features().depth_integer && m_index.tail >= max_vertices) // FIXME: Make this more efficient
+		Flush(VERTEXCOUNT);
 }
 
 /// Checks if region repeat is used (applying it does something to at least one of the values in min...max)
