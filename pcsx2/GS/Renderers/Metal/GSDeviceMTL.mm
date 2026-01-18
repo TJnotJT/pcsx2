@@ -1799,10 +1799,11 @@ static GSMTLExpandType ConvertVSExpand(GSHWDrawConfig::VSExpand generic)
 {
 	switch (generic)
 	{
-		case GSHWDrawConfig::VSExpand::None:   return GSMTLExpandType::None;
-		case GSHWDrawConfig::VSExpand::Point:  return GSMTLExpandType::Point;
-		case GSHWDrawConfig::VSExpand::Line:   return GSMTLExpandType::Line;
-		case GSHWDrawConfig::VSExpand::Sprite: return GSMTLExpandType::Sprite;
+		case GSHWDrawConfig::VSExpand::None:         return GSMTLExpandType::None;
+		case GSHWDrawConfig::VSExpand::Point:        return GSMTLExpandType::Point;
+		case GSHWDrawConfig::VSExpand::Line:         return GSMTLExpandType::Line;
+		case GSHWDrawConfig::VSExpand::Sprite:       return GSMTLExpandType::Sprite;
+		default: pxFail("Unhandled VS expand type"); return static_cast<GSMTLExpandType>(-1);
 	}
 }
 
