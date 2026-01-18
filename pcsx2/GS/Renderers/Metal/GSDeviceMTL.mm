@@ -1125,7 +1125,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::COLCLIP_INIT:
 			case ShaderConvert::COLCLIP_RESOLVE:
 				continue;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
+			case ShaderConvert::FLOAT32_TO_UINT32:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
@@ -1165,6 +1165,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Float32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+				break;
+			default:
+				pxFail("Unimplemented convert shader.");
 				break;
 		}
 		const u32 scmask = ShaderConvertWriteMask(conv);
