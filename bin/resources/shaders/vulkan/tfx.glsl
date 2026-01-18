@@ -1698,7 +1698,7 @@ void main()
 	#endif
 
 	#if PS_ZFLOOR && !PS_Z_INTEGER
-		FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
+		input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 	#endif
 
 	#if PS_ZCLAMP
