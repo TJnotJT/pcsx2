@@ -6058,26 +6058,34 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// colclip hw requires blitting.
 		EndRenderPass();
 	}
-	else if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds))
+	else if (InRenderPass() &&
+		((draw_rt && m_current_render_target == draw_rt) ||
+		(draw_ds && m_current_depth_target == draw_ds)))
 	{
 		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
 		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
-		// Prefer keeping feedback loop enabled, that way we're not constantly restarting render passes.
-		if (!(draw_rt || draw_rt_rov) && m_current_render_target && config.tex != m_current_render_target &&
+		if (!draw_rt && m_current_render_target && config.tex != m_current_render_target &&
+			draw_rt_rov != m_current_render_target &&
 			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
 			m_pipeline_selector.rt = true;
-			pipe.feedback_loop_flags |= (m_current_framebuffer_feedback_loop & FeedbackLoopFlag_ReadAndWriteRT);
+			
 		}
-		else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
-				 draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
+		else if (!draw_ds && m_current_depth_target && config.tex != m_current_depth_target &&
+			draw_ds_rov != m_current_depth_target &&
+			draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 		{
 			draw_ds = m_current_depth_target;
 			m_pipeline_selector.ds = true;
-			pipe.feedback_loop_flags |= (m_current_framebuffer_feedback_loop &
-				(FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth));
 		}
+
+		// Prefer keeping feedback loop enabled, that way we're not constantly restarting render passes
+		if (draw_rt)
+			pipe.feedback_loop_flags |= m_current_framebuffer_feedback_loop & FeedbackLoopFlag_ReadAndWriteRT;
+		if (draw_ds)
+			pipe.feedback_loop_flags |= (m_current_framebuffer_feedback_loop &
+				(FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth));
 	}
 
 	if (draw_rt && (config.require_one_barrier || (config.tex && config.tex == config.rt)) && !m_features.texture_barrier)
