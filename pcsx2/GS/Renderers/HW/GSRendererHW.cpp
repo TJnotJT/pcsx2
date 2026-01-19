@@ -17,6 +17,7 @@ GSRendererHW::GSRendererHW()
 {
 	MULTI_ISA_SELECT(GSRendererHWPopulateFunctions)(*this);
 	m_mipmap = GSConfig.HWMipmap;
+	UpdateZIntegerEnabled();
 	SetTCOffset();
 
 	pxAssert(!g_texture_cache);
@@ -5115,7 +5116,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
 				{
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::PointZInt;
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::PointZInteger;
 				}
 			}
 			break;
@@ -5142,7 +5143,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
 				{
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineZInt;
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineZInteger;
 				}
 			}
 			break;
@@ -5205,7 +5206,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
 				{
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInt;
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInteger;
 				}
 			}
 			break;

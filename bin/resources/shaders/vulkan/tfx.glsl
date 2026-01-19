@@ -7,6 +7,19 @@
 
 #if defined(VERTEX_SHADER)
 
+#ifndef VS_EXPAND_NONE
+#define VS_EXPAND_NONE 0
+#define VS_EXPAND_POINT 1
+#define VS_EXPAND_LINE 2
+#define VS_EXPAND_SPRITE 3
+#define VS_EXPAND_POINT_Z_INTEGER 4
+#define VS_EXPAND_LINE_Z_INTEGER 5
+#define VS_EXPAND_TRIANGLE_Z_INTEGER 6
+#endif
+
+#define VS_NEEDS_BARY VS_Z_INTEGER && \
+	(VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
+
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -31,13 +44,13 @@ layout(location = 0) out VSOutput
 
 #if VS_Z_INTEGER
 	flat uvec3 zi;
-#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+#if VS_NEEDS_BARY
 	vec2 bary;
 #endif
 #endif
 } vsOut;
 
-#if VS_EXPAND == 0
+#if VS_EXPAND == VS_EXPAND_NONE
 
 layout(location = 0) in vec2 a_st;
 layout(location = 1) in uvec4 a_c;
@@ -118,7 +131,9 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_Z_INTEGER
 	uint z;
+#if VS_NEEDS_BARY
 	vec2 bary;
+#endif
 #endif
 };
 
@@ -165,14 +180,16 @@ ProcessedVertex load_vertex(uint index)
 	vtx.t.z = a_f.r;
 
 #if VS_Z_INTEGER
-	#if VS_EXPAND == 4
-		uint index_mod = index % 3;
-	#elif VS_EXPAND == 2 || VS_EXPAND == 5
-		uint index_mod = index & 1;
-	#else
-		uint index_mod = 0;
+	#if VS_NEEDS_BARY
+		#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
+			uint index_mod = index % 3;
+		#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
+			uint index_mod = index & 1;
+		#else
+			uint index_mod = 0;
+		#endif
+		vtx.bary = vec2(index_mod == 0, index_mod == 1);
 	#endif
-	vtx.bary = vec2(index_mod == 0, index_mod == 1);
 	vtx.z = z;
 #endif
 
@@ -185,7 +202,7 @@ void main()
 	uint vid = uint(gl_VertexIndex);
 	uvec3 zi;
 
-#if VS_EXPAND == 1 // Point
+#if VS_EXPAND == VS_EXPAND_POINT
 
 	vtx = load_vertex(vid >> 2);
 
@@ -196,7 +213,7 @@ void main()
 	zi = uvec3(vtx.z, 0, 0);
 #endif
 
-#elif VS_EXPAND == 2 // Line
+#elif VS_EXPAND == VS_EXPAND_LINE
 
 	uint vid_base = vid >> 2;
 
@@ -223,7 +240,7 @@ void main()
 	// This means that both triangles will have a point based off the top line point as their first point
 	// So we don't have to do anything for !IIP
 
-#elif VS_EXPAND == 3 // Sprite
+#elif VS_EXPAND == VS_EXPAND_SPRITE
 
 	// Sprite points are always in pairs
 	uint vid_base = vid >> 1;
@@ -248,7 +265,7 @@ void main()
 	zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 4) // Triangle for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
 	uint vid_base = (vid / 3) * 3;
 	ProcessedVertex raw0 = load_vertex(vid_base + 0);
@@ -259,7 +276,7 @@ void main()
 	// All vertices of the same primitive must have z in same order
 	zi = uvec3(raw0.z, raw1.z, raw2.z);
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 5) // Lines for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
 	uint vid_base = vid & ~1;
 	ProcessedVertex raw0 = load_vertex(vid_base + 0);
@@ -269,7 +286,7 @@ void main()
 	// All vertices of the same primitive must have z in same order
 	zi = uvec3(raw0.z, raw1.z, 0);
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 6) // Points for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
 	vtx = load_vertex(vid);
 
 	zi = uvec3(vtx.z, 0, 0); // Flat Z
@@ -282,7 +299,7 @@ void main()
 
 #if VS_Z_INTEGER
 	vsOut.zi = zi;
-#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+#if VS_NEEDS_BARY
 	vsOut.bary = vtx.bary;
 #endif
 #endif

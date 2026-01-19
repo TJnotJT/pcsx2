@@ -429,9 +429,9 @@ struct alignas(16) GSHWDrawConfig
 		Point,
 		Line,
 		Sprite,
-		TriangleZInt,
-		LineZInt,
-		PointZInt
+		PointZInteger,
+		LineZInteger,
+		TriangleZInteger
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -458,9 +458,9 @@ struct alignas(16) GSHWDrawConfig
 		/// Remove the Z integer expand shader.
 		__fi void RemoveZIntegerExpand()
 		{
-			if ((expand == GSHWDrawConfig::VSExpand::LineZInt) ||
-				(expand == GSHWDrawConfig::VSExpand::TriangleZInt) ||
-				(expand == GSHWDrawConfig::VSExpand::PointZInt))
+			if ((expand == GSHWDrawConfig::VSExpand::PointZInteger) ||
+				(expand == GSHWDrawConfig::VSExpand::LineZInteger) ||
+				(expand == GSHWDrawConfig::VSExpand::TriangleZInteger))
 			{
 				expand = GSHWDrawConfig::VSExpand::None;
 			}
@@ -1021,10 +1021,10 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 		case GSHWDrawConfig::VSExpand::Sprite:
 			// Sprite expand does a 2-4 expansion, and relies on the low bit of the vertex ID to figure out if it's the first or second coordinate.
 			return 2;
-		case GSHWDrawConfig::VSExpand::TriangleZInt:
+		case GSHWDrawConfig::VSExpand::TriangleZInteger:
 			// Triangle Z integer relies on vertex ID modulo 3 to figure out which vertex it is.
 			return 3;
-		case GSHWDrawConfig::VSExpand::LineZInt:
+		case GSHWDrawConfig::VSExpand::LineZInteger:
 			// Line Z integer relies on vertex ID modulo 2 to figure out which vertex it is.
 			return 2;
 		default:

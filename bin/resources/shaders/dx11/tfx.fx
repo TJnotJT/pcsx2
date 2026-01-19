@@ -50,6 +50,16 @@
 #define INVALID_CLASS 7
 #endif
 
+#ifndef VS_EXPAND_NONE
+#define VS_EXPAND_NONE 0
+#define VS_EXPAND_POINT 1
+#define VS_EXPAND_LINE 2
+#define VS_EXPAND_SPRITE 3
+#define VS_EXPAND_POINT_Z_INTEGER 4
+#define VS_EXPAND_LINE_Z_INTEGER 5
+#define VS_EXPAND_TRIANGLE_Z_INTEGER 6
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -124,6 +134,9 @@
 #define PS_ZWRITE (PS_ZCLAMP || PS_ZFLOOR)
 #define SW_Z_TESTING (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 
+#define VS_NEEDS_BARY VS_Z_INTEGER && \
+	(VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
+
 struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
@@ -133,7 +146,7 @@ struct VS_INPUT
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
 	float4 f : COLOR1;
-#if VS_Z_INTEGER
+#if VS_NEEDS_BARY
 	float2 bary : COLOR2;
 #endif
 };
@@ -152,7 +165,7 @@ struct VS_OUTPUT
 
 #if VS_Z_INTEGER
 	nointerpolation uint3 zi : COLOR1;
-#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+#if VS_NEEDS_BARY
 	float2 bary : COLOR2;
 #endif
 #endif
@@ -1513,7 +1526,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 
 #if VS_Z_INTEGER
 	output.zi = uint3(input.z, 0, 0);
-#if VS_EXPAND == 2 || VS_EXPAND == 4 || VS_EXPAND == 5
+#if VS_NEEDS_BARY
 	output.bary = input.bary;
 #endif
 #endif
@@ -1521,7 +1534,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	return output;
 }
 
-#if VS_EXPAND != 0
+#if VS_EXPAND != VS_EXPAND_NONE
 
 struct VS_RAW_INPUT
 {
@@ -1554,10 +1567,10 @@ VS_INPUT load_vertex(uint index)
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
 
 	// Barycentric coordinates handling
-#if VS_Z_INTEGER
-#if VS_EXPAND == 4
+#if VS_Z_INTEGER && VS_NEEDS_BARY
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
 	uint index_mod = index % 3;
-#elif VS_EXPAND == 2 || VS_EXPAND == 5
+#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
 	uint index_mod = index & 1;
 #else
 	uint index_mod = 0;
@@ -1570,7 +1583,7 @@ VS_INPUT load_vertex(uint index)
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 {
-#if VS_EXPAND == 1 // Point
+#if VS_EXPAND == VS_EXPAND_POINT
 
 	VS_OUTPUT vtx = vs_main(load_vertex(vid >> 2));
 
@@ -1579,7 +1592,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == 2 // Line
+#elif VS_EXPAND == VS_EXPAND_LINE
 
 	uint vid_base = vid >> 2;
 	bool is_bottom = vid & 2;
@@ -1606,7 +1619,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == 3 // Sprite
+#elif VS_EXPAND == VS_EXPAND_SPRITE
 
 	// Sprite points are always in pairs
 	uint vid_base = vid >> 1;
@@ -1629,7 +1642,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 4) // Triangle for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
 	uint vid_base = (vid / 3) * 3;
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
@@ -1642,7 +1655,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 5) // Lines for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
 	uint vid_base = vid & ~1;
 	VS_INPUT raw0 = load_vertex(vid_base + 0);
@@ -1654,7 +1667,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	
 	return vtx;
 
-#elif VS_Z_INTEGER && (VS_EXPAND == 6) // Points for integer Z
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
 	return vs_main(load_vertex(vid));
 #endif
 }
