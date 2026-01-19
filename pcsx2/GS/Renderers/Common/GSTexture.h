@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "GS/GS.h" // FIXME: Do this properly
 #include "GS/GSVector.h"
 
 #include <string>
@@ -156,24 +155,8 @@ public:
 	__fi u32 GetClearColor() const { return m_clear_value.color; }
 	__fi float GetClearDepth() const { return m_clear_value.depth; }
 	__fi float GetClearDepthInteger() const { return m_clear_value.color; }
-	__fi GSVector4 GetUNormClearColor() const // FIXME: Rename to GetVectorClearColor
-	{
-		// FIXME: Do this properly with virtual function
-		if (GSGetCurrentRenderer() == GSRendererType::DX12)
-		{
-			return IsDepthInteger() ? GSVector4(static_cast<float>(m_clear_value.color), 0.0f, 0.0f, 0.0f) :
-				GSVector4::unorm8(m_clear_value.color);
-		}
-		else if (GSGetCurrentRenderer() == GSRendererType::VK)
-		{
-			return IsDepthInteger() ? GSVector4::cast(GSVector4i(m_clear_value.color, 0, 0, 0)) :
-				GSVector4::unorm8(m_clear_value.color);
-		}
-		else
-		{
-			pxFail("Use only DX12 or VK.");
-		}
-	}
+	// FIXME: Rename to GetVectorClearColor
+	virtual GSVector4 GetUNormClearColor() const { return GSVector4::unorm8(m_clear_value.color); }
 
 	__fi void SetClearColor(u32 color)
 	{

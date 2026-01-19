@@ -48,6 +48,12 @@ public:
 
 	void* GetNativeHandle() const override;
 
+	GSVector4 GetUNormClearColor() const override
+	{
+		return IsDepthInteger() ? GSVector4::cast(GSVector4i(m_clear_value.color, 0, 0, 0)) :
+			GSVector4::unorm8(m_clear_value.color);
+	}
+
 	bool Update(const GSVector4i& r, const void* data, int pitch, int layer = 0) override;
 	bool Map(GSMap& m, const GSVector4i* r = NULL, int layer = 0) override;
 	void Unmap() override;
