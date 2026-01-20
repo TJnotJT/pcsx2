@@ -3755,7 +3755,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 	}
 
 	PRIM_OVERLAP overlap = PRIM_OVERLAP_NO;
-	bool check_quads = primclass == GS_TRIANGLE_CLASS;
+	bool check_quads = (primclass == GS_TRIANGLE_CLASS);
 
 	u32 i = 0;
 	u32 skip = 0; // Number of indices to skip if we have the bbox from the previous iteration.
@@ -3770,7 +3770,37 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 		while (j < count)
 		{
-			if (check_quads && j + 3 < count)
+			bool got_bbox = false;
+
+			// First check: see if the triangles are part of triangle strip that form a non-axis-aligned quad.
+			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
+				index[j + 1] == index[j + 3] && index[j + 2] == index[j + 4])
+			{
+				// There is a shared edge between this and next triangle.
+				// Check if the unshared point is on opposite sides of the shared edge.
+				const GSVector4i shared0 = GSVector4i(v[index[j + 1]].m[1]).upl16();
+				const GSVector4i shared1 = GSVector4i(v[index[j + 2]].m[1]).upl16() - shared0;
+				const GSVector4i unshared0 = GSVector4i(v[index[j + 0]].m[1]).upl16() - shared0;
+				const GSVector4i unshared1 = GSVector4i(v[index[j + 5]].m[1]).upl16() - shared0;
+
+				// Cross product signs comparison.
+				if ((unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) !=
+					(unshared1.x * shared1.y - unshared1.y * shared1.x >= 0))
+				{
+					// Corners are on opposite sides so we can assume a non-axis-aligned quad.
+					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
+					bbox = bbox.runion(GSVector4i(v[index[j + 1]].m[1]).upl16().xyxy());
+					bbox = bbox.runion(GSVector4i(v[index[j + 2]].m[1]).upl16().xyxy());
+					bbox = bbox.runion(GSVector4i(v[index[j + 5]].m[1]).upl16().xyxy());
+
+					skip = 6;
+
+					got_bbox = true;
+				}
+			}
+
+			// Second check: see if triangles form an axis-aligned quad.
+			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && check_quads && j + 3 < count)
 			{
 				const u16* RESTRICT idx0 = &index[j + 0];
 				const u16* RESTRICT idx1 = &index[j + 3];
@@ -3780,31 +3810,30 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				if (AreTrianglesQuad<0, 0>(v, idx0, idx1, &tri0, &tri1))
 				{
 					// tri.b is right angle corner
-					GSVector4i corner0 = GSVector4i(v[idx0[tri0.b]].m[1]).upl16().xyxy();
-					GSVector4i corner1 = GSVector4i(v[idx1[tri1.b]].m[1]).upl16().xyxy();
-					bbox = corner0.runion(corner1);
+					bbox = GSVector4i(v[idx0[tri0.b]].m[1]).upl16().xyxy();
+					bbox = bbox.runion(GSVector4i(v[idx1[tri1.b]].m[1]).upl16().xyxy());
 					
 					skip = 6;
+
+					got_bbox = true;
 				}
 				else
 				{
-					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
-					bbox = bbox.runion(GSVector4i(v[index[j + 1]].m[1]).upl16().xyxy());
-					bbox = bbox.runion(GSVector4i(v[index[j + 2]].m[1]).upl16().xyxy());
-
-					skip = 3;
-
-					// If we fail a quad check assume the rest are not quads.
+					// If we fail a quad check assume the rest are not quads since the check is relatively expensive.
 					check_quads = false;
 				}
 			}
-			else
+			
+			// Default case: just take the bbox of the prim vertices.
+			if (!got_bbox)
 			{
 				bbox = GSVector4i(v[GetIndex(j)].m[1]).upl16().xyxy();
 				for (int k = 1; k < n; k++) // Unroll
 					bbox = bbox.runion(GSVector4i(v[GetIndex(j + k)].m[1]).upl16().xyxy());
 
 				skip = n;
+
+				got_bbox = true;
 			}
 
 			// Avoid degenerate bbox.
