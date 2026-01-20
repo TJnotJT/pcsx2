@@ -3766,38 +3766,72 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 	{
 		u32 j = i + skip;
 
+		skip = 0;
+
 		GSVector4i bbox(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
 		while (j < count)
 		{
 			bool got_bbox = false;
 
-			// First check: see if the triangles are part of triangle strip that form a non-axis-aligned quad.
-			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
-				index[j + 1] == index[j + 3] && index[j + 2] == index[j + 4])
-			{
-				// There is a shared edge between this and next triangle.
-				// Check if the unshared point is on opposite sides of the shared edge.
-				const GSVector4i shared0 = GSVector4i(v[index[j + 1]].m[1]).upl16();
-				const GSVector4i shared1 = GSVector4i(v[index[j + 2]].m[1]).upl16() - shared0;
-				const GSVector4i unshared0 = GSVector4i(v[index[j + 0]].m[1]).upl16() - shared0;
-				const GSVector4i unshared1 = GSVector4i(v[index[j + 5]].m[1]).upl16() - shared0;
+			// Todo: optimize have a flag in GSState that tells us when a strip and/or fan
+			// has been created to avoid unnecessary checks.
+			// For triangle strips indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
+			// For triangles fans indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
+			// Warning: this depends on how the vertices are arrange in the vertex kick.
+			// if that changes this detection will break.
+			constexpr int shared[2][4] = { { 1, 2, 3, 4 }, { 0, 2, 3, 4 } };
+			constexpr int unshared[2][2] = { { 0, 5 }, { 1, 5 } };
 
-				// Cross product signs comparison.
-				if ((unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) !=
-					(unshared1.x * shared1.y - unshared1.y * shared1.x >= 0))
+			const auto CheckTriangleQuads = [&]<int type>() {
+				if (!got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
+					index[j + shared[type][0]] == index[j + shared[type][2]] &&
+					index[j + shared[type][1]] == index[j + shared[type][3]])
 				{
-					// Corners are on opposite sides so we can assume a non-axis-aligned quad.
+					// Get the initial triangle bbox.
 					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
 					bbox = bbox.runion(GSVector4i(v[index[j + 1]].m[1]).upl16().xyxy());
 					bbox = bbox.runion(GSVector4i(v[index[j + 2]].m[1]).upl16().xyxy());
-					bbox = bbox.runion(GSVector4i(v[index[j + 5]].m[1]).upl16().xyxy());
 
-					skip = 6;
+					while (true)
+					{
+						// There is a shared edge between this and next triangle.
+						// Check if the unshared point is on opposite sides of the shared edge.
+						const GSVector4i shared0 = GSVector4i(v[index[j + skip + shared[type][0]]].m[1]).upl16();
+						const GSVector4i shared1 = GSVector4i(v[index[j + skip + shared[type][1]]].m[1]).upl16() - shared0;
+						const GSVector4i unshared0 = GSVector4i(v[index[j + skip + unshared[type][0]]].m[1]).upl16() - shared0;
+						const GSVector4i unshared1 = GSVector4i(v[index[j + skip + unshared[type][1]]].m[1]).upl16() - shared0;
 
-					got_bbox = true;
+						// Cross product signs comparison.
+						if ((unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) ==
+							(unshared1.x * shared1.y - unshared1.y * shared1.x >= 0))
+						{
+							break; // Triangles are on same side of the shared edge so there's overlap.
+						}
+
+						// Corners are on opposite sides so we can assume a non-axis-aligned quad.
+						// Take union with the single unshared point.
+						bbox = bbox.runion(GSVector4i(v[index[j + skip + unshared[type][1]]].m[1]).upl16().xyxy());
+
+						skip += 3;
+
+						got_bbox = true;
+
+						if (!(j + skip + 3 < count &&
+							index[j + skip + shared[type][0]] == index[j + skip + shared[type][2]] &&
+							index[j + skip + shared[type][1]] == index[j + skip + shared[type][3]]))
+						{
+							// Cannot continue the strip/fan. Consume the last triangle and exit.
+							skip += 3;
+							break;
+						}
+					}
 				}
-			}
+			};
+
+			// First check: see if the triangles are part of triangle strip/fan that form a non-axis-aligned quad.
+			CheckTriangleQuads.template operator()<0>();
+			CheckTriangleQuads.template operator()<1>();
 
 			// Second check: see if triangles form an axis-aligned quad.
 			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && check_quads && j + 3 < count)
