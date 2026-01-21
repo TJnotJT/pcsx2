@@ -3774,19 +3774,26 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 		{
 			bool got_bbox = false;
 
-			// Todo: optimize have a flag in GSState that tells us when a strip and/or fan
-			// has been created to avoid unnecessary checks.
-			// For triangle strips indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
-			// For triangles fans indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
+			// Assuming that indices 0-5 represent two triangles:
+			// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
+			// Triangles fans: indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
 			// Warning: this depends on how the vertices are arrange in the vertex kick.
 			// if that changes this detection will break.
-			constexpr int shared[2][4] = { { 1, 2, 3, 4 }, { 0, 2, 3, 4 } };
-			constexpr int unshared[2][2] = { { 0, 5 }, { 1, 5 } };
+			constexpr std::array<std::array<std::array<int, 3>, 2>, 2> tri_order({
+				// Triangle strips, expected indices of first and second triangle.
+				std::array{ std::array<int, 3>{ 1, 2, 0 }, std::array<int, 3>{ 3, 4, 5 } },
+
+				// Triangle fans, expected indices of first and second triangle.
+				std::array{ std::array<int, 3>{ 0, 2, 1 }, std::array<int, 3>{ 3, 4, 5 } },
+			});
 
 			const auto CheckTriangleQuads = [&]<int type>() {
+				constexpr std::array<int, 3> tri0 = tri_order[type][0];
+				constexpr std::array<int, 3> tri1 = tri_order[type][1];
+
 				if (!got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
-					index[j + shared[type][0]] == index[j + shared[type][2]] &&
-					index[j + shared[type][1]] == index[j + shared[type][3]])
+					index[j + tri0[0]] == index[j + tri1[0]] &&
+					index[j + tri0[1]] == index[j + tri1[1]])
 				{
 					// Get the initial triangle bbox.
 					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
@@ -3797,10 +3804,10 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					{
 						// There is a shared edge between this and next triangle.
 						// Check if the unshared point is on opposite sides of the shared edge.
-						const GSVector4i shared0 = GSVector4i(v[index[j + skip + shared[type][0]]].m[1]).upl16();
-						const GSVector4i shared1 = GSVector4i(v[index[j + skip + shared[type][1]]].m[1]).upl16() - shared0;
-						const GSVector4i unshared0 = GSVector4i(v[index[j + skip + unshared[type][0]]].m[1]).upl16() - shared0;
-						const GSVector4i unshared1 = GSVector4i(v[index[j + skip + unshared[type][1]]].m[1]).upl16() - shared0;
+						const GSVector4i shared0 = GSVector4i(v[index[j + skip + tri0[0]]].m[1]).upl16();
+						const GSVector4i shared1 = GSVector4i(v[index[j + skip + tri0[1]]].m[1]).upl16() - shared0;
+						const GSVector4i unshared0 = GSVector4i(v[index[j + skip + tri0[2]]].m[1]).upl16() - shared0;
+						const GSVector4i unshared1 = GSVector4i(v[index[j + skip + tri1[2]]].m[1]).upl16() - shared0;
 
 						// Cross product signs comparison.
 						if ((unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) ==
@@ -3811,15 +3818,15 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 						// Corners are on opposite sides so we can assume a non-axis-aligned quad.
 						// Take union with the single unshared point.
-						bbox = bbox.runion(GSVector4i(v[index[j + skip + unshared[type][1]]].m[1]).upl16().xyxy());
+						bbox = bbox.runion(GSVector4i(v[index[j + skip + tri1[2]]].m[1]).upl16().xyxy());
 
 						skip += 3;
 
 						got_bbox = true;
 
 						if (!(j + skip + 3 < count &&
-							index[j + skip + shared[type][0]] == index[j + skip + shared[type][2]] &&
-							index[j + skip + shared[type][1]] == index[j + skip + shared[type][3]]))
+							index[j + skip + tri0[0]] == index[j + skip + tri1[0]] &&
+							index[j + skip + tri0[1]] == index[j + skip + tri1[1]]))
 						{
 							// Cannot continue the strip/fan. Consume the last triangle and exit.
 							skip += 3;
@@ -3830,8 +3837,11 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			};
 
 			// First check: see if the triangles are part of triangle strip/fan that form a non-axis-aligned quad.
-			CheckTriangleQuads.template operator()<0>();
-			CheckTriangleQuads.template operator()<1>();
+			if (primclass == GS_TRIANGLE_CLASS)
+			{
+				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
+				CheckTriangleQuads.template operator()<1>(); // Check triangle fans.
+			}
 
 			// Second check: see if triangles form an axis-aligned quad.
 			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && check_quads && j + 3 < count)
