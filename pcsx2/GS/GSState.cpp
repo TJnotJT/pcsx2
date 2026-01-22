@@ -3762,6 +3762,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 	GSVector4i all(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
+	bool previous_tri_strip = false; // If previous group of triangles was a triangle strip.
+	GSVector4i strip_corners; // Tracks the corners of the previous triangle strip (if any).
+
 	while (i < count)
 	{
 		u32 j = i + skip;
@@ -3772,7 +3775,12 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 		while (j < count)
 		{
+			bool tri_strip = false; // Whether this group is a triangle strip.
+			GSVector4i corners; // New strip corners.
+
 			bool got_bbox = false;
+
+			bool skip_overlap_check = false;
 
 			// Assuming that indices 0-5 represent two triangles:
 			// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
@@ -3795,6 +3803,13 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					index[j + tri0[0]] == index[j + tri1[0]] &&
 					index[j + tri0[1]] == index[j + tri1[1]])
 				{
+					// For strips get the first two corners.
+					if (type == 0)
+					{
+						corners.x = v[index[j + 0]].XYZ.U32[0];
+						corners.y = v[index[j + 1]].XYZ.U32[0];
+					}
+
 					// Get the initial triangle bbox.
 					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
 					bbox = bbox.runion(GSVector4i(v[index[j + 1]].m[1]).upl16().xyxy());
@@ -3833,6 +3848,24 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 							break;
 						}
 					}
+
+					if (type == 0 && skip >= 6)
+					{
+						tri_strip = true;
+
+						// Saw a nontrivial triangle strip so get the last 2 corners.
+						// Order of the corners will depend on whether there were even or odd triangles in the strip.
+						if (skip & 1)
+						{
+							corners.z = v[index[j + skip - 1]].XYZ.U32[0];
+							corners.w = v[index[j + skip - 2]].XYZ.U32[0];
+						}
+						else
+						{
+							corners.z = v[index[j + skip - 2]].XYZ.U32[0];
+							corners.w = v[index[j + skip - 1]].XYZ.U32[0];
+						}
+					}
 				}
 			};
 
@@ -3840,7 +3873,24 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			if (primclass == GS_TRIANGLE_CLASS)
 			{
 				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
-				CheckTriangleQuads.template operator()<1>(); // Check triangle fans.
+				if (tri_strip)
+				{
+					if (s_n == 426)
+						printf("");
+					if (previous_tri_strip)
+					{
+						// See if the new strip can be combined with old:
+						// if old corners {0, 2} == new corners {1, 3} or
+						// if old corners {1, 3} == new corners {0, 2}.
+						int m1 = (strip_corners.yxwz() == corners).mask();
+						int m2 = (strip_corners.wzyx() == corners).mask(); // reversed order
+						skip_overlap_check = (m1 == 0x0F0F || m1 == 0xF0F0 || m2 == 0x0F0F || m2 == 0xF0F0);
+					}
+				}
+				else
+				{
+					CheckTriangleQuads.template operator()<1>(); // Check triangle fans.
+				}
 			}
 
 			// Second check: see if triangles form an axis-aligned quad.
@@ -3880,16 +3930,31 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				got_bbox = true;
 			}
 
+			// If the bbox is < 1 pixel square then just assume its contribution to overlap is negligible.
+			// SSX draws a bunch of 1 pixel triangles.
+			const bool skip_bbox = bbox.width() * bbox.height() < 2048;
+
 			// Avoid degenerate bbox.
-			bbox = bbox.blend(bbox + GSVector4i(0, 0, 1, 1), bbox.xyxy() == bbox.zwzw());
+			//bbox = bbox.blend(bbox + GSVector4i(0, 0, 1, 1), bbox.xyxy() == bbox.zwzw());
 
-			if (all.rintersects(bbox))
+			if (!skip_bbox)
 			{
-				overlap = PRIM_OVERLAP_YES;
-				break;
-			}
+				if (s_n == 426)
+					printf("");
+				if (!skip_overlap_check && all.rintersects(bbox))
+				{
+					overlap = PRIM_OVERLAP_YES;
+					break;
+				}
 
-			all = all.runion(bbox);
+				all = all.runion(bbox);
+
+				if (primclass == GS_TRIANGLE_CLASS)
+				{
+					previous_tri_strip = tri_strip;
+					strip_corners = corners;
+				}
+			}
 
 			j += skip;
 
