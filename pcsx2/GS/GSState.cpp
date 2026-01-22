@@ -3762,8 +3762,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 	GSVector4i all(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
-	bool previous_tri_strip = false; // If previous group of triangles was a triangle strip.
-	GSVector4i strip_corners; // Tracks the corners of the previous triangle strip (if any).
+	bool prev_tri_strip = false; // If previous group of triangles was a triangle strip.
+	GSVector4i prev_corners; // Tracks the corners of the previous triangle strip (if any).
 
 	while (i < count)
 	{
@@ -3783,6 +3783,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			bool skip_overlap_check = false;
 
+			// Get the initial bbox.
 			bbox = GSVector4i(v[GetIndex(j)].m[1]).upl16().xyxy();
 			for (int k = 1; k < n; k++) // Unroll
 				bbox = bbox.runion(GSVector4i(v[GetIndex(j + k)].m[1]).upl16().xyxy());
@@ -3811,21 +3812,15 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				constexpr std::array<int, 3> tri0 = tri_order[type][0];
 				constexpr std::array<int, 3> tri1 = tri_order[type][1];
 
-				if (!got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
+				if (!skip_bbox && !got_bbox && primclass == GS_TRIANGLE_CLASS && j + 3 < count &&
 					index[j + tri0[0]] == index[j + tri1[0]] &&
 					index[j + tri0[1]] == index[j + tri1[1]])
 				{
 					// For strips get the first two corners.
 					if (type == 0)
 					{
-						corners.x = v[index[j + 0]].XYZ.U32[0];
-						corners.y = v[index[j + 1]].XYZ.U32[0];
+						corners = GSVector4i(v[index[j + 0]].XYZ.U32[0], v[index[j + 1]].XYZ.U32[0]);
 					}
-
-					// Get the initial triangle bbox.
-					bbox = GSVector4i(v[index[j + 0]].m[1]).upl16().xyxy();
-					bbox = bbox.runion(GSVector4i(v[index[j + 1]].m[1]).upl16().xyxy());
-					bbox = bbox.runion(GSVector4i(v[index[j + 2]].m[1]).upl16().xyxy());
 
 					while (true)
 					{
@@ -3866,17 +3861,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						tri_strip = true;
 
 						// Saw a nontrivial triangle strip so get the last 2 corners.
-						// Order of the corners will depend on whether there were even or odd triangles in the strip.
-						if (skip & 1)
-						{
-							corners.z = v[index[j + skip - 1]].XYZ.U32[0];
-							corners.w = v[index[j + skip - 2]].XYZ.U32[0];
-						}
-						else
-						{
-							corners.z = v[index[j + skip - 2]].XYZ.U32[0];
-							corners.w = v[index[j + skip - 1]].XYZ.U32[0];
-						}
+						corners = corners.blend32<0xC>(
+							GSVector4i(0, 0, v[index[j + skip - 1]].XYZ.U32[0], v[index[j + skip - 2]].XYZ.U32[0]));
 					}
 				}
 			};
@@ -3887,20 +3873,23 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
 				if (tri_strip)
 				{
-					if (s_n == 426)
-						printf("");
-					if (previous_tri_strip)
+					if (prev_tri_strip)
 					{
-						// See if the new strip can be combined with old:
-						// if old corners {0, 2} == new corners {1, 3} or
-						// if old corners {1, 3} == new corners {0, 2}.
-						bool b1 = strip_corners.x == corners.x || strip_corners.y == corners.x || strip_corners.x == corners.y || strip_corners.y == corners.y;
-						bool b2 = strip_corners.z == corners.z || strip_corners.w == corners.z || strip_corners.z == corners.w || strip_corners.w == corners.w;
-						skip_overlap_check = b1 || b2;
-						//int m1 = (strip_corners.yxwz() == corners).mask();
-						//int m2 = (strip_corners.wzyx() == corners).mask(); // reversed order
-						//int m3 = (strip_corners.wzxy() == corners).mask(); // reversed order
-						//skip_overlap_check = (m1 == 0x0F0F || m1 == 0xF0F0 || m2 == 0x0F0F || m2 == 0xF0F0);
+						// See if the new strip can be combined with old.
+						/*GSVector4i prev_xyxy = prev_corners.xyxy();
+						GSVector4i prev_zwzw = prev_corners.zwzw();
+						GSVector4i xxyy = corners.xxyy();
+						GSVector4i zzww = corners.zzww();
+
+						skip_overlap_check = ((prev_xyxy == xxyy).mask() && (prev_zwzw == zzww).mask()) ||
+						                     ((prev_xyxy == zzww).mask() && (prev_zwzw == xxyy).mask());*/
+
+						bool b1 = prev_corners.x == corners.x || prev_corners.y == corners.x || prev_corners.x == corners.y || prev_corners.y == corners.y;
+						bool b2 = prev_corners.z == corners.z || prev_corners.w == corners.z || prev_corners.z == corners.w || prev_corners.w == corners.w;
+						bool b3 = prev_corners.x == corners.z || prev_corners.y == corners.z || prev_corners.x == corners.w || prev_corners.y == corners.w;
+						bool b4 = prev_corners.z == corners.x || prev_corners.w == corners.x || prev_corners.z == corners.y || prev_corners.w == corners.y;
+
+						skip_overlap_check = (b1 && b2) || (b2 && b3);
 					}
 				}
 				else
@@ -3946,17 +3935,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				got_bbox = true;
 			}
 
-			// If the bbox is < 1 pixel square then just assume its contribution to overlap is negligible.
-			// SSX draws a bunch of 1 pixel triangles.
-			
-
-			// Avoid degenerate bbox.
-			//bbox = bbox.blend(bbox + GSVector4i(0, 0, 1, 1), bbox.xyxy() == bbox.zwzw());
-
 			if (!skip_bbox)
 			{
-				if (s_n == 426)
-					printf("");
 				if (!skip_overlap_check && all.rintersects(bbox))
 				{
 					overlap = PRIM_OVERLAP_YES;
@@ -3967,8 +3947,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 				if (primclass == GS_TRIANGLE_CLASS)
 				{
-					previous_tri_strip = tri_strip;
-					strip_corners = corners;
+					prev_tri_strip = tri_strip;
+					prev_corners = corners;
 				}
 			}
 
