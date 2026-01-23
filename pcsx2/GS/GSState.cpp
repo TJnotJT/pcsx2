@@ -1822,6 +1822,7 @@ void GSState::GIFRegHandlerHWREG(const GIFReg* RESTRICT r)
 void GSState::Flush(GSFlushReason reason)
 {
 	FlushWrite();
+	FlushInvalidation();
 
 	if (m_index.tail > 0)
 	{
@@ -1855,8 +1856,6 @@ void GSState::Flush(GSFlushReason reason)
 				return;
 		}
 		m_state_flush_reason = reason;
-
-		FlushInvalidation();
 
 		// Used to prompt the current draw that it's modifying its own CLUT.
 		CheckCLUTValidity(m_prev_env.PRIM.PRIM);
