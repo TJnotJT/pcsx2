@@ -159,6 +159,7 @@ public:
 
 		bool Inside(u32 bp, u32 bw, u32 psm, const GSVector4i& rect);
 		bool Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i& rect);
+		bool Overlaps(u32 start_block, u32 end_block);
 	};
 
 	struct PaletteKey
@@ -522,7 +523,8 @@ public:
 	bool HasTargetInHeightCache(u32 bp, u32 fbw, u32 psm, u32 max_age = std::numeric_limits<u32>::max(), bool move_front = true);
 	bool Has32BitTarget(u32 bp);
 
-	void InvalidateSourceAtPage(u32 page); // Keep fixing here!
+	bool InvalidateSourcesAtPage(u32 page, u32 bp, u32 psm, u32 bw, const GSVector4i* rect = nullptr,
+		const GSVector2i* block_range = nullptr);
 	void InvalidateContainedTargets(u32 start_bp, u32 end_bp, u32 write_psm = PSMCT32, u32 write_bw = 1);
 	void InvalidateVideoMemType(int type, u32 bp, u32 write_psm = PSMCT32, u32 write_fbmsk = 0, bool dirty_only = false);
 	void InvalidateVideoMemSubTarget(GSTextureCache::Target* rt);

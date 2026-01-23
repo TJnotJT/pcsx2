@@ -4459,9 +4459,86 @@ void GSTextureCache::InvalidateVideoMemType(int type, u32 bp, u32 write_psm, u32
 	}
 }
 
+// Invalidate sources at the gives page as long as they overlap the given region
+bool GSTextureCache::InvalidateSourcesAtPage(u32 page, u32 bp, u32 psm, u32 bw, const GSVector4i* rect,
+	const GSVector2i* block_range)
+{
+	pxAssert(rect || block_range);
+
+	bool found = false;
+	auto& list = m_src.m_map[page];
+	for (auto i = list.begin(); i != list.end();)
+	{
+		Source* s = *i;
+		++i;
+
+		if (GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
+		{
+			bool hit = (bp == s->m_TEX0.TBP0);
+
+			if (!s->m_target)
+			{
+				found |= hit;
+
+				// No point keeping invalidated sources around when the hash cache is active,
+				// we can just re-hash and create a new source from the cached texture.
+				if (s->m_from_hash_cache || (GSConfig.UserHacks_DisablePartialInvalidation && s->m_repeating))
+				{
+					m_src.RemoveAt(s);
+				}
+				else
+				{
+					u32* RESTRICT valid = s->m_valid.get();
+
+					if (valid && !s->CanPreload())
+					{
+						// Invalidate data of input texture
+						if (s->m_repeating)
+						{
+							// Note: very hot path on snowbling engine game
+							for (const GSVector2i& k : s->m_p2t[page])
+							{
+								valid[k.x] &= k.y;
+							}
+						}
+						else
+						{
+							valid[page] = 0;
+						}
+					}
+
+					s->m_complete_layers = 0;
+				}
+			}
+			else if (hit ||
+				(bp == s->m_from_target_TEX0.TBP0) || // render target used as input texture
+				(rect && s->Overlaps(bp, bw, psm, *rect)) ||
+				(block_range && s->Overlaps(block_range->x, block_range->y)))
+			{
+				m_src.RemoveAt(s);
+			}
+		}
+	}
+	return found;
+}
+
 // Invalidate targets by giving a page range instead of a rectangle.
+// Note: this function is based on InvalidateVideoMem().
 void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
 {
+	// We assume input range is page aligned.
+	pxAssert(((start_bp | end_bp) & (GS_BLOCKS_PER_PAGE - 1)) == 0);
+
+	// Invalidate the sources in the page range.
+	const u32 start_pg = start_bp / GS_BLOCKS_PER_PAGE;
+	const u32 end_pg = end_bp / GS_BLOCKS_PER_PAGE;
+	const GSVector2i block_range(start_bp, end_bp);
+	for (u32 page = start_pg; page < end_pg; page++)
+	{
+		InvalidateSourcesAtPage(page, start_bp, psm, bw, nullptr, &block_range);
+	}
+
+	// Invalidate the targets in the page range.
 	const RGBAMask psm_mask(GSUtil::GetChannelMask(psm));
 
 	for (int type = 0; type < 2; type++)
@@ -4476,20 +4553,20 @@ void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32
 			constexpr int blocks_per_page = static_cast<int>(GS_BLOCKS_PER_PAGE);
 			const int t_bp = static_cast<int>(t->m_TEX0.TBP0);
 			const int valid_blocks = static_cast<int>(t->UnwrappedEndBlock()) - t_bp + 1;
-			const int start_valid_pg =
-				Common::AlignUpPow2(
-					std::clamp(static_cast<int>(start_bp) - t_bp, 0, valid_blocks), blocks_per_page
-				) / blocks_per_page;
-			const int end_valid_pg =
-				Common::AlignDownPow2(
-					std::clamp(static_cast<int>(end_bp) - t_bp, 0, valid_blocks), blocks_per_page
-				) / blocks_per_page;
+
+			// Range that is invalidated in blocks.
+			const int start_valid_bp = std::clamp(static_cast<int>(start_bp) - t_bp, 0, valid_blocks);
+			const int end_valid_bp = std::clamp(static_cast<int>(end_bp) - t_bp, 0, valid_blocks);
+
+			// Range that is invalidated in pages.
+			const int start_valid_pg = Common::AlignUpPow2(start_valid_bp, blocks_per_page) / blocks_per_page;
+			const int end_valid_pg = Common::AlignDownPow2(end_valid_bp, blocks_per_page) / blocks_per_page;
 
 			if (end_valid_pg <= start_valid_pg)
 			{
 				// Invalidation range is empty.
 			}
-			else if (end_valid_pg * blocks_per_page >= valid_blocks)
+			else if (start_valid_pg == 0 && end_valid_pg * blocks_per_page >= valid_blocks)
 			{
 				// Entire range is invalidated.
 				InvalidateSourcesFromTarget(t);
@@ -4638,71 +4715,12 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 		}
 	}
 
-	bool found = false;
 	// Previously: rect.ralign<Align_Outside>((bp & 31) == 0 ? GSLocalMemory::m_psm[psm].pgs : GSLocalMemory::m_psm[psm].bs)
 	// But this causes rects to be too big, especially in WRC games, I don't think there's any need to align them here.
 	GSVector4i r = rect;
 
-	off.loopPages(rect, [this, &rect, bp, bw, psm, &found](u32 page) {
-		auto& list = m_src.m_map[page];
-		for (auto i = list.begin(); i != list.end();)
-		{
-			Source* s = *i;
-			++i;
-
-			if (GSUtil::HasSharedBits(psm, s->m_TEX0.PSM))
-			{
-				bool b = bp == s->m_TEX0.TBP0;
-
-				if (!s->m_target)
-				{
-					found |= b;
-
-					// No point keeping invalidated sources around when the hash cache is active,
-					// we can just re-hash and create a new source from the cached texture.
-					if (s->m_from_hash_cache || (GSConfig.UserHacks_DisablePartialInvalidation && s->m_repeating))
-					{
-						m_src.RemoveAt(s);
-					}
-					else
-					{
-						u32* RESTRICT valid = s->m_valid.get();
-
-						if (valid && !s->CanPreload())
-						{
-							// Invalidate data of input texture
-							if (s->m_repeating)
-							{
-								// Note: very hot path on snowbling engine game
-								for (const GSVector2i& k : s->m_p2t[page])
-								{
-									valid[k.x] &= k.y;
-								}
-							}
-							else
-							{
-								valid[page] = 0;
-							}
-						}
-
-						s->m_complete_layers = 0;
-					}
-				}
-				else
-				{
-					// render target used as input texture
-					b |= bp == s->m_from_target_TEX0.TBP0;
-
-					if (!b)
-						b = s->Overlaps(bp, bw, psm, rect);
-
-					if (b)
-					{
-						m_src.RemoveAt(s);
-					}
-				}
-			}
-		}
+	off.loopPages(rect, [this, &rect, bp, bw, psm](u32 page) {
+		InvalidateSourcesAtPage(page, bp, psm, bw, &rect);
 	});
 
 	if (!target)
@@ -4790,7 +4808,7 @@ void GSTextureCache::InvalidateVideoMem(const GSOffset& off, const GSVector4i& r
 	}
 }
 
-// Goal: retrive the data from the GPU to the GS memory.
+// Goal: retrieve the data from the GPU to the GS memory.
 // Called each time you want to read from the GS memory.
 // full_flush is set when it's a Local->Local stransfer and both src and destination are the same.
 void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush)
@@ -7368,6 +7386,11 @@ bool GSTextureCache::Surface::Inside(u32 bp, u32 bw, u32 psm, const GSVector4i& 
 	return start_block >= m_TEX0.TBP0 && end_block <= UnwrappedEndBlock();
 }
 
+bool GSTextureCache::Surface::Overlaps(u32 start_block, u32 end_block)
+{
+	return GSTextureCache::CheckOverlap(m_TEX0.TBP0, UnwrappedEndBlock(), start_block, end_block);;
+}
+
 bool GSTextureCache::Surface::Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i& rect)
 {
 	const GSOffset off(GSLocalMemory::m_psm[psm].info, bp, bw, psm);
@@ -7394,8 +7417,8 @@ bool GSTextureCache::Surface::Overlaps(u32 bp, u32 bw, u32 psm, const GSVector4i
 	if (end_block > GS_MAX_BLOCKS && bp < m_end_block && m_end_block < m_TEX0.TBP0)
 		bp += GS_MAX_BLOCKS;
 
-	const bool overlap = GSTextureCache::CheckOverlap(m_TEX0.TBP0, UnwrappedEndBlock(), start_block, end_block);
-	return overlap;
+
+	return Overlaps(start_block, end_block);
 }
 
 // GSTextureCache::Source
