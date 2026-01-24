@@ -1916,7 +1916,7 @@ void GSDeviceOGL::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GS
 		constexpr GLint clear_color = 0;
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
-	m_convert.ps[SetDATMShader(datm)].Bind();
+	m_convert.ps[SetDATMShader(datm, ds->IsDepthStencil24() ? 24 : 32)].Bind();
 
 	// om
 

@@ -19,19 +19,19 @@
 
 #include <algorithm>
 
-int SetDATMShader(SetDATM datm)
+int SetDATMShader(SetDATM datm, u32 depth_bpp)
 {
 	switch (datm)
 	{
 		case SetDATM::DATM1_RTA_CORRECTION:
-			return static_cast<int>(ShaderConvert::DATM_1_RTA_CORRECTION);
+			return static_cast<int>(depth_bpp == 24 ? ShaderConvert::DATM_1_RTA_CORRECTION_D24 : ShaderConvert::DATM_1_RTA_CORRECTION);
 		case SetDATM::DATM0_RTA_CORRECTION:
-			return static_cast<int>(ShaderConvert::DATM_0_RTA_CORRECTION);
+			return static_cast<int>(depth_bpp == 24 ? ShaderConvert::DATM_0_RTA_CORRECTION_D24 : ShaderConvert::DATM_0_RTA_CORRECTION);
 		case SetDATM::DATM1:
-			return static_cast<int>(ShaderConvert::DATM_1);
+			return static_cast<int>(depth_bpp == 24 ? ShaderConvert::DATM_1_D24 : ShaderConvert::DATM_1);
 		case SetDATM::DATM0:
 		default:
-			return static_cast<int>(ShaderConvert::DATM_0);
+			return static_cast<int>(depth_bpp == 24 ? ShaderConvert::DATM_0_D24 : ShaderConvert::DATM_0);
 	}
 }
 
@@ -46,6 +46,10 @@ const char* shaderName(ShaderConvert value)
 		case ShaderConvert::DATM_0:                 return "ps_datm0";
 		case ShaderConvert::DATM_1_RTA_CORRECTION:  return "ps_datm1_rta_correction";
 		case ShaderConvert::DATM_0_RTA_CORRECTION:  return "ps_datm0_rta_correction";
+		case ShaderConvert::DATM_1_D24:               return "ps_datm1";
+		case ShaderConvert::DATM_0_D24:               return "ps_datm0";
+		case ShaderConvert::DATM_1_RTA_CORRECTION_D24:return "ps_datm1_rta_correction";
+		case ShaderConvert::DATM_0_RTA_CORRECTION_D24:return "ps_datm0_rta_correction";
 		case ShaderConvert::COLCLIP_INIT:           return "ps_colclip_init";
 		case ShaderConvert::COLCLIP_RESOLVE:        return "ps_colclip_resolve";
 		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";

@@ -37,7 +37,8 @@ static u32 s_debug_scope_depth = 0;
 
 static bool IsDATMConvertShader(ShaderConvert i)
 {
-	return (i == ShaderConvert::DATM_0 || i == ShaderConvert::DATM_1 || i == ShaderConvert::DATM_0_RTA_CORRECTION || i == ShaderConvert::DATM_1_RTA_CORRECTION);
+	return (i == ShaderConvert::DATM_0 || i == ShaderConvert::DATM_1 || i == ShaderConvert::DATM_0_RTA_CORRECTION || i == ShaderConvert::DATM_1_RTA_CORRECTION ||
+		i == ShaderConvert::DATM_0_D24 || i == ShaderConvert::DATM_1_D24 || i == ShaderConvert::DATM_0_RTA_CORRECTION_D24 || i == ShaderConvert::DATM_1_RTA_CORRECTION_D24);
 }
 static bool IsDATEModePrimIDInit(u32 flag)
 {
@@ -2644,6 +2645,15 @@ bool GSDevice12::CompileConvertPipelines()
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
 			}
 			break;
+			case ShaderConvert::DATM_0_D24:
+			case ShaderConvert::DATM_1_D24:
+			case ShaderConvert::DATM_0_RTA_CORRECTION_D24:
+			case ShaderConvert::DATM_1_RTA_CORRECTION_D24:
+			{
+				gpb.ClearRenderTargets();
+				gpb.SetDepthStencilFormat(DXGI_FORMAT_D24_UNORM_S8_UINT);
+			}
+			break;
 			default:
 			{
 				depth ? gpb.ClearRenderTargets() : gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -2720,13 +2730,13 @@ bool GSDevice12::CompileConvertPipelines()
 		else if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
 		{
 			const bool is_setup = i == ShaderConvert::COLCLIP_INIT;
-			std::array<ComPtr<ID3D12PipelineState>, 2>& arr = is_setup ? m_colclip_setup_pipelines : m_colclip_finish_pipelines;
-			for (u32 ds = 0; ds < 2; ds++)
+			std::array<ComPtr<ID3D12PipelineState>, 3>& arr = is_setup ? m_colclip_setup_pipelines : m_colclip_finish_pipelines;
+			for (u32 ds = 0; ds < 3; ds++)
 			{
 				pxAssert(!arr[ds]);
 
 				gpb.SetRenderTarget(0, is_setup ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
-				gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
+				gpb.SetDepthStencilFormat(ds ? (ds == 2 ? DXGI_FORMAT_D24_UNORM_S8_UINT : DXGI_FORMAT_D32_FLOAT_S8X24_UINT) : DXGI_FORMAT_UNKNOWN);
 				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false);
 				if (!arr[ds])
 					return false;
@@ -2751,9 +2761,9 @@ bool GSDevice12::CompileConvertPipelines()
 		gpb.SetBlendState(0, false, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO,
 			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_RED);
 
-		for (u32 ds = 0; ds < 2; ds++)
+		for (u32 ds = 0; ds < 3; ds++)
 		{
-			gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
+			gpb.SetDepthStencilFormat(ds ? (ds == 2 ? DXGI_FORMAT_D24_UNORM_S8_UINT : DXGI_FORMAT_D32_FLOAT_S8X24_UINT) : DXGI_FORMAT_UNKNOWN);
 			m_date_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
 			if (!m_date_image_setup_pipelines[ds][datm])
 				return false;
@@ -3911,7 +3921,7 @@ void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	OMSetRenderTargets(nullptr, ds, bbox);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
 	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(m_convert[SetDATMShader(datm)].get());
+	SetPipeline(m_convert[SetDATMShader(datm, ds->IsDepthStencil24() ? 24 : 32)].get());
 	// Reference stencil value set on Create()
 	BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,

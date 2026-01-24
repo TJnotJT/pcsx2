@@ -2202,7 +2202,7 @@ void GSDevice11::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 
 	PSSetShaderResource(0, rt);
 	PSSetSamplerState(m_convert.pt.get());
-	PSSetShader(m_convert.ps[SetDATMShader(datm)].get(), nullptr);
+	PSSetShader(m_convert.ps[SetDATMShader(datm, ds->IsDepthStencil24() ? 24 : 32)].get(), nullptr);
 
 	// draw
 

@@ -21,6 +21,10 @@ enum class ShaderConvert
 	DATM_0,
 	DATM_1_RTA_CORRECTION,
 	DATM_0_RTA_CORRECTION,
+	DATM_1_D24,
+	DATM_0_D24,
+	DATM_1_RTA_CORRECTION_D24,
+	DATM_0_RTA_CORRECTION_D24,
 	COLCLIP_INIT,
 	COLCLIP_RESOLVE,
 	RTA_CORRECTION,
@@ -154,6 +158,10 @@ static inline u32 DepthOutputBits(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
 		case ShaderConvert::DEPTH_COPY_D24_D32:
+		case ShaderConvert::DATM_0:
+		case ShaderConvert::DATM_1:
+		case ShaderConvert::DATM_0_RTA_CORRECTION:
+		case ShaderConvert::DATM_1_RTA_CORRECTION:
 			return 32;
 		case ShaderConvert::RGBA8_TO_FLOAT32_D24:
 		case ShaderConvert::RGBA8_TO_FLOAT24_D24:
@@ -166,6 +174,10 @@ static inline u32 DepthOutputBits(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_TO_FLOAT24_D24:
 		case ShaderConvert::DEPTH_COPY_D24:
 		case ShaderConvert::DEPTH_COPY_D32_D24:
+		case ShaderConvert::DATM_0_D24:
+		case ShaderConvert::DATM_1_D24:
+		case ShaderConvert::DATM_0_RTA_CORRECTION_D24:
+		case ShaderConvert::DATM_1_RTA_CORRECTION_D24:
 			return 24;
 		default:
 			return 0;
@@ -180,6 +192,10 @@ static inline bool HasStencilOutput(ShaderConvert shader)
 		case ShaderConvert::DATM_1:
 		case ShaderConvert::DATM_0_RTA_CORRECTION:
 		case ShaderConvert::DATM_1_RTA_CORRECTION:
+		case ShaderConvert::DATM_0_D24:
+		case ShaderConvert::DATM_1_D24:
+		case ShaderConvert::DATM_0_RTA_CORRECTION_D24:
+		case ShaderConvert::DATM_1_RTA_CORRECTION_D24:
 			return true;
 		default:
 			return false;
@@ -332,7 +348,7 @@ enum class PresentShader
 
 /// Get the name of a shader
 /// (Can't put methods on an enum class)
-int SetDATMShader(SetDATM datm);
+int SetDATMShader(SetDATM datm, u32 depth_bpp);
 const char* shaderName(ShaderConvert value);
 const char* shaderName(PresentShader value);
 

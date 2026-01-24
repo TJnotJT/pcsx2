@@ -338,9 +338,9 @@ private:
 	std::array<ComPtr<ID3D12PipelineState>, 32> m_color_copy{};
 	std::array<ComPtr<ID3D12PipelineState>, 2> m_merge{};
 	std::array<ComPtr<ID3D12PipelineState>, NUM_INTERLACE_SHADERS> m_interlace{};
-	std::array<ComPtr<ID3D12PipelineState>, 2> m_colclip_setup_pipelines{}; // [depth]
-	std::array<ComPtr<ID3D12PipelineState>, 2> m_colclip_finish_pipelines{}; // [depth]
-	std::array<std::array<ComPtr<ID3D12PipelineState>, 4>, 2> m_date_image_setup_pipelines{}; // [depth][datm]
+	std::array<ComPtr<ID3D12PipelineState>, 3> m_colclip_setup_pipelines{}; // [depth]
+	std::array<ComPtr<ID3D12PipelineState>, 3> m_colclip_finish_pipelines{}; // [depth]
+	std::array<std::array<ComPtr<ID3D12PipelineState>, 4>, 3> m_date_image_setup_pipelines{}; // [depth][datm]
 	ComPtr<ID3D12PipelineState> m_fxaa_pipeline;
 	ComPtr<ID3D12PipelineState> m_shadeboost_pipeline;
 	ComPtr<ID3D12PipelineState> m_imgui_pipeline;
