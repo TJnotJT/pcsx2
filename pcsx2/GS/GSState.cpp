@@ -1975,24 +1975,34 @@ void GSState::FlushInvalidation()
 				// Merged only if the range is page aligned and there is more than 1 rectangle merged.
 				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0 && (i - start_i) >= 2)
 				{
-					const GSVector2i& last_pgs = GSLocalMemory::m_psm[last_psm].pgs;
-					const int num_pages = (last_bp - start_bp) / GS_BLOCKS_PER_PAGE;
-					const int bw_pixels = last_bw * 64;
-					const int bw_pages = (bw_pixels + last_pgs.x - 1) / last_pgs.x;
-					
-					// Merge only if the page range forms a rectangle.
-					if (num_pages <= bw_pages || (num_pages % bw_pages) == 0)
+					if (last_bw == 1)
 					{
-						const int width = std::min<int>(num_pages * last_pgs.x, bw_pixels);
-						const int height = (num_pages / bw_pages) * last_pgs.y;
-						InvalidateVideoMem(m_invalidation_queue[start_i].blit, GSVector4i(0, 0, width, height));
+						// If BW == 1, then it's likely not representative of the actual BW used for the texture
+						// so in this case it may be safer to invalidate by range.
+						InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
 						invalidated = true;
+					}
+					else
+					{
+						const GSVector2i& last_pgs = GSLocalMemory::m_psm[last_psm].pgs;
+						const int num_pages = (last_bp - start_bp) / GS_BLOCKS_PER_PAGE;
+						const int bw_pixels = last_bw * 64;
+						const int bw_pages = (bw_pixels + last_pgs.x - 1) / last_pgs.x;
+
+						// Merge only if the page range forms a rectangle.
+						if (num_pages <= bw_pages || (num_pages % bw_pages) == 0)
+						{
+							const int width = std::min<int>(num_pages * last_pgs.x, bw_pixels);
+							const int height = (num_pages / bw_pages) * last_pgs.y;
+							InvalidateVideoMem(m_invalidation_queue[start_i].blit, GSVector4i(0, 0, width, height));
+							invalidated = true;
+						}
 					}
 				}
 				
 				if (!invalidated)
 				{
-					// The merging criteria was not met so fallback to individual rectangle invalidation.
+					// The merging criteria was not met so fallback to invalidating individual rects.
 					for (u32 j = start_i; j < i; j++)
 						InvalidateVideoMem(m_invalidation_queue[j].blit, m_invalidation_queue[j].rect);
 				}
