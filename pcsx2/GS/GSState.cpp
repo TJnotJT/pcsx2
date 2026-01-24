@@ -1974,14 +1974,15 @@ void GSState::FlushInvalidation()
 				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0 && (i - start_i) >= 2)
 				{
 					const GSVector2i& last_pgs = GSLocalMemory::m_psm[last_psm].pgs;
-					const int blocks_wide = (last_bw * 64) / last_pgs.y * GS_BLOCKS_PER_PAGE;
-					if (((last_bp - start_bp) % blocks_wide) == 0)
+					const int num_pages = (last_bp - start_bp) / GS_BLOCKS_PER_PAGE;
+					const int bw_pixels = last_bw * 64;
+					const int bw_pages = (bw_pixels + last_pgs.x - 1) / last_pgs.x;
+					if (num_pages <= bw_pages || (num_pages % bw_pages) == 0)
 					{
 						// Page range is aligned to the buffer left/right ends so use a rectangle.
-						const int width = std::min((last_bp - start_bp) / blocks_wide, last_bw) * last_pgs.x;
-						const int height = ((last_bp - start_bp) / blocks_wide) * last_pgs.y;
-						GSVector4i rect(0, 0, width, height);
-						InvalidateVideoMem(m_invalidation_queue[start_i].blit, rect);
+						const int width = std::min<int>(num_pages * last_pgs.x, bw_pixels);
+						const int height = (num_pages / bw_pages) * last_pgs.y;
+						InvalidateVideoMem(m_invalidation_queue[start_i].blit, GSVector4i(0, 0, width, height));
 					}
 					else
 					{
