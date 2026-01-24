@@ -1917,6 +1917,9 @@ void GSRendererHW::Move()
 	if (m_env.TRXDIR.XDIR == 3)
 		return;
 
+	// Flush invalidation in case the move uses overlapping regions.
+	FlushInvalidation();
+
 	const int sx = m_env.TRXPOS.SSAX;
 	const int sy = m_env.TRXPOS.SSAY;
 	const int dx = m_env.TRXPOS.DSAX;
