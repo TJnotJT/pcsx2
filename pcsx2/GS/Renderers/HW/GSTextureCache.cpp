@@ -141,6 +141,10 @@ bool GSTextureCache::FullRectDirty(Target* target)
 	return FullRectDirty(target, GSUtil::GetChannelMask(target->m_TEX0.PSM));
 }
 
+// FIXME: REMOVE!!
+extern int num_adddirtyrect;
+extern int num_dirtybypage;
+
 void GSTextureCache::AddDirtyRectTarget(Target* target, GSVector4i rect, u32 psm, u32 bw, RGBAMask rgba, bool req_linear)
 {
 	bool skipdirty = false;
@@ -148,6 +152,8 @@ void GSTextureCache::AddDirtyRectTarget(Target* target, GSVector4i rect, u32 psm
 
 	if (rect.rempty())
 		return;
+
+	num_adddirtyrect++;
 
 	std::vector<GSDirtyRect>::iterator it = target->m_dirty.end();
 	while (it != target->m_dirty.begin())
@@ -659,6 +665,8 @@ void GSTextureCache::DirtyRectByPage(u32 sbp, u32 spsm, u32 sbw, Target* t, GSVe
 {
 	if (src_r.rempty())
 		return;
+
+	num_dirtybypage++;
 
 	const u32 start_bp = GSLocalMemory::GetStartBlockAddress(sbp, sbw, spsm, src_r);
 	const u32 end_bp = GSLocalMemory::GetEndBlockAddress(sbp, sbw, spsm, src_r);

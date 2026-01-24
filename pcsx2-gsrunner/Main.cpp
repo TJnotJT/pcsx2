@@ -55,6 +55,9 @@
 #include <unistd.h>
 #endif
 
+int num_adddirtyrect = 0;
+int num_dirtybypage = 0;
+
 namespace GSRunner
 {
 	static void InitializeConsole();
@@ -843,6 +846,8 @@ void GSRunner::DumpStats()
 	Console.WriteLn(fmt::format("@HWSTAT@ Copies: {} (avg {})", s_total_copies, static_cast<u64>(std::ceil(s_total_copies / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn(fmt::format("@HWSTAT@ Uploads: {} (avg {})", s_total_uploads, static_cast<u64>(std::ceil(s_total_uploads / static_cast<double>(s_total_drawn_frames)))));
 	Console.WriteLn(fmt::format("@HWSTAT@ Readbacks: {} (avg {})", s_total_readbacks, static_cast<u64>(std::ceil(s_total_readbacks / static_cast<double>(s_total_drawn_frames)))));
+	Console.WriteLn(fmt::format("@HWSTAT@ DirtyRectByPage: {}", num_dirtybypage));
+	Console.WriteLn(fmt::format("@HWSTAT@ AddDirtyRect: {}", num_adddirtyrect));
 	Console.WriteLn("============================================");
 }
 
