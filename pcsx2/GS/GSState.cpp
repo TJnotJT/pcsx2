@@ -1920,18 +1920,18 @@ void GSState::FlushInvalidation()
 		return;
 
 	// For merging together invalidation ranges that are end-to-end (or nearly).
-	u32 start_i = 0;
-	u32 start_bp = 0;
-	u32 last_bp = 0;
-	u32 last_blocks = 0;
-	u32 last_psm = 0;
-	u32 last_bw = 0;
+	int start_i = 0;
+	int start_bp = 0;
+	int last_bp = 0;
+	int last_blocks = 0;
+	int last_psm = 0;
+	int last_bw = 0;
 	bool merging = false;
 
 	// Add a dummy element at the end in case we need to commit a merge range.
 	m_invalidation_queue.push_back({GIFRegBITBLTBUF{}, GSVector4i(0)});
 	
-	for (u32 i = 0; i < m_invalidation_queue.size(); i++)
+	for (int i = 0; i < static_cast<int>(m_invalidation_queue.size()); i++)
 	{
 		const GSInvalidationQueue& invalidate = m_invalidation_queue[i];
 
@@ -1941,9 +1941,9 @@ void GSState::FlushInvalidation()
 
 		const GSVector4i& r = invalidate.rect;
 		const GIFRegBITBLTBUF& blit = invalidate.blit;
-		const u32 bp = blit.DBP;
-		const u32 bw = blit.DBW;
-		const u32 psm = blit.DPSM;
+		const int bp = static_cast<int>(blit.DBP);
+		const int bw = static_cast<int>(blit.DBW);
+		const int psm = static_cast<int>(blit.DPSM);
 
 		// Determine if the transfer can be part of a merge sequence.
 		bool merge_aligned = (r.x == 0 && r.y == 0) && // Top-left corner of transfer rect must be (0, 0).
@@ -2003,7 +2003,7 @@ void GSState::FlushInvalidation()
 				if (!invalidated)
 				{
 					// The merging criteria was not met so fallback to invalidating individual rects.
-					for (u32 j = start_i; j < i; j++)
+					for (int j = start_i; j < i; j++)
 						InvalidateVideoMem(m_invalidation_queue[j].blit, m_invalidation_queue[j].rect);
 				}
 
