@@ -536,10 +536,10 @@ public:
 		HashCacheEntry* hc_entry, bool new_texture_is_shared);
 
 	/// Converts single color value to depth using the specified shader expression.
-	static float ConvertColorToDepth(u32 c, ShaderConvert convert);
+	static float ConvertColorToDepth(u32 c, ShaderConvert convert, GSTexture::Format depth_format);
 
 	/// Converts single depth value to colour using the specified shader expression.
-	static u32 ConvertDepthToColor(float d, ShaderConvert convert);
+	static u32 ConvertDepthToColor(float d, ShaderConvert convert, GSTexture::Format depth_format);
 
 	/// Copies RGB channels from depth target to a color target.
 	bool CopyRGBFromDepthToColor(Target* dst, Target* depth_src);
@@ -572,6 +572,7 @@ public:
 	void SetTemporaryZInfo(TempZAddress address_info);
 	/// Invalidates a temporary Z, a partial copy only created from the current DS for the current draw when Z is not offset but RT is.
 	void InvalidateTemporaryZ();
+	void Ensure32BitTemporaryZ(bool preserve);
 
 	/// Injects a texture into the hash cache, by using GSTexture::Swap(), transitively applying to all sources. Ownership of tex is transferred.
 	void InjectHashCacheTexture(const HashCacheKey& key, GSTexture* tex, const std::pair<u8, u8>& alpha_minmax);

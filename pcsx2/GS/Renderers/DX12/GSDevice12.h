@@ -212,7 +212,7 @@ public:
 			{
 				u32 topology : 2;
 				u32 rt : 1;
-				u32 ds : 1;
+				u32 ds : 2; // 0: none, 1: 32 bit float, 2: 24 bit unorm.
 			};
 
 			u32 key;

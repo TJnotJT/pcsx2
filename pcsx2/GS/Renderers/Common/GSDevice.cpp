@@ -65,7 +65,24 @@ const char* shaderName(ShaderConvert value)
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:  return "ps_convert_rgba8_float16_biln";
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN: return "ps_convert_rgb5a1_float16_biln";
 		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
-		case ShaderConvert::DEPTH_COPY:             return "ps_depth_copy";
+		case ShaderConvert::FLOAT32_TO_16_BITS_D24:     return "ps_convert_float32_32bits_d24";
+		case ShaderConvert::FLOAT32_TO_32_BITS_D24:     return "ps_convert_float32_32bits_d24";
+		case ShaderConvert::FLOAT32_TO_RGBA8_D24:       return "ps_convert_float32_rgba8_d24";
+		case ShaderConvert::FLOAT32_TO_RGB8_D24:        return "ps_convert_float32_rgba8_d24";
+		case ShaderConvert::FLOAT16_TO_RGB5A1_D24:      return "ps_convert_float16_rgb5a1_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT32_D24:       return "ps_convert_rgba8_float32_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT24_D24:       return "ps_convert_rgba8_float24_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT16_D24:       return "ps_convert_rgba8_float16_d24";
+		case ShaderConvert::RGB5A1_TO_FLOAT16_D24:      return "ps_convert_rgb5a1_float16_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT32_BILN_D24:  return "ps_convert_rgba8_float32_biln_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT24_BILN_D24:  return "ps_convert_rgba8_float24_biln_d24";
+		case ShaderConvert::RGBA8_TO_FLOAT16_BILN_D24:  return "ps_convert_rgba8_float16_biln_d24";
+		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN_D24: return "ps_convert_rgb5a1_float16_biln_d24";
+		case ShaderConvert::FLOAT32_TO_FLOAT24_D24:     return "ps_convert_float32_float24_d24";
+		case ShaderConvert::DEPTH_COPY:                 return "ps_depth_copy";
+		case ShaderConvert::DEPTH_COPY_D24:             return "ps_depth_copy_d24";
+		case ShaderConvert::DEPTH_COPY_D32_D24:         return "ps_depth_copy_d32_d24";
+		case ShaderConvert::DEPTH_COPY_D24_D32:         return "ps_depth_copy_d24_d32";
 		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
 		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
 		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
@@ -397,6 +414,12 @@ void GSDevice::ClearDepth(GSTexture* t, float d)
 	t->SetClearDepth(d);
 }
 
+void GSDevice::ClearDepthNormalize(GSTexture* t, float d)
+{
+	const float scale = t->GetFormat() == GSTexture::Format::DepthStencil24 ? std::exp2(-24.0f) : std::exp2(-32.0f);
+	ClearDepth(t, d * scale);
+}
+
 bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy)
 {
 	pxAssert(sTex->GetState() == GSTexture::State::Cleared && dTex->IsRenderTargetOrDepthStencil());
@@ -714,6 +737,11 @@ GSTexture* GSDevice::CreateRenderTarget(int w, int h, GSTexture::Format format, 
 GSTexture* GSDevice::CreateDepthStencil(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
 {
 	return FetchSurface(GSTexture::Type::DepthStencil, w, h, 1, format, clear, !prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);
 }
 
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)

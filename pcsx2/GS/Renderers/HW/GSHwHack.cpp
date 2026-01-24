@@ -841,7 +841,7 @@ bool GSHwHack::GSC_Battlefield2(GSRendererHW& r, int& skip)
 			if (dst)
 			{
 				float dc = r.m_vertex.buff[1].XYZ.Z;
-				g_gs_device->ClearDepth(dst->m_texture, dc * std::exp2(-32.0f));
+				g_gs_device->ClearDepthNormalize(dst->m_texture, dc);
 			}
 		}
 	}

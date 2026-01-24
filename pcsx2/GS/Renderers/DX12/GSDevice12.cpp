@@ -1443,7 +1443,9 @@ void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_f
 			{DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_UNORM,
 				DXGI_FORMAT_UNKNOWN}, // ColorClip
 			{DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS, DXGI_FORMAT_UNKNOWN,
-				DXGI_FORMAT_D32_FLOAT_S8X24_UINT}, // DepthStencil
+				DXGI_FORMAT_D32_FLOAT_S8X24_UINT}, // DepthStencil (32 bit float)
+			{DXGI_FORMAT_D24_UNORM_S8_UINT, DXGI_FORMAT_R24_UNORM_X8_TYPELESS, DXGI_FORMAT_UNKNOWN,
+				DXGI_FORMAT_D24_UNORM_S8_UINT}, // DepthStencil (24 bit unorm)
 			{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_UNKNOWN}, // UNorm8
 			{DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_UNKNOWN}, // UInt16
 			{DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32_UINT, DXGI_FORMAT_UNKNOWN}, // UInt32
@@ -2613,19 +2615,21 @@ bool GSDevice12::CompileConvertPipelines()
 
 	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
-		const bool depth = HasDepthOutput(i);
+		const u32 depth = HasDepthOutput(i) ? DepthOutputBits(i) : 0;
 		const int index = static_cast<int>(i);
 
 		switch (i)
 		{
 			case ShaderConvert::RGBA8_TO_16_BITS:
 			case ShaderConvert::FLOAT32_TO_16_BITS:
+			case ShaderConvert::FLOAT32_TO_16_BITS_D24:
 			{
 				gpb.SetRenderTarget(0, DXGI_FORMAT_R16_UINT);
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
 			}
 			break;
 			case ShaderConvert::FLOAT32_TO_32_BITS:
+			case ShaderConvert::FLOAT32_TO_32_BITS_D24:
 			{
 				gpb.SetRenderTarget(0, DXGI_FORMAT_R32_UINT);
 				gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
@@ -2643,7 +2647,9 @@ bool GSDevice12::CompileConvertPipelines()
 			default:
 			{
 				depth ? gpb.ClearRenderTargets() : gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
-				gpb.SetDepthStencilFormat(depth ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
+				gpb.SetDepthStencilFormat(depth ?
+					(depth == 24 ? DXGI_FORMAT_D24_UNORM_S8_UINT : DXGI_FORMAT_D32_FLOAT_S8X24_UINT) :
+					DXGI_FORMAT_UNKNOWN);
 			}
 			break;
 		}
@@ -3018,6 +3024,7 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
 	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+	sm.AddMacro("VS_DEPTH_FMT_GPU", static_cast<int>(sel.depth_fmt_gpu));
 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
@@ -3067,6 +3074,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_URBAN_CHAOS_HLE", sel.urban_chaos_hle);
 	sm.AddMacro("PS_DST_FMT", sel.dst_fmt);
 	sm.AddMacro("PS_DEPTH_FMT", sel.depth_fmt);
+	sm.AddMacro("PS_DEPTH_FMT_GPU", sel.depth_fmt_gpu);
 	sm.AddMacro("PS_PAL_FMT", sel.pal_fmt);
 	sm.AddMacro("PS_COLCLIP_HW", sel.colclip_hw);
 	sm.AddMacro("PS_RTA_CORRECTION", sel.rta_correction);
@@ -3134,7 +3142,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		gpb.SetRenderTarget(0, native_format);
 	}
 	if (p.ds)
-		gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
+		gpb.SetDepthStencilFormat(p.ds == 1 ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_D24_UNORM_S8_UINT);
 
 	// Shaders
 	gpb.SetVertexShader(vs);
@@ -4192,7 +4200,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			 m_current_depth_target->GetSize() == draw_rt->GetSize())
 	{
 		draw_ds = m_current_depth_target;
-		m_pipeline_selector.ds = true;
+		m_pipeline_selector.ds = draw_ds->IsDepthStencil24() ? 2 : 1;
 	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
@@ -4416,7 +4424,7 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.cms.key = config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr;
-	m_pipeline_selector.ds = config.ds != nullptr;
+	m_pipeline_selector.ds = config.ds != nullptr ? (config.ds->IsDepthStencil24() ? 2 : 1) : 0;
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)

@@ -1211,7 +1211,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #endif // PS_DATE != 1/2
 
-#if PS_ZFLOOR
+#if PS_ZFLOOR && !PS_DEPTH_FMT_GPU
 float depth_value = floor(input.p.z * exp2(32.0f)) * exp2(-32.0f);
 #else
 float depth_value = input.p.z;
@@ -1264,7 +1264,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.p = float4(input.p, input.z, 1.0f) - float4(0.05f, 0.05f, 0, 0);
 
 	output.p.xy = output.p.xy * float2(VertexScale.x, -VertexScale.y) - float2(VertexOffset.x, -VertexOffset.y);
-	output.p.z *= exp2(-32.0f);		// integer->float depth
+	output.p.z *= VS_DEPTH_FMT_GPU ? exp2(-24.0f) : exp2(-32.0f);		// integer->float depth
 
 	if(VS_TME)
 	{

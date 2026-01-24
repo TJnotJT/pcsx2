@@ -40,7 +40,24 @@ enum class ShaderConvert
 	RGBA8_TO_FLOAT16_BILN,
 	RGB5A1_TO_FLOAT16_BILN,
 	FLOAT32_TO_FLOAT24,
+	FLOAT32_TO_16_BITS_D24,
+	FLOAT32_TO_32_BITS_D24,
+	FLOAT32_TO_RGBA8_D24,
+	FLOAT32_TO_RGB8_D24,
+	FLOAT16_TO_RGB5A1_D24,
+	RGBA8_TO_FLOAT32_D24,
+	RGBA8_TO_FLOAT24_D24,
+	RGBA8_TO_FLOAT16_D24,
+	RGB5A1_TO_FLOAT16_D24,
+	RGBA8_TO_FLOAT32_BILN_D24,
+	RGBA8_TO_FLOAT24_BILN_D24,
+	RGBA8_TO_FLOAT16_BILN_D24,
+	RGB5A1_TO_FLOAT16_BILN_D24,
+	FLOAT32_TO_FLOAT24_D24,
 	DEPTH_COPY,
+	DEPTH_COPY_D24,
+	DEPTH_COPY_D32_D24,
+	DEPTH_COPY_D24_D32,
 	DOWNSAMPLE_COPY,
 	RGBA_TO_8I,
 	RGB5A1_TO_8I,
@@ -103,9 +120,55 @@ static inline bool HasDepthOutput(ShaderConvert shader)
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
 		case ShaderConvert::FLOAT32_TO_FLOAT24:
 		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::RGBA8_TO_FLOAT32_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT32_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_BILN_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN_D24:
+		case ShaderConvert::FLOAT32_TO_FLOAT24_D24:
+		case ShaderConvert::DEPTH_COPY_D24:
+		case ShaderConvert::DEPTH_COPY_D24_D32:
+		case ShaderConvert::DEPTH_COPY_D32_D24:
 			return true;
 		default:
 			return false;
+	}
+}
+
+static inline u32 DepthOutputBits(ShaderConvert shader)
+{
+	pxAssert(HasDepthOutput(shader));
+	switch (shader)
+	{
+		case ShaderConvert::RGBA8_TO_FLOAT32:
+		case ShaderConvert::RGBA8_TO_FLOAT24:
+		case ShaderConvert::RGBA8_TO_FLOAT16:
+		case ShaderConvert::RGB5A1_TO_FLOAT16:
+		case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
+		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
+		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+		case ShaderConvert::FLOAT32_TO_FLOAT24:
+		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::DEPTH_COPY_D24_D32:
+			return 32;
+		case ShaderConvert::RGBA8_TO_FLOAT32_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT32_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_BILN_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN_D24:
+		case ShaderConvert::FLOAT32_TO_FLOAT24_D24:
+		case ShaderConvert::DEPTH_COPY_D24:
+		case ShaderConvert::DEPTH_COPY_D32_D24:
+			return 24;
+		default:
+			return 0;
 	}
 }
 
@@ -131,6 +194,10 @@ static inline bool SupportsNearest(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
 		case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
 		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+		case ShaderConvert::RGBA8_TO_FLOAT32_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_BILN_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_BILN_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_BILN_D24:
 			return false;
 		default:
 			return true;
@@ -145,6 +212,10 @@ static inline bool SupportsBilinear(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT24:
 		case ShaderConvert::RGBA8_TO_FLOAT16:
 		case ShaderConvert::RGB5A1_TO_FLOAT16:
+		case ShaderConvert::RGBA8_TO_FLOAT32_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT24_D24:
+		case ShaderConvert::RGBA8_TO_FLOAT16_D24:
+		case ShaderConvert::RGB5A1_TO_FLOAT16_D24:
 			return false;
 		default:
 			return true;
@@ -156,9 +227,93 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 	switch (shader)
 	{
 		case ShaderConvert::FLOAT32_TO_RGB8:
+		case ShaderConvert::FLOAT32_TO_RGB8_D24:
 			return 0x7;
 		default:
 			return 0xf;
+	}
+}
+
+
+static ShaderConvert GetDepthToRGBShader(GSTexture::Format depth_format)
+{
+	return depth_format == GSTexture::Format::DepthStencil24 ?
+		ShaderConvert::FLOAT32_TO_RGB8_D24 :
+		ShaderConvert::FLOAT32_TO_RGB8;
+}
+
+static ShaderConvert GetDepthToRGBAShader(GSTexture::Format depth_format)
+{
+	return depth_format == GSTexture::Format::DepthStencil24 ?
+		ShaderConvert::FLOAT32_TO_RGBA8_D24 :
+		ShaderConvert::FLOAT32_TO_RGBA8;
+}
+
+static ShaderConvert GetRGBAToDepthShader(GSTexture::Format depth_format)
+{
+	return depth_format == GSTexture::Format::DepthStencil24 ?
+		ShaderConvert::RGBA8_TO_FLOAT32_D24 :
+		ShaderConvert::RGBA8_TO_FLOAT32;
+}
+
+static ShaderConvert GetDepthToColorShader(GSTexture::Format depth_format, u32 bpp)
+{
+	switch (bpp)
+	{
+	case 32: return depth_format == GSTexture::Format::DepthStencil24 ?
+		ShaderConvert::FLOAT32_TO_RGBA8_D24 : ShaderConvert::FLOAT32_TO_RGBA8;
+	case 24:
+		return depth_format == GSTexture::Format::DepthStencil24 ?
+			ShaderConvert::FLOAT32_TO_RGB8_D24 : ShaderConvert::FLOAT32_TO_RGB8;
+	case 16:
+		return depth_format == GSTexture::Format::DepthStencil24 ?
+			ShaderConvert::FLOAT16_TO_RGB5A1_D24 : ShaderConvert::FLOAT16_TO_RGB5A1;
+	default:
+		pxFail("Bad bpp.");
+		return static_cast<ShaderConvert>(-1);
+	}
+}
+
+static ShaderConvert GetColorToDepthShader(GSTexture::Format depth_format, u32 bpp)
+{
+	switch (bpp)
+	{
+	case 32: return depth_format == GSTexture::Format::DepthStencil24 ?
+		ShaderConvert::RGBA8_TO_FLOAT32_D24 : ShaderConvert::RGBA8_TO_FLOAT32;
+	case 24:
+		return depth_format == GSTexture::Format::DepthStencil24 ?
+			ShaderConvert::RGBA8_TO_FLOAT24_D24 : ShaderConvert::RGBA8_TO_FLOAT24;
+	case 16:
+		return depth_format == GSTexture::Format::DepthStencil24 ?
+			ShaderConvert::RGB5A1_TO_FLOAT16_D24 : ShaderConvert::RGB5A1_TO_FLOAT16;
+	default:
+		pxFail("Bad bpp.");
+		return static_cast<ShaderConvert>(-1);
+	}
+}
+
+static ShaderConvert GetDepthCopyShader(GSTexture::Format src, GSTexture::Format dst)
+{
+	return src == GSTexture::Format::DepthStencil24 ?
+		(dst == GSTexture::Format::DepthStencil24 ? ShaderConvert::DEPTH_COPY_D24 : ShaderConvert::DEPTH_COPY_D24_D32) :
+		(dst == GSTexture::Format::DepthStencil24 ? ShaderConvert::DEPTH_COPY_D32_D24 : ShaderConvert::DEPTH_COPY);
+}
+
+static ShaderConvert GetBilinearVersion(ShaderConvert shader)
+{
+	switch (shader)
+	{
+	case ShaderConvert::RGBA8_TO_FLOAT32: return ShaderConvert::RGBA8_TO_FLOAT32_BILN;
+	case ShaderConvert::RGBA8_TO_FLOAT24: return ShaderConvert::RGBA8_TO_FLOAT24_BILN;
+	case ShaderConvert::RGBA8_TO_FLOAT16: return ShaderConvert::RGBA8_TO_FLOAT16_BILN;
+	case ShaderConvert::RGB5A1_TO_FLOAT16: return ShaderConvert::RGB5A1_TO_FLOAT16_BILN;
+	case ShaderConvert::RGBA8_TO_FLOAT32_D24: return ShaderConvert::RGBA8_TO_FLOAT32_BILN_D24;
+	case ShaderConvert::RGBA8_TO_FLOAT24_D24: return ShaderConvert::RGBA8_TO_FLOAT24_BILN_D24;
+	case ShaderConvert::RGBA8_TO_FLOAT16_D24: return ShaderConvert::RGBA8_TO_FLOAT16_BILN_D24;
+	case ShaderConvert::RGB5A1_TO_FLOAT16_D24: return ShaderConvert::RGB5A1_TO_FLOAT16_BILN_D24;
+	default:
+		pxFail("Shader does not support bilinear.");
+		return static_cast<ShaderConvert>(-1);
 	}
 }
 
@@ -316,7 +471,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
-				u8 _free : 2;
+				u8 depth_fmt_gpu : 1; // 0: 32 bit float; 1: 24 bit unorm.
+				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -343,6 +499,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 pal_fmt   : 2;
 				u32 dst_fmt   : 2; // 0 → 32-bit, 1 → 24-bit, 2 → 16-bit
 				u32 depth_fmt : 2; // 0 → None, 1 → 32-bit, 2 → 16-bit, 3 → RGBA
+				u32 depth_fmt_gpu : 1; // 0 -> 32 bit float, 1 -> 24 bit float.
 				// Alpha extension/Correction
 				u32 aem : 1;
 				u32 fba : 1;
@@ -1053,6 +1210,7 @@ public:
 
 	void ClearRenderTarget(GSTexture* t, u32 c);
 	void ClearDepth(GSTexture* t, float d);
+	void ClearDepthNormalize(GSTexture* t, float d);
 	bool ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy);
 	void InvalidateRenderTarget(GSTexture* t);
 
@@ -1063,6 +1221,7 @@ public:
 	GSTexture* CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
+	GSTexture* CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear = true, bool prefer_reuse = true);
 
 	virtual std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) = 0;
 

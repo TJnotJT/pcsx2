@@ -3818,7 +3818,7 @@ void GSRendererHW::Draw()
 							static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 						GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->GetFormat(), ds->m_texture->GetFormat()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 
@@ -3835,7 +3835,12 @@ void GSRendererHW::Draw()
 					sRect = sRect.min(GSVector4(1.0f));
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
-					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					if ((GSUtil::GetChannelMask(ds->m_TEX0.PSM) & 8) && ds->m_alpha_max > 0)
+					{
+						g_texture_cache->Ensure32BitTemporaryZ(true);
+					}
+
+					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect), GetDepthCopyShader(ds->m_texture->GetFormat(), g_texture_cache->GetTemporaryZ()->GetFormat()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);
@@ -3862,7 +3867,7 @@ void GSRendererHW::Draw()
 				const int new_height = std::min(2048, std::max(t_size.y, static_cast<int>(vertical_size))) * ds->m_scale;
 				const int new_width = std::min(2048, std::max(t_size.x, static_cast<int>(horizontal_size))) * ds->m_scale;
 
-				if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_width, new_height, GSTexture::Format::DepthStencil, true))
+				if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_width, new_height, ds->m_texture->GetFormat(), true))
 				{
 					GSVector4 sRect = GSVector4(static_cast<float>(z_horizontal_offset) / static_cast<float>(ds->m_unscaled_size.x), static_cast<float>(z_vertical_offset) / static_cast<float>(ds->m_unscaled_size.y), 1.0f , 1.0f);
 
@@ -3883,7 +3888,7 @@ void GSRendererHW::Draw()
 
 					if (m_cached_ctx.TEST.ZTST > ZTST_ALWAYS || !dRect.rintersect(GSVector4i(GSVector4(m_r) * ds->m_scale)).eq(dRect))
 					{
-						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect), GetDepthCopyShader(ds->m_texture->GetFormat(), tex->GetFormat()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 					}
 					g_texture_cache->SetTemporaryZ(tex);
@@ -4492,10 +4497,10 @@ void GSRendererHW::Draw()
 
 				if (z_width != new_w || z_height != new_h)
 				{
-					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, GSTexture::Format::DepthStencil, true))
+					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, g_texture_cache->GetTemporaryZ()->GetFormat(), true))
 					{
 						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect), GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->GetFormat(), tex->GetFormat()), false);
 						g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 						g_texture_cache->InvalidateTemporaryZ();
 						g_texture_cache->SetTemporaryZ(tex);
@@ -4802,7 +4807,7 @@ void GSRendererHW::Draw()
 						static_cast<float>((real_rect.w + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d rt_vert_offset %d z_horz_offset %d rt_horz_offset %d", s_n, z_vertical_offset, vertical_offset, z_horizontal_offset, horizontal_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->GetFormat(), ds->m_texture->GetFormat()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 				else if (m_temp_z_full_copy)
@@ -4815,7 +4820,7 @@ void GSRendererHW::Draw()
 						static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %d z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->GetFormat(), ds->m_texture->GetFormat()), false);
 					g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 				}
 
@@ -5160,6 +5165,8 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
+	m_conf.ps.depth_fmt_gpu = m_conf.vs.depth_fmt_gpu = (m_conf.ds && m_conf.ds->IsDepthStencil24()) ? 1 : 0;
+
 	// On the real GS we appear to do clamping on the max z value the format allows.
 	// Clamping is done after rasterization.
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
@@ -5168,7 +5175,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	m_conf.cb_vs.max_depth = GSVector2i(0xFFFFFFFF);
 	//ps_cb.MaxDepth = GSVector4(0.0f, 0.0f, 0.0f, 1.0f);
 	m_conf.ps.zclamp = 0;
-	m_conf.ps.zfloor = !m_cached_ctx.ZBUF.ZMSK;
+	m_conf.ps.zfloor = !m_cached_ctx.ZBUF.ZMSK && m_conf.ds->IsDepthStencil32();
 
 	if (clamp_z)
 	{
@@ -5178,7 +5185,8 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		}
 		else if (!m_cached_ctx.ZBUF.ZMSK)
 		{
-			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
+			const float scale = m_conf.ds->IsDepthStencil24() ? 0x1p-24f : 0x1p-32f;
+			m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * scale;
 			m_conf.ps.zclamp = 1;
 		}
 	}
@@ -7070,7 +7078,10 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-				src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+				src_target->m_texture->IsDepthStencil() ?
+					GetDepthCopyShader(src_target->m_texture->GetFormat(), src_copy->GetFormat()) :
+					ShaderConvert::COPY,
+				false);
 		}
 		else
 		{
@@ -7105,7 +7116,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
 
 		g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-			src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+			src_target->m_texture->IsDepthStencil() ? GetDepthCopyShader(src_target->m_texture->GetFormat(), src_copy->GetFormat()) : ShaderConvert::COPY, false);
 	}
 	m_conf.tex = src_copy.get();
 }
@@ -8902,9 +8913,8 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 		{
 			const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 			const u32 z = std::min(max_z, m_vertex.buff[1].XYZ.Z);
-			const float d = static_cast<float>(z) * 0x1p-32f;
-			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			g_gs_device->ClearDepth(ds->m_texture, d);
+			GL_INS("HW: TryTargetClear(): DS at %x <= %d", ds->m_TEX0.TBP0, z);
+			g_gs_device->ClearDepthNormalize(ds->m_texture, static_cast<float>(z));
 			ds->m_dirty.clear();
 			ds->m_alpha_max = z >> 24;
 			ds->m_alpha_min = z >> 24;
