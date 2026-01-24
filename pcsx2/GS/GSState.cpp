@@ -1970,29 +1970,29 @@ void GSState::FlushInvalidation()
 
 				last_bp += last_blocks;
 
-				// Merged only if the range is page aligned and there is more than 1 range merged.
+				bool invalidated = false;
+
+				// Merged only if the range is page aligned and there is more than 1 rectangle merged.
 				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0 && (i - start_i) >= 2)
 				{
 					const GSVector2i& last_pgs = GSLocalMemory::m_psm[last_psm].pgs;
 					const int num_pages = (last_bp - start_bp) / GS_BLOCKS_PER_PAGE;
 					const int bw_pixels = last_bw * 64;
 					const int bw_pages = (bw_pixels + last_pgs.x - 1) / last_pgs.x;
+					
+					// Merge only if the page range forms a rectangle.
 					if (num_pages <= bw_pages || (num_pages % bw_pages) == 0)
 					{
-						// Page range is aligned to the buffer left/right ends so use a rectangle.
 						const int width = std::min<int>(num_pages * last_pgs.x, bw_pixels);
 						const int height = (num_pages / bw_pages) * last_pgs.y;
 						InvalidateVideoMem(m_invalidation_queue[start_i].blit, GSVector4i(0, 0, width, height));
-					}
-					else
-					{
-						// Not aligned to the buffer with so do it range-based instead.
-						InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
+						invalidated = true;
 					}
 				}
-				else
+				
+				if (!invalidated)
 				{
-					// Otherwise fallback to rectangle invalidation.
+					// The merging criteria was not met so fallback to individual rectangle invalidation.
 					for (u32 j = start_i; j < i; j++)
 						InvalidateVideoMem(m_invalidation_queue[j].blit, m_invalidation_queue[j].rect);
 				}
@@ -2020,7 +2020,7 @@ void GSState::FlushInvalidation()
 			}
 			else
 			{
-				// Not mergable; fallback to rectangle invalidation.
+				// Not mergable so fallback to rectangle invalidation.
 				InvalidateVideoMem(blit, r);
 			}
 		}
