@@ -4554,20 +4554,19 @@ void GSTextureCache::InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, 
 			const int t_bp = static_cast<int>(t->m_TEX0.TBP0);
 			const int valid_blocks = static_cast<int>(t->UnwrappedEndBlock()) - t_bp + 1;
 
-			// Range that is invalidated in blocks.
-			const int start_valid_bp = std::clamp(static_cast<int>(start_bp) - t_bp, 0, valid_blocks);
-			const int end_valid_bp = std::clamp(static_cast<int>(end_bp) - t_bp, 0, valid_blocks);
+			// Range that is invalidated in blocks offset from target base.
+			const int start_invalid_bp = std::max(static_cast<int>(start_bp) - t_bp, 0);
+			const int end_invalid_bp = std::max(static_cast<int>(end_bp) - t_bp, 0);
 
 			// Range that is invalidated in pages.
-			const int start_valid_pg = Common::AlignUpPow2(start_valid_bp, blocks_per_page) / blocks_per_page;
-			const int end_valid_pg = Common::AlignDownPow2(end_valid_bp, blocks_per_page) / blocks_per_page;
+			const int start_invalid_pg = Common::AlignUpPow2(start_invalid_bp, blocks_per_page) / blocks_per_page;
+			const int end_invalid_pg = Common::AlignDownPow2(end_invalid_bp, blocks_per_page) / blocks_per_page;
 
-			if (end_valid_pg <= start_valid_pg)
+			if (end_invalid_bp <= 0 || start_invalid_bp >= valid_blocks)
 			{
 				// Invalidation range is empty.
 			}
-			else if (GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) &&
-				start_valid_pg == 0 && end_valid_pg * blocks_per_page >= valid_blocks)
+			else if (GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) && start_invalid_bp == 0 && end_invalid_bp >= valid_blocks)
 			{
 				// Entire range is invalidated.
 				InvalidateSourcesFromTarget(t);
@@ -4581,45 +4580,48 @@ void GSTextureCache::InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, 
 				const GSVector2i& pgs = GSLocalMemory::m_psm[t->m_TEX0.PSM].pgs;
 				const int width_pages = (t->m_TEX0.TBW * 64) / pgs.x; // Pages in a buffer width row
 
-				int curr_valid_pg = start_valid_pg;
+				int curr_invalid_pg = start_invalid_pg;
 
-				// The initial part of the range if the start block is not buffer width aligned.
-				if ((curr_valid_pg % width_pages) != 0)
+				// The initial part of the range if the start block is not at the buffer left end.
+				if ((curr_invalid_pg % width_pages) != 0)
 				{
-					const int end_valid_pg_rect = std::min(Common::AlignUp(curr_valid_pg, width_pages), end_valid_pg);
-					const int pg_y0 = curr_valid_pg / width_pages;
-					const int pg_x0 = curr_valid_pg % width_pages;
+					const int end_invalid_pg_rect = std::min(Common::AlignUp(curr_invalid_pg, width_pages), end_invalid_pg);
+					const int pg_y0 = curr_invalid_pg / width_pages;
+					const int pg_x0 = curr_invalid_pg % width_pages;
 					const int pg_y1 = pg_y0 + 1;
-					const int pg_x1 = pg_x0 + (end_valid_pg_rect - curr_valid_pg);
-					AddDirtyRectTarget(t, GSVector4i(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y),
-						t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
+					const int pg_x1 = pg_x0 + (end_invalid_pg_rect - curr_invalid_pg);
+					GSVector4i r(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y);
 
-					curr_valid_pg = end_valid_pg_rect; // Advance to the new row of pages.
+					AddDirtyRectTarget(t, r.rintersect(t->m_valid), t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
+
+					curr_invalid_pg = end_invalid_pg_rect; // Advance to the new row of pages.
 				}
 
-				// The buffer width aligned part of the range.
-				if (curr_valid_pg + width_pages <= end_valid_pg)
+				// The middle part that goes from the left end of the buffer to the right end.
+				if (curr_invalid_pg + width_pages <= end_invalid_pg)
 				{
-					const int end_valid_pg_rect = Common::AlignDown(end_valid_pg, width_pages);
-					const int pg_y0 = curr_valid_pg / width_pages;
+					const int end_invalid_pg_rect = Common::AlignDown(end_invalid_pg, width_pages);
+					const int pg_y0 = curr_invalid_pg / width_pages;
 					const int pg_x0 = 0;
-					const int pg_y1 = pg_y0 + (end_valid_pg_rect - curr_valid_pg) / width_pages;
+					const int pg_y1 = pg_y0 + (end_invalid_pg_rect - curr_invalid_pg) / width_pages;
 					const int pg_x1 = pg_x0 + width_pages;
-					AddDirtyRectTarget(t, GSVector4i(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y),
-						t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
+					const GSVector4i r(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y);
 
-					curr_valid_pg = end_valid_pg_rect;
+					AddDirtyRectTarget(t, r.rintersect(t->m_valid), t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
+
+					curr_invalid_pg = end_invalid_pg_rect;
 				}
 
-				// The end part of the range if the end block is not buffer width aligned.
-				if (curr_valid_pg < end_valid_pg)
+				// The end part of the range if the end block is not buffer at the buffer right end.
+				if (curr_invalid_pg < end_invalid_pg)
 				{
-					const int pg_y0 = curr_valid_pg / width_pages;
+					const int pg_y0 = curr_invalid_pg / width_pages;
 					const int pg_x0 = 0;
 					const int pg_y1 = pg_y0 + 1;
-					const int pg_x1 = pg_x0 + (end_valid_pg - curr_valid_pg);
-					AddDirtyRectTarget(t, GSVector4i(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y),
-						t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
+					const int pg_x1 = pg_x0 + (end_invalid_pg - curr_invalid_pg);
+					const GSVector4i r(pg_x0 * pgs.x, pg_y0 * pgs.y, pg_x1 * pgs.x, pg_y1 * pgs.y);
+
+					AddDirtyRectTarget(t, r.rintersect(t->m_valid), t->m_TEX0.PSM, t->m_TEX0.TBW, psm_mask);
 				}
 
 				if (start_bp == t->m_TEX0.TBP0 && GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) &&
