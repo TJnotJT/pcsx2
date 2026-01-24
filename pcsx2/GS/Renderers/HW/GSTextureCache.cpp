@@ -4566,7 +4566,8 @@ void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32
 			{
 				// Invalidation range is empty.
 			}
-			else if (start_valid_pg == 0 && end_valid_pg * blocks_per_page >= valid_blocks)
+			else if (GSUtil::HasCompatibleBits(psm, t->m_TEX0.PSM) &&
+				start_valid_pg == 0 && end_valid_pg * blocks_per_page >= valid_blocks)
 			{
 				// Entire range is invalidated.
 				InvalidateSourcesFromTarget(t);
@@ -4576,6 +4577,7 @@ void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32
 			}
 			else if (GSUtil::HasSharedBits(psm, t->m_TEX0.PSM))
 			{
+				// Partial invalidation.
 				const GSVector2i& pgs = GSLocalMemory::m_psm[t->m_TEX0.PSM].pgs;
 				const int width_pages = (t->m_TEX0.TBW * 64) / pgs.x; // Pages in a buffer width row
 
