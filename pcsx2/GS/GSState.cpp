@@ -1970,9 +1970,24 @@ void GSState::FlushInvalidation()
 
 				last_bp += last_blocks;
 
-				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0) // Merged range must be page aligned.
+				// Merged only if the range is page aligned and there is more than 1 range merged.
+				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0 && (i - start_i) >= 2)
 				{
-					InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
+					const GSVector2i& last_pgs = GSLocalMemory::m_psm[last_psm].pgs;
+					const int blocks_wide = (last_bw * 64) / last_pgs.y * GS_BLOCKS_PER_PAGE;
+					if (((last_bp - start_bp) % blocks_wide) == 0)
+					{
+						// Page range is aligned to the buffer left/right ends so use a rectangle.
+						const int width = std::min((last_bp - start_bp) / blocks_wide, last_bw) * last_pgs.x;
+						const int height = ((last_bp - start_bp) / blocks_wide) * last_pgs.y;
+						GSVector4i rect(0, 0, width, height);
+						InvalidateVideoMem(m_invalidation_queue[start_i].blit, rect);
+					}
+					else
+					{
+						// Not aligned to the buffer with so do it range-based instead.
+						InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
+					}
 				}
 				else
 				{
