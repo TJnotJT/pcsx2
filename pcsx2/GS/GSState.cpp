@@ -1935,6 +1935,7 @@ void GSState::FlushInvalidation()
 	{
 		const GSInvalidationQueue& invalidate = m_invalidation_queue[i];
 
+		const GSVector2i& pgs = GSLocalMemory::m_psm[invalidate.blit.DPSM].pgs;
 		const GSVector2i& bs = GSLocalMemory::m_psm[invalidate.blit.DPSM].bs;
 		const GSVector4i& bsmask = GSVector4i(bs).xyxy() - GSVector4i(1);
 
@@ -1946,7 +1947,8 @@ void GSState::FlushInvalidation()
 
 		// Determine if the transfer can be part of a merge sequence.
 		bool merge_aligned = (r.x == 0 && r.y == 0) && // Top-left corner of transfer rect must be (0, 0).
-			((r.z & bsmask.x) == 0 && (r.w & bsmask.y) == 0); // Width/heights must be block aligned.
+			                 ((r.z & bsmask.x) == 0 && (r.w & bsmask.y) == 0) && // Width/heights must be block aligned.
+		                     (r.z >= bw * 64 || r.w <= pgs.y); // Must cover contiguous pages.
 
 		// Number of blocks in a mergable transfer.
 		const u32 blocks = merge_aligned ? (invalidate.rect.z / bs.x) * (invalidate.rect.w / bs.y) : 0;

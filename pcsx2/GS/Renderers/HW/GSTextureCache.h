@@ -528,7 +528,7 @@ public:
 	void InvalidateContainedTargets(u32 start_bp, u32 end_bp, u32 write_psm = PSMCT32, u32 write_bw = 1);
 	void InvalidateVideoMemType(int type, u32 bp, u32 write_psm = PSMCT32, u32 write_fbmsk = 0, bool dirty_only = false);
 	void InvalidateVideoMemSubTarget(GSTextureCache::Target* rt);
-	void InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw);
+	void InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw);
 	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true);
 	void InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush = false);
 

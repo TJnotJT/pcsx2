@@ -4522,9 +4522,9 @@ bool GSTextureCache::InvalidateSourcesAtPage(u32 page, u32 bp, u32 psm, u32 bw, 
 	return found;
 }
 
-// Invalidate targets by giving a page range instead of a rectangle.
+// Invalidate memory by giving a page range instead of a rectangle.
 // Note: this function is based on InvalidateVideoMem().
-void GSTextureCache::InvalidateVideoMemTargetPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
+void GSTextureCache::InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
 {
 	// We assume input range is page aligned.
 	pxAssert(((start_bp | end_bp) & (GS_BLOCKS_PER_PAGE - 1)) == 0);

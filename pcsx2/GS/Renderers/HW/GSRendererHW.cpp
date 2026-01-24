@@ -1873,7 +1873,7 @@ void GSRendererHW::InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GS
 
 void GSRendererHW::InvalidateVideoMemPages(u32 start_bp, u32 end_bp, u32 psm, u32 bw)
 {
-	g_texture_cache->InvalidateVideoMemTargetPages(start_bp, end_bp, psm, bw);
+	g_texture_cache->InvalidateVideoMemPages(start_bp, end_bp, psm, bw);
 }
 
 void GSRendererHW::InvalidateLocalMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r, bool clut)
