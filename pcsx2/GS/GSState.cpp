@@ -1975,7 +1975,7 @@ void GSState::FlushInvalidation()
 				// Merged only if the range is page aligned and there is more than 1 rectangle merged.
 				if ((last_bp & (GS_BLOCKS_PER_PAGE - 1)) == 0 && (i - start_i) >= 2)
 				{
-					if (last_bw == 1)
+					if (last_bw == 1 || GSLocalMemory::m_psm[last_psm].bpp == 32)
 					{
 						// If BW == 1, then it's likely not representative of the actual BW used for the texture
 						// so in this case it may be safer to invalidate by range.
@@ -2647,7 +2647,6 @@ void GSState::Move()
 	FlushInvalidation();
 
 	InvalidateLocalMem(m_env.BITBLTBUF, GSVector4i(sx, sy, sx + w, sy + h));
-	InvalidateVideoMem(m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h));
 	const bool overlaps = m_env.BITBLTBUF.SBP == m_env.BITBLTBUF.DBP;
 	const bool intersect = overlaps && !(GSVector4i(sx, sy, sx + w, sy + h).rintersect(GSVector4i(dx, dy, dx + w, dy + h)).rempty());
 	m_invalidation_queue.push_back({m_env.BITBLTBUF, GSVector4i(dx, dy, dx + w, dy + h)});
