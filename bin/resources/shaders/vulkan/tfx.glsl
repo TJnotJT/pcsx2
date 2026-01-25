@@ -334,8 +334,6 @@ void main()
 
 #define NEEDS_TEX (PS_TFX != 4)
 
-vec4 FragCoord;
-
 layout(std140, set = 0, binding = 1) uniform cb1
 {
 	vec3 FogColor;
@@ -385,11 +383,11 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 	#if defined(DISABLE_TEXTURE_BARRIER) || defined(HAS_FEEDBACK_LOOP_LAYOUT)
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
 			layout(set = 1, binding = 2) uniform texture2D RtSampler;
-			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(FragCoord.xy), 0); }
+			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0); }
 		#endif
 		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
 			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0); }
+			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0); }
 		#endif
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
@@ -989,7 +987,7 @@ vec4 ps_color()
 #elif PS_CHANNEL_FETCH == 6
 	vec4 T = fetch_gXbY(ivec2(gl_FragCoord.xy + ChannelShuffleOffset));
 #elif PS_DEPTH_FMT > 0
-	vec4 T = sample_depth(st_int, ivec2(FragCoord.xy));
+	vec4 T = sample_depth(st_int, ivec2(gl_FragCoord.xy));
 #else
 	vec4 T = sample_color(st);
 #endif
@@ -1036,9 +1034,9 @@ void ps_dither(inout vec3 C, float As)
 		ivec2 fpos;
 
 		#if PS_DITHER == 2
-			fpos = ivec2(FragCoord.xy);
+			fpos = ivec2(gl_FragCoord.xy);
 		#else
-			fpos = ivec2(FragCoord.xy * RcpScaleFactor);
+			fpos = ivec2(gl_FragCoord.xy * RcpScaleFactor);
 		#endif
 
 		float value = DitherMatrix[fpos.y & 3][fpos.x & 3];
@@ -1281,21 +1279,30 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 
 void main()
 {
-	FragCoord = gl_FragCoord;
+	float input_z = gl_FragCoord.z;
+
+	// Must floor before depth testing.
+#if PS_ZFLOOR
+	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
+#endif
+
+#if PS_ZCLAMP
+	input_z = min(input_z, MaxDepthPS);
+#endif
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
-		if (FragCoord.z < sample_from_depth().r)
+		if (input_z < sample_from_depth().r)
 			discard;
 	#elif PS_ZTST == ZTST_GREATER
-		if (FragCoord.z <= sample_from_depth().r)
+		if (input_z <= sample_from_depth().r)
 			discard;
 	#endif
 #endif // PS_ZTST
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
-	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
+	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
 #if PS_DATE >= 5
@@ -1330,7 +1337,7 @@ void main()
 #endif		// PS_DATE >= 5
 
 #if PS_DATE == 3
-	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(FragCoord.xy), 0).r);
+	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(gl_FragCoord.xy), 0).r);
 	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
 	// the bad alpha value so we must keep it.
 
@@ -1460,7 +1467,7 @@ void main()
 		// Alpha test with feedback
 		#if (PS_AFAIL == AFAIL_FB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZWRITE
 			if (!atst_pass)
-				FragCoord.z = sample_from_depth().r;
+				input_z = sample_from_depth().r;
 		#elif (PS_AFAIL == AFAIL_ZB_ONLY) && PS_FEEDBACK_LOOP_IS_NEEDED_RT
 			if (!atst_pass)
 				o_col0 = sample_from_rt();
@@ -1471,22 +1478,14 @@ void main()
 				o_col0.a = sample_from_rt().a;
 			#endif
 			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ZWRITE
-				FragCoord.z = sample_from_depth().r;
+				input_z = sample_from_depth().r;
 			#endif
 			}
 		#endif
 	#endif
-
-	#if PS_ZFLOOR
-		FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
-	#endif
-
-	#if PS_ZCLAMP
-		FragCoord.z = min(FragCoord.z, MaxDepthPS);
-	#endif
 	
 	#if PS_ZWRITE
-		gl_FragDepth = FragCoord.z;
+		gl_FragDepth = input_z;
 	#endif
 #endif // PS_DATE
 }
