@@ -53,8 +53,6 @@
 #define NEEDS_DEPTH (PS_DEPTH_FEEDBACK && NEEDS_DEPTH_FOR_AFAIL)
 #define PS_ZWRITE (PS_ZCLAMP || PS_ZFLOOR)
 
-vec4 FragCoord;
-
 layout(std140, binding = 0) uniform cb21
 {
 	vec3 FogColor;
@@ -123,6 +121,14 @@ in SHADER
 	layout(location = 0) TARGET_0_QUALIFIER vec4 SV_Target0;
 #endif
 
+#if NEEDS_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+#if HAS_FRAMEBUFFER_FETCH
+	layout(location = 1) inout float SV_Target1;
+#else
+	layout(location = 1) out float SV_Target1;
+#endif
+#endif
+
 #if NEEDS_TEX
 layout(binding = 0) uniform sampler2D TextureSampler;
 layout(binding = 1) uniform sampler2D PaletteSampler;
@@ -136,7 +142,7 @@ layout(binding = 2) uniform sampler2D RtSampler; // note 2 already use by the im
 layout(binding = 3) uniform sampler2D img_prim_min;
 #endif
 
-#if NEEDS_DEPTH
+#if !HAS_FRAMEBUFFER_FETCH && NEEDS_DEPTH
 layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
@@ -147,7 +153,7 @@ vec4 sample_from_rt()
 #elif HAS_FRAMEBUFFER_FETCH
 	return LAST_FRAG_COLOR;
 #else
-	return texelFetch(RtSampler, ivec2(FragCoord.xy), 0);
+	return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0);
 #endif
 }
 
@@ -155,8 +161,10 @@ vec4 sample_from_depth()
 {
 #if !NEEDS_DEPTH
 	return vec4(0.0);
+#elif HAS_FRAMEBUFFER_FETCH && (DEPTH_FEEDBACK_SUPPORT == 2)
+	return SV_Target1;
 #else
-	return texelFetch(DepthSampler, ivec2(FragCoord.xy), 0);
+	return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0);
 #endif
 }
 
@@ -770,9 +778,9 @@ void ps_dither(inout vec3 C, float As)
 {
 #if PS_DITHER > 0 && PS_DITHER < 3
 	#if PS_DITHER == 2
-		ivec2 fpos = ivec2(FragCoord.xy);
+		ivec2 fpos = ivec2(gl_FragCoord.xy);
 	#else
-		ivec2 fpos = ivec2(FragCoord.xy * RcpScaleFactor);
+		ivec2 fpos = ivec2(gl_FragCoord.xy * RcpScaleFactor);
 	#endif
 		float value = DitherMatrix[fpos.y&3][fpos.x&3];
 
@@ -1015,21 +1023,30 @@ float As = As_rgba.a;
 
 void ps_main()
 {
-	FragCoord = gl_FragCoord;
+	float input_z = gl_FragCoord.z;
+
+	// Must floor before depth testing.
+#if PS_ZFLOOR
+	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
+#endif
+	
+#if PS_ZCLAMP
+	input_z = min(input_z, MaxDepthPS);
+#endif
 
 #if NEEDS_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
-		if (FragCoord.z < sample_from_depth().r)
+		if (input_z < sample_from_depth().r)
 			discard;
 	#elif PS_ZTST == ZTST_GREATER
-		if (FragCoord.z <= sample_from_depth().r)
+		if (input_z <= sample_from_depth().r)
 			discard;
 	#endif
 #endif // PS_ZTST
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
-	if ((int(FragCoord.y) & 1) == (PS_SCANMSK & 1))
+	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
 
@@ -1065,7 +1082,7 @@ void ps_main()
 #endif
 
 #if PS_DATE == 3
-	int stencil_ceil = int(texelFetch(img_prim_min, ivec2(FragCoord.xy), 0).r);
+	int stencil_ceil = int(texelFetch(img_prim_min, ivec2(gl_FragCoord.xy), 0).r);
 	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
 	// the bad alpha value so we must keep it.
 
@@ -1194,7 +1211,7 @@ void ps_main()
 	// Alpha test with feedback
 	#if (PS_AFAIL == AFAIL_FB_ONLY) && NEEDS_DEPTH && PS_ZWRITE
 		if (!atst_pass)
-			FragCoord.z = sample_from_depth().r;
+			input_z = sample_from_depth().r;
 	#elif (PS_AFAIL == AFAIL_ZB_ONLY) && NEEDS_RT
 		if (!atst_pass)
 			C = sample_from_rt();
@@ -1205,7 +1222,7 @@ void ps_main()
 			C.a = sample_from_rt().a;
 		#endif
 		#if NEEDS_DEPTH && PS_ZWRITE
-			FragCoord.z = sample_from_depth().r;
+			input_z = sample_from_depth().r;
 		#endif
 		}
 	#endif
@@ -1219,15 +1236,14 @@ void ps_main()
 	#endif
 #endif
 
-#if PS_ZFLOOR
-FragCoord.z = floor(FragCoord.z * exp2(32.0f)) * exp2(-32.0f);
-#endif
-	
-#if PS_ZCLAMP
-FragCoord.z = min(FragCoord.z, MaxDepthPS);
-#endif
-
 #if PS_ZWRITE
-gl_FragDepth = FragCoord.z;
+	#if NEEDS_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+		// Depth as color write.
+		// Warning: do not write SV_Target1 until the end since the value might
+		// be needed for FB fetch in sample_from_depth().
+		SV_Target1 = input_z;
+	#endif
+	// Standard depth write.
+	gl_FragDepth = input_z;
 #endif
 }

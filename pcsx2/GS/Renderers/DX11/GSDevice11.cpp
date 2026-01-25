@@ -59,8 +59,15 @@ GSDevice11::GSDevice11()
 	m_features.stencil_buffer = true;
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
-	m_features.depth_feedback = m_features.multidraw_fb_copy ? GSDevice::DepthFeedbackSupport::Depth :
-	                                                           GSDevice::DepthFeedbackSupport::None;
+	if (m_features.multidraw_fb_copy && (GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Auto ||
+		GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Depth))
+	{
+		m_features.depth_feedback = GSDevice::DepthFeedbackSupport::Depth;
+	}
+	else
+	{
+		m_features.depth_feedback = GSDevice::DepthFeedbackSupport::None;
+	}
 }
 
 GSDevice11::~GSDevice11() = default;
