@@ -1977,8 +1977,8 @@ void GSState::FlushInvalidation()
 				{
 					if (last_bw == 1 || GSLocalMemory::m_psm[last_psm].bpp == 32)
 					{
-						// If BW == 1, then it's likely not representative of the actual BW used for the texture
-						// so in this case it may be safer to invalidate by range.
+						// For BW == 1, using use range-based invalidation since it may be a texture uploaded piecemeal.
+						// For 32 bpp formats using range based invalidation seems to be effective also.
 						InvalidateVideoMemPages(start_bp, last_bp, last_psm, last_bw);
 						invalidated = true;
 					}
