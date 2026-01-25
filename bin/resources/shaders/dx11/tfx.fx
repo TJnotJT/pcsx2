@@ -166,11 +166,11 @@ struct PS_INPUT
 #else
 	nointerpolation float4 c : COLOR0;
 #endif
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
 #endif
-	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
-	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 };
 
 #ifdef PIXEL_SHADER
