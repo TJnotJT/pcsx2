@@ -5223,6 +5223,7 @@ void GSRendererHW::EmulateZbufferAA1()
 		{
 			// AA1: Z is not written on lines since coverage is always less than 0x80.
 			m_conf.depth.zwe = false;
+			m_conf.ps.DisableDepthOutput();
 		}
 		else if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
 		{
@@ -7956,6 +7957,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (features.framebuffer_fetch)
 		{
 			// Full DATE is "free" with framebuffer fetch. The barrier gets cleared below.
+			DATE_BARRIER = true;
+			m_conf.require_full_barrier = true;
+		}
+		else if (IsCoverageAlphaSupported())
+		{
+			// We're using AA1 for this draw so use only full barrier DATE, to avoid the complications
+			// with stencil/primid setup with AA1 vertex shaders. AA1 triangles usually require full barriers anyway.
 			DATE_BARRIER = true;
 			m_conf.require_full_barrier = true;
 		}
