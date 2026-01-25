@@ -153,7 +153,20 @@ void GSTextureCache::AddDirtyRectTarget(Target* target, GSVector4i rect, u32 psm
 	if (rect.rempty())
 		return;
 
+	if (GSState::s_n == 2079)
+		printf("");
+
 	num_adddirtyrect++;
+
+	static int draw = 0;
+	static int count = 0;
+	count++;
+	if (draw != GSState::s_n)
+	{
+		Console.Warning("AddDirtyRect: %d %d\n", draw, count);
+		count = 0;
+	}
+	draw = GSState::s_n;
 
 	std::vector<GSDirtyRect>::iterator it = target->m_dirty.end();
 	while (it != target->m_dirty.begin())
