@@ -1242,9 +1242,8 @@ void ps_main()
 		// Warning: do not write SV_Target1 until the end since the value might
 		// be needed for FB fetch in sample_from_depth().
 		SV_Target1 = input_z;
-	#else
-		// Standard depth write.
-		gl_FragDepth = input_z;
 	#endif
+	// Standard depth write.
+	gl_FragDepth = input_z;
 #endif
 }

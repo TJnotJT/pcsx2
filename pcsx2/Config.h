@@ -468,6 +468,14 @@ enum class GSNativeScaling : u8
 	MaxCount
 };
 
+enum class GSDepthFeedbackMode : u8
+{
+	None      = 0,
+	Auto      = 1,
+	Depth     = 2,
+	DepthAsRT = 3,
+};
+
 enum class AchievementOverlayPosition : u8
 {
 	TopLeft,
@@ -856,6 +864,7 @@ struct Pcsx2Config
 		GSBilinearDirtyMode UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
 		TriFiltering TriFilter = TriFiltering::Automatic;
 		s8 OverrideTextureBarriers = -1;
+		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
