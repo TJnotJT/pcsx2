@@ -5207,7 +5207,15 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	{
 		m_conf.depth.ztst = m_cached_ctx.TEST.ZTST;
 		// AA1: Z is not written on lines since coverage is always less than 0x80.
-		m_conf.depth.zwe = (m_cached_ctx.ZBUF.ZMSK || (PRIM->AA1 && m_vt.m_primclass == GS_LINE_CLASS)) ? 0 : 1;
+		if (m_cached_ctx.ZBUF.ZMSK || (PRIM->AA1 && m_vt.m_primclass == GS_LINE_CLASS))
+		{
+			m_conf.depth.zwe = false;
+			m_cached_ctx.ZBUF.ZMSK = true;
+		}
+		else
+		{
+			m_conf.depth.zwe = true;
+		}
 	}
 	else
 	{
