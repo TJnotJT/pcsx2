@@ -3762,6 +3762,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 	GSVector4i all(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
+	u32 prev_tristrip_i0 = 0;
+	u32 prev_tristrip_i1 = 0;
+
 	while (i < count)
 	{
 		u32 j = i + skip;
@@ -3786,6 +3789,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				// Triangle fan expected indices.
 				std::array{ std::array<int, 3>{ 0, 2, 1 }, std::array<int, 3>{ 3, 4, 5 } },
 			});
+
+			u32 tristrip_i0 = 0;
+			u32 tristrip_i1 = 0;
 
 			const auto CheckTriangleQuads = [&]<int type>() {
 				constexpr std::array<int, 3> tri0 = tri_order[type][0];
@@ -3823,11 +3829,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						bbox = bbox.runion(GSVector4i(v[index[k + tri1[2]]].m[1]).upl16().xyxy());
 						k += 3;
 
-						skip += 3;
-
 						got_bbox = true;
 
-						if (!(k < count &&
+						if (!(k + 3 < count &&
 							index[k + tri0[0]] == index[k + tri1[0]] &&
 							index[k + tri0[1]] == index[k + tri1[1]]))
 						{
@@ -3835,15 +3839,74 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 							break;
 						}
 					}
-					
+
 					skip = k - j + 3;
+
+
+					if (type == 0 && skip >= 9)
+					{
+						/*const bool axis_aligned_x = v[index[j + 0]].XYZ.X == v[index[j + 1]].XYZ.X &&
+													v[index[k + 1]].XYZ.X == v[index[k + 2]].XYZ.X;
+						const bool axis_aligned_y = v[index[i + 0]].XYZ.Y == v[index[i + 1]].XYZ.Y &&
+													v[index[j + 1]].XYZ.Y == v[index[j + 2]].XYZ.Y;
+						const bool axis_aligned = axis_aligned_x && axis_aligned_y;*/
+						tristrip_i0 = j;
+						tristrip_i1 = j + skip - 3;
+					}
 				}
+			};
+
+			const auto FindMatchingPoint = [&](u32 tri0, u32 tri1, u32& a, u32& b) -> bool {
+				for (u32 i = 0; i < 2; i++)
+				{
+					for (u32 j = 0; j < 2; j++)
+					{
+						if (v[index[tri0 + i]].XYZ.U32[0] == v[index[tri1 + j]].XYZ.U32[0])
+						{
+							a = i;
+							b = j;
+							return true;
+						}
+					}
+				}
+
+				return false;
 			};
 
 			// First check: see if the triangles are part of triangle strip/fan.
 			if (primclass == GS_TRIANGLE_CLASS)
 			{
 				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
+				bool next_loop = false;
+				if (prev_tristrip_i0 < prev_tristrip_i1 && tristrip_i0 < tristrip_i1)
+				{
+					static int count = 0;
+					u32 a0, a1, b0, b1;
+					if (FindMatchingPoint(prev_tristrip_i0, tristrip_i0, a0, b0) &&
+						FindMatchingPoint(prev_tristrip_i1 + 1, tristrip_i1 + 1, a1, b1))
+					{
+						count++;
+						next_loop = true;
+						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
+							s_n, count, a0, b0, a1, b1, j);
+					}
+					else if (FindMatchingPoint(prev_tristrip_i0, tristrip_i1 + 1, a0, b0) &&
+						FindMatchingPoint(prev_tristrip_i1 + 1, tristrip_i0, a1, b1))
+					{
+						count++;
+						next_loop = true;
+						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
+							s_n, count, a0, b0, a1, b1, j);
+					}
+				}
+				prev_tristrip_i0 = tristrip_i0;
+				prev_tristrip_i1 = tristrip_i1;
+				if (next_loop)
+				{
+					j += skip;
+					skip = 0;
+					continue;
+				}
 				CheckTriangleQuads.template operator()<1>(); // Check triangle fans.
 			}
 
@@ -3860,7 +3923,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					// tri.b is right angle corner
 					bbox = GSVector4i(v[idx0[tri0.b]].m[1]).upl16().xyxy();
 					bbox = bbox.runion(GSVector4i(v[idx1[tri1.b]].m[1]).upl16().xyxy());
-					
+
 					skip = 6;
 
 					got_bbox = true;
