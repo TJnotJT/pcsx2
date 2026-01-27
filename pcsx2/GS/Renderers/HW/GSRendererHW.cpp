@@ -5174,7 +5174,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	m_conf.nindices = m_index.tail;
 }
 
-void GSRendererHW::GetZWriteConfigVSPS(const bool force_zclamp_ps)
+void GSRendererHW::GetZWriteConfigVSPS()
 {
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
@@ -5188,10 +5188,10 @@ void GSRendererHW::GetZWriteConfigVSPS(const bool force_zclamp_ps)
 
 	// Clamp in the vertex shader for primitives that have flat colors.
 	const bool clamp_vs = m_cached_ctx.DepthWrite() && large_z &&
-	                      (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS) && !force_zclamp_ps;
+	                      (m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS);
 
 	// Otherwise clamp in the pixel shader (performance note: may prevent early Z test);
-	const bool clamp_ps = m_cached_ctx.DepthWrite() && !clamp_vs && (large_z || force_zclamp_ps);
+	const bool clamp_ps = m_cached_ctx.DepthWrite() && !clamp_vs && large_z;
 
 	if (clamp_vs)
 		m_conf.cb_vs.max_depth = GSVector2i(max_z);
@@ -5224,7 +5224,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
-	GetZWriteConfigVSPS(false);
+	GetZWriteConfigVSPS();
 }
 
 void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
@@ -6840,8 +6840,7 @@ void GSRendererHW::SetupROV()
 			GL_INS("ROV: Using SW depth write%s",
 				(m_conf.depth.zwe || (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)) ?
 				" and disabling HW" : "");
-			if (!m_conf.ps.HasDepthWrite())
-				GetZWriteConfigVSPS(true); // Make sure that pixel shader writes to depth.
+			m_conf.ps.zwrite = true;
 		}
 		
 		m_conf.ps.rov_depth = true;
@@ -7985,8 +7984,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		if (afail_needs_depth && zwe)
 		{
 			GL_INS("Enable SW depth write for depth feedback");
-			if (!m_conf.ps.HasDepthWrite())
-				GetZWriteConfigVSPS(true); // Make sure pixel shader writes to depth.
+			m_conf.ps.zwrite = true;
 
 			if (m_cached_ctx.DepthRead())
 			{

@@ -135,7 +135,7 @@ private:
 	bool CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextureCache::Source* tex,
 		const TextureMinMaxResult& tmm);
 
-	void GetZWriteConfigVSPS(const bool force_zclamp_ps = false);
+	void GetZWriteConfigVSPS();
 	void EmulateZbuffer(const GSTextureCache::Target* ds);
 	static void GetAlphaTestConfigPS(const u32 atst, const u8 aref, const bool invert_test, u32& ps_atst_out, float& aref_out);
 	void EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& DATE_one, bool& DATE_PRIMID);

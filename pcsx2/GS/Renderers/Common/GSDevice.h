@@ -423,9 +423,10 @@ struct alignas(16) GSHWDrawConfig
 				u32 dither : 2;
 				u32 dither_adjust : 1;
 
-				// Depth clamp - also indicates SW depth write.
+				// Depth output
 				u32 zclamp : 1;
 				u32 zfloor : 1;
+				u32 zwrite : 1;
 
 				// Hack
 				u32 tcoffsethack : 1;
@@ -513,12 +514,6 @@ struct alignas(16) GSHWDrawConfig
 		__fi void DisableDepthOutput()
 		{
 			zclamp = zfloor = false;
-		}
-
-		/// Does the pixel shader write to depth (e.g., gl_FragDepth or SV_Depth) explicitly.
-		__fi bool HasDepthWrite() const
-		{
-			return zclamp || zfloor;
 		}
 	};
 	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
