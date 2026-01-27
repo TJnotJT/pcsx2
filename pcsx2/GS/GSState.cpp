@@ -3777,31 +3777,6 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 		{
 			bool got_bbox = false;
 
-			// Second check: see if triangles form an axis-aligned quad.
-			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && check_quads && j + 3 < count)
-			{
-				const u16* RESTRICT idx0 = &index[j + 0];
-				const u16* RESTRICT idx1 = &index[j + 3];
-				TriangleOrdering tri0;
-				TriangleOrdering tri1;
-
-				if (AreTrianglesQuad<0, 0>(v, idx0, idx1, &tri0, &tri1))
-				{
-					// tri.b is right angle corner
-					bbox = GSVector4i(v[idx0[tri0.b]].m[1]).upl16().xyxy();
-					bbox = bbox.runion(GSVector4i(v[idx1[tri1.b]].m[1]).upl16().xyxy());
-
-					skip = 6;
-
-					got_bbox = true;
-				}
-				else
-				{
-					// If we fail a quad check assume the rest are not quads since the check is relatively expensive.
-					check_quads = false;
-				}
-			}
-
 			// Assuming that indices 0-5 represent two triangles:
 			// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
 			// Triangles fans: indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
@@ -3933,6 +3908,31 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					continue;
 				}
 				CheckTriangleQuads.template operator()<1>(); // Check triangle fans.
+			}
+
+			// Second check: see if triangles form an axis-aligned quad.
+			if (!got_bbox && primclass == GS_TRIANGLE_CLASS && check_quads && j + 3 < count)
+			{
+				const u16* RESTRICT idx0 = &index[j + 0];
+				const u16* RESTRICT idx1 = &index[j + 3];
+				TriangleOrdering tri0;
+				TriangleOrdering tri1;
+
+				if (AreTrianglesQuad<0, 0>(v, idx0, idx1, &tri0, &tri1))
+				{
+					// tri.b is right angle corner
+					bbox = GSVector4i(v[idx0[tri0.b]].m[1]).upl16().xyxy();
+					bbox = bbox.runion(GSVector4i(v[idx1[tri1.b]].m[1]).upl16().xyxy());
+
+					skip = 6;
+
+					got_bbox = true;
+				}
+				else
+				{
+					// If we fail a quad check assume the rest are not quads since the check is relatively expensive.
+					check_quads = false;
+				}
 			}
 			
 			// Default case: just take the bbox of the prim vertices.
