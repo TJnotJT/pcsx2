@@ -3932,6 +3932,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					// If this and the previous group are tristrips, check if they appears to be part of
 					// the same non-overlapping grid by checking shared vertices in the first/last triangle
 					// of each strip.
+					// FIXME: Optimization: in the tristrip checking, we can set a flag if this tristrip overlaps with its continuation.
 					const bool prev_tristrip = prev_tristrip_i0 < prev_tristrip_i1;
 					const bool tristrip = tristrip_i0 < tristrip_i1;
 					if (!(got_bbox && prev_tristrip && tristrip))
@@ -3963,6 +3964,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						break; // Cannot continue the tristrip chain.
 					}
 
+					prev_tristrip_i1 = tristrip_i1;
 					bbox_tristrip = bbox_tristrip.runion(bbox);
 					j += skip;
 				}
