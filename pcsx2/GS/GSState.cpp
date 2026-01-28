@@ -3781,19 +3781,6 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			u32 tristrip_i0 = 0;
 			u32 tristrip_i1 = 0;
 
-			// Assuming that indices 0-5 represent two triangles:
-			// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
-			// Triangles fans: indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
-			// Warning: this depends on how the vertices are arranged in the vertex kick.
-			// if that changes this detection will break.
-			constexpr std::array<std::array<std::array<int, 3>, 2>, 2> tri_order({
-				// Triangle strip expected indices.
-				std::array{ std::array<int, 3>{ 1, 2, 0 }, std::array<int, 3>{ 3, 4, 5 } },
-
-				// Triangle fan expected indices.
-				std::array{ std::array<int, 3>{ 0, 2, 1 }, std::array<int, 3>{ 3, 4, 5 } },
-			});
-
 			// Test overlap of two adjacent triangles give the indices of the
 			// shared edge and two unshared points.
 			const auto TrianglesOverlap = [&](u32 s0, u32 s1, u32 u0, u32 u1) -> bool {
@@ -3807,7 +3794,22 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				       (unshared1.x * shared1.y - unshared1.y * shared1.x >= 0);
 			};
 
-			const auto CheckTriangleQuads = [&]<int type>() {
+			// Checks for a single triangle strip/fan based on the indices.
+			// Returns the index of the first and last triangle.
+			const auto CheckTriangleQuads = [&index, &v]<int type>(u32& i, u32& tri_out0, u32& tri_out1) -> u32 {
+				// Assuming that indices 0-5 represent two triangles:
+				// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
+				// Triangles fans: indices 0, 2 are identical to indices 3, 4. Indices 1, 5 are different.
+				// Warning: this depends on how the vertices are arranged in the vertex kick.
+				// if that changes this detection will break.
+				constexpr std::array<std::array<std::array<int, 3>, 2>, 2> tri_order({
+					// Triangle strip expected indices.
+					std::array{ std::array<int, 3>{ 1, 2, 0 }, std::array<int, 3>{ 3, 4, 5 } },
+
+					// Triangle fan expected indices.
+					std::array{ std::array<int, 3>{ 0, 2, 1 }, std::array<int, 3>{ 3, 4, 5 } },
+				});
+
 				constexpr std::array<int, 3> tri0 = tri_order[type][0];
 				constexpr std::array<int, 3> tri1 = tri_order[type][1];
 
