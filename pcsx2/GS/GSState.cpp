@@ -3731,6 +3731,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 	const u32 count = m_index.tail;
 
 	// Optimize out using indices for sprites and points; probably not much difference.
+	// FIXME: REfactor this to just return the points.
 	const auto GetIndex = [&](int i) {
 		if constexpr (primclass == GS_SPRITE_CLASS || primclass == GS_POINT_CLASS)
 			return i;
@@ -3762,9 +3763,6 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 	GSVector4i all(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
-	u32 prev_tristrip_i0 = 0;
-	u32 prev_tristrip_i1 = 0;
-
 	while (i < count)
 	{
 		u32 j = i + skip;
@@ -3777,6 +3775,11 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 		{
 			bool got_bbox = false;
 			bool merge_tristrips = false;
+			bool tristrip_overlap = false;
+
+			// Base index of the first/last triangle in a tristrip (if any).
+			u32 tristrip_i0 = 0;
+			u32 tristrip_i1 = 0;
 
 			// Assuming that indices 0-5 represent two triangles:
 			// Triangle strips: indices 1, 2 are identical to indices 3, 4. Indices 0, 5 are different.
@@ -3791,8 +3794,18 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				std::array{ std::array<int, 3>{ 0, 2, 1 }, std::array<int, 3>{ 3, 4, 5 } },
 			});
 
-			u32 tristrip_i0 = 0;
-			u32 tristrip_i1 = 0;
+			// Test overlap of two adjacent triangles give the indices of the
+			// shared edge and two unshared points.
+			const auto TrianglesOverlap = [&](u32 s0, u32 s1, u32 u0, u32 u1) -> bool {
+				const GSVector4i shared0 = GSVector4i(v[index[s0]].m[1]).upl16();
+				const GSVector4i shared1 = GSVector4i(v[index[s1]].m[1]).upl16() - shared0;
+				const GSVector4i unshared0 = GSVector4i(v[index[u0]].m[1]).upl16() - shared0;
+				const GSVector4i unshared1 = GSVector4i(v[index[u1]].m[1]).upl16() - shared0;
+
+				// Cross product signs comparison. If true, triangles are on same side of the shared edge.
+				return (unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) ==
+				       (unshared1.x * shared1.y - unshared1.y * shared1.x >= 0);
+			};
 
 			const auto CheckTriangleQuads = [&]<int type>() {
 				constexpr std::array<int, 3> tri0 = tri_order[type][0];
@@ -3811,18 +3824,10 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 					while (true)
 					{
-						// There is a shared edge between this and next triangle.
-						// Check if the unshared point is on opposite sides of the shared edge.
-						const GSVector4i shared0 = GSVector4i(v[index[k + tri1[0]]].m[1]).upl16();
-						const GSVector4i shared1 = GSVector4i(v[index[k + tri1[1]]].m[1]).upl16() - shared0;
-						const GSVector4i unshared0 = GSVector4i(v[index[k + tri0[2]]].m[1]).upl16() - shared0;
-						const GSVector4i unshared1 = GSVector4i(v[index[k + tri1[2]]].m[1]).upl16() - shared0;
-
-						// Cross product signs comparison.
-						if ((unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) ==
-							(unshared1.x * shared1.y - unshared1.y * shared1.x >= 0))
+						// There is a shared edge between this and next triangle so check if they overlap.
+						if (tristrip_overlap = TrianglesOverlap(k + tri1[0], k + tri1[1], k + tri0[2], k + tri1[2]))
 						{
-							break; // Triangles are on same side of the shared edge so there's overlap.
+							break;
 						}
 
 						// Corners are on opposite sides so we can assume a non-axis-aligned quad.
@@ -3842,26 +3847,54 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					skip = k - j + 3; // Number of vertices in the loop + first triangle.
 					got_bbox = (skip >= 6); // At least 2 triangles grouped.
 
-					// Only save the tristrip for merging if at least 3 triangles are in the strip.
-					// Tristrips with 2 triangles seem to give too many false positives.
-					if (type == 0 && skip >= 9)
+					const bool axis_aligned_x = v[index[j + 0]].XYZ.X == v[index[j + 1]].XYZ.X &&
+						                        v[index[k + 1]].XYZ.X == v[index[k + 2]].XYZ.X;
+					const bool axis_aligned_y = v[index[j + 0]].XYZ.X == v[index[j + 1]].XYZ.Y &&
+						                        v[index[k + 1]].XYZ.X == v[index[k + 2]].XYZ.Y;
+					const bool axis_aligned = axis_aligned_x || axis_aligned_y;
+
+					// Only save the tristrip for merging if at least 3 triangles are in the strip and there's no overlap.
+					// Tristrips with 2 triangles or axis-aligned seem to give too many false positives.
+					// FIXME: Try with 6 with the overlap check.
+					if (type == 0 && got_bbox)
 					{
 						tristrip_i0 = j;
-						tristrip_i1 = j + skip - 3;
+						tristrip_i1 = k;
 					}
 				}
 			};
 
-			const auto FindMatchingPoint = [&](u32 tri0, u32 tri1, u32& a, u32& b) -> bool {
-				for (u32 i = 0; i < 2; i++)
+			// Template parameter indicates if the triangle is at the end of the strip or beginning.
+			const auto FindMatchingPoint = [&]<bool end0, bool end1>(u32 tri0, u32 tri1, u32& a, u32& b) -> bool {
+				// For the end triangle only consider the last edge of the triangle.
+				// For the start triangle only consider the first edge of the triangle.
+				const u32 base0 = end0 ? 1 : 0;
+				const u32 base1 = end1 ? 1 : 0;
+
+				for (u32 i = base0; i < base0 + 2; i++)
 				{
-					for (u32 j = 0; j < 2; j++)
+					for (u32 j = base1; j < base1 + 2; j++)
 					{
 						if (v[index[tri0 + i]].XYZ.U32[0] == v[index[tri1 + j]].XYZ.U32[0])
 						{
 							a = i;
 							b = j;
 							return true;
+
+							// Get the index that should be shared between the adjacent triangles.
+							const u32 i2 = end0 ? (i == 2 ? 0 : i - 5) : (i == 0 ? 2 : i + 5);
+							const u32 j2 = end1 ? (j == 2 ? 0 : j - 5) : (j == 0 ? 2 : j + 5);
+
+							if (v[index[tri0 + i2]].XYZ.U32[0] != v[index[tri1 + j2]].XYZ.U32[0])
+							{
+								return false; // Edge is not shared.
+							}
+
+							// Get the indices that should be unshared.
+							const u32 i3 = end0 ? 2 - i : i + 1;
+							const u32 j3 = end1 ? 2 - j : j + 1;
+
+							return !TrianglesOverlap(i, i2, i3, j3);
 						}
 					}
 				}
@@ -3872,40 +3905,92 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			// First check: see if the triangles are part of triangle strip.
 			if (!got_bbox && primclass == GS_TRIANGLE_CLASS)
 			{
-				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
+				const u32 start_j = j;
+				u32 prev_tristrip_i0 = 0;
+				u32 prev_tristrip_i1 = 0;
+				GSVector4i bbox_tristrip(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
 
-				// If this and the previous group are tristrips, check if they appears to be part of
-				// the same non-overlapping grid by checking shared vertices in the first/last tiangle
-				// of each strip.
-				const bool prev_tristrip = prev_tristrip_i0 < prev_tristrip_i1;
-				const bool tristrip = tristrip_i0 < tristrip_i1;
-				if (got_bbox && prev_tristrip && tristrip && all.rintersects(bbox))
+				// Check for the first tristrip in the chain.
+				CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
+				if (got_bbox)
 				{
-					static int count = 0;
-					u32 a0, a1, b0, b1;
-					// Check the first two vertices of first triangles and last two vertices of last triangles.
-					if (FindMatchingPoint(prev_tristrip_i0, tristrip_i0, a0, b0) &&
-						FindMatchingPoint(prev_tristrip_i1 + 1, tristrip_i1 + 1, a1, b1))
-					{
-						count++;
-						merge_tristrips = true;
-						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
-							s_n, count, a0, b0, a1, b1, j);
-					}
-					else if (FindMatchingPoint(prev_tristrip_i0, tristrip_i1 + 1, a0, b0) &&
-						FindMatchingPoint(prev_tristrip_i1 + 1, tristrip_i0, a1, b1))
-					{
-						count++;
-						merge_tristrips = true;
-						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
-							s_n, count, a0, b0, a1, b1, j);
-					}
+					prev_tristrip_i0 = tristrip_i0;
+					prev_tristrip_i1 = tristrip_i1;
+					bbox_tristrip = bbox;
+					j += skip;
 				}
 
-				// Save first/last triangle of new tristrip (if any).
-				prev_tristrip_i0 = tristrip_i0;
-				prev_tristrip_i1 = tristrip_i1;
+				while (j < count)
+				{
+					got_bbox = false;
+					tristrip_i0 = 0;
+					tristrip_i1 = 0;
+					bbox = GSVector4i(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX);
+					CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
 
+					// If this and the previous group are tristrips, check if they appears to be part of
+					// the same non-overlapping grid by checking shared vertices in the first/last tiangle
+					// of each strip.
+					const bool prev_tristrip = prev_tristrip_i0 < prev_tristrip_i1;
+					const bool tristrip = tristrip_i0 < tristrip_i1;
+					if (!(got_bbox && prev_tristrip && tristrip))
+					{
+						break; // Cannot continue the tristrip chain.
+					}
+
+					/*if (bbox_tristrip.rintersects(bbox))
+					{*/
+						// Do more expensive check to make sure tristrips don't overlap.
+
+						static int count = 0;
+						u32 a0, a1, b0, b1;
+						// Check the first two vertices of first triangles and last two vertices of last triangles.
+						if (FindMatchingPoint.template operator()<false, false>(prev_tristrip_i0, tristrip_i0, a0, b0) &&
+							FindMatchingPoint.template operator()<true, true>(prev_tristrip_i1, tristrip_i1, a1, b1))
+						{
+							count++;
+							//merge_tristrips = true;
+							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
+								s_n, count, a0, b0, a1, b1, j);
+						}
+						else if (FindMatchingPoint.template operator()<false, true>(prev_tristrip_i0, tristrip_i1, a0, b0) &&
+							FindMatchingPoint.template operator()<true, false>(prev_tristrip_i1, tristrip_i0, a1, b1))
+						{
+							count++;
+							//merge_tristrips = true;
+							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
+								s_n, count, a0, b0, a1, b1, j);
+						}
+						else
+						{
+							break; // Cannot continue the tristrip chain.
+						}
+					//}
+
+					bbox_tristrip = bbox_tristrip.runion(bbox);
+					j += skip;
+				}
+
+				if (!bbox_tristrip.rempty())
+				{
+					bbox = bbox_tristrip;
+					got_bbox = true;
+					skip = j - start_j;
+					j = start_j;
+				}
+
+				// Save first/last triangle of new tristrip (if any) but only if no overlap
+				// was detected with this tristrip and the next triangle.
+				/*if (!tristrip_overlap)
+				{
+					prev_tristrip_i0 = tristrip_i0;
+					prev_tristrip_i1 = tristrip_i1;
+				}
+				else
+				{
+					prev_tristrip_i0 = 0;
+					prev_tristrip_i1 = 0;
+				}*/
 			}
 
 			// Second check: see if the triangles are part of triangle fan.
