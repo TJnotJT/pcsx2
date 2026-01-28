@@ -3879,22 +3879,23 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						{
 							a = i;
 							b = j;
-							return true;
 
 							// Get the index that should be shared between the adjacent triangles.
-							const u32 i2 = end0 ? (i == 2 ? 0 : i - 5) : (i == 0 ? 2 : i + 5);
-							const u32 j2 = end1 ? (j == 2 ? 0 : j - 5) : (j == 0 ? 2 : j + 5);
+							const int i2 = end0 ? (i == 2 ? 0 : i - 4) : (i == 0 ? 2 : i + 4);
+							const int j2 = end1 ? (j == 2 ? 0 : j - 4) : (j == 0 ? 2 : j + 4);
 
 							if (v[index[tri0 + i2]].XYZ.U32[0] != v[index[tri1 + j2]].XYZ.U32[0])
 							{
 								return false; // Edge is not shared.
 							}
 
-							// Get the indices that should be unshared.
-							const u32 i3 = end0 ? 2 - i : i + 1;
-							const u32 j3 = end1 ? 2 - j : j + 1;
+							//return true;
 
-							return !TrianglesOverlap(i, i2, i3, j3);
+							// Get the indices that should be unshared.
+							const int i3 = end0 ? 3 - i : 1 - i;
+							const int j3 = end1 ? 3 - j : 1 - j;
+
+							return !TrianglesOverlap(tri0 + i, tri0 + i2, tri0 + i3, tri1 + j3);
 						}
 					}
 				}
@@ -3929,7 +3930,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					CheckTriangleQuads.template operator()<0>(); // Check triangle strips.
 
 					// If this and the previous group are tristrips, check if they appears to be part of
-					// the same non-overlapping grid by checking shared vertices in the first/last tiangle
+					// the same non-overlapping grid by checking shared vertices in the first/last triangle
 					// of each strip.
 					const bool prev_tristrip = prev_tristrip_i0 < prev_tristrip_i1;
 					const bool tristrip = tristrip_i0 < tristrip_i1;
@@ -3938,34 +3939,29 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						break; // Cannot continue the tristrip chain.
 					}
 
-					/*if (bbox_tristrip.rintersects(bbox))
-					{*/
-						// Do more expensive check to make sure tristrips don't overlap.
-
-						static int count = 0;
-						u32 a0, a1, b0, b1;
-						// Check the first two vertices of first triangles and last two vertices of last triangles.
-						if (FindMatchingPoint.template operator()<false, false>(prev_tristrip_i0, tristrip_i0, a0, b0) &&
-							FindMatchingPoint.template operator()<true, true>(prev_tristrip_i1, tristrip_i1, a1, b1))
-						{
-							count++;
-							//merge_tristrips = true;
-							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
-								s_n, count, a0, b0, a1, b1, j);
-						}
-						else if (FindMatchingPoint.template operator()<false, true>(prev_tristrip_i0, tristrip_i1, a0, b0) &&
-							FindMatchingPoint.template operator()<true, false>(prev_tristrip_i1, tristrip_i0, a1, b1))
-						{
-							count++;
-							//merge_tristrips = true;
-							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
-								s_n, count, a0, b0, a1, b1, j);
-						}
-						else
-						{
-							break; // Cannot continue the tristrip chain.
-						}
-					//}
+					static int count = 0;
+					u32 a0 = -1, a1 = -1, b0 = -1, b1 = -1;
+					// Check the first two vertices of first triangles and last two vertices of last triangles.
+					if (FindMatchingPoint.template operator()<false, false>(prev_tristrip_i0, tristrip_i0, a0, b0) &&
+						FindMatchingPoint.template operator()<true, true>(prev_tristrip_i1, tristrip_i1, a1, b1))
+					{
+						count++;
+						//merge_tristrips = true;
+						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
+							s_n, count, a0, b0, a1, b1, j);
+					}
+					else if (FindMatchingPoint.template operator()<false, true>(prev_tristrip_i0, tristrip_i1, a0, b0) &&
+						FindMatchingPoint.template operator()<true, false>(prev_tristrip_i1, tristrip_i0, a1, b1))
+					{
+						count++;
+						//merge_tristrips = true;
+						Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
+							s_n, count, a0, b0, a1, b1, j);
+					}
+					else
+					{
+						break; // Cannot continue the tristrip chain.
+					}
 
 					bbox_tristrip = bbox_tristrip.runion(bbox);
 					j += skip;

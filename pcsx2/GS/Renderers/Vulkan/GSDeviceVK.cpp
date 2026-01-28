@@ -6108,7 +6108,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt,
 		{
 			vkCmdPipelineBarrier(GetCurrentCommandBuffer(), VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, barrier_flags, 0, nullptr, 0, nullptr, 1, &barrier);
-
+			GL_INS("%d", p);
 			const u32 count = (*config.drawlist)[n] * indices_per_prim;
 			DrawIndexedPrimitive(p, count);
 			p += count;
