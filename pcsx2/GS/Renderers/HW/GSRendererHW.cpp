@@ -5201,6 +5201,8 @@ void GSRendererHW::GetZWriteConfigVSPS()
 		m_conf.cb_ps.TA_MaxDepth_Af.z = static_cast<float>(max_z) * 0x1p-32f;
 		m_conf.ps.zclamp = true;
 	}
+
+	m_conf.ps.zwrite = m_cached_ctx.DepthWrite() && (m_conf.ps.zfloor || m_conf.ps.zclamp);
 }
 
 void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
@@ -6593,8 +6595,11 @@ void GSRendererHW::SetupROV()
 	const u32 atst = m_cached_ctx.TEST.ATST;
 	const u32 afail = m_cached_ctx.TEST.AFAIL;
 
-	const bool afail_needs_rt = ate && ((afail == AFAIL_ZB_ONLY) || (afail == AFAIL_RGB_ONLY));
-	const bool afail_needs_depth = ate && ((afail == AFAIL_FB_ONLY) || (afail == AFAIL_RGB_ONLY));
+	// FIXME: Decide if we're going to keep VK discard or conditional writing!
+	/*const bool afail_needs_rt = ate && ((afail == AFAIL_ZB_ONLY) || (afail == AFAIL_RGB_ONLY));
+	const bool afail_needs_depth = ate && ((afail == AFAIL_FB_ONLY) || (afail == AFAIL_RGB_ONLY));*/
+	const bool afail_needs_rt = ate;
+	const bool afail_needs_depth = ate;
 
 	const bool blend = m_conf.blend.enable || m_conf.ps.IsSWBlending();
 	const bool blend_needs_rt = blend &&

@@ -1331,9 +1331,9 @@ layout(early_fragment_tests) in;
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH
-#define DISCARD fail_z = true
+#define DISCARD discarded = true
 #else
-#define DISCARD discard;
+#define DISCARD discard
 #endif
 
 void main()
@@ -1367,17 +1367,16 @@ void main()
 	bool fail_z = false;
 #endif
 
+	bool discarded = false;
+
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
 	#if PS_ZTST == ZTST_GEQUAL
-		fail_z = fail_z || (input_z < sample_from_depth().r);
+		if (input_z < sample_from_depth().r)
+			DISCARD;
 	#elif PS_ZTST == ZTST_GREATER
-		fail_z = fail_z || (input_z <= sample_from_depth().r);
+		if (input_z <= sample_from_depth().r)
+			DISCARD;
 	#endif
-
-	// We do not discard for ROVs and instead do conditional writes to mirror DX12,
-	// which does not allow control flow based on ROV reads.
-	if (fail_z)
-		DISCARD;
 #endif // PS_ZTST
 
 #if PS_SCANMSK & 2
@@ -1435,9 +1434,10 @@ void main()
 
 	bool atst_pass = atst(C);
 
-#if PS_AFAIL == ATST_KEEP
-	if (!atst_pass)
+#if PS_AFAIL == AFAIL_KEEP
+	if (!atst_pass) {
 		DISCARD;
+	}
 #endif
 
 #if SW_AD_TO_HW
@@ -1563,7 +1563,7 @@ void main()
 			#endif
 			}
 		#endif
-	#endif
+		#endif
 
 	// Writing back color (nothing to do for non-ROV)
 	#if PS_RETURN_COLOR_ROV
@@ -1578,7 +1578,10 @@ void main()
 			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
 				o_col0 = fail_z ? rt_col : o_col0;
 			#endif
+
+			o_col0 = discarded ? rt_col : o_col0;
 		#endif
+
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 	#endif
@@ -1591,6 +1594,7 @@ void main()
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = input_z;
 	#elif PS_RETURN_DEPTH_ROV
+		input_z = discarded ? sample_from_depth().r : input_z;
 		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 	#endif
 
