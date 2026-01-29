@@ -310,6 +310,7 @@ void main()
 #define PS_DITHER_ADJUST 0
 #define PS_ZCLAMP 0
 #define PS_ZFLOOR 0
+#define PS_ZWRITE 0
 #define PS_SCANMSK 0
 #define PS_AUTOMATIC_LOD 0
 #define PS_MANUAL_LOD 0
@@ -328,13 +329,12 @@ void main()
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY)
-#define PS_ZWRITE (PS_ZCLAMP || PS_ZFLOOR)
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
-#define PS_RETURN_DEPTH_ROV ((PS_ZCLAMP || PS_ZFLOOR) && PS_ROV_DEPTH)
-#define PS_RETURN_DEPTH ((PS_ZCLAMP || PS_ZFLOOR) && !PS_ROV_DEPTH)
-#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !(PS_ZCLAMP || PS_ZFLOOR))
+#define PS_RETURN_DEPTH_ROV (PS_ZWRITE && PS_ROV_DEPTH)
+#define PS_RETURN_DEPTH (PS_ZWRITE && !PS_ROV_DEPTH)
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !PS_ZWRITE)
 #define PS_ENABLE_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT \
@@ -1330,6 +1330,12 @@ layout(pixel_interlock_ordered) in;
 layout(early_fragment_tests) in;
 #endif
 
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+#define DISCARD discarded = true
+#else
+#define DISCARD discard
+#endif
+
 void main()
 {
 	float input_z = gl_FragCoord.z;
@@ -1355,26 +1361,28 @@ void main()
 	cachedDepthValue = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
 #endif
 
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+	bool fail_z = gl_HelperInvocation;
+#else
 	bool fail_z = false;
+#endif
+
+	bool discarded = false;
+
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
 	#if PS_ZTST == ZTST_GEQUAL
-		fail_z = input_z < sample_from_depth().r;
+		if (input_z < sample_from_depth().r)
+			DISCARD;
 	#elif PS_ZTST == ZTST_GREATER
-		fail_z = input_z <= sample_from_depth().r;
-	#endif
-
-	// We do not discard for ROVs and instead do conditional writes to mirror DX12,
-	// which does not allow control flow based on ROV reads.
-	#if !PS_ROV_DEPTH
-		if (fail_z)
-			discard;
+		if (input_z <= sample_from_depth().r)
+			DISCARD;
 	#endif
 #endif // PS_ZTST
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
-		discard;
+		DISCARD;
 #endif
 #if PS_DATE >= 5
 
@@ -1402,7 +1410,7 @@ void main()
 #endif
 
 	if (bad) {
-		discard;
+		DISCARD;
 	}
 
 #endif		// PS_DATE >= 5
@@ -1413,7 +1421,7 @@ void main()
 	// the bad alpha value so we must keep it.
 
 	if (gl_PrimitiveID > stencil_ceil) {
-		discard;
+		DISCARD;
 	}
 #endif
 
@@ -1426,9 +1434,10 @@ void main()
 
 	bool atst_pass = atst(C);
 
-#if PS_AFAIL == ATST_KEEP
-	if (!atst_pass)
-		discard;
+#if PS_AFAIL == AFAIL_KEEP
+	if (!atst_pass) {
+		DISCARD;
+	}
 #endif
 
 #if SW_AD_TO_HW
@@ -1569,6 +1578,8 @@ void main()
 			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ENABLE_ZTST
 				o_col0 = fail_z ? rt_col : o_col0;
 			#endif
+
+			o_col0 = discarded ? rt_col : o_col0;
 		#endif
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
@@ -1582,6 +1593,7 @@ void main()
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = input_z;
 	#elif PS_RETURN_DEPTH_ROV
+		input_z = discarded ? sample_from_depth().r : input_z;
 		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 	#endif
 
