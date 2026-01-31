@@ -3798,7 +3798,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			};
 
 			// Helper to detect triangles strips/fans.
-			const auto CheckTriangleStripFan = [v, index, count, TrianglesOverlap]
+			const auto CheckTriangleQuads = [v, index, count, TrianglesOverlap]
 				<int type>(u32 i, u32& verts, GSVector4i& bbox) -> bool {
 
 				// Assuming that indices 0-5 represent two triangles:
@@ -3905,7 +3905,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Helper function to detect triangles strips and merge them together into
 			// a grid of triangles strips.
-			const auto CheckTriangleStrips = [index, v, count, CheckTriangleStripFan, FindMatchingPoint]
+			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, FindMatchingPoint]
 				(u32 i, u32& verts, GSVector4i& bbox_all) -> bool {
 				if (!(primclass == GS_TRIANGLE_CLASS && i + 6 <= count))
 				{
@@ -3920,7 +3920,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				GSVector4i bbox;
 
 				// Check for the first tristrip in the chain.
-				if (!CheckTriangleStripFan.template operator()<0>(j, verts, bbox))
+				if (!CheckTriangleQuads.template operator()<0>(j, verts, bbox))
 				{
 					return false;
 				}
@@ -3932,7 +3932,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 				while (j < count)
 				{
-					if (!CheckTriangleStripFan.template operator()<0>(j, verts, bbox))
+					if (!CheckTriangleQuads.template operator()<0>(j, verts, bbox))
 					{
 						break; // Cannot continue trianglestrip grid.
 					}
@@ -4024,7 +4024,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 			// Second check: see if the triangles are part of triangle fan.
 			if (!got_bbox)
 			{
-				got_bbox = CheckTriangleStripFan.template operator()<1>(j, skip, bbox);
+				got_bbox = CheckTriangleQuads.template operator()<1>(j, skip, bbox);
 			}
 
 			// Third check: see if a pair of triangles are an axis-aligned quad.
