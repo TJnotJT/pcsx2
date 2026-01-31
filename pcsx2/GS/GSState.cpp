@@ -3854,9 +3854,14 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					}
 				}
 
+				if (j == i)
+				{
+					return false; // Only a single triangle in the strip.
+				}
+
 				verts = j - i + 3; // Number of vertices in the loop + first triangle.
 
-				return n >= 6; // Only return success if atleast 2 triangles are in the strip/fan.
+				return true;
 			};
 
 			// Helper functions to find a common edge between two triangles.
