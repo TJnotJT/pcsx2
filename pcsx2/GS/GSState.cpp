@@ -3953,9 +3953,19 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				bbox_all = bbox;
 				j += skip;
 
+				// Only keep the chain going as long as each new tristrip has at least 3 triangles.
+				// Tristrips with 2 triangles seem to be more likely to overlap an earlier strip.
+				constexpr u32 min_merge_verts = 9;
+
+				if (skip < min_merge_verts)
+				{
+					return true;
+				}
+
 				while (j < count)
 				{
-					if (!CheckTriangleQuads.template operator()<0>(j, skip, bbox, axis_aligned))
+					if (!CheckTriangleQuads.template operator()<0>(j, skip, bbox, axis_aligned) ||
+						skip < min_merge_verts)
 					{
 						break; // Cannot continue tristrip grid.
 					}
