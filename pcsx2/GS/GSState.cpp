@@ -3782,15 +3782,20 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Test overlap of two adjacent triangles give the indices of the
 			// shared edge and two unshared points.
-			const auto TrianglesOverlap = [v, index](u32 s0, u32 s1, u32 u0, u32 u1) -> bool {
+			const auto TrianglesOverlap = [v, index](u32 s0, u32 s1, u32 u0, u32 u1, bool& sign_out) -> bool {
 				const GSVector4i shared0 = GSVector4i(v[index[s0]].m[1]).upl16();
 				const GSVector4i shared1 = GSVector4i(v[index[s1]].m[1]).upl16() - shared0;
 				const GSVector4i unshared0 = GSVector4i(v[index[u0]].m[1]).upl16() - shared0;
 				const GSVector4i unshared1 = GSVector4i(v[index[u1]].m[1]).upl16() - shared0;
 
+				// Determine which side of the shared edge each triangle is on.
+				const bool sign0 = unshared0.x * shared1.y - unshared0.y * shared1.x >= 0;
+				const bool sign1 = unshared1.x * shared1.y - unshared1.y * shared1.x >= 0;
+
+				sign_out = sign0; // Output side of the first triangle with respect to the shared edge.
+
 				// Cross product signs comparison. If true, triangles are on same side of the shared edge.
-				return (unshared0.x * shared1.y - unshared0.y * shared1.x >= 0) ==
-				       (unshared1.x * shared1.y - unshared1.y * shared1.x >= 0);
+				return sign0 == sign1;
 			};
 
 			// Helper to detect triangles strips/fans.
@@ -3839,7 +3844,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				while (true)
 				{
 					// Check if the two triangles overlap.
-					if (TrianglesOverlap(j + tri1[0], j + tri1[1], j + tri0[2], j + tri1[2]))
+					[[maybe_unused]] bool sign;// ignore
+					if (TrianglesOverlap(j + tri1[0], j + tri1[1], j + tri0[2], j + tri1[2], sign))
 					{
 						break;
 					}
@@ -3874,24 +3880,21 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				return true;
 			};
 
-			// Helper functions to find a common edge between two triangles.
+			// Helper functions to find a common edge between two triangles and check if they overlap.
 			// Template parameter indicates if the triangle is at the end of the strip or beginning.
-			const auto FindMatchingPoint = [v, index, TrianglesOverlap]<bool end0, bool end1>
-				(u32 tri0, u32 tri1, u32& a, u32& b) -> bool {
+			const auto MatchTriangles = [v, index, TrianglesOverlap]<bool end0, bool end1>
+				(u32 tri0, u32 tri1, bool& sign) -> bool {
 				// For the end triangle only consider the last edge of the triangle.
 				// For the start triangle only consider the first edge of the triangle.
 				const u32 base0 = end0 ? 1 : 0;
 				const u32 base1 = end1 ? 1 : 0;
 
-				for (u32 i0 = base0; i0 < base0 + 2; i0++)
+				for (int i0 = base0; i0 < base0 + 2; i0++)
 				{
-					for (u32 i1 = base1; i1 < base1 + 2; i1++)
+					for (int i1 = base1; i1 < base1 + 2; i1++)
 					{
 						if (v[index[tri0 + i0]].XYZ.U32[0] == v[index[tri1 + i1]].XYZ.U32[0])
 						{
-							a = i0;
-							b = i1;
-
 							// Get the index that should be shared between the adjacent triangles.
 							const int j0 = end0 ? (i0 == 2 ? 0 : i0 - 4) : (i0 == 0 ? 2 : i0 + 4);
 							const int j1 = end1 ? (i1 == 2 ? 0 : i1 - 4) : (i1 == 0 ? 2 : i1 + 4);
@@ -3905,7 +3908,12 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 							const int k0 = end0 ? 3 - i0 : 1 - i0;
 							const int k1 = end1 ? 3 - i1 : 1 - i1;
 
-							return !TrianglesOverlap(tri0 + i0, tri0 + j0, tri0 + k0, tri1 + k1);
+							// Get the shared edge in the order of the first strip's increasing indices.
+							// Consistency is important for the sign check to work correctly.
+							const int s0 = std::min(i0, j0);
+							const int t0 = std::max(i0, j0);
+
+							return !TrianglesOverlap(tri0 + s0, tri0 + t0, tri0 + k0, tri1 + k1, sign);
 						}
 					}
 				}
@@ -3915,7 +3923,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Helper function to detect triangles strips and merge them together into
 			// a grid of triangles strips.
-			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, FindMatchingPoint]
+			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, MatchTriangles]
 				(u32 i, u32& skip, GSVector4i& bbox_all) -> bool {
 				if (!(primclass == GS_TRIANGLE_CLASS && i + 6 <= count))
 				{
@@ -3926,6 +3934,10 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				u32 prev_tri0 = 0; // First triangle of previous tristrip
 				u32 prev_tri1 = 0; // Last triangle of previous tristrip
 				bool axis_aligned = true; // Whether all quads so far are axis-aligned.
+
+				// Used to make sure the tristrips are adjacent in the same direction so there's not overlap.
+				bool expected_sign_set = false;
+				bool expected_sign;
 
 				// Temp variables for number of vertices in strip and bbox.
 				GSVector4i bbox;
@@ -3970,25 +3982,52 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						// rediscovering it again on the next iteration, we could remember it to save some time.
 
 						static int count = 0;
-						u32 a0 = -1, a1 = -1, b0 = -1, b1 = -1;
+						
+						bool sign0, sign1; // Orientation of how the first and last triangles are adjacent.
+						bool flip; // Whether to flip the expected orientation because the two strips are in opposite directions.
+
 						// Check the first two vertices of first triangles and last two vertices of last triangles.
-						if (FindMatchingPoint.template operator()<false, false>(prev_tri0, tri0, a0, b0) &&
-							FindMatchingPoint.template operator()<true, true>(prev_tri1, tri1, a1, b1))
+						if (MatchTriangles.template operator()<false, false>(prev_tri0, tri0, sign0) &&
+							MatchTriangles.template operator()<true, true>(prev_tri1, tri1, sign1))
 						{
 							count++;
-							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=normal j=%d",
-								s_n, count, a0, b0, a1, b1, j);
+							Console.Warning("Tristrip Match: draw=%d count=%d orient=normal j=%d",
+								s_n, count, j);
+							flip = false; // Tristrips are in the same directions.
 						}
-						else if (FindMatchingPoint.template operator()<false, true>(prev_tri0, tri1, a0, b0) &&
-							FindMatchingPoint.template operator()<true, false>(prev_tri1, tri0, a1, b1))
+						else if (MatchTriangles.template operator()<false, true>(prev_tri0, tri1, sign0) &&
+							MatchTriangles.template operator()<true, false>(prev_tri1, tri0, sign1))
 						{
 							count++;
-							Console.Warning("Tristrip Match: draw=%d count=%d match0=%d-%d match1=%d-%d orient=flip j=%d",
-								s_n, count, a0, b0, a1, b1, j);
+							Console.Warning("Tristrip Match: draw=%d count=%d orient=flip j=%d",
+								s_n, count, j);
+							flip = true; // Tristrips are in opposite directions.
 						}
 						else
 						{
 							break; // Cannot continue the tristrip chain.
+						}
+
+						if (expected_sign_set)
+						{
+							if (!(sign0 == expected_sign && sign1 == expected_sign))
+							{
+								break; // New tristrip is on the wrong side.
+							}
+						}
+						else
+						{
+							if (sign0 != sign1)
+							{
+								break; // First/last triangles are on different sides.
+							}
+							expected_sign = sign0;
+							expected_sign_set = true;
+						}
+
+						if (flip)
+						{
+							expected_sign = !expected_sign;
 						}
 					}
 
@@ -4039,7 +4078,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				return true;
 			};
 
-			// First check: see if the triangles are part of triangle strip.
+			// First check: see if the triangles are part of a triangle strip.
 			if (!got_bbox)
 			{
 				got_bbox = CheckTriangleStrips(j, skip, bbox);
