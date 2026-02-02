@@ -5253,7 +5253,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 	m_conf.nindices = m_index.tail;
 }
 
-void GSRendererHW::GetZWriteConfigVSPS()
+void GSRendererHW::GetZWriteConfigVSPS(bool z_integer)
 {
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
@@ -5306,7 +5306,7 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
-	GetZWriteConfigVSPS();
+	GetZWriteConfigVSPS(FIXME);
 }
 
 void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex)

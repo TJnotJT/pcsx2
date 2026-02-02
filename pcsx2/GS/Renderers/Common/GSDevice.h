@@ -641,7 +641,7 @@ struct alignas(16) GSHWDrawConfig
 			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 		}
 	};
-	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
+	static_assert(sizeof(PSSelector) == 16, "PSSelector is 16 bytes");
 #pragma pack(pop)
 	struct PSSelectorHash
 	{
