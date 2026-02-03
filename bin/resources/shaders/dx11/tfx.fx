@@ -1141,6 +1141,12 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 [earlydepthstencil]
 #endif
 
+#if PS_ROV_COLOR || PS_ROV_DEPTH
+#define DISCARD rov_discard = true
+#else
+#define DISCARD discard
+#endif
+
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 PS_OUTPUT_REAL ps_main(PS_INPUT input)
 #else
@@ -1164,19 +1170,19 @@ void ps_main(PS_INPUT input)
 	cachedDepthValue = DepthTextureRov[input.p.xy];
 #endif
 
-	bool fail_z = false;
+#if (PS_ROV_COLOR && PS_COLOR_FEEDBACK) || (PS_ROV_DEPTH && PS_DEPTH_FEEDBACK)
+	bool rov_discard = false;
+#endif
+
+	// Use ROV discard macro for since we cannot do
+	// conditional discard based on value read from ROV.
 #if PS_DEPTH_FEEDBACK && ZTST_NEEDS_DEPTH
 	#if PS_ZTST == ZTST_GEQUAL
-		fail_z = (input.p.z < DepthLoad(input.p.xy));
+		if (input.p.z < DepthLoad(input.p.xy))
+			DISCARD;
 	#elif PS_ZTST == ZTST_GREATER
-		fail_z = (input.p.z <= DepthLoad(input.p.xy));
-	#endif
-
-	// Cannot directly discard with ROVs because it is illegal to do control flow based on the
-	// value read from an ROVs. We must instead use conditional writes (later).
-	#if !PS_ROV_DEPTH
-		if (fail_z)
-			discard;
+		if (input.p.z <= DepthLoad(input.p.xy))
+			DISCARD;
 	#endif
 #endif
 
@@ -1189,7 +1195,7 @@ void ps_main(PS_INPUT input)
 
 	bool atst_pass = atst(C);
 
-#if PS_AFAIL == AFAIL_KEEP
+#if PS_ATST != PS_ATST_NONE && PS_AFAIL == AFAIL_KEEP
 	if (!atst_pass)
 		discard;
 #endif
@@ -1404,19 +1410,14 @@ void ps_main(PS_INPUT input)
 		output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
 		output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
 		output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
-	#endif
-
-	#if PS_DEPTH_FEEDBACK && ZTST_NEEDS_DEPTH
-		output.c0 = fail_z ? rt_col : output.c0;
+		
+		output.c0 = rov_discard ? rt_col : output.c0;
 	#endif
 
 	RtWrite(input.p.xy, output.c0);
 #endif
 
 	// Depth write back
-#if PS_DEPTH_FEEDBACK && ZTST_NEEDS_DEPTH
-	input.p.z = fail_z ? DepthLoad(input.p.xy) : input.p.z;
-#endif
 #if PS_RETURN_DEPTH
 	output_real.depth = input.p.z;
 	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
@@ -1424,6 +1425,9 @@ void ps_main(PS_INPUT input)
 		output_real.depth_color = input.p.z;
 	#endif
 #elif PS_RETURN_DEPTH_ROV
+	#if PS_DEPTH_FEEDBACK
+		input.p.z = rov_discard ? DepthLoad(input.p.xy) : input.p.z;
+	#endif
 	DepthWrite(input.p.xy, input.p.z);
 #endif
 

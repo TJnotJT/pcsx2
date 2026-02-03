@@ -1356,9 +1356,7 @@ void main()
 	cachedDepthValue = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
 #endif
 
-	bool fail_z = false;
-
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if (PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT) || (PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
 	bool rov_discard = gl_HelperInvocation;
 #endif
 
@@ -1427,7 +1425,7 @@ void main()
 
 	bool atst_pass = atst(C);
 
-#if PS_AFAIL == AFAIL_KEEP
+#if PS_ATST != PS_ATST_NONE && PS_AFAIL == AFAIL_KEEP
 	if (!atst_pass) {
 		DISCARD;
 	}
@@ -1567,28 +1565,19 @@ void main()
 			o_col0.g = bool(ColorMask.g) ? o_col0.g : rt_col.g;
 			o_col0.b = bool(ColorMask.b) ? o_col0.b : rt_col.b;
 			o_col0.a = bool(ColorMask.a) ? o_col0.a : rt_col.a;
-		
-			#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && ZTST_NEEDS_DEPTH
-				o_col0 = fail_z ? rt_col : o_col0;
-			#endif
 
 			o_col0 = rov_discard ? rt_col : o_col0;
 		#endif
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 	#endif
-
-	// Write back depth
-	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		#if ZTST_NEEDS_DEPTH
-			input_z = fail_z ? sample_from_depth().r : input_z;
-		#endif
-		input_z = rov_discard ? sample_from_depth().r : input_z;
-	#endif
 	
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = input_z;
 	#elif PS_RETURN_DEPTH_ROV
+		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+			input_z = rov_discard ? sample_from_depth().r : input_z;
+		#endif
 		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 	#endif
 
