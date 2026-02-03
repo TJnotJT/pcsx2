@@ -1034,10 +1034,6 @@ void ps_main()
 #if PS_ZFLOOR
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
-	
-#if PS_ZCLAMP
-	input_z = min(input_z, MaxDepthPS);
-#endif
 
 #if NEEDS_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
@@ -1239,6 +1235,10 @@ void ps_main()
 	#if !PS_NO_COLOR1
 		SV_Target1 = alpha_blend;
 	#endif
+#endif
+
+#if PS_ZCLAMP
+	input_z = min(input_z, MaxDepthPS);
 #endif
 
 #if PS_ZWRITE

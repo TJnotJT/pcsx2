@@ -5192,28 +5192,19 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
 
-	// Only fix Z values if:
-	// - We are writing to the Z buffer.
-	// - We are Z testing with ZTST_GREATER.
-	// The latter is because clamp/floor only decrease Z. Only ZTST_GREATER can be broken by failing
-	// to clamp/floor the incoming Z when the buffer value is clamped/floored.
-	const bool needs_fix = m_cached_ctx.DepthWrite() || (m_cached_ctx.DepthRead() && m_cached_ctx.TEST.ZTST == ZTST_GREATER);
-
 	// No interpolation for flat Z so we can make some optimizations.
 	const bool flat_z = m_vt.m_eq.z || m_vt.m_primclass == GS_POINT_CLASS || m_vt.m_primclass == GS_SPRITE_CLASS;
 
 	m_conf.cb_vs.max_depth = GSVector2i(0xFFFFFFFF);
 	m_conf.cb_ps.TA_MaxDepth_Af.z = 0.0f;
 	m_conf.ps.zclamp = false;
-	m_conf.ps.zfloor = needs_fix && !flat_z;
 
-	// Clamp in the vertex shader for primitives that have flat Z.
-	const bool clamp_vs = needs_fix && large_z && flat_z;
+	// Z floor must be enabled with ZTST_GREATER since otherwise there can be false
+	// passing if the incoming Z is not floored when the buffer value is floored.
+	m_conf.ps.zfloor = !flat_z &&
+		(m_cached_ctx.DepthWrite() || (m_cached_ctx.DepthRead() && m_cached_ctx.TEST.ZTST == ZTST_GREATER));
 
-	// Otherwise clamp in the pixel shader (performance note: may prevent early Z test);
-	const bool clamp_ps = needs_fix && large_z && !flat_z;
-
-	if (needs_fix && large_z)
+	if (m_cached_ctx.DepthWrite() && large_z)
 	{
 		if (flat_z)
 		{
@@ -7629,7 +7620,6 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		{
 			// Disable Z write on second pass
 			m_conf.alpha_second_pass.depth.zwe = false;
-			m_conf.alpha_second_pass.ps.DisableDepthOutput();
 		}
 		else if (afail == AFAIL_ZB_ONLY)
 		{
@@ -7639,7 +7629,6 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		{
 			// Disable Z write on second pass
 			m_conf.alpha_second_pass.depth.zwe = false;
-			m_conf.alpha_second_pass.ps.DisableDepthOutput();
 
 			m_conf.alpha_second_pass.colormask.wrgba = m_conf.colormask.wrgba & 7; // Disable A write on second pass
 		}

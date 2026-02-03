@@ -1291,10 +1291,6 @@ void main()
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
-#if PS_ZCLAMP
-	input_z = min(input_z, MaxDepthPS);
-#endif
-
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
 		if (input_z < sample_from_depth().r)
@@ -1487,6 +1483,10 @@ void main()
 			#endif
 			}
 		#endif
+	#endif
+
+	#if PS_ZCLAMP
+		input_z = min(input_z, MaxDepthPS);
 	#endif
 	
 	#if PS_ZWRITE

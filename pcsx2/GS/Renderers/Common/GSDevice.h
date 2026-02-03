@@ -485,12 +485,6 @@ struct alignas(16) GSHWDrawConfig
 			// disable both outputs.
 			no_color = no_color1 = 1;
 		}
-
-		/// Disables depth output from the pixel shader.
-		__fi void DisableDepthOutput()
-		{
-			zwrite = false;
-		}
 	};
 	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
 #pragma pack(pop)

@@ -1067,10 +1067,6 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	input.p.z = floor(input.p.z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
-#if PS_ZCLAMP
-	input.p.z = min(input.p.z, MaxDepthPS);
-#endif
-
 #if PS_DEPTH_FEEDBACK && (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#if PS_ZTST == ZTST_GEQUAL
 		if (input.p.z < DepthTexture.Load(int3(input.p.xy, 0)).r)
@@ -1282,6 +1278,10 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif // !PS_NO_COLOR
 
 #endif // PS_DATE != 1/2
+
+#if PS_ZCLAMP
+	input.p.z = min(input.p.z, MaxDepthPS);
+#endif
 
 #if PS_ZWRITE
 #if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
