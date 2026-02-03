@@ -6808,8 +6808,8 @@ void GSRendererHW::SetupROV()
 		}
 	}
 
-	GL_INS("ROV: %sColor ROV / %sDepth ROV", use_rov_color_final ? "" : "No ",
-	                                         use_rov_depth_final ? "" : "No ");
+	GL_INS("ROV: Color ROV %s / depth ROV %s",
+		use_rov_color_final ? "enabled" : "disabled", use_rov_depth_final ? "enabled" : "disabled");
 
 	// Update the average barrier history
 	if (m_conf.rt)
@@ -6846,6 +6846,11 @@ void GSRendererHW::SetupROV()
 				(m_conf.depth.zwe || (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)) ?
 				" and disabling HW" : "");
 			m_conf.ps.zwrite = true;
+		}
+		else
+		{
+			GL_INS("ROV: No depth write");
+			m_conf.ps.zwrite = false;
 		}
 		
 		m_conf.ps.rov_depth = true;
