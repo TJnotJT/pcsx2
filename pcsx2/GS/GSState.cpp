@@ -3909,8 +3909,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 				// Check that the initial two triangles form a strip.
 				if (!(primclass == GS_TRIANGLE_CLASS && i + 6 <= count &&
-					index[i + tri0[0]] == index[i + tri1[0]] &&
-					index[i + tri0[1]] == index[i + tri1[1]]))
+					v[index[i + tri0[0]]].XYZ.U32[0] == v[index[i + tri1[0]]].XYZ.U32[0] &&
+					v[index[i + tri0[1]]].XYZ.U32[0] == v[index[i + tri1[1]]].XYZ.U32[0]))
 				{
 					return false;
 				}
@@ -3945,8 +3945,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					j += 3;
 
 					if (!(j + 6 <= count &&
-						index[j + tri0[0]] == index[j + tri1[0]] &&
-						index[j + tri0[1]] == index[j + tri1[1]]))
+						v[index[j + tri0[0]]].U32[0] == v[index[j + tri1[0]]].U32[0] &&
+						v[index[j + tri0[1]]].U32[0] == v[index[j + tri1[1]]].U32[0]))
 					{
 						// Cannot continue the strip/fan.
 						break;
@@ -4007,7 +4007,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Helper function to detect triangles strips and merge them together into
 			// a grid of triangles strips.
-			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, MatchTriangles]
+			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, MatchTriangles, GetPoint]
 				(u32 i, u32& skip, BoundingOct& bbox_all, SavedTristrip& saved_tristrip) -> bool {
 
 				if (!(primclass == GS_TRIANGLE_CLASS && i + 6 <= count))
@@ -4050,12 +4050,20 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 				// Only keep the chain going as long as each new tristrip has at least 3 triangles.
 				// Tristrips with 2 triangles seem to be more likely to overlap an earlier strip.
-				constexpr u32 min_merge_verts = 9;
+				constexpr u32 min_merge_verts = 6;
 
 				if (skip < min_merge_verts)
 				{
 					return true;
 				}
+
+				GSVector4i first_pt = GetPoint(prev_tri0).xyxy();
+				GSVector4i prev_pt = first_pt;
+
+				const auto Distance = [](const GSVector4i& x, const GSVector4i& y) -> float {
+					const GSVector4i d = x - y;
+					return std::sqrtf(d.x * d.x + d.y * d.y);
+				};
 
 				while (j < count)
 				{
@@ -4134,6 +4142,13 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 						{
 							expected_sign = !expected_sign;
 						}
+
+						const GSVector4i new_pt = GetPoint(flip ? j + skip - 3);
+						if (Distance(new_pt, first_pt) < Distance(prev_pt, first_pt))
+						{
+							break;
+						}
+						prev_pt = new_pt;
 					}
 
 					prev_tri0 = tri0;
