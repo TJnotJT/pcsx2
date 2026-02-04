@@ -3747,6 +3747,14 @@ struct BoundingOct
 		bbox1 = bbox1.runion(other.bbox1);
 	}
 
+	void UnionSprite(const GSVector4i& pt0, const GSVector4i& pt1)
+	{
+		const GSVector4i pt2 = pt0.blend32<0b0101>(pt1);
+		const GSVector4i pt3 = pt0.blend32<0b1010>(pt1);
+		bbox0 = bbox0.runion(pt0).runion(pt1).runion(pt2).runion(pt3);
+		bbox1 = bbox1.runion(Rotate45(pt0)).runion(Rotate45(pt1)).runion(Rotate45(pt2)).runion(Rotate45(pt3));
+	}
+
 	bool Intersects(const BoundingOct& other)
 	{
 		return bbox0.rintersects(other.bbox0) && bbox1.rintersects(other.bbox1);
@@ -3945,8 +3953,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					j += 3;
 
 					if (!(j + 6 <= count &&
-						v[index[j + tri0[0]]].U32[0] == v[index[j + tri1[0]]].U32[0] &&
-						v[index[j + tri0[1]]].U32[0] == v[index[j + tri1[1]]].U32[0]))
+						v[index[j + tri0[0]]].XYZ.U32[0] == v[index[j + tri1[0]]].XYZ.U32[0] &&
+						v[index[j + tri0[1]]].XYZ.U32[0] == v[index[j + tri1[1]]].XYZ.U32[0]))
 					{
 						// Cannot continue the strip/fan.
 						break;
@@ -4019,13 +4027,20 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				u32 prev_tri0; // First triangle of previous tristrip.
 				u32 prev_tri1; // Last triangle of previous tristrip.
 				bool axis_aligned_all; // Whether all quads so far are axis-aligned.
+				u32 n_tristrips = 0; // Number of tristrips merged so far.
 				
+				// Used to make sure the tristrips are adjacent in the same direction so there's not overlap.
+				bool expected_sign;
+
+				// For another heuristic to determine if the tristrips are overlapping themselves.
+				GSVector4i start_pt;
+				GSVector4i prev_pt;
+
+				// Where the current tristrip has indices increasing in the same direction as the first.
+				bool orientation = true;
+
 				bool axis_aligned; // Whether current strip is axis-aligned.
 				BoundingOct bbox; // BBox of current strip.
-
-				// Used to make sure the tristrips are adjacent in the same direction so there's not overlap.
-				bool expected_sign_set = false;
-				bool expected_sign;
 
 				// Check for the first tristrip in the chain.
 				if (saved_tristrip.saved)
@@ -4046,6 +4061,8 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				prev_tri1 = j + skip - 3;
 				axis_aligned_all = axis_aligned;
 				bbox_all = bbox;
+				start_pt = GetPoint(prev_tri0).xyxy();
+				n_tristrips++;
 				j += skip;
 
 				// Only keep the chain going as long as each new tristrip has at least 3 triangles.
@@ -4056,9 +4073,6 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				{
 					return true;
 				}
-
-				GSVector4i first_pt = GetPoint(prev_tri0).xyxy();
-				GSVector4i prev_pt = first_pt;
 
 				const auto Distance = [](const GSVector4i& x, const GSVector4i& y) -> float {
 					const GSVector4i d = x - y;
@@ -4121,7 +4135,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 							break; // Cannot continue the tristrip chain.
 						}
 
-						if (expected_sign_set)
+						if (n_tristrips >= 2)
 						{
 							if (!(sign0 == expected_sign && sign1 == expected_sign))
 							{
@@ -4135,20 +4149,29 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 								break; // First/last triangles are on different sides.
 							}
 							expected_sign = sign0;
-							expected_sign_set = true;
 						}
 
 						if (flip)
 						{
 							expected_sign = !expected_sign;
+							orientation = !orientation;
 						}
 
-						const GSVector4i new_pt = GetPoint(flip ? j + skip - 3);
-						if (Distance(new_pt, first_pt) < Distance(prev_pt, first_pt))
+						GSVector4i curr_pt = GetPoint(orientation ? tri0 : tri1) - start_pt;
+						curr_pt.x = std::abs(curr_pt.x);
+						curr_pt.y = std::abs(curr_pt.y);
+
+						if (n_tristrips >= 2)
 						{
-							break;
+							if (curr_pt.x <= prev_pt.x && curr_pt.y <= prev_pt.y)
+							{
+								break; // We moved closer to the start point so we might be overlapping.
+							}
 						}
-						prev_pt = new_pt;
+						prev_pt.x = std::max(prev_pt.x, curr_pt.x);
+						prev_pt.y = std::max(prev_pt.y, curr_pt.y);
+
+						n_tristrips++;
 					}
 
 					prev_tri0 = tri0;
@@ -4183,8 +4206,10 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				}
 
 				// tri.b is right angle corner
-				bbox = BoundingOct(GetPoint(off0 + tri0.b).xyxy());
-				bbox.Union(GetPoint(off1 + tri1.b).xyxy());
+				const GSVector4i pt0 = GetPoint(off0 + tri0.b).xyxy();
+				const GSVector4i pt1 = GetPoint(off1 + tri1.b).xyxy();
+				bbox = BoundingOct();
+				bbox.UnionSprite(pt0, pt1);
 				skip = 6;
 
 				return true;
@@ -4192,10 +4217,18 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Helper functions to just get the individual prim bbox.
 			const auto GetBBox = [v, count, GetPoint](u32 i, u32& skip, BoundingOct& bbox) -> bool {
-				bbox = BoundingOct(GetPoint(i + 0).xyxy());
-				for (u32 j = 1; j < n; j++) // Unroll
+				if constexpr (primclass == GS_SPRITE_CLASS)
 				{
-					bbox.Union(GetPoint(i + j).xyxy());
+					bbox = BoundingOct();
+					bbox.UnionSprite(GetPoint(i + 0).xyxy(), GetPoint(i + 1).xyxy());
+				}
+				else
+				{
+					bbox = BoundingOct(GetPoint(i + 0).xyxy());
+					for (u32 j = 1; j < n; j++) // Unroll
+					{
+						bbox.Union(GetPoint(i + j).xyxy());
+					}
 				}
 				skip = n;
 				return true;
