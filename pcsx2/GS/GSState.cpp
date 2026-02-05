@@ -3953,7 +3953,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 
 			// Helper function to detect triangles strips and merge them together into
 			// a grid of triangles strips.
-			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, MatchTriangles]
+			const auto CheckTriangleStrips = [index, v, count, CheckTriangleQuads, MatchTriangles, GetPoint]
 				(u32 i, u32& skip, GSVector4i& bbox_all, SavedTristrip& saved_tristrip) -> bool {
 
 				if (!(primclass == GS_TRIANGLE_CLASS && i + 6 <= count))
@@ -3962,16 +3962,28 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				}
 
 				u32 j = i;
+
 				u32 prev_tri0; // First triangle of previous tristrip.
 				u32 prev_tri1; // Last triangle of previous tristrip.
-				bool axis_aligned_all; // Whether all quads so far are axis-aligned.
 				
-				bool axis_aligned; // Whether current strip is axis-aligned.
-				GSVector4i bbox; // BBox of current strip.
+				bool axis_aligned_all; // Whether all quads so far are axis-aligned.
+				bool all_small; // Whether all strips so far have 2 triangles only.
+				
+				u32 n_tristrips = 0; // Number of tristrips merged so far (not axis-aligned).
 
 				// Used to make sure the tristrips are adjacent in the same direction so there's not overlap.
-				bool expected_sign_set = false;
 				bool expected_sign;
+
+				// For another heuristic to determine if the tristrips are overlapping themselves.
+				// Stores the maximum difference in X/Y from the starting point.
+				GSVector4i start_pt;
+				GSVector4i max_delta(0, 0);
+
+				// Where the current tristrip is oriented in the same direction as the first.
+				bool orientation = true;
+
+				bool axis_aligned; // Whether current strip is axis-aligned.
+				GSVector4i bbox; // BBox of current strip.
 
 				// Check for the first tristrip in the chain.
 				if (saved_tristrip.saved)
@@ -3991,12 +4003,16 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 				prev_tri0 = j;
 				prev_tri1 = j + skip - 3;
 				axis_aligned_all = axis_aligned;
+				all_small = (skip <= 6);
 				bbox_all = bbox;
+				start_pt = GetPoint(prev_tri0);
+				n_tristrips++;
 				j += skip;
 
 				// Only keep the chain going as long as each new tristrip has at least 3 triangles.
 				// Tristrips with 2 triangles seem to be more likely to overlap an earlier strip.
-				constexpr u32 min_merge_verts = 9;
+				// FIXME: Delete!!!
+				constexpr u32 min_merge_verts = 6;
 
 				if (skip < min_merge_verts)
 				{
@@ -4026,8 +4042,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					const u32 tri1 = j + skip - 3;
 					
 					axis_aligned_all = axis_aligned_all && axis_aligned;
+					all_small = all_small && (skip <= 6);
 
-					// If axis-aligned, use a bbox check since its more accurate and cheaper.
+					// If axis-aligned, use a bbox check since it's more accurate and cheaper.
 					if (axis_aligned_all)
 					{
 						if (bbox.rintersects(bbox_all))
@@ -4059,7 +4076,9 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 							break; // Cannot continue the tristrip chain.
 						}
 
-						if (expected_sign_set)
+						// Heuristic for tristrip overlap: make sure the new tristrip is always on the same side
+						// as the previous one.
+						if (n_tristrips >= 2)
 						{
 							if (!(sign0 == expected_sign && sign1 == expected_sign))
 							{
@@ -4073,13 +4092,31 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 								break; // First/last triangles are on different sides.
 							}
 							expected_sign = sign0;
-							expected_sign_set = true;
 						}
 
 						if (flip)
 						{
 							expected_sign = !expected_sign;
+							orientation = !orientation;
 						}
+
+						// Get absolute displacement from first point of strip.
+						const GSVector4i curr_pt = GetPoint(orientation ? tri0 : tri1 + 2);
+						const GSVector4i curr_delta = (curr_pt - start_pt).abs32();
+
+						// For tristrips with 2 triangles use another heuristic to prevent overlap:
+						// Make sure that the new triangles don't ever move closer the first triangle.
+						// Needed because such tristrips appear to be more likely to overlap themself.
+						if (n_tristrips >= 2 && all_small)
+						{
+							if (((curr_delta <= max_delta).mask() & 0xFF) == 0xFF)
+							{
+								break; // We moved closer to the start point in both X/Y so end the merging.
+							}
+						}
+						max_delta = max_delta.max_i32(curr_delta);
+
+						n_tristrips++;
 					}
 
 					prev_tri0 = tri0;

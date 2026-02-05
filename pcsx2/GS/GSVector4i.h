@@ -840,6 +840,11 @@ public:
 		return GSVector4i(_mm_srli_epi64(m, i));
 	}
 
+	__forceinline GSVector4i abs32() const
+	{
+		return GSVector4i(_mm_abs_epi32(m));
+	}
+
 	__forceinline GSVector4i add8(const GSVector4i& v) const
 	{
 		return GSVector4i(_mm_add_epi8(m, v.m));
