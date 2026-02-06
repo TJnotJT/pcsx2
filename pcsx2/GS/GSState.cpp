@@ -4229,6 +4229,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 		all = bbox;
 		i = j;
 	}
+	Console.Warning("DRAWLIST %d: %d\n", s_n, (int)m_drawlist.size());
 	return overlap;
 }
 
