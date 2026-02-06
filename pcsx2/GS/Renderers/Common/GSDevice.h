@@ -423,7 +423,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 dither : 2;
 				u32 dither_adjust : 1;
 
-				// Depth clamp - also indicates SW depth write.
+				// Depth writing
 				u32 zclamp : 1;
 				u32 zfloor : 1;
 				u32 zwrite : 1;
@@ -462,7 +462,7 @@ struct alignas(16) GSHWDrawConfig
 		{
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
-			return color_feedback || channel_fb || tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt;;
+			return color_feedback || channel_fb || tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt;
 		}
 
 		__fi bool IsFeedbackLoopDepth() const
@@ -749,9 +749,9 @@ struct alignas(16) GSHWDrawConfig
 	static bool HasAlphaTestSecondPass(AlphaTestMode method)
 	{
 		return method == AlphaTestMode::SIMPLE_FB_ONLY ||
-			method == AlphaTestMode::SIMPLE_RGB_ONLY ||
-			method == AlphaTestMode::PASS_THEN_FAIL ||
-			method == AlphaTestMode::NEVER;
+		       method == AlphaTestMode::SIMPLE_RGB_ONLY ||
+		       method == AlphaTestMode::PASS_THEN_FAIL ||
+		       method == AlphaTestMode::NEVER;
 	}
 
 	enum class DestinationAlphaMode : u8
@@ -773,7 +773,7 @@ struct alignas(16) GSHWDrawConfig
 	};
 
 	GSTexture* rt;        ///< Render target
-	GSTexture* ds_as_rt;  ///< Depth stencil as color (if supported)
+	GSTexture* ds_as_rt;  ///< Depth as color (if supported)
 	GSTexture* ds;        ///< Depth stencil
 	GSTexture* tex;       ///< Source texture
 	GSTexture* pal;       ///< Palette texture
@@ -910,7 +910,7 @@ public:
 		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
 		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
 		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		DepthFeedbackSupport depth_feedback : 2; ///< Support for depth feedback loops (mainly for alpha test).
+		DepthFeedbackSupport depth_feedback : 2; ///< Support for depth feedback loops.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

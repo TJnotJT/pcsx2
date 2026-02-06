@@ -4446,7 +4446,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		return;
 	}
 
-	const int n_barriers = static_cast<bool>(feedback_rt) + static_cast<bool>(feedback_depth);
+	const int n_barriers = static_cast<int>(feedback_rt) + static_cast<int>(feedback_depth);
 
 	if (feedback_rt || feedback_depth)
 	{
@@ -4493,8 +4493,8 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 			if (feedback_rt)
 					FeedbackBarrier(draw_rt);
-				if (feedback_depth)
-					FeedbackBarrier(draw_ds);
+			if (feedback_depth)
+				FeedbackBarrier(draw_ds);
 		}
 	}
 

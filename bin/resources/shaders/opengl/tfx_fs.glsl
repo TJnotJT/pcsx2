@@ -122,6 +122,8 @@ in SHADER
 	layout(location = 0) TARGET_0_QUALIFIER vec4 SV_Target0;
 #endif
 
+// Depth feedback mode 2 is for depth as color.
+// Use FB fetch for the feedback if it's available.
 #if NEEDS_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
 #if HAS_FRAMEBUFFER_FETCH
 	layout(location = 1) inout float SV_Target1;
@@ -143,7 +145,10 @@ layout(binding = 2) uniform sampler2D RtSampler; // note 2 already use by the im
 layout(binding = 3) uniform sampler2D img_prim_min;
 #endif
 
-#if !HAS_FRAMEBUFFER_FETCH && NEEDS_DEPTH
+// Depth feedback mode 1 binds depth buffer directly as a texture.
+// Depth feedback mode 2 (depth as color) can use FB fetch for the feedback,
+// in which case we don't need to explicitly bind depth as a texture.
+#if (DEPTH_FEEDBACK_SUPPORT == 1 || (DEPTH_FEEDBACK_SUPPORT == 2 && !HAS_FRAMEBUFFER_FETCH)) && NEEDS_DEPTH
 layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
@@ -1243,7 +1248,8 @@ void ps_main()
 
 #if PS_ZWRITE
 	#if NEEDS_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
-		// Depth as color write.
+		// Depth as color write. For depth as color feedback we write to both
+		// color copy and real depth to avoid having to copy back to real depth.
 		// Warning: do not write SV_Target1 until the end since the value might
 		// be needed for FB fetch in sample_from_depth().
 		SV_Target1 = input_z;

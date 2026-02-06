@@ -1072,8 +1072,8 @@ PS_OUTPUT ps_main(PS_INPUT input)
 		if (input.p.z < DepthTexture.Load(int3(input.p.xy, 0)).r)
 			discard;
 	#elif PS_ZTST == ZTST_GREATER
-	if (input.p.z <= DepthTexture.Load(int3(input.p.xy, 0)).r)
-		discard;
+		if (input.p.z <= DepthTexture.Load(int3(input.p.xy, 0)).r)
+			discard;
 	#endif
 #endif // PS_ZTST
 

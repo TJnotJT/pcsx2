@@ -5189,6 +5189,8 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 		m_conf.depth.ztst = ZTST_ALWAYS;
 	}
 
+	// On the real GS we appear to do clamping on the max z value the format allows.
+	// Clamping is done after rasterization.
 	const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 	const bool large_z = static_cast<u32>(GSVector4i(m_vt.m_max.p).z) > max_z;
 
@@ -5199,8 +5201,8 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	m_conf.cb_ps.TA_MaxDepth_Af.z = 0.0f;
 	m_conf.ps.zclamp = false;
 
-	// Z floor must be enabled with ZTST_GREATER since otherwise there can be false
-	// passing if the incoming Z is not floored when the buffer value is floored.
+	// Even when Z is read-only, Z floor must be enabled with ZTST_GREATER since otherwise there
+	// can be false passing if the incoming Z is not floored when the buffer value is floored.
 	m_conf.ps.zfloor = !flat_z &&
 		(m_cached_ctx.DepthWrite() || (m_cached_ctx.DepthRead() && m_cached_ctx.TEST.ZTST == ZTST_GREATER));
 
@@ -7368,7 +7370,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		(afail == AFAIL_RGB_ONLY && !m_conf.colormask.wa && !zwe) ||
 		(afail == AFAIL_ZB_ONLY && !m_conf.colormask.wrgba))
 	{
-		// Failing alpha test is a NOP
+		// Failing alpha test is a NOP.
 		atst = ATST_ALWAYS;
 	}
 
@@ -7376,7 +7378,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 		(afail == AFAIL_RGB_ONLY && (!(m_conf.colormask.wrgba & 7))) ||
 		(afail == AFAIL_ZB_ONLY && !zwe))
 	{
-		// Passing alpha test is a NOP
+		// Failing alpha test discards both color/depth.
 		afail = AFAIL_KEEP;
 	}
 
@@ -7436,7 +7438,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	// Determine whether the feedback methods require a single pass.
 	const bool feedback_one_pass = simple_fb_only || simple_rgb_only || simple_zb_only;
 
-	// If we are already have the required barriers for the accurate feedback path and
+	// If we already have the required barriers for the accurate feedback path and
 	// do not require depth feedback.
 	const bool free_barrier_feedback =
 		((m_conf.require_one_barrier && feedback_one_pass) || m_conf.require_full_barrier) &&
@@ -7536,7 +7538,7 @@ void GSRendererHW::EmulateAlphaTest(const bool& DATE, bool& DATE_BARRIER, bool& 
 	}
 	else
 	{
-		// Use pass/fail method. May be inaccurate. Accurate for simple ZB_ONLY.
+		// Use pass/fail method. Accurate for simple ZB_ONLY, otherwise may be inaccurate.
 		GL_INS("Alpha test: Two pass with pass/fail");
 
 		// Enable alpha test and discard failing fragments on first pass.
@@ -7615,6 +7617,8 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	}
 	else
 	{
+		// Pass-then-fail method or NEVER.
+
 		// Determine the write mask for fragments on each pass.
 		if (afail == AFAIL_FB_ONLY)
 		{
@@ -8368,8 +8372,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (m_conf.require_one_barrier || m_conf.require_full_barrier)
 			pxAssert(!m_conf.blend.enable || m_conf.ps.no_color1);
 
+		// If we use depth feedback directly, we must use barrier for the depth texture.
+		// If we use depth-as-color feedback, then FB fetch can be used for depth also.
 		bool need_barriers_for_depth = m_conf.ps.IsFeedbackLoopDepth() &&
-		                               (features.depth_feedback != GSDevice::DepthFeedbackSupport::None);
+		                               (features.depth_feedback == GSDevice::DepthFeedbackSupport::Depth);
 
 		if (!need_barriers_for_depth)
 		{

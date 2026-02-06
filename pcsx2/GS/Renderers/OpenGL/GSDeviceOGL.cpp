@@ -742,7 +742,7 @@ bool GSDeviceOGL::CheckFeatures()
 	m_features.test_and_sample_depth = m_features.texture_barrier;
 	if (m_features.test_and_sample_depth)
 	{
-		// Use depth feedback directly if possible, otherwise use depth as RT feedback.
+		// Auto select chooses depth-as-rt as it appears to be more compatible across hardware.
 		if (GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::DepthAsRT ||
 			GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Auto)
 		{
@@ -1327,14 +1327,17 @@ std::string GSDeviceOGL::GenGlslHeader(const std::string_view entry, GLenum type
 
 	switch (static_cast<int>(m_features.depth_feedback))
 	{
-		case 0:
+		case GSDevice::DepthFeedbackSupport::None:
 			header += "#define DEPTH_FEEDBACK_SUPPORT 0\n"; // None
+			static_assert(static_cast<int>(GSDevice::DepthFeedbackSupport::None) == 0);
 			break;
-		case 1:
+		case GSDevice::DepthFeedbackSupport::Depth:
 			header += "#define DEPTH_FEEDBACK_SUPPORT 1\n"; // Depth
+			static_assert(static_cast<int>(GSDevice::DepthFeedbackSupport::Depth) == 1);
 			break;
-		case 2:
+		case GSDevice::DepthFeedbackSupport::DepthAsRT:
 			header += "#define DEPTH_FEEDBACK_SUPPORT 2\n"; // Depth as RT
+			static_assert(static_cast<int>(GSDevice::DepthFeedbackSupport::DepthAsRT) == 2);
 			break;
 		default:
 			pxFail("Incorrect depth feedback support."); // Impossible
@@ -2319,16 +2322,16 @@ void GSDeviceOGL::OMSetColorMaskState(OMColorMaskSelector sel)
 
 void GSDeviceOGL::OMUnbindTexture(GSTextureOGL* tex)
 {
-	if (GLState::rt != tex && GLState::ds != tex)
+	if (GLState::rt != tex && GLState::ds_as_rt != tex && GLState::ds != tex)
 		return;
 
 	OMSetFBO(m_fbo);
 	if (GLState::rt == tex)
 		OMAttachRt();
-	if (GLState::ds == tex)
-		OMAttachDs();
 	if (GLState::ds_as_rt == tex)
 		OMAttachDsAsRt();
+	if (GLState::ds == tex)
+		OMAttachDs();
 }
 
 void GSDeviceOGL::OMSetBlendState(bool enable, GLenum src_factor, GLenum dst_factor, GLenum op,
@@ -2382,7 +2385,7 @@ void GSDeviceOGL::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextu
 	const bool ds_changed = (ds != GLState::ds);
 	const u32 draw_buffers = GLState::draw_buffers;
 
-	g_perfmon.Put(GSPerfMon::RenderPasses, static_cast<double>(rt_changed || ds_changed || ds_as_rt_changed));
+	g_perfmon.Put(GSPerfMon::RenderPasses, static_cast<double>(rt_changed || ds_as_rt_changed || ds_changed));
 	// Split up to avoid unbind/bind calls when clearing.
 
 	OMSetFBO(m_fbo);
