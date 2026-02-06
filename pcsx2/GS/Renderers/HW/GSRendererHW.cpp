@@ -6642,7 +6642,7 @@ void GSRendererHW::SetupROV()
 		// If we use color ROV with discard or the pixel shader writes to depth,
 		// we cannot use early depth stencil, so must use depth ROV with feedback.
 		// Same applies in reverse for depth ROV forcing color ROV with feedback.
-		if (m_conf.ds && depth_write && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.zwrite))
+		if (m_conf.ds && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.zwrite))
 		{
 			GL_INS("ROV: Color ROV with shader discard/depth write forces depth ROV");
 			rov_depth = true;
