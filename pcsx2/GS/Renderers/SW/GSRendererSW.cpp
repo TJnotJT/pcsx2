@@ -311,8 +311,8 @@ void GSRendererSW::RewriteVerticesIfSTOverflow()
 			0);
 
 		const bool st_overflow =
-			((GSVector4i::cast(m_vt.m_min.t <= -OVERFLOW_VAL * tsize) & clamp_mode).mask() & 3) ||
-			((GSVector4i::cast(m_vt.m_max.t >= OVERFLOW_VAL * tsize) & clamp_mode).mask() & 3) ||
+			((GSVector4i::cast(m_vt.m_min.t <= -OVERFLOW_VAL * tsize) & clamp_mode).mask() & 0xFF) ||
+			((GSVector4i::cast(m_vt.m_max.t >= OVERFLOW_VAL * tsize) & clamp_mode).mask() & 0xFF) ||
 			m_vt.nan.value;
 
 		if (st_overflow)
@@ -392,8 +392,8 @@ void GSRendererSW::RewriteVerticesIfSTOverflow()
 				for (int j = 0; j < n; j++)
 				{
 					GSVector4 stcq = GSVector4::cast(GSVector4i(m_vertex.buff[i + j].m[0]));
-					const float Q = (primclass == GS_SPRITE_CLASS) ? stcq.w : m_vertex.buff[i + 1].RGBAQ.Q;
-					stcq = (stcq / Q).xyzw(stcq);
+					const float q = (primclass == GS_SPRITE_CLASS) ? m_vertex.buff[i + 1].RGBAQ.Q : stcq.w;
+					stcq = (stcq / q).xyzw(stcq);
 					
 					tmin = tmin.min(stcq);
 					tmax = tmax.max(stcq);
