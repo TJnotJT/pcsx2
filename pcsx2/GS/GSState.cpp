@@ -4045,7 +4045,7 @@ GSState::PRIM_OVERLAP GSState::GetPrimitiveOverlapDrawlistImpl(bool save_drawlis
 					all_small = all_small && (skip <= 6);
 
 					// If axis-aligned, use a bbox check since it's more accurate and cheaper.
-					if (axis_aligned_all)
+					if (axis_aligned_all && false)
 					{
 						if (bbox.rintersects(bbox_all))
 						{
