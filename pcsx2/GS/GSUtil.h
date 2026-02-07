@@ -76,3 +76,84 @@ public:
 		return GetClassVertexCount(GetPrimClass(prim));
 	}
 };
+
+// Class that represents an octogonal bounding area with sides at 45 degree increments.
+class BoundingOct
+{
+private:
+	GSVector4i bbox0; // Standard bbox.
+	GSVector4i bbox1; // Bounding diamond (rotated 45 degrees axes).
+
+	// Assumes that v is is of the form { x, y, x, y }.
+	static GSVector4i Rotate45(const GSVector4i& v)
+	{
+		return v.hadd32(v).upl32(v.hsub32(v));
+	}
+
+	BoundingOct(const GSVector4i& bbox0, const GSVector4i& bbox1)
+		: bbox0(bbox0)
+		, bbox1(bbox1)
+	{
+	}
+
+public:
+	// Initialize to null bounding area.
+	BoundingOct()
+		: bbox0(GSVector4i(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX))
+		, bbox1(GSVector4i(INT_MAX, INT_MAX, -INT_MAX, -INT_MAX))
+	{
+	}
+
+	static BoundingOct FromPoint(GSVector4i v)
+	{
+		v = v.xyxy();
+		return { v, Rotate45(v) };
+	}
+
+	// The two inputs are assumed to be diagonally opposite to each other in an axis-aligned quad (i.e. sprite).
+	static BoundingOct FromSprite(GSVector4i v0, GSVector4i v1)
+	{
+		v0 = v0.xyxy();
+		v1 = v1.xyxy();
+		const GSVector4i v2 = v0.blend32<0b0101>(v1);
+		const GSVector4i v3 = v0.blend32<0b1010>(v1);
+		return {
+			v0.runion(v1),
+			(Rotate45(v0).runion(Rotate45(v1))).runion(Rotate45(v2).runion(Rotate45(v3))),
+		};
+	}
+
+	BoundingOct Union(GSVector4i v) const
+	{
+		v = v.xyxy();
+		return { bbox0.runion(v), bbox1.runion(Rotate45(v)) };
+	}
+
+	BoundingOct Union(const BoundingOct& other) const
+	{
+		return { bbox0.runion(other.bbox0), bbox1.runion(other.bbox1) };
+	}
+
+	BoundingOct UnionSprite(GSVector4i pt0, GSVector4i pt1) const
+	{
+		return Union(FromSprite(pt0, pt1));
+	}
+
+	bool Intersects(const BoundingOct& other) const
+	{
+		return bbox0.rintersects(other.bbox0) && bbox1.rintersects(other.bbox1);
+	}
+
+	BoundingOct FixDegenerate() const
+	{
+		return {
+			bbox0.blend(bbox0 + GSVector4i(0, 0, 1, 1), bbox0.xyxy() == bbox0.zwzw()),
+			bbox1.blend(bbox1 + GSVector4i(0, 0, 1, 1), bbox1.xyxy() == bbox1.zwzw()),
+		};
+	}
+
+	const GSVector4i& ToBBox()
+	{
+		return bbox0;
+	}
+};

@@ -827,6 +827,11 @@ public:
 		return GSVector4i(vaddq_s32(v4s, v.v4s));
 	}
 
+	__forceinline GSVector4i hadd32(const GSVector4i& v) const
+	{
+		return GSVector4i(vpaddq_s32(v4s, v.v4s));
+	}
+
 	__forceinline GSVector4i adds8(const GSVector4i& v) const
 	{
 		return GSVector4i(vreinterpretq_s32_s8(vqaddq_s8(vreinterpretq_s8_s32(v4s), vreinterpretq_s8_s32(v.v4s))));
@@ -869,6 +874,13 @@ public:
 	__forceinline GSVector4i sub32(const GSVector4i& v) const
 	{
 		return GSVector4i(vsubq_s32(v4s, v.v4s));
+	}
+
+	__forceinline GSVector4i hsub32(const GSVector4i& v) const
+	{
+		const GSVector4i a = sub32(yxwz());
+		const GSVector4i b = v.sub32(v.yxwz());
+		return a.xzyw().upl64(b.xzyw());
 	}
 
 	__forceinline GSVector4i subs8(const GSVector4i& v) const
