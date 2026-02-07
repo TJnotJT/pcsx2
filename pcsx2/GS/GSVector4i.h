@@ -860,6 +860,11 @@ public:
 		return GSVector4i(_mm_add_epi32(m, v.m));
 	}
 
+	__forceinline GSVector4i hadd32(const GSVector4i& v) const
+	{
+		return GSVector4i(_mm_hadd_epi32(m, v.m));
+	}
+
 	__forceinline GSVector4i adds8(const GSVector4i& v) const
 	{
 		return GSVector4i(_mm_adds_epi8(m, v.m));
@@ -898,6 +903,11 @@ public:
 	__forceinline GSVector4i sub32(const GSVector4i& v) const
 	{
 		return GSVector4i(_mm_sub_epi32(m, v.m));
+	}
+
+	__forceinline GSVector4i hsub32(const GSVector4i& v) const
+	{
+		return GSVector4i(_mm_hsub_epi32(m, v.m));
 	}
 
 	__forceinline GSVector4i subs8(const GSVector4i& v) const
