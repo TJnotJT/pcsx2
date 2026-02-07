@@ -1487,11 +1487,20 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 #elif VS_EXPAND == VS_EXPAND_LINE_AA1
 	// Expand in y direction for shallow lines and x direction for steep lines.
 	line_delta /= VertexScale;
-	float2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? float2(0.0f, 2.0f) : float2(2.0f, 0.0f);
+	bool x_major = abs(line_delta.x) >= abs(line_delta.y);
+	float2 line_expand = x_major ? float2(0.0f, 2.0f) : float2(2.0f, 0.0f);
+	float2 bottom_fix = line_vector / (x_major ? line_vector.x : line_vector.y);
 #endif
 	float2 line_width = (line_expand * PointSize) / 2;
 	float2 offset = is_right ? line_width : -line_width;
 	vtx.p.xy += offset;
+
+#if VS_EXPAND == VS_EXPAND_LINE_AA1
+	if (is_bottom)
+	{
+		vtx.p.xy -= bottom_fix * PointSize;
+	}
+#endif
 
 #if VS_EXPAND == VS_EXPAND_LINE_AA1
 	vtx.inv_cov = is_right ? 1.0f : -1.0f;
