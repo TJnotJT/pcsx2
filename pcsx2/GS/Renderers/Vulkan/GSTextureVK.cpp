@@ -670,13 +670,27 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
 		{
 			pxFail("Transitioning to depth UAV without depth color.");
-
 		}
 		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
 		{
 			pxFail("Transitioning to depth while in depth color.");
 		}
 	}
+
+	if (old_layout == Layout::ReadWriteImage && new_layout != Layout::ColorAttachment && new_layout != Layout::ReadWriteImage)
+	{
+		if (IsRenderTarget())
+		{
+			TransitionSubresourcesToLayout(command_buffer, 0, num_levels, old_layout, Layout::ColorAttachment);
+		}
+		else
+		{
+			pxAssert(IsDepthColor());
+			static_cast<GSTextureVK*>(m_depth_color.get())->TransitionSubresourcesToLayout(command_buffer, 0, num_levels, old_layout, Layout::ColorAttachment);
+		}
+		old_layout = Layout::ColorAttachment;
+	}
+
 
 	VkImageAspectFlags aspect;
 	if (IsDepthStencil() && !IsDepthColor())
