@@ -5328,7 +5328,7 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 				}
 				vkTex->TransitionToLayout(layout);
 			}
-			else if (!read_only && GSConfig.HWROVUseBarriersVK)
+			else if (!read_only && GSConfig.HWROVUseBarriersVK == 1)
 			{
 				// It seems we need a barrier even when using fragment shader interlock
 				if (InRenderPass())
@@ -5351,6 +5351,25 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 
 	if (m_tfx_textures[i] == vkTex)
 		return;
+
+	if (!read_only && GSConfig.HWROVUseBarriersVK == 2)
+	{
+		// Apply barriers to the UAVs whenever there is a UAV change.
+		if (InRenderPass())
+		{
+			GL_INS("Ending render pass due to UAV barrier");
+			EndRenderPass();
+		}
+		for (GSTextureVK* tex : std::array{ vkTex, const_cast<GSTextureVK*>(m_tfx_textures[i]) })
+		{
+			// The subresources version does the barrier even when the before/after layout
+			// are the same since we want a memory barrier here, not just a layout change.
+			if (tex)
+				tex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, tex->GetLayout(), tex->GetLayout());
+		}
+
+		g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+	}
 
 	m_tfx_textures[i] = vkTex;
 	m_dirty_flags |= (DIRTY_FLAG_TFX_TEXTURE_0 << i);
