@@ -5447,6 +5447,14 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
 	if (m_current_render_pass != VK_NULL_HANDLE)
 		EndRenderPass();
 
+	if (GSConfig.HWROVUseBarriersVK == 2)
+	{
+		// Add UAV barriers before the render pass.
+		const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_RT_ROV])->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, m_tfx_textures[TFX_TEXTURE_RT_ROV]->GetLayout(), m_tfx_textures[TFX_TEXTURE_RT_ROV]->GetLayout());
+		const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_DEPTH_ROV])->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetLayout(), m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetLayout());
+		g_perfmon.Put(GSPerfMon::Barriers, 2.0);
+	}
+
 	m_current_render_pass = rp;
 	m_current_render_pass_area = rect;
 
@@ -5503,6 +5511,7 @@ void GSDeviceVK::EndRenderPass()
 		// Unbind any ROVs on render pass end to insert a barrier.
 		PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, nullptr, true, true, true);
 		PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, nullptr, true, true, true);
+		g_perfmon.Put(GSPerfMon::Barriers, 2.0);
 	}
 }
 
