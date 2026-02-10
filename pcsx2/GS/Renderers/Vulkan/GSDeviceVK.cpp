@@ -5497,6 +5497,13 @@ void GSDeviceVK::EndRenderPass()
 	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
 
 	vkCmdEndRenderPass(GetCurrentCommandBuffer());
+
+	if (GSConfig.HWROVUseBarriersVK == 2)
+	{
+		// Unbind any ROVs on render pass end to insert a barrier.
+		PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, nullptr, true, true, true);
+		PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, nullptr, true, true, true);
+	}
 }
 
 void GSDeviceVK::SetViewport(const VkViewport& viewport)
