@@ -6177,12 +6177,20 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// Unbind to avoid conflicts with framebuffer
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 	}
-	
-	PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, config.ps.color_feedback, !config.ps.no_color);
-	PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, config.ps.depth_feedback, config.ps.zclamp);
 
-	// Set framebuffer after settings feedback textures/UAVs in case a depth UAV update requires a render pass.
+	if (GSConfig.HWROVUseBarriersVK == 2 && (draw_rt_rov || draw_ds_rov) &&
+		(draw_rt_rov != m_tfx_textures[TFX_TEXTURE_RT_ROV] || draw_ds_rov != m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]))
+	{
+		EndRenderPass();
+	}
+	// FIXME: Maybe we should make setting both RT and depth ROV and single function like OMSetRenderTargets()
+	// if we're going to keep the GSConfig.HWROVUseBarriersVK == 2 setting, so that one doesn't end the render pass
+	// and mess up the other.
+	PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, config.ps.color_feedback, !config.ps.no_color);
+	PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, config.ps.depth_feedback, config.ps.zwrite);
+
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
+
 
 	// Begin render pass if new target or out of the area.
 	if (!InRenderPass())
