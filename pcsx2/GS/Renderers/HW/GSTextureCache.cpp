@@ -7834,6 +7834,8 @@ void GSTextureCache::Target::Update(bool cannot_scale)
 				m_rt_alpha_scale = true;
 		}
 
+		GSConfig.UserHacks_BilinearHack = GSBilinearDirtyMode::ForceNearest;
+
 		const bool linear = upscaled && GSConfig.UserHacks_BilinearHack != GSBilinearDirtyMode::ForceNearest;
 		ShaderConvert depth_shader = linear ? ShaderConvert::RGBA8_TO_FLOAT32_BILN : ShaderConvert::RGBA8_TO_FLOAT32;
 		if (m_type == DepthStencil && GSLocalMemory::m_psm[m_TEX0.PSM].trbpp != 32)
@@ -8034,7 +8036,7 @@ bool GSTextureCache::Target::ResizeTexture(int new_unscaled_width, int new_unsca
 		{
 			// Can't do partial copies in DirectX for depth textures, and it's probably not ideal in other
 			// APIs either. So use a fullscreen quad setting depth instead.
-			g_gs_device->StretchRect(m_texture, tex, GSVector4(rc), ShaderConvert::DEPTH_COPY, true);
+			g_gs_device->StretchRect(m_texture, tex, GSVector4(rc), ShaderConvert::DEPTH_COPY, false);
 		}
 		else
 		{
