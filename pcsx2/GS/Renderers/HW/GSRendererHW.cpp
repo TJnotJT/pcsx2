@@ -6510,7 +6510,15 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool can_trilinear = !tex->m_palette && !tex->m_target && !m_conf.ps.shuffle;
 	const bool trilinear_manual = need_mipmap && GSConfig.HWMipmap;
 
-	bool bilinear = m_vt.IsLinear();
+	const bool probable_pixel_copy =
+		(m_vt.m_primclass == GS_SPRITE_CLASS || (m_vt.m_primclass == GS_TRIANGLE_CLASS && m_vt.m_eq.z)) && // Flat draw
+		m_primitive_covers_without_gaps != NoGapsType::GapsFound && // Sprites or triangles cover without gaps.
+		// Delta X equals delta U (or S) and delta Y equals delta V (or T).
+		((m_vt.m_max.p - m_vt.m_min.p == m_vt.m_max.t - m_vt.m_min.t).mask() & 3) == 3 && 
+		(fmodf(std::abs(m_vt.m_max.p.x - m_vt.m_min.t.x), 1.0f) == 0.5f) && // X and U (or S) offset by half pixel.
+		(fmodf(std::abs(m_vt.m_max.p.y - m_vt.m_min.t.y), 1.0f) == 0.5f);   // Y and V (or T) offset by half pixel.
+
+	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
 	int trilinear = 0;
 	bool trilinear_auto = false; // Generate mipmaps if needed (basic).
 	switch (GSConfig.TriFilter)
