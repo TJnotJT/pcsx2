@@ -1568,7 +1568,7 @@ void GSState::GIFRegHandlerSCISSOR(const GIFReg* RESTRICT r)
 template <int i>
 void GSState::GIFRegHandlerALPHA(const GIFReg* RESTRICT r)
 {
-	GL_REG("ALPHA = 0x%x_%x", r->U32[1], r->U32[0]);
+	GL_REG("ALPHA_%d = 0x%x_%x", i, r->U32[1], r->U32[0]);
 
 	m_env.CTXT[i].ALPHA = r->ALPHA;
 
@@ -1621,6 +1621,7 @@ void GSState::GIFRegHandlerCOLCLAMP(const GIFReg* RESTRICT r)
 template <int i>
 void GSState::GIFRegHandlerTEST(const GIFReg* RESTRICT r)
 {
+	GL_REG("TEST_%d = 0x%x_%x", i, r->U32[1], r->U32[0]);
 	m_env.CTXT[i].TEST = r->TEST;
 
 	if (i == m_prev_env.PRIM.CTXT)
@@ -2892,6 +2893,34 @@ void GSState::Transfer(const u8* mem, u32 size)
 							case GIFPath::TYPE_ADONLY: // very common
 								do
 								{
+									const u8 reg_num = ((GIFPackedReg*)mem)->A_D.ADDR & 0x7F;
+									if (reg_num == 0x43)
+									{
+										GIFReg& gr = ((GIFPackedReg*)mem)->r;
+										if (gr.ALPHA.A == 0 && gr.ALPHA.B == 2 && gr.ALPHA.C == 1 && gr.ALPHA.D == 1)
+										{
+											Console.Warning("Rewrote ALPHA %d", s_n);
+											gr.ALPHA.B = 0;
+										} else if (gr.ALPHA.A == 1 && gr.ALPHA.B == 0 && gr.ALPHA.C == 0 && gr.ALPHA.D == 2)
+										{
+											Console.Warning("Rewrote ALPHA %d", s_n);
+											gr.ALPHA.B = 2;
+											gr.ALPHA.C = 2;
+											gr.ALPHA.FIX = 0x70;
+										}
+										printf("");
+									}
+									else if (reg_num == 0x48)
+									{
+										GIFReg& gr = ((GIFPackedReg*)mem)->r;
+										if (gr.TEST.ZTE && gr.TEST.ZTST == ZTST_GEQUAL)
+										{
+											Console.Warning("Rewrote ZTST %d", s_n);
+											gr.TEST.ZTST = ZTST_ALWAYS;
+										}
+										printf("");
+									}
+
 									(this->*m_fpGIFRegHandlers[((GIFPackedReg*)mem)->A_D.ADDR & 0x7F])(&((GIFPackedReg*)mem)->r);
 
 									mem += sizeof(GIFPackedReg);
@@ -2990,7 +3019,10 @@ void GSState::Transfer(const u8* mem, u32 size)
 	}
 
 	if (m_dump && mem > start)
+	{
+		Console.Warning("%d: Transfer", s_n);
 		m_dump->Transfer(index, start, mem - start);
+	}
 
 	if (index == 0)
 	{
@@ -3268,7 +3300,11 @@ void GSState::UpdateContext()
 	const bool ctx_switch = (m_context != &m_draw_env->CTXT[PRIM->CTXT]);
 
 	if (ctx_switch)
+	{
 		GL_REG("Context Switch %d", PRIM->CTXT);
+		if (m_dump)
+			Console.Warning("Context Switch %d", s_n);
+	}
 
 	m_context = const_cast<GSDrawingContext*>(&m_draw_env->CTXT[PRIM->CTXT]);
 

@@ -57,6 +57,9 @@ GSRenderer::GSRenderer()
 	: m_shader_time_start(Common::Timer::GetCurrentValue())
 {
 	s_last_draw_rect = GSVector4::zero();
+
+	m_dump_frames = 1;
+	m_snapshot = "C:\\Users\\tchan\\Desktop\\dump";
 }
 
 GSRenderer::~GSRenderer() = default;
