@@ -6518,6 +6518,11 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		(fmodf(std::abs(m_vt.m_max.p.x - m_vt.m_min.t.x), 1.0f) == 0.5f) && // X and U (or S) offset by half pixel.
 		(fmodf(std::abs(m_vt.m_max.p.y - m_vt.m_min.t.y), 1.0f) == 0.5f);   // Y and V (or T) offset by half pixel.
 
+	if (m_vt.IsLinear() && probable_pixel_copy)
+	{
+		Console.Warning("DISABLED BILINEAR %d %d", m_vt.m_primclass, s_n);
+	}
+
 	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
 	int trilinear = 0;
 	bool trilinear_auto = false; // Generate mipmaps if needed (basic).
