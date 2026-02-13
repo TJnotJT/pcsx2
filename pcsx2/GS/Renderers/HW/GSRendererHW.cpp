@@ -6534,13 +6534,11 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		(u_increasing == v_increasing) ?
 		m_vt.m_max.p.y - m_vt.m_min.t.y : m_vt.m_max.p.y + m_vt.m_min.t.y), 1.0f);
 
-	const bool no_upscale = GetUpscaleMultiplier() == 1.0f;
-
 	// Flags that indicate that U/S or V/T being halfway between two texels can be fixed
 	// by simply shifting the coordinates.
-	const bool can_fix_half_u = !m_vt.IsLinear() && PRIM->FST && x_u_offset == 0.0f && no_upscale &&
+	const bool can_fix_half_u = !m_vt.IsLinear() && PRIM->FST && x_u_offset == 0.0f &&
 	                            fmodf(m_vt.m_min.t.x, 1.0f) == 0.0f && fmodf(m_vt.m_max.t.x, 1.0f) == 0.0f;
-	const bool can_fix_half_v = !m_vt.IsLinear() && PRIM->FST && y_v_offset == 0.0f && no_upscale &&
+	const bool can_fix_half_v = !m_vt.IsLinear() && PRIM->FST && y_v_offset == 0.0f &&
 	                            fmodf(m_vt.m_min.t.y, 1.0f) == 0.0f && fmodf(m_vt.m_max.t.y, 1.0f) == 0.0f;
 
 	// Whether the draw appears to be copying pixels 1-to-1 to texels.
@@ -6548,12 +6546,36 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	                                 (y_v_offset == 0.5f || can_fix_half_v) &&
 	                                 unscaled_copy;
 
-	// The following adjustment is made so that at native resolution, when X/Y is on a pixel center
-	// U/V is also on a texel center.
 	if (probable_pixel_copy)
 	{
-		m_conf.cb_vs.texture_offset.x = can_fix_half_u ? -8.0f : 0.0f;
-		m_conf.cb_vs.texture_offset.y = can_fix_half_v ? -8.0f : 0.0f;
+		const float upscale = GetUpscaleMultiplier();
+
+		// Helper function to get the offset needed to fix UV being exactly on a texel
+		// boundary in GS coordinates.
+		const auto GetUVOffsetFix = [upscale](bool increasing) {
+			// Shift U/V in the positive direction half a texel since the GS seems to round up.
+			float offset = -8.0f;
+
+			if (upscale != 1.0f)
+			{
+				// This magic offset is used to account for the fact that with upscaling
+				// each GS pixel corresponds to multiple GPU pixels, so the bottom-right
+				// rule for omitting pixels might end up drawing more than we want.
+				const float magic_offset = 8.0f * (1.0f - 1.0f / upscale);
+
+				offset += increasing ? magic_offset : -magic_offset;
+			}
+
+			return offset;
+		};
+
+		m_conf.cb_vs.texture_offset.x = can_fix_half_u ? GetUVOffsetFix(u_increasing) : 0.0f;
+		m_conf.cb_vs.texture_offset.y = can_fix_half_v ? GetUVOffsetFix(v_increasing) : 0.0f;
+
+		if (can_fix_half_u || can_fix_half_v)
+		{
+			Console.Warning("FIXED %d (%f, %f)", s_n, m_conf.cb_vs.texture_offset.x, m_conf.cb_vs.texture_offset.y);
+		}
 	}
 
 	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
