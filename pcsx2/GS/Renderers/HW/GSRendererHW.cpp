@@ -6514,7 +6514,8 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool unscaled_copy =
 		(m_vt.m_primclass == GS_SPRITE_CLASS || (m_vt.m_primclass == GS_TRIANGLE_CLASS && m_vt.m_eq.z)) && // Flat draw.
 		m_primitive_covers_without_gaps != NoGapsType::GapsFound && // Sprites or triangles cover without gaps.
-		((m_vt.m_max.p - m_vt.m_min.p == m_vt.m_max.t - m_vt.m_min.t).mask() & 3) == 3; // Position deltas same as texture deltas.
+		((m_vt.m_max.p - m_vt.m_min.p == m_vt.m_max.t - m_vt.m_min.t).mask() & 3) == 3 && // Position deltas same as texture deltas.
+		(rt->GetScale() == tex->GetScale()); // Same upscale.
 
 	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
 
@@ -6526,35 +6527,36 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool u_increasing = PRIM->FST ? (vn.U >= v0.U) : (vn.ST.S >= vn.ST.S);
 	const bool v_increasing = PRIM->FST ? (vn.V >= v0.V) : (vn.ST.T >= vn.ST.T);
 
-	const float x_u_offset = fmodf(std::abs(
-		(x_increasing == u_increasing) ?
-		m_vt.m_max.p.x - m_vt.m_min.t.x : m_vt.m_max.p.x + m_vt.m_min.t.x), 1.0f);
+	const bool x_px_aligned = (fmodf(m_vt.m_min.p.x, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.p.x, 1.0f) == 0.0f);
+	const bool y_px_aligned = (fmodf(m_vt.m_min.p.y, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.p.y, 1.0f) == 0.0f);
+	const bool u_px_aligned = (fmodf(m_vt.m_min.t.x, 1.0f) == 0.5f) && (fmodf(m_vt.m_max.t.x, 1.0f) == 0.5f);
+	const bool v_px_aligned = (fmodf(m_vt.m_min.t.y, 1.0f) == 0.5f) && (fmodf(m_vt.m_max.t.y, 1.0f) == 0.5f);
+	const bool u_half_px_aligned = (fmodf(m_vt.m_min.t.x, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.t.x, 1.0f) == 0.0f);
+	const bool v_half_px_aligned = (fmodf(m_vt.m_min.t.y, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.t.y, 1.0f) == 0.0f);
 
-	const float y_v_offset = fmodf(std::abs(
-		(u_increasing == v_increasing) ?
-		m_vt.m_max.p.y - m_vt.m_min.t.y : m_vt.m_max.p.y + m_vt.m_min.t.y), 1.0f);
+	const float x_u_offset = (x_increasing == u_increasing) ? m_vt.m_max.p.x - m_vt.m_min.t.x :
+	                                                          m_vt.m_max.p.x + m_vt.m_min.t.x;
+	const float y_v_offset = (y_increasing == v_increasing) ? m_vt.m_max.p.y - m_vt.m_min.t.y :
+	                                                          m_vt.m_max.p.y + m_vt.m_min.t.y;
+	const float x_u_offset_mod = fmodf(std::abs(x_u_offset), 1.0f);
+	const float y_v_offset_mod = fmodf(std::abs(y_v_offset), 1.0f);
 
-	// Flags that indicate that U/S or V/T being halfway between two texels can be fixed
-	// by simply shifting the coordinates.
-	const bool can_fix_half_u = !m_vt.IsLinear() && PRIM->FST && x_u_offset == 0.0f &&
-	                            fmodf(m_vt.m_min.t.x, 1.0f) == 0.0f && fmodf(m_vt.m_max.t.x, 1.0f) == 0.0f;
-	const bool can_fix_half_v = !m_vt.IsLinear() && PRIM->FST && y_v_offset == 0.0f &&
-	                            fmodf(m_vt.m_min.t.y, 1.0f) == 0.0f && fmodf(m_vt.m_max.t.y, 1.0f) == 0.0f;
+	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q;
 
 	// Whether the draw appears to be copying pixels 1-to-1 to texels.
-	const bool probable_pixel_copy = (x_u_offset == 0.5f || can_fix_half_u) &&
-	                                 (y_v_offset == 0.5f || can_fix_half_v) &&
-	                                 unscaled_copy;
+	const bool probable_pixel_copy = x_px_aligned && (u_px_aligned || (u_half_px_aligned && !m_vt.IsRealLinear())) &&
+	                                 y_px_aligned && (v_px_aligned || (v_half_px_aligned && !m_vt.IsRealLinear())) &&
+	                                 unscaled_copy && can_fix_tex_coord;
 
 	if (probable_pixel_copy)
 	{
-		const float upscale = GetUpscaleMultiplier();
+		const float upscale = tex->GetScale();
 
 		// Helper function to get the offset needed to fix UV being exactly on a texel
 		// boundary in GS coordinates.
-		const auto GetUVOffsetFix = [upscale](bool increasing) {
+		const auto GetUVOffsetFix = [&](bool increasing, bool halfway) {
 			// Shift U/V in the positive direction half a texel since the GS seems to round up.
-			float offset = -8.0f;
+			float offset = halfway ? -8.0f : 0.0f;
 
 			if (upscale != 1.0f)
 			{
@@ -6569,13 +6571,27 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			return offset;
 		};
 
-		m_conf.cb_vs.texture_offset.x = can_fix_half_u ? GetUVOffsetFix(u_increasing) : 0.0f;
-		m_conf.cb_vs.texture_offset.y = can_fix_half_v ? GetUVOffsetFix(v_increasing) : 0.0f;
+		// Helper function to get the offset needed to fix UV being exactly on a texel
+		// boundary in GS coordinates.
+		const auto GetSTOffsetFix = [&](bool increasing, bool halfway, float tsize, float q) {
+			return GetUVOffsetFix(increasing, halfway) * q / (16.0f * tsize);
+		};
 
-		if (can_fix_half_u || can_fix_half_v)
+		if (PRIM->FST)
 		{
-			Console.Warning("FIXED %d (%f, %f)", s_n, m_conf.cb_vs.texture_offset.x, m_conf.cb_vs.texture_offset.y);
+			m_conf.cb_vs.texture_offset.x = GetUVOffsetFix(u_increasing, u_half_px_aligned);
+			m_conf.cb_vs.texture_offset.y = GetUVOffsetFix(v_increasing, v_half_px_aligned);
 		}
+		else
+		{
+			const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
+			const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
+			const float q = m_vt.m_min.t.w;
+			m_conf.cb_vs.texture_offset.x = GetSTOffsetFix(u_increasing, u_half_px_aligned, tw, q);
+			m_conf.cb_vs.texture_offset.y = GetSTOffsetFix(v_increasing, v_half_px_aligned, th, q);
+		}
+
+		Console.Warning("FIXED %d (%f, %f)", s_n, m_conf.cb_vs.texture_offset.x, m_conf.cb_vs.texture_offset.y);
 	}
 
 	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
