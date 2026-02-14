@@ -5273,38 +5273,120 @@ void GSDeviceVK::SetLineWidth(float width)
 // Note: Handling of UAVs is different from DX12 because in DX12 we handle clearing/dirty state
 // update closer to the actual draw to make use of DX12's functionality for UAV clearing
 // without transitioning to render target.
-void GSDeviceVK::PSSetUnorderedAccess(int i, GSTexture* tex, bool check_state, bool read, bool write)
+void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds)
 {
-	pxAssert(i == TFX_TEXTURE_RT_ROV || i == TFX_TEXTURE_DEPTH_ROV);
+	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
+	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
+	GSTextureVK* oldVkRt = m_tfx_textures[TFX_TEXTURE_RT_ROV] != m_null_texture.get() ?
+	                       const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_RT_ROV]) :
+	                       nullptr;
+	GSTextureVK* oldVkDs = m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] != m_null_texture.get() ?
+	                       const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]) :
+	                       nullptr;
 
-	GSTextureVK* vkTex = static_cast<GSTextureVK*>(tex);
+	if (!(vkRt || vkDs || oldVkRt || oldVkDs))
+		return;
 
-	if (vkTex)
+	pxAssert(!vkDs || vkDs->IsDepthColor());
+	pxAssert(!(vkRt || vkDs) || m_features.rov);
+
+	if (vkRt)
 	{
-		pxAssert(m_features.rov);
-		pxAssert(!vkTex->IsDepthStencil() || vkTex->IsDepthColor());
-
-		PSSetShaderResource(i, tex, true, false);
+		PSSetShaderResource(TFX_TEXTURE_RT_ROV, vkRt, true, false);
 
 		// Unbind conflicting RT texture
-		const u32 i_conflict = (i == TFX_TEXTURE_RT_ROV) ? TFX_TEXTURE_RT : TFX_TEXTURE_DEPTH;
-		PSSetShaderResource(i_conflict, nullptr, false);
+		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 
 		// Unbind conflicting source texture
-		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == tex)
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == vkRt)
 		{
 			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
 		}
 
-		if (write)
+		if (write_rt)
 		{
-			tex->SetState(GSTexture::State::Dirty);
+			vkRt->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
 	{
 		// Unbind to avoid conflicts with OM targets.
-		PSSetShaderResource(i, nullptr, false);
+		PSSetShaderResource(TFX_TEXTURE_RT_ROV, nullptr, false);
+	}
+
+	if (vkDs)
+	{
+		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, vkDs, true, false);
+
+		// Unbind conflicting RT texture
+		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
+
+		// Unbind conflicting source texture
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == vkDs)
+		{
+			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
+		}
+
+		if (write_ds)
+		{
+			vkDs->SetState(GSTexture::State::Dirty);
+		}
+	}
+	else
+	{
+		// Unbind to avoid conflicts with OM targets.
+		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, nullptr, false);
+	}
+
+	const auto UAVBarrier = [this](GSTextureVK* tex) {
+		// The subresources version does the barrier even when the before/after layout
+		// are the same since we want a memory barrier here, not just a layout change.
+		tex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, tex->GetLayout(), tex->GetLayout());
+		g_perfmon.Put(GSPerfMon::Barriers, 1.0);
+	};
+
+	// The following are to fix issues with some systems that seem to require barriers even with FSI.
+	if (GSConfig.HWROVUseBarriersVK == 1)
+	{
+		// Adds a barriers to the UAVs before every draw. Can result in a large performance hit.
+		if ((vkRt || vkDs) && InRenderPass())
+		{
+			GL_INS("Ending render pass due to UAV barrier");
+			EndRenderPass();
+		}
+		for (GSTextureVK* tex : std::array{ vkRt, vkDs })
+		{
+			if (tex)
+			{
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to UAV barrier");
+					EndRenderPass();
+				}
+				UAVBarrier(tex);
+			}
+		}
+	}
+	else if (GSConfig.HWROVUseBarriersVK == 2)
+	{
+		// A lower overhead fix that seems to work sometimes. We only do a barrier when we are changing
+		// the UAV, unbinding the UAV, or binding a UAV where there was not one previously.
+		for (auto& old_new_tex : std::array{ std::array{ vkRt, oldVkRt }, std::array{ vkDs , oldVkDs } })
+		{
+			if (old_new_tex[0] != old_new_tex[1])
+			{
+				if (InRenderPass())
+				{
+					GL_INS("Ending render pass due to UAV barrier");
+					EndRenderPass();
+				}
+				for (GSTextureVK* tex : old_new_tex)
+				{
+					if (tex)
+						UAVBarrier(tex);
+				}
+			}
+		}
 	}
 }
 
@@ -5327,19 +5409,6 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, boo
 					EndRenderPass();
 				}
 				vkTex->TransitionToLayout(layout);
-			}
-			else if (!read_only && GSConfig.HWROVUseBarriersVK)
-			{
-				// It seems we need a barrier even when using fragment shader interlock
-				if (InRenderPass())
-				{
-					GL_INS("Ending render pass due to UAV barrier");
-					EndRenderPass();
-				}
-				// The subresources version does the barrier even when the before/after layout
-				// are the same since we want a memory barrier here, not just a layout change.
-				vkTex->TransitionSubresourcesToLayout(GetCurrentCommandBuffer(), 0, 1, vkTex->GetLayout(), layout);
-				g_perfmon.Put(GSPerfMon::Barriers, 1.0);
 			}
 		}
 		vkTex->SetUseFenceCounter(GetCurrentFenceCounter());
@@ -6142,11 +6211,15 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// Unbind to avoid conflicts with framebuffer
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 	}
-	
-	PSSetUnorderedAccess(TFX_TEXTURE_RT_ROV, draw_rt_rov, true, config.ps.color_feedback, !config.ps.no_color);
-	PSSetUnorderedAccess(TFX_TEXTURE_DEPTH_ROV, draw_ds_rov, true, config.ps.depth_feedback, config.ps.zclamp);
 
-	// Set framebuffer after settings feedback textures/UAVs in case a depth UAV update requires a render pass.
+	if (GSConfig.HWROVUseBarriersVK == 2 && (draw_rt_rov || draw_ds_rov) &&
+		(draw_rt_rov != m_tfx_textures[TFX_TEXTURE_RT_ROV] || draw_ds_rov != m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]))
+	{
+		EndRenderPass();
+	}
+	
+	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, !config.ps.no_color, config.ps.zwrite);
+
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
 
 	// Begin render pass if new target or out of the area.
