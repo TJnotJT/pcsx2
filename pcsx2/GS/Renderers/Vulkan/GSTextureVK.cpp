@@ -670,13 +670,29 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
 		{
 			pxFail("Transitioning to depth UAV without depth color.");
-
 		}
 		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
 		{
 			pxFail("Transitioning to depth while in depth color.");
 		}
 	}
+
+	// RDNA2 transition issue discovered by Air.
+	// FIXME: Guard this in a conditional that tests GPU arch.
+
+	// Windows RDNA2 drivers don't always correctly transition the layout(?) when ROV is involved.
+	// ReadWriteImage -> Feedback transitions are broken.
+	// ReadWriteImage -> Read only layout  -> Feedback transitions are broken.
+	// ReadWriteImage -> General layout    -> Feedback transitions are broken.
+	// ReadWriteImage -> Write only layout -> Feedback transitions works fine.
+	// Not every broken transition gives broken rendering, the Shadow of the colossus eagle dump is fine after the 1st frame.
+	// Transition to a write only layout using an extra barrier, then to feedback fixes this issue.
+	if (old_layout == Layout::ReadWriteImage && new_layout != Layout::ColorAttachment && new_layout != Layout::ReadWriteImage)
+	{
+		TransitionSubresourcesToLayout(command_buffer, 0, num_levels, old_layout, Layout::ColorAttachment);
+		old_layout = Layout::ColorAttachment;
+	}
+
 
 	VkImageAspectFlags aspect;
 	if (IsDepthStencil() && !IsDepthColor())
