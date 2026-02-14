@@ -6517,81 +6517,39 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		((m_vt.m_max.p - m_vt.m_min.p == m_vt.m_max.t - m_vt.m_min.t).mask() & 3) == 3 && // Position deltas same as texture deltas.
 		(rt->GetScale() == tex->GetScale()); // Same upscale.
 
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	const GSVector2i x_mod(fmodf(m_vt.m_min.p.x, 1.0f), fmodf(m_vt.m_max.p.x, 1.0f));
+	const GSVector2i y_mod(fmodf(m_vt.m_min.p.y, 1.0f), fmodf(m_vt.m_max.p.y, 1.0f));
+	const GSVector2i u_mod(fmodf(m_vt.m_min.t.x, 1.0f), fmodf(m_vt.m_max.t.x, 1.0f));
+	const GSVector2i v_mod(fmodf(m_vt.m_min.t.y, 1.0f), fmodf(m_vt.m_max.t.y, 1.0f));
 
-	const GSVertex& v0 = m_vertex.buff[m_index.buff[0]];
-	const GSVertex& vn = m_vertex.buff[m_index.buff[m_index.tail - n + 1]];
-
-	const bool x_increasing = vn.XYZ.X >= v0.XYZ.X;
-	const bool y_increasing = vn.XYZ.Y >= v0.XYZ.Y;
-	const bool u_increasing = PRIM->FST ? (vn.U >= v0.U) : (vn.ST.S >= vn.ST.S);
-	const bool v_increasing = PRIM->FST ? (vn.V >= v0.V) : (vn.ST.T >= vn.ST.T);
-
-	const bool x_px_aligned = (fmodf(m_vt.m_min.p.x, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.p.x, 1.0f) == 0.0f);
-	const bool y_px_aligned = (fmodf(m_vt.m_min.p.y, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.p.y, 1.0f) == 0.0f);
-	const bool u_px_aligned = (fmodf(m_vt.m_min.t.x, 1.0f) == 0.5f) && (fmodf(m_vt.m_max.t.x, 1.0f) == 0.5f);
-	const bool v_px_aligned = (fmodf(m_vt.m_min.t.y, 1.0f) == 0.5f) && (fmodf(m_vt.m_max.t.y, 1.0f) == 0.5f);
-	const bool u_half_px_aligned = (fmodf(m_vt.m_min.t.x, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.t.x, 1.0f) == 0.0f);
-	const bool v_half_px_aligned = (fmodf(m_vt.m_min.t.y, 1.0f) == 0.0f) && (fmodf(m_vt.m_max.t.y, 1.0f) == 0.0f);
-
-	const float x_u_offset = (x_increasing == u_increasing) ? m_vt.m_max.p.x - m_vt.m_min.t.x :
-	                                                          m_vt.m_max.p.x + m_vt.m_min.t.x;
-	const float y_v_offset = (y_increasing == v_increasing) ? m_vt.m_max.p.y - m_vt.m_min.t.y :
-	                                                          m_vt.m_max.p.y + m_vt.m_min.t.y;
-	const float x_u_offset_mod = fmodf(std::abs(x_u_offset), 1.0f);
-	const float y_v_offset_mod = fmodf(std::abs(y_v_offset), 1.0f);
-
-	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q;
+	const bool x_px_aligned = x_mod.x == 0.0f && x_mod.y == 0.0f;
+	const bool y_px_aligned = y_mod.x == 0.0f && y_mod.y == 0.0f;
+	const bool u_px_aligned = u_mod.x == 0.5f && u_mod.y == 0.5f;
+	const bool v_px_aligned = v_mod.x == 0.5f && v_mod.y == 0.5f;
+	const bool u_half_px_aligned = u_mod.x == 0.0f && u_mod.y == 0.0f;
+	const bool v_half_px_aligned = v_mod.x == 0.0f && v_mod.y == 0.0f;
 
 	// Whether the draw appears to be copying pixels 1-to-1 to texels.
 	const bool probable_pixel_copy = x_px_aligned && (u_px_aligned || (u_half_px_aligned && !m_vt.IsRealLinear())) &&
 	                                 y_px_aligned && (v_px_aligned || (v_half_px_aligned && !m_vt.IsRealLinear())) &&
-	                                 unscaled_copy && can_fix_tex_coord;
+	                                 unscaled_copy;
 
-	if (probable_pixel_copy)
+	m_conf.cb_vs.texture_offset = GSVector2(0.0f, 0.0f);
+
+	// Sprite alignment for non-upscaled draws.
+	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q; // Only non-perspective tex coords can be fixed.
+	if (probable_pixel_copy && GetUpscaleMultiplier() == 1.0f && can_fix_tex_coord)
 	{
-		const float upscale = tex->GetScale();
-
-		// Helper function to get the offset needed to fix UV being exactly on a texel
-		// boundary in GS coordinates.
-		const auto GetUVOffsetFix = [&](bool increasing, bool halfway) {
-			// Shift U/V in the positive direction half a texel since the GS seems to round up.
-			float offset = halfway ? -8.0f : 0.0f;
-
-			if (upscale != 1.0f)
-			{
-				// This magic offset is used to account for the fact that with upscaling
-				// each GS pixel corresponds to multiple GPU pixels, so the bottom-right
-				// rule for omitting pixels might end up drawing more than we want.
-				const float magic_offset = 8.0f * (1.0f - 1.0f / upscale);
-
-				offset += increasing ? magic_offset : -magic_offset;
-			}
-
-			return offset;
-		};
-
-		// Helper function to get the offset needed to fix UV being exactly on a texel
-		// boundary in GS coordinates.
-		const auto GetSTOffsetFix = [&](bool increasing, bool halfway, float tsize, float q) {
-			return GetUVOffsetFix(increasing, halfway) * q / (16.0f * tsize);
-		};
-
-		if (PRIM->FST)
-		{
-			m_conf.cb_vs.texture_offset.x = GetUVOffsetFix(u_increasing, u_half_px_aligned);
-			m_conf.cb_vs.texture_offset.y = GetUVOffsetFix(v_increasing, v_half_px_aligned);
-		}
-		else
+		m_conf.cb_vs.texture_offset.x = u_half_px_aligned ? -8.0f : 0.0f;
+		m_conf.cb_vs.texture_offset.y = v_half_px_aligned ? -8.0f : 0.0f;
+		if (!PRIM->FST)
 		{
 			const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
 			const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
 			const float q = m_vt.m_min.t.w;
-			m_conf.cb_vs.texture_offset.x = GetSTOffsetFix(u_increasing, u_half_px_aligned, tw, q);
-			m_conf.cb_vs.texture_offset.y = GetSTOffsetFix(v_increasing, v_half_px_aligned, th, q);
+			m_conf.cb_vs.texture_offset.x *= q / (16.0f * tw);
+			m_conf.cb_vs.texture_offset.y *= q / (16.0f * th);
 		}
-
-		Console.Warning("FIXED %d (%f, %f)", s_n, m_conf.cb_vs.texture_offset.x, m_conf.cb_vs.texture_offset.y);
 	}
 
 	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
@@ -6670,31 +6628,31 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		// The purpose of texture shuffle is to move color channel. Extra interpolation is likely a bad idea.
 		bilinear &= m_vt.IsLinear();
 
-		if (!probable_pixel_copy)
+		if (GetUpscaleMultiplier() != 1.0f)
 		{
 			const GSVector4 half_pixel = RealignTargetTextureCoordinate(tex);
 			m_conf.cb_vs.texture_offset = GSVector2(half_pixel.x, half_pixel.y);
+		}
 
-			// Can be seen with the cabin part of the ship in God of War, offsets are required when using FST.
-			// ST uses a normalized position so doesn't need an offset here, will break Bionicle Heroes.
-			if (GSConfig.UserHacks_HalfPixelOffset == GSHalfPixelOffset::NativeWTexOffset)
+		// Can be seen with the cabin part of the ship in God of War, offsets are required when using FST.
+		// ST uses a normalized position so doesn't need an offset here, will break Bionicle Heroes.
+		if (GSConfig.UserHacks_HalfPixelOffset == GSHalfPixelOffset::NativeWTexOffset)
+		{
+			const u32 psm = rt ? rt->m_TEX0.PSM : ds->m_TEX0.PSM;
+			const bool can_offset = m_r.width() > GSLocalMemory::m_psm[psm].pgs.x || m_r.height() > GSLocalMemory::m_psm[psm].pgs.y;
+
+			if (can_offset && tex->m_scale > 1.0f)
 			{
-				const u32 psm = rt ? rt->m_TEX0.PSM : ds->m_TEX0.PSM;
-				const bool can_offset = m_r.width() > GSLocalMemory::m_psm[psm].pgs.x || m_r.height() > GSLocalMemory::m_psm[psm].pgs.y;
-
-				if (can_offset && tex->m_scale > 1.0f)
+				const GSVertex* v = &m_vertex.buff[0];
+				if (PRIM->FST)
 				{
-					const GSVertex* v = &m_vertex.buff[0];
-					if (PRIM->FST)
-					{
-						const int x1_frac = ((v[1].XYZ.X - m_context->XYOFFSET.OFX) & 0xf);
-						const int y1_frac = ((v[1].XYZ.Y - m_context->XYOFFSET.OFY) & 0xf);
+					const int x1_frac = ((v[1].XYZ.X - m_context->XYOFFSET.OFX) & 0xf);
+					const int y1_frac = ((v[1].XYZ.Y - m_context->XYOFFSET.OFY) & 0xf);
 
-						if (!(x1_frac & 8))
-							m_conf.cb_vs.texture_offset.x = (1.0f - ((0.5f / (tex->m_unscaled_size.x * tex->m_scale)) * tex->m_unscaled_size.x)) * 8.0f;
-						if (!(y1_frac & 8))
-							m_conf.cb_vs.texture_offset.y = (1.0f - ((0.5f / (tex->m_unscaled_size.y * tex->m_scale)) * tex->m_unscaled_size.y)) * 8.0f;
-					}
+					if (!(x1_frac & 8))
+						m_conf.cb_vs.texture_offset.x = (1.0f - ((0.5f / (tex->m_unscaled_size.x * tex->m_scale)) * tex->m_unscaled_size.x)) * 8.0f;
+					if (!(y1_frac & 8))
+						m_conf.cb_vs.texture_offset.y = (1.0f - ((0.5f / (tex->m_unscaled_size.y * tex->m_scale)) * tex->m_unscaled_size.y)) * 8.0f;
 				}
 			}
 		}
@@ -6746,38 +6704,38 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			bilinear &= m_vt.IsLinear();
 		}
 
-		if (!probable_pixel_copy)
+		if (GetUpscaleMultiplier() != 1.0f)
 		{
 			const GSVector4 half_pixel = RealignTargetTextureCoordinate(tex);
 			m_conf.cb_vs.texture_offset = GSVector2(half_pixel.x, half_pixel.y);
+		}
 
-			if (GSConfig.UserHacks_HalfPixelOffset == GSHalfPixelOffset::NativeWTexOffset)
+		if (GSConfig.UserHacks_HalfPixelOffset == GSHalfPixelOffset::NativeWTexOffset)
+		{
+			const u32 psm = rt ? rt->m_TEX0.PSM : ds->m_TEX0.PSM;
+			const bool can_offset = m_r.width() > GSLocalMemory::m_psm[psm].pgs.x || m_r.height() > GSLocalMemory::m_psm[psm].pgs.y;
+
+			if (can_offset && tex->m_scale > 1.0f)
 			{
-				const u32 psm = rt ? rt->m_TEX0.PSM : ds->m_TEX0.PSM;
-				const bool can_offset = m_r.width() > GSLocalMemory::m_psm[psm].pgs.x || m_r.height() > GSLocalMemory::m_psm[psm].pgs.y;
-
-				if (can_offset && tex->m_scale > 1.0f)
+				const GSVertex* v = &m_vertex.buff[0];
+				if (PRIM->FST)
 				{
-					const GSVertex* v = &m_vertex.buff[0];
-					if (PRIM->FST)
-					{
-						const int x1_frac = ((v[1].XYZ.X - m_context->XYOFFSET.OFX) & 0xf);
-						const int y1_frac = ((v[1].XYZ.Y - m_context->XYOFFSET.OFY) & 0xf);
+					const int x1_frac = ((v[1].XYZ.X - m_context->XYOFFSET.OFX) & 0xf);
+					const int y1_frac = ((v[1].XYZ.Y - m_context->XYOFFSET.OFY) & 0xf);
 
-						if (!(x1_frac & 8))
-							m_conf.cb_vs.texture_offset.x = (1.0f - ((0.5f / (tex->m_unscaled_size.x * tex->m_scale)) * tex->m_unscaled_size.x)) * 8.0f;
-						if (!(y1_frac & 8))
-							m_conf.cb_vs.texture_offset.y = (1.0f - ((0.5f / (tex->m_unscaled_size.y * tex->m_scale)) * tex->m_unscaled_size.y)) * 8.0f;
-					}
-					else if (m_vt.m_eq.q)
-					{
-						const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
-						const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
-						const float q = v[0].RGBAQ.Q;
+					if (!(x1_frac & 8))
+						m_conf.cb_vs.texture_offset.x = (1.0f - ((0.5f / (tex->m_unscaled_size.x * tex->m_scale)) * tex->m_unscaled_size.x)) * 8.0f;
+					if (!(y1_frac & 8))
+						m_conf.cb_vs.texture_offset.y = (1.0f - ((0.5f / (tex->m_unscaled_size.y * tex->m_scale)) * tex->m_unscaled_size.y)) * 8.0f;
+				}
+				else if (m_vt.m_eq.q)
+				{
+					const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
+					const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
+					const float q = v[0].RGBAQ.Q;
 
-						m_conf.cb_vs.texture_offset.x = 0.5f * q / tw;
-						m_conf.cb_vs.texture_offset.y = 0.5f * q / th;
-					}
+					m_conf.cb_vs.texture_offset.x = 0.5f * q / tw;
+					m_conf.cb_vs.texture_offset.y = 0.5f * q / th;
 				}
 			}
 		}
