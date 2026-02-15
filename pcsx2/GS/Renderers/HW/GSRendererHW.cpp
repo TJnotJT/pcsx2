@@ -6510,6 +6510,47 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool can_trilinear = !tex->m_palette && !tex->m_target && !m_conf.ps.shuffle;
 	const bool trilinear_manual = need_mipmap && GSConfig.HWMipmap;
 
+	m_conf.cb_vs.texture_offset = GSVector2(0.0f, 0.0f);
+
+	bool underflow_x = false;
+	bool underflow_y = false;
+	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST)
+	{
+		GSVertex* RESTRICT vtx = m_vertex.buff;
+		
+		for (int i = 0; i < m_index.tail; i += 2)
+		{
+			const bool x_inc = vtx[i + 1].XYZ.X >= vtx[i + 0].XYZ.X;
+			const bool y_inc = vtx[i + 1].XYZ.Y >= vtx[i + 0].XYZ.Y;
+
+			GSVertex& vx0 = x_inc ? vtx[i + 0] : vtx[i + 1];
+			GSVertex& vx1 = x_inc ? vtx[i + 1] : vtx[i + 0];
+			GSVertex& vy0 = y_inc ? vtx[i + 0] : vtx[i + 1];
+			GSVertex& vy1 = y_inc ? vtx[i + 1] : vtx[i + 0];
+
+			const GSVector4i x = GSVector4i(vx0.XYZ.X, vx1.XYZ.X);
+			const GSVector4i u = GSVector4i(vx0.U, vx1.U);
+			const GSVector4i y = GSVector4i(vy0.XYZ.Y, vy1.XYZ.Y);
+			const GSVector4i v = GSVector4i(vy0.V, vy1.V);
+
+			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
+
+			if ((((x.y - x.x) & 0xF) == 0) && ((u.y - u.x) % (x.y - x.x) == 0) && (((u.x - x.x) & 0xF) == 0) && !IsPow2(x.y - x.x))
+			{
+				underflow_x = true;
+				vx1.U -= 16;
+				Console.Warning("X underflow %d", s_n);
+			}
+
+			if ((((y.y - y.x) & 0xF) == 0) && ((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0) && !IsPow2(y.y - y.x))
+			{
+				underflow_y = true;
+				vy1.V -= 16;
+				Console.Warning("Y underflow %d", s_n);
+			}
+		}
+	}
+
 	// Whether the draws appears to be an unscaled copy of the src texture into RT.
 	const bool unscaled_copy =
 		(m_vt.m_primclass == GS_SPRITE_CLASS || (m_vt.m_primclass == GS_TRIANGLE_CLASS && m_vt.m_eq.z)) && // Flat draw.
@@ -6538,17 +6579,16 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const int p_t_aligned = (p_frac == t_frac).mask();
 	const int p_t_half_aligned = ((p_frac == GSVector4(0.0f)) & (t_frac == GSVector4(0.5f))).mask();
 
+	// FIXME: Might have to not allow half pixel OR only allow powers of 2!!!
 	const bool x_u_aligned = (p_t_aligned & 0b0101) == 0b0101;
 	const bool y_v_aligned = (p_t_aligned & 0b1010) == 0b1010;
 	const bool x_u_half_aligned = (p_t_half_aligned & 0b0101) == 0b0101;
 	const bool y_v_half_aligned = (p_t_half_aligned & 0b1010) == 0b1010;
 
 	// Whether the draw appears to be copying pixels 1-to-1 to texels.
-	const bool probable_pixel_copy = (x_u_aligned || (x_u_half_aligned && !m_vt.IsRealLinear())) &&
-	                                 (y_v_aligned || (y_v_half_aligned && !m_vt.IsRealLinear())) &&
+	const bool probable_pixel_copy = (x_u_aligned || (x_u_half_aligned && !m_vt.IsRealLinear() && !underflow_x)) &&
+	                                 (y_v_aligned || (y_v_half_aligned && !m_vt.IsRealLinear() && !underflow_y)) &&
 	                                 unscaled_copy;
-
-	m_conf.cb_vs.texture_offset = GSVector2(0.0f, 0.0f);
 
 	// Do sprite alignment for non-upscaled draws.
 	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q; // Only non-perspective tex coords can be fixed.
@@ -8137,6 +8177,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		rt->m_rt_alpha_scale = new_scale_rt_alpha;
 		m_conf.ps.rta_correction = rt->m_rt_alpha_scale;
 	}
+
+	//if (s_n >= 450 && s_n <= 460)
+		//m_conf.ps.rta_correction = 0;
 
 	if (features.framebuffer_fetch)
 	{
