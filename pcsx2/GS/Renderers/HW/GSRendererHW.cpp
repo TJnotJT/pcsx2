@@ -6588,7 +6588,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	// Whether the draw appears to be copying pixels 1-to-1 to texels.
 	const bool probable_pixel_copy = (x_u_aligned || (x_u_half_aligned && !m_vt.IsRealLinear() && !underflow_x)) &&
 	                                 (y_v_aligned || (y_v_half_aligned && !m_vt.IsRealLinear() && !underflow_y)) &&
-	                                 unscaled_copy;
+	                                 unscaled_copy && 0;
 
 	// Do sprite alignment for non-upscaled draws.
 	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q; // Only non-perspective tex coords can be fixed.
