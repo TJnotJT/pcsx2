@@ -6844,6 +6844,15 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	// clamp to base level if we're not providing or generating mipmaps
 	// manual trilinear causes the chain to be uploaded, auto causes it to be generated
 	m_conf.sampler.lodclamp = !(trilinear_manual || trilinear_auto);
+
+	if (m_vt.m_primclass == GS_SPRITE_CLASS && m_index.tail == 2)
+	{
+		Console.Warning("ONE SPRITE %d", s_n);
+	}
+	if (s_n == 3)
+	{
+		m_conf.cb_vs.texture_offset = GSVector2(16.0f, 16.0f);
+	}
 }
 
 __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, const GSTextureCache::Target* ds,

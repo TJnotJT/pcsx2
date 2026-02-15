@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "GS.h"
+#include "GS/GSState.h"
 #include "GS/GSLzma.h"
 #include "GSDumpReplayer.h"
 #include "GameList.h"
@@ -264,6 +265,9 @@ void GSDumpReplayerCpuStep()
 		s_needs_state_loaded = false;
 	}
 
+	static u32 curr_packet = 0;
+	curr_packet = s_current_packet;
+
 	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
 	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
 	if (s_current_packet == 0)
@@ -343,6 +347,15 @@ void GSDumpReplayerCpuStep()
 		}
 		break;
 	}
+
+	static int s_n_backup = 0;
+	MTGS::RunOnGSThread([curr = curr_packet]() {
+		if (GSState::s_n != s_n_backup)
+		{
+			Console.Warning("Draw %d packet %d", GSState::s_n, curr);
+		}
+		s_n_backup = GSState::s_n;
+	});
 }
 
 void GSDumpReplayerCpuExecute()

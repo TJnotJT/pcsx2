@@ -2081,6 +2081,23 @@ void GSState::FlushPrim()
 		m_env.CTXT[PRIM->CTXT].UpdateScissor();
 		m_vt.Update(m_vertex.buff, m_index.buff, m_vertex.tail, m_index.tail, GSUtil::GetPrimClass(PRIM->PRIM));
 
+		if (s_n == 3)
+		{
+			for (int i = 0; i < m_vertex.tail; i++)
+			{
+				m_vertex.buff[i].U -= 8;
+				m_vertex.buff[i].V -= 8;
+			}
+		}
+
+		if (s_n == 448)
+		{
+			for (int i = 0; i < m_vertex.tail; i++)
+			{
+				m_vertex.buff[i].U -= 8;
+			}
+		}
+
 		// Texel coordinate rounding
 		// Helps Manhunt (lights shining through objects).
 		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
