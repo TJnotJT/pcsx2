@@ -578,6 +578,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 vertex_offset;
 		GSVector2 texture_scale;
 		GSVector2 texture_offset;
+		GSVector2 texture_offset2;
 		GSVector2 point_size;
 		GSVector2i max_depth;
 		__fi VSConstantBuffer()

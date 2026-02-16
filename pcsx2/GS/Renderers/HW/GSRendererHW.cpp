@@ -6512,6 +6512,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 
 	m_conf.cb_vs.texture_offset = GSVector2(0.0f, 0.0f);
 
+	m_conf.cb_vs.texture_offset2 = GSVector2(0.0f);
 	bool underflow_x = false;
 	bool underflow_y = false;
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
@@ -6538,14 +6539,16 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			if ((((x.y - x.x) & 0xF) == 0) && ((u.y - u.x) % (x.y - x.x) == 0) && (((u.x - x.x) & 0xF) == 0) && !IsPow2(x.y - x.x))
 			{
 				underflow_x = true;
-				vx1.U -= 16;
+				//vx1.U -= 1;
+				m_conf.cb_vs.texture_offset2.x = .01f / (float)(1 << m_context->TEX0.TW);
 				Console.Warning("X underflow %d", s_n);
 			}
 
 			if ((((y.y - y.x) & 0xF) == 0) && ((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0) && !IsPow2(y.y - y.x))
 			{
 				underflow_y = true;
-				vy1.V -= 16;
+				//vy1.V -= 1;
+				m_conf.cb_vs.texture_offset2.y = .01f / (float)(1 << m_context->TEX0.TH);
 				Console.Warning("Y underflow %d", s_n);
 			}
 		}

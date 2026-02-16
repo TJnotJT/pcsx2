@@ -13,6 +13,7 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	vec2 VertexOffset;
 	vec2 TextureScale;
 	vec2 TextureOffset;
+	vec2 TextureOffset2;
 	vec2 PointSize;
 	uint MaxDepth;
 	uint pad_cb0;
@@ -199,6 +200,36 @@ void main()
 
 	ProcessedVertex lt = load_vertex(vid_lt);
 	ProcessedVertex rb = load_vertex(vid_rb);
+
+	if (rb.p.x >= lt.p.x)
+	{
+		rb.t.x -= TextureOffset2.x;
+		rb.ti.x -= TextureOffset2.x;
+		lt.t.x += TextureOffset2.x / 2;
+		lt.ti.x += TextureOffset2.x / 2;
+	}
+	else
+	{
+		lt.t.x -= TextureOffset2.x;
+		lt.ti.x -= TextureOffset2.x;
+		rb.t.x += TextureOffset2.x / 2;
+		rb.ti.x += TextureOffset2.x / 2;
+	}
+	if (rb.p.y >= lt.p.y)
+	{
+		rb.t.y -= TextureOffset2.y;
+		rb.ti.y -= TextureOffset2.y;
+		lt.t.y += TextureOffset2.y / 100;
+		lt.ti.y += TextureOffset2.y / 100;
+	}
+	else
+	{
+		lt.t.y -= TextureOffset2.y;
+		lt.ti.y -= TextureOffset2.y;
+		rb.t.y += TextureOffset2.y / 100;
+		rb.ti.y += TextureOffset2.y / 100;
+	}
+
 	vtx = rb;
 
 	bool is_right = ((vid & 1u) != 0u);
