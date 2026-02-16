@@ -6639,6 +6639,14 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 
 		std::swap(m_vertex.buff, m_vertex.buff_copy);
 		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
+
+		if (!m_drawlist.empty())
+		{
+			for (int i = 0; i < m_drawlist.size(); i++)
+			{
+				m_drawlist[i] *= 4;
+			}
+		}
 	}
 
 	bool bilinear = m_vt.IsLinear();
