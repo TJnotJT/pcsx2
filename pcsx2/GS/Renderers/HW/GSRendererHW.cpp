@@ -6517,7 +6517,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	bool underflow_y = false;
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
 	{
-		while (m_vertex.maxcount < 2 * m_index.tail)
+		while (m_vertex.maxcount < 4 * m_index.tail)
 			GrowVertexBuffer();
 
 		GSVertex* RESTRICT vtx = m_vertex.buff;
@@ -6526,50 +6526,122 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		int j = 0;
 		for (int i = 0; i < m_index.tail; i += 2)
 		{
-			const bool x_inc = vtx[i + 1].XYZ.X >= vtx[i + 0].XYZ.X;
-			const bool y_inc = vtx[i + 1].XYZ.Y >= vtx[i + 0].XYZ.Y;
+			GSVertex v0 = vtx[i + 0];
+			GSVertex v1 = vtx[i + 1];
 
-			GSVertex& vx0 = x_inc ? vtx[i + 0] : vtx[i + 1];
-			GSVertex& vx1 = x_inc ? vtx[i + 1] : vtx[i + 0];
-			GSVertex& vy0 = y_inc ? vtx[i + 0] : vtx[i + 1];
-			GSVertex& vy1 = y_inc ? vtx[i + 1] : vtx[i + 0];
+			if (v0.XYZ.X > v1.XYZ.X)
+			{
+				std::swap(v0.XYZ.X, v1.XYZ.X);
+				std::swap(v0.U, v1.U);
+			}
 
-			const GSVector4i x = GSVector4i(vx0.XYZ.X, vx1.XYZ.X);
-			const GSVector4i u = GSVector4i(vx0.U, vx1.U);
-			const GSVector4i y = GSVector4i(vy0.XYZ.Y, vy1.XYZ.Y);
-			const GSVector4i v = GSVector4i(vy0.V, vy1.V);
+			if (v0.XYZ.Y > v1.XYZ.Y)
+			{
+				std::swap(v0.XYZ.Y, v1.XYZ.Y);
+				std::swap(v0.V, v1.V);
+			}
+
+			const GSVector4i x = GSVector4i(v0.XYZ.X, v1.XYZ.X);
+			const GSVector4i u = GSVector4i(v0.U, v1.U);
+			const GSVector4i y = GSVector4i(v0.XYZ.Y, v1.XYZ.Y);
+			const GSVector4i v = GSVector4i(v0.V, v1.V);
 
 			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 
-			bool ufx = false;
-			bool ufy = false;
+			const bool half_x = (((x.y - x.x) & 0xF) == 0) && 
+				((u.y - u.x) % (x.y - x.x) == 0) && (((u.x - x.x) & 0xF) == 0);
+			const bool half_y = (((y.y - y.x) & 0xF) == 0) && 
+				((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0);
 
-			if ((((x.y - x.x) & 0xF) == 0) && ((u.y - u.x) % (x.y - x.x) == 0) && (((u.x - x.x) & 0xF) == 0) && !IsPow2(x.y - x.x))
+			const bool uf_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
+			const bool uf_y = half_y && (v.y > v.x) && !IsPow2(x.y - x.x);
+			const int scale_u = (u.y - u.x) / (x.y - x.x);
+			const int scale_v = (v.y - v.x) / (y.y - y.x);
+
+			if (half_x)
 			{
-				underflow_x = true;
-				ufx = true;
-				//vx1.U -= 1;
-				//m_conf.cb_vs.texture_offset2.x = .01f / (float)(1 << m_context->TEX0.TW);
-				Console.Warning("X underflow %d", s_n);
+				v0.U += 8;
+				v1.U += 8;
 			}
 
-			if ((((y.y - y.x) & 0xF) == 0) && ((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0) && !IsPow2(y.y - y.x))
+			if (half_y)
 			{
-				underflow_y = true;
-				ufy = true;
-				//vy1.V -= 1;
-				//m_conf.cb_vs.texture_offset2.y = .01f / (float)(1 << m_context->TEX0.TH);
-				Console.Warning("Y underflow %d", s_n);
+				v0.V += 8;
+				v1.V += 8;
 			}
 
-			if (ufx)
-			{
-				vtx_out[j + 0] = vx0;
-				vtx_out[j + 1] = vx1;
+			underflow_x = underflow_x || uf_x;
+			underflow_y = underflow_y || uf_x;
 
-				vtx_out[j + 1].U = vx0.U + 16;
+			GSVertex& vtl0 = vtx_out[j + 0];
+			GSVertex& vtl1 = vtx_out[j + 1];
+			GSVertex& vt0 = vtx_out[j + 2];
+			GSVertex& vt1 = vtx_out[j + 3];
+			GSVertex& vl0 = vtx_out[j + 4];
+			GSVertex& vl1 = vtx_out[j + 5];
+			GSVertex& vbr0 = vtx_out[j + 6];
+			GSVertex& vbr1 = vtx_out[j + 7];
+
+			m_index.buff[j + 0] = j + 0;
+			m_index.buff[j + 1] = j + 1;
+			m_index.buff[j + 2] = j + 2;
+			m_index.buff[j + 3] = j + 3;
+			m_index.buff[j + 4] = j + 4;
+			m_index.buff[j + 5] = j + 5;
+			m_index.buff[j + 6] = j + 6;
+			m_index.buff[j + 7] = j + 7;
+
+			j += 8;
+
+			// Top left pixel
+			vtl0 = v0;
+			vtl1 = v0;
+			vtl1.XYZ.X += 16;
+			vtl1.XYZ.Y += 16;
+			vtl1.U += 16 * scale_u;
+			vtl1.V += 16 * scale_v;
+
+			// Left vertical strip
+			vl0 = vtl1;
+			vl1 = vtl1;
+			vl0.XYZ.X = v0.XYZ.X;
+			vl0.U = v0.U;
+			vl1.XYZ.Y = v1.XYZ.Y;
+			vl1.V = v1.V;
+
+			// Top horizontal strip
+			vt0 = vtl1;
+			vt1 = vtl1;
+			vt0.XYZ.Y = v0.XYZ.Y;
+			vt0.V = v0.V;
+			vt1.XYZ.X = v1.XYZ.X;
+			vt1.U = v1.U;
+
+			// Bottom right rectangle
+			vbr0 = vtl1;
+			vbr1 = v1;
+
+			// X underflow adjustments
+			if (uf_x)
+			{
+				vt0.U -= 16;
+				vt1.U -= 16;
+				vbr0.U -= 16;
+				vbr1.U -= 16;
+			}
+
+			// Y underflow adjustments
+			if (uf_y)
+			{
+				vl0.V -= 16;
+				vl1.V -= 16;
+				vbr0.V -= 16;
+				vbr1.V -= 16;
 			}
 		}
+
+		std::swap(m_vertex.buff, m_vertex.buff_copy);
+		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
 	}
 
 	// Whether the draws appears to be an unscaled copy of the src texture into RT.
