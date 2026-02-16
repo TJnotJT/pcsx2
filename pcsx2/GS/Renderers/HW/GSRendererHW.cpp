@@ -6518,7 +6518,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		GSVertex* RESTRICT vtx = m_vertex.buff;
 		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
 
-		int j = 0;
+		int j = 0; // FIXME: Rename to i_out
 		for (int i = 0; i < m_index.tail; i += 2)
 		{
 			GSVertex v0 = vtx[i + 0];
@@ -6553,12 +6553,17 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			const int scale_u = (u.y - u.x) / (x.y - x.x);
 			const int scale_v = (v.y - v.x) / (y.y - y.x);
 
+			// FIXME: Handle upscaling.
+			// FIXME: Make helper functions to orgnaize better.
+
+			// Round up X if on texel boundary
 			if (half_x)
 			{
 				v0.U += 8;
 				v1.U += 8;
 			}
 
+			// Round up Y if on texel boundary
 			if (half_y)
 			{
 				v0.V += 8;
@@ -6613,7 +6618,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			vbr0 = vtl1;
 			vbr1 = v1;
 
-			// X underflow adjustments
+			// X underflow adjustment
 			if (underflow_x)
 			{
 				vt0.U -= 16;
@@ -6622,7 +6627,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 				vbr1.U -= 16;
 			}
 
-			// Y underflow adjustments
+			// Y underflow adjustment
 			if (underflow_y)
 			{
 				vl0.V -= 16;
