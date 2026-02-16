@@ -6514,7 +6514,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 
 	bool underflow_x = false;
 	bool underflow_y = false;
-	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST)
+	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
 	{
 		GSVertex* RESTRICT vtx = m_vertex.buff;
 		
