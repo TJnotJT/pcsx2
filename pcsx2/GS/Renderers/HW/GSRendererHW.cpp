@@ -6510,11 +6510,6 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const bool can_trilinear = !tex->m_palette && !tex->m_target && !m_conf.ps.shuffle;
 	const bool trilinear_manual = need_mipmap && GSConfig.HWMipmap;
 
-	m_conf.cb_vs.texture_offset = GSVector2(0.0f, 0.0f);
-
-	m_conf.cb_vs.texture_offset2 = GSVector2(0.0f);
-	bool underflow_x = false;
-	bool underflow_y = false;
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
 	{
 		while (m_vertex.maxcount < 4 * m_index.tail)
@@ -6553,8 +6548,8 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			const bool half_y = (((y.y - y.x) & 0xF) == 0) && 
 				((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0);
 
-			const bool uf_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
-			const bool uf_y = half_y && (v.y > v.x) && !IsPow2(x.y - x.x);
+			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
+			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(x.y - x.x);
 			const int scale_u = (u.y - u.x) / (x.y - x.x);
 			const int scale_v = (v.y - v.x) / (y.y - y.x);
 
@@ -6569,9 +6564,6 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 				v0.V += 8;
 				v1.V += 8;
 			}
-
-			underflow_x = underflow_x || uf_x;
-			underflow_y = underflow_y || uf_x;
 
 			GSVertex& vtl0 = vtx_out[j + 0];
 			GSVertex& vtl1 = vtx_out[j + 1];
@@ -6622,7 +6614,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			vbr1 = v1;
 
 			// X underflow adjustments
-			if (uf_x)
+			if (underflow_x)
 			{
 				vt0.U -= 16;
 				vt1.U -= 16;
@@ -6631,7 +6623,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			}
 
 			// Y underflow adjustments
-			if (uf_y)
+			if (underflow_y)
 			{
 				vl0.V -= 16;
 				vl1.V -= 16;
@@ -6644,62 +6636,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
 	}
 
-	// Whether the draws appears to be an unscaled copy of the src texture into RT.
-	const bool unscaled_copy =
-		(m_vt.m_primclass == GS_SPRITE_CLASS || (m_vt.m_primclass == GS_TRIANGLE_CLASS && m_vt.m_eq.z)) && // Flat draw.
-		m_primitive_covers_without_gaps != NoGapsType::GapsFound && // Sprites or triangles cover without gaps.
-		((m_vt.m_max.p - m_vt.m_min.p == m_vt.m_max.t - m_vt.m_min.t).mask() & 3) == 3 && // Position deltas same as texture deltas.
-		(rt->GetScale() == tex->GetScale()); // Same upscale.
-
-	// Determine direction of each attribute.
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
-	const GSVertex& v0 = m_vertex.buff[m_index.buff[0]];
-	const GSVertex& vn = m_vertex.buff[m_index.buff[m_index.tail - n + 1]];
-	const float x_dir = (vn.XYZ.X >= v0.XYZ.X) ? 1.0f : -1.0f;
-	const float y_dir = (vn.XYZ.Y >= v0.XYZ.Y) ? 1.0f : -1.0f;
-	const float u_dir = (PRIM->FST ? vn.U >= v0.U : vn.ST.S >= v0.ST.S) ? 1.0f : -1.0f;
-	const float v_dir = (PRIM->FST ? vn.V >= v0.V : vn.ST.T >= v0.ST.T) ? 1.0f : -1.0f;
-
-	const auto Frac = [](const GSVector4& v) {
-		return GSVector4(v.x - std::floor(v.x), v.y - std::floor(v.y),
-		                 v.z - std::floor(v.z), v.w - std::floor(v.w));
-	};
-
-	// Determine pixel alignment of the whole draw bbox.
-	const GSVector4 p_frac = Frac(m_vt.m_min.p.xyxy(m_vt.m_max.p) * GSVector4(x_dir, y_dir).xyxy());
-	const GSVector4 t_frac = Frac((m_vt.m_min.t.xyxy(m_vt.m_max.t) - GSVector4(0.5f)) * GSVector4(u_dir, v_dir).xyxy());
-
-	const int p_t_aligned = (p_frac == t_frac).mask();
-	const int p_t_half_aligned = ((p_frac == GSVector4(0.0f)) & (t_frac == GSVector4(0.5f))).mask();
-
-	// FIXME: Might have to not allow half pixel OR only allow powers of 2!!!
-	const bool x_u_aligned = (p_t_aligned & 0b0101) == 0b0101;
-	const bool y_v_aligned = (p_t_aligned & 0b1010) == 0b1010;
-	const bool x_u_half_aligned = (p_t_half_aligned & 0b0101) == 0b0101;
-	const bool y_v_half_aligned = (p_t_half_aligned & 0b1010) == 0b1010;
-
-	// Whether the draw appears to be copying pixels 1-to-1 to texels.
-	const bool probable_pixel_copy = (x_u_aligned || (x_u_half_aligned && !m_vt.IsRealLinear() && !underflow_x)) &&
-	                                 (y_v_aligned || (y_v_half_aligned && !m_vt.IsRealLinear() && !underflow_y)) &&
-	                                 unscaled_copy && 0;
-
-	// Do sprite alignment for non-upscaled draws.
-	const bool can_fix_tex_coord = PRIM->FST || m_vt.m_eq.q; // Only non-perspective tex coords can be fixed.
-	if (probable_pixel_copy && can_fix_tex_coord && tex->GetScale() == 1.0f && rt->GetScale() == 1.0f)
-	{
-		m_conf.cb_vs.texture_offset.x = x_u_half_aligned ? -8.0f : 0.0f;
-		m_conf.cb_vs.texture_offset.y = y_v_half_aligned ? -8.0f : 0.0f;
-		if (!PRIM->FST)
-		{
-			const float tw = static_cast<float>(1 << m_cached_ctx.TEX0.TW);
-			const float th = static_cast<float>(1 << m_cached_ctx.TEX0.TH);
-			const float q = m_vt.m_min.t.w;
-			m_conf.cb_vs.texture_offset.x *= q / (16.0f * tw);
-			m_conf.cb_vs.texture_offset.y *= q / (16.0f * th);
-		}
-	}
-
-	bool bilinear = m_vt.IsLinear() && !probable_pixel_copy;
+	bool bilinear = m_vt.IsLinear();
 	int trilinear = 0;
 	bool trilinear_auto = false; // Generate mipmaps if needed (basic).
 	switch (GSConfig.TriFilter)
