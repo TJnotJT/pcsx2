@@ -8118,6 +8118,15 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
+	// Sprite splitting/rounding to emulate UV underflow.
+	if (SplitSprites4xAndRound())
+	{
+		for (u32 i = 0; i < m_drawlist.size(); i++)
+		{
+			m_drawlist[i] *= 4;
+		}
+	}
+
 	HandleProvokingVertexFirst();
 
 	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0);
