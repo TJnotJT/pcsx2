@@ -4068,6 +4068,9 @@ bool GSState::SpriteDrawWithoutGaps()
 	return false;
 }
 
+// Emulate UV underflow when UVs fall exactly on texel boundaries (i.e. UVs being rounded down instead of up,
+// likely due to internal precision of GS). Underflow probably impacts triangles and lines also, but this is only
+// implemented for sprites at the moment.
 bool GSState::SplitSprites4xAndRound()
 {
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())

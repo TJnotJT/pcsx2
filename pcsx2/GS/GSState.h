@@ -486,10 +486,6 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
-
-	// Emulate UV underflow when UVs fall exactly on texel boundaries (i.e. UVs being rounded down instead of up,
-	// likely due to internal precision of GS). Underflow probably impacts triangles and lines also, but this is only
-	// implemented for sprites at the moment.
 	bool SplitSprites4xAndRound();
 };
 
