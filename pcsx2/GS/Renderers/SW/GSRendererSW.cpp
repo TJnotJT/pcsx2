@@ -446,6 +446,8 @@ void GSRendererSW::Draw()
 			pxFailRel("Unknown primitive class.");
 			break;
 	}
+
+	SplitSprites4xAndRound();
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
