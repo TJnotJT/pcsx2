@@ -4073,6 +4073,21 @@ bool GSState::SpriteDrawWithoutGaps()
 // implemented for sprites at the moment.
 bool GSState::SplitSprites4xAndRound()
 {
+	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
+	// at pixel centers (at least if we do the math correct interpolation without rounding errors):
+	// - The top-most and/or left-most pixels never seem to have rounding error (since the GS likely rasterizes top-left to bottom-right).
+	// - When the width is not power of 2, the Us other than the left-most seem to round down (when on a texel boundary).
+	// - When the height is not power of 2, the Vs other than the top-most seem to round down (when on a texel boundary).
+	// - If the width and/or height is a power of 2, the UVs always round up (when on a texel boundary).
+	// To emulate this behavior, each sprite is split into 4 new sprites for the top, left, top-left, and bottom-right pixels,
+	// and the UVs are adjusted.
+	
+	// Side node: The reason for this behavior might be due to the GS fixed-point precision for computing gradients,
+	// since power-of-2 and non-power-of-2 denominators have different behavior. However, this pattern only seems to
+	// hold when the width or height is <= 512 pixels. At > 512 pixels, the rounding seems to be sporadically up/down,
+	// suggesting that reciprocals < 1/ 512 are somehow treated differently. Fortunately, a width or height of 640
+	// underflows the UVs, so no changes are needed to the below code (since other widths > 512 are less common).
+
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
 	{
 		while (m_vertex.maxcount < 4 * m_index.tail)
