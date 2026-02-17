@@ -4082,7 +4082,7 @@ bool GSState::SplitSprites4xAndRound()
 	// To emulate this behavior, each sprite is split into 4 new sprites for the top, left, top-left, and bottom-right pixels,
 	// and the UVs are adjusted.
 	
-	// Side node: The reason for this behavior might be due to the GS fixed-point precision for computing gradients,
+	// Side note: The reason for this behavior might be due to the GS fixed-point precision for computing gradients,
 	// since power-of-2 and non-power-of-2 denominators have different behavior. However, this pattern only seems to
 	// hold when the width or height is <= 512 pixels. At > 512 pixels, the rounding seems to be sporadically up/down,
 	// suggesting that reciprocals < 1/ 512 are somehow treated differently. Fortunately, a width or height of 640
@@ -4098,7 +4098,7 @@ bool GSState::SplitSprites4xAndRound()
 		GSVertex* RESTRICT vtx = m_vertex.buff;
 		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
 
-		u32 j = 0; // FIXME: Rename to i_out
+		u32 i_out = 0;
 		for (u32 i = 0; i < m_index.tail; i += 2)
 		{
 			GSVertex v0 = vtx[i + 0];
@@ -4109,6 +4109,7 @@ bool GSState::SplitSprites4xAndRound()
 			v0.FOG = v1.FOG;
 			v0.XYZ.Z = v1.XYZ.Z;
 
+			// Make sure vertices are top-left and bottom-right.
 			if (v0.XYZ.X > v1.XYZ.X)
 			{
 				std::swap(v0.XYZ.X, v1.XYZ.X);
@@ -4121,69 +4122,77 @@ bool GSState::SplitSprites4xAndRound()
 				std::swap(v0.V, v1.V);
 			}
 
-			// FIXME: Cleanup this up. Make a bbox in a single GSVector4i.
-			const GSVector4i x = GSVector4i(v0.XYZ.X - xyof.x, v1.XYZ.X - xyof.x);
-			const GSVector4i u = GSVector4i(v0.U, v1.U);
-			const GSVector4i y = GSVector4i(v0.XYZ.Y - xyof.y, v1.XYZ.Y - xyof.y);
-			const GSVector4i v = GSVector4i(v0.V, v1.V);
+			const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
+			const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
+			const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
+			const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
+			const int U0 = static_cast<int>(v0.U);
+			const int V0 = static_cast<int>(v0.V);
+			const int U1 = static_cast<int>(v1.U);
+			const int V1 = static_cast<int>(v1.V);
 
-			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
+			const int dX = X1 - X0;
+			const int dY = Y1 - Y0;
+			const int dU = U1 - U0;
+			const int dV = V1 - V0;
 
-			const bool int_width_x = (((x.y - x.x) & 0xF) == 0);
-			const bool int_width_y = (((y.y - y.x) & 0xF) == 0);
-			const bool int_scale_x = ((u.y - u.x) % (x.y - x.x)) == 0;
-			const bool int_scale_y = ((v.y - v.x) % (y.y - y.x)) == 0;
-			const int scale_u = (u.y - u.x) / (x.y - x.x);
-			const int scale_v = (v.y - v.x) / (y.y - y.x);
+			const bool int_dx = (dX & 0xF) == 0;
+			const bool int_dy = (dY & 0xF) == 0;
+			const bool int_scale_u = (dU % dX) == 0;
+			const bool int_scale_v = (dV % dY) == 0;
+			const int scale_u = dU / dX;
+			const int scale_v = dV / dY;
 
 			// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-			const bool half_x = int_width_x && int_scale_x && ((u.x + scale_u * (16 - (x.x & 0xF))) & 0xF) == 0;
-			const bool half_y = int_width_y && int_scale_y && ((v.x + scale_v * (16 - (y.x & 0xF))) & 0xF) == 0;
+			const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
+			const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
 
-			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
-			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(y.y - y.x);
+			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
+			
+			// Whether U, V will underflow (round down) at pixel centers in X, Y.
+			const bool underflow_u = half_u && (U1 > U0) && !IsPow2(dX);
+			const bool underflow_v = half_v && (V1 > V0) && !IsPow2(dY);
 
-			// FIXME: Handle upscaling.
-			// FIXME: Make helper functions to organize better.
-
-			// Round up X if on texel boundary
-			if (half_x)
+			// Round up X if on texel boundary (rounding down handled later).
+			if (half_u)
 			{
 				v0.U += 8;
 				v1.U += 8;
 			}
 
-			// Round up Y if on texel boundary
-			if (half_y)
+			// Round up Y if on texel boundary (rounding down handled later).
+			if (half_v)
 			{
 				v0.V += 8;
 				v1.V += 8;
 			}
 
-			GSVertex& vtl0 = vtx_out[j + 0];
-			GSVertex& vtl1 = vtx_out[j + 1];
-			GSVertex& vt0 = vtx_out[j + 2];
-			GSVertex& vt1 = vtx_out[j + 3];
-			GSVertex& vl0 = vtx_out[j + 4];
-			GSVertex& vl1 = vtx_out[j + 5];
-			GSVertex& vbr0 = vtx_out[j + 6];
-			GSVertex& vbr1 = vtx_out[j + 7];
+			// Get references to new vertices.
+			GSVertex& vtl0 = vtx_out[i_out + 0];
+			GSVertex& vtl1 = vtx_out[i_out + 1];
+			GSVertex& vt0 = vtx_out[i_out + 2];
+			GSVertex& vt1 = vtx_out[i_out + 3];
+			GSVertex& vl0 = vtx_out[i_out + 4];
+			GSVertex& vl1 = vtx_out[i_out + 5];
+			GSVertex& vbr0 = vtx_out[i_out + 6];
+			GSVertex& vbr1 = vtx_out[i_out + 7];
 
-			m_index.buff[j + 0] = j + 0;
-			m_index.buff[j + 1] = j + 1;
-			m_index.buff[j + 2] = j + 2;
-			m_index.buff[j + 3] = j + 3;
-			m_index.buff[j + 4] = j + 4;
-			m_index.buff[j + 5] = j + 5;
-			m_index.buff[j + 6] = j + 6;
-			m_index.buff[j + 7] = j + 7;
+			// Indices for sprites are trivial.
+			m_index.buff[i_out + 0] = i_out + 0;
+			m_index.buff[i_out + 1] = i_out + 1;
+			m_index.buff[i_out + 2] = i_out + 2;
+			m_index.buff[i_out + 3] = i_out + 3;
+			m_index.buff[i_out + 4] = i_out + 4;
+			m_index.buff[i_out + 5] = i_out + 5;
+			m_index.buff[i_out + 6] = i_out + 6;
+			m_index.buff[i_out + 7] = i_out + 7;
 
-			j += 8;
+			i_out += 8;
 
 			// Top left pixel. Empty unless splitting both X and Y.
 			vtl0 = v0;
 			vtl1 = v0;
-			if (underflow_x && underflow_y)
+			if (underflow_u && underflow_v)
 			{
 				vtl1.XYZ.X += 16;
 				vtl1.XYZ.Y += 16;
@@ -4196,12 +4205,12 @@ bool GSState::SplitSprites4xAndRound()
 			vl1 = v0;
 			vl1.XYZ.Y = v1.XYZ.Y;
 			vl1.V = v1.V;
-			if (underflow_x)
+			if (underflow_u)
 			{
 				vl1.XYZ.X += 16;
 				vl1.U += 16 * scale_u;
 			}
-			if (underflow_y)
+			if (underflow_v)
 			{
 				vl0.XYZ.Y += 16;
 				vl0.V += 16 * scale_v;
@@ -4212,12 +4221,12 @@ bool GSState::SplitSprites4xAndRound()
 			vt1 = v0;
 			vt1.XYZ.X = v1.XYZ.X;
 			vt1.U = v1.U;
-			if (underflow_y)
+			if (underflow_v)
 			{
 				vt1.XYZ.Y += 16;
 				vt1.V += 16 * scale_v;
 			}
-			if (underflow_x)
+			if (underflow_u)
 			{
 				vt0.XYZ.X += 16;
 				vt0.U += 16 * scale_u;
@@ -4226,19 +4235,19 @@ bool GSState::SplitSprites4xAndRound()
 			// Bottom right rectangle. Whole sprite if not splitting X nor Y.
 			vbr0 = v0;
 			vbr1 = v1;
-			if (underflow_x)
+			if (underflow_u)
 			{
 				vbr0.XYZ.X += 16;
 				vbr0.U += 16 * scale_u;
 			}
-			if (underflow_y)
+			if (underflow_v)
 			{
 				vbr0.XYZ.Y += 16;
 				vbr0.V += 16 * scale_v;
 			}
 
 			// X underflow adjustment.
-			if (underflow_x)
+			if (underflow_u)
 			{
 				vt0.U -= 16;
 				vt1.U -= 16;
@@ -4247,7 +4256,7 @@ bool GSState::SplitSprites4xAndRound()
 			}
 
 			// Y underflow adjustment.
-			if (underflow_y)
+			if (underflow_v)
 			{
 				vl0.V -= 16;
 				vl1.V -= 16;
@@ -4258,7 +4267,7 @@ bool GSState::SplitSprites4xAndRound()
 
 		// Replace old sprites with split spites.
 		std::swap(m_vertex.buff, m_vertex.buff_copy);
-		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
+		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = i_out;
 
 		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
 		{
