@@ -6564,11 +6564,8 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			const int scale_v = (v.y - v.x) / (y.y - y.x);
 
 			// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-			const bool half_x = int_width_x && int_scale_x && ((u.x + scale_u * (16 - (x.x & ~0xF))) & 0xF) == 0;
-			const bool half_y = int_width_y && int_scale_y && ((v.x + scale_v * (16 - (y.x & ~0xF))) & 0xF) == 0;
-
-			//const bool half_x = int_width_x && int_scale_x && (((u.x - x.x) & 0xF) == 0);
-			//const bool half_y = int_width_y && int_scale_y && (((v.x - y.x) & 0xF) == 0);
+			const bool half_x = int_width_x && int_scale_x && ((u.x + scale_u * (16 - (x.x & 0xF))) & 0xF) == 0;
+			const bool half_y = int_width_y && int_scale_y && ((v.x + scale_v * (16 - (y.x & 0xF))) & 0xF) == 0;
 
 			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
 			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(y.y - y.x);
