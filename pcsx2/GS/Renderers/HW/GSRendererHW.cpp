@@ -6536,6 +6536,11 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			GSVertex v0 = vtx[i + 0];
 			GSVertex v1 = vtx[i + 1];
 
+			// Make sure flat attributes are the same.
+			v0.RGBAQ = v1.RGBAQ;
+			v0.FOG = v1.FOG;
+			v0.XYZ.Z = v1.XYZ.Z;
+
 			if (v0.XYZ.X > v1.XYZ.X)
 			{
 				std::swap(v0.XYZ.X, v1.XYZ.X);
