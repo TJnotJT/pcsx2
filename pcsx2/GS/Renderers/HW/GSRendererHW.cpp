@@ -6509,194 +6509,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	                                     complex_wms_wmt || psm.depth || target_region;
 	const bool can_trilinear = !tex->m_palette && !tex->m_target && !m_conf.ps.shuffle;
 	const bool trilinear_manual = need_mipmap && GSConfig.HWMipmap;
-
-	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
-	{
-		// FIXME: Way to do this more cleanly without computing drawlist unnecessarily?
-		ComputeDrawlistGetSize(1.0f);
-		if (!m_drawlist.empty())
-		{
-			for (int i = 0; i < m_drawlist.size(); i++)
-			{
-				m_drawlist[i] *= 4;
-			}
-		}
-
-		while (m_vertex.maxcount < 4 * m_index.tail)
-			GrowVertexBuffer();
-
-		const GSVector4i xyof = m_context->scissor.xyof.xyxy();
-
-		GSVertex* RESTRICT vtx = m_vertex.buff;
-		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
-
-		int j = 0; // FIXME: Rename to i_out
-		for (int i = 0; i < m_index.tail; i += 2)
-		{
-			GSVertex v0 = vtx[i + 0];
-			GSVertex v1 = vtx[i + 1];
-
-			// Make sure flat attributes are the same.
-			v0.RGBAQ = v1.RGBAQ;
-			v0.FOG = v1.FOG;
-			v0.XYZ.Z = v1.XYZ.Z;
-
-			if (v0.XYZ.X > v1.XYZ.X)
-			{
-				std::swap(v0.XYZ.X, v1.XYZ.X);
-				std::swap(v0.U, v1.U);
-			}
-
-			if (v0.XYZ.Y > v1.XYZ.Y)
-			{
-				std::swap(v0.XYZ.Y, v1.XYZ.Y);
-				std::swap(v0.V, v1.V);
-			}
-
-			// FIXME: Cleanup this up. Make a bbox in a single GSVector4i.
-			const GSVector4i x = GSVector4i(v0.XYZ.X - xyof.x, v1.XYZ.X - xyof.x);
-			const GSVector4i u = GSVector4i(v0.U, v1.U);
-			const GSVector4i y = GSVector4i(v0.XYZ.Y - xyof.y, v1.XYZ.Y - xyof.y);
-			const GSVector4i v = GSVector4i(v0.V, v1.V);
-
-			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
-
-			const bool int_width_x = (((x.y - x.x) & 0xF) == 0);
-			const bool int_width_y = (((y.y - y.x) & 0xF) == 0);
-			const bool int_scale_x = ((u.y - u.x) % (x.y - x.x)) == 0;
-			const bool int_scale_y = ((v.y - v.x) % (y.y - y.x)) == 0;
-			const int scale_u = (u.y - u.x) / (x.y - x.x);
-			const int scale_v = (v.y - v.x) / (y.y - y.x);
-
-			// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-			const bool half_x = int_width_x && int_scale_x && ((u.x + scale_u * (16 - (x.x & 0xF))) & 0xF) == 0;
-			const bool half_y = int_width_y && int_scale_y && ((v.x + scale_v * (16 - (y.x & 0xF))) & 0xF) == 0;
-
-			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
-			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(y.y - y.x);
-
-			// FIXME: Handle upscaling.
-			// FIXME: Make helper functions to organize better.
-
-			// Round up X if on texel boundary
-			if (half_x)
-			{
-				v0.U += 8;
-				v1.U += 8;
-			}
-
-			// Round up Y if on texel boundary
-			if (half_y)
-			{
-				v0.V += 8;
-				v1.V += 8;
-			}
-
-			GSVertex& vtl0 = vtx_out[j + 0];
-			GSVertex& vtl1 = vtx_out[j + 1];
-			GSVertex& vt0 = vtx_out[j + 2];
-			GSVertex& vt1 = vtx_out[j + 3];
-			GSVertex& vl0 = vtx_out[j + 4];
-			GSVertex& vl1 = vtx_out[j + 5];
-			GSVertex& vbr0 = vtx_out[j + 6];
-			GSVertex& vbr1 = vtx_out[j + 7];
-
-			m_index.buff[j + 0] = j + 0;
-			m_index.buff[j + 1] = j + 1;
-			m_index.buff[j + 2] = j + 2;
-			m_index.buff[j + 3] = j + 3;
-			m_index.buff[j + 4] = j + 4;
-			m_index.buff[j + 5] = j + 5;
-			m_index.buff[j + 6] = j + 6;
-			m_index.buff[j + 7] = j + 7;
-
-			j += 8;
-
-			// Top left pixel. Empty unless splitting both X and Y.
-			vtl0 = v0;
-			vtl1 = v0;
-			if (underflow_x && underflow_y)
-			{
-				vtl1.XYZ.X += 16;
-				vtl1.XYZ.Y += 16;
-				vtl1.U += 16 * scale_u;
-				vtl1.V += 16 * scale_v;
-			}
-
-			// Left vertical strip. Empty unless splitting X.
-			vl0 = v0;
-			vl1 = v0;
-			vl1.XYZ.Y = v1.XYZ.Y;
-			vl1.V = v1.V;
-			if (underflow_x)
-			{
-				vl1.XYZ.X += 16;
-				vl1.U += 16 * scale_u;
-			}
-			if (underflow_y)
-			{
-				vl0.XYZ.Y += 16;
-				vl0.V += 16 * scale_v;
-			}
-
-			// Top horizontal strip. Empty unless splitting Y.
-			vt0 = v0;
-			vt1 = v0;
-			vt1.XYZ.X = v1.XYZ.X;
-			vt1.U = v1.U;
-			if (underflow_y)
-			{
-				vt1.XYZ.Y += 16;
-				vt1.V += 16 * scale_v;
-			}
-			if (underflow_x)
-			{
-				vt0.XYZ.X += 16;
-				vt0.U += 16 * scale_u;
-			}
-
-			// Bottom right rectangle. Whole sprite if not splitting X nor Y.
-			vbr0 = v0;
-			vbr1 = v1;
-			if (underflow_x)
-			{
-				vbr0.XYZ.X += 16;
-				vbr0.U += 16 * scale_u;
-			}
-			if (underflow_y)
-			{
-				vbr0.XYZ.Y += 16;
-				vbr0.V += 16 * scale_v;
-			}
-
-			// X underflow adjustment.
-			if (underflow_x)
-			{
-				vt0.U -= 16;
-				vt1.U -= 16;
-				vbr0.U -= 16;
-				vbr1.U -= 16;
-			}
-
-			// Y underflow adjustment.
-			if (underflow_y)
-			{
-				vl0.V -= 16;
-				vl1.V -= 16;
-				vbr0.V -= 16;
-				vbr1.V -= 16;
-			}
-		}
-
-		std::swap(m_vertex.buff, m_vertex.buff_copy);
-		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
-
-		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
-		{
-			DumpVertices(GetDrawDumpPath("%05d_vertex_sprite_split.txt", s_n));
-		}
-	}
-
+	
 	bool bilinear = m_vt.IsLinear();
 	int trilinear = 0;
 	bool trilinear_auto = false; // Generate mipmaps if needed (basic).
@@ -8312,6 +8125,14 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		ComputeDrawlistGetSize(rt->m_scale);
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	if (SplitSprites4xAndRound())
+	{
+		for (u32 i = 0; i < m_drawlist.size(); i++)
+		{
+			m_drawlist[i] *= 4;
+		}
 	}
 
 	HandleProvokingVertexFirst();
