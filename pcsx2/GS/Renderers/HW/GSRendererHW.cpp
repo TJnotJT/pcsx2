@@ -6512,8 +6512,20 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 
 	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
 	{
+		// FIXME: Way to do this more cleanly without computing drawlist unnecessarily?
+		ComputeDrawlistGetSize(1.0f);
+		if (!m_drawlist.empty())
+		{
+			for (int i = 0; i < m_drawlist.size(); i++)
+			{
+				m_drawlist[i] *= 4;
+			}
+		}
+
 		while (m_vertex.maxcount < 4 * m_index.tail)
 			GrowVertexBuffer();
+
+		const GSVector4i xyof = m_context->scissor.xyof.xyxy();
 
 		GSVertex* RESTRICT vtx = m_vertex.buff;
 		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
@@ -6536,25 +6548,33 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 				std::swap(v0.V, v1.V);
 			}
 
-			const GSVector4i x = GSVector4i(v0.XYZ.X, v1.XYZ.X);
+			// FIXME: Cleanup this up. Make a bbox in a single GSVector4i.
+			const GSVector4i x = GSVector4i(v0.XYZ.X - xyof.x, v1.XYZ.X - xyof.x);
 			const GSVector4i u = GSVector4i(v0.U, v1.U);
-			const GSVector4i y = GSVector4i(v0.XYZ.Y, v1.XYZ.Y);
+			const GSVector4i y = GSVector4i(v0.XYZ.Y - xyof.y, v1.XYZ.Y - xyof.y);
 			const GSVector4i v = GSVector4i(v0.V, v1.V);
 
 			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 
-			const bool half_x = (((x.y - x.x) & 0xF) == 0) && 
-				((u.y - u.x) % (x.y - x.x) == 0) && (((u.x - x.x) & 0xF) == 0);
-			const bool half_y = (((y.y - y.x) & 0xF) == 0) && 
-				((v.y - v.x) % (y.y - y.x) == 0) && (((v.x - y.x) & 0xF) == 0);
-
-			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
-			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(x.y - x.x);
+			const bool int_width_x = (((x.y - x.x) & 0xF) == 0);
+			const bool int_width_y = (((y.y - y.x) & 0xF) == 0);
+			const bool int_scale_x = ((u.y - u.x) % (x.y - x.x)) == 0;
+			const bool int_scale_y = ((v.y - v.x) % (y.y - y.x)) == 0;
 			const int scale_u = (u.y - u.x) / (x.y - x.x);
 			const int scale_v = (v.y - v.x) / (y.y - y.x);
 
+			// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
+			const bool half_x = int_width_x && int_scale_x && ((u.x + scale_u * (16 - (x.x & ~0xF))) & 0xF) == 0;
+			const bool half_y = int_width_y && int_scale_y && ((v.x + scale_v * (16 - (y.x & ~0xF))) & 0xF) == 0;
+
+			//const bool half_x = int_width_x && int_scale_x && (((u.x - x.x) & 0xF) == 0);
+			//const bool half_y = int_width_y && int_scale_y && (((v.x - y.x) & 0xF) == 0);
+
+			const bool underflow_x = half_x && (u.y > u.x) && !IsPow2(x.y - x.x);
+			const bool underflow_y = half_y && (v.y > v.x) && !IsPow2(y.y - y.x);
+
 			// FIXME: Handle upscaling.
-			// FIXME: Make helper functions to orgnaize better.
+			// FIXME: Make helper functions to organize better.
 
 			// Round up X if on texel boundary
 			if (half_x)
@@ -6590,35 +6610,64 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 
 			j += 8;
 
-			// Top left pixel
+			// Top left pixel. Empty unless splitting both X and Y.
 			vtl0 = v0;
 			vtl1 = v0;
-			vtl1.XYZ.X += 16;
-			vtl1.XYZ.Y += 16;
-			vtl1.U += 16 * scale_u;
-			vtl1.V += 16 * scale_v;
+			if (underflow_x && underflow_y)
+			{
+				vtl1.XYZ.X += 16;
+				vtl1.XYZ.Y += 16;
+				vtl1.U += 16 * scale_u;
+				vtl1.V += 16 * scale_v;
+			}
 
-			// Left vertical strip
-			vl0 = vtl1;
-			vl1 = vtl1;
-			vl0.XYZ.X = v0.XYZ.X;
-			vl0.U = v0.U;
+			// Left vertical strip. Empty unless splitting X.
+			vl0 = v0;
+			vl1 = v0;
 			vl1.XYZ.Y = v1.XYZ.Y;
 			vl1.V = v1.V;
+			if (underflow_x)
+			{
+				vl1.XYZ.X += 16;
+				vl1.U += 16 * scale_u;
+			}
+			if (underflow_y)
+			{
+				vl0.XYZ.Y += 16;
+				vl0.V += 16 * scale_v;
+			}
 
-			// Top horizontal strip
-			vt0 = vtl1;
-			vt1 = vtl1;
-			vt0.XYZ.Y = v0.XYZ.Y;
-			vt0.V = v0.V;
+			// Top horizontal strip. Empty unless splitting Y.
+			vt0 = v0;
+			vt1 = v0;
 			vt1.XYZ.X = v1.XYZ.X;
 			vt1.U = v1.U;
+			if (underflow_y)
+			{
+				vt1.XYZ.Y += 16;
+				vt1.V += 16 * scale_v;
+			}
+			if (underflow_x)
+			{
+				vt0.XYZ.X += 16;
+				vt0.U += 16 * scale_u;
+			}
 
-			// Bottom right rectangle
-			vbr0 = vtl1;
+			// Bottom right rectangle. Whole sprite if not splitting X nor Y.
+			vbr0 = v0;
 			vbr1 = v1;
+			if (underflow_x)
+			{
+				vbr0.XYZ.X += 16;
+				vbr0.U += 16 * scale_u;
+			}
+			if (underflow_y)
+			{
+				vbr0.XYZ.Y += 16;
+				vbr0.V += 16 * scale_v;
+			}
 
-			// X underflow adjustment
+			// X underflow adjustment.
 			if (underflow_x)
 			{
 				vt0.U -= 16;
@@ -6627,7 +6676,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 				vbr1.U -= 16;
 			}
 
-			// Y underflow adjustment
+			// Y underflow adjustment.
 			if (underflow_y)
 			{
 				vl0.V -= 16;
@@ -6640,12 +6689,9 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		std::swap(m_vertex.buff, m_vertex.buff_copy);
 		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = j;
 
-		if (!m_drawlist.empty())
+		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
 		{
-			for (int i = 0; i < m_drawlist.size(); i++)
-			{
-				m_drawlist[i] *= 4;
-			}
+			DumpVertices(GetDrawDumpPath("%05d_vertex_sprite_split.txt", s_n));
 		}
 	}
 
