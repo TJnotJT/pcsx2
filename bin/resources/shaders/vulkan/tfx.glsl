@@ -135,6 +135,11 @@ ProcessedVertex load_vertex(uint index)
 	#if VS_TME
 		vec2 uv = a_uv - TextureOffset;
 		vec2 st = a_st - TextureOffset;
+		
+		#if VS_SPRITE_OFFSET && VS_FST
+			uv -= st; // Use ST as offset 
+		#endif
+
 		vtx.ti.xy = uv * TextureScale;
 
 		#if VS_FST

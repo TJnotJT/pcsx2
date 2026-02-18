@@ -448,7 +448,7 @@ void GSRendererSW::Draw()
 	}
 
 	// Sprite splitting/rounding to emulate UV rounding error on GS.
-	SplitSprites4xAndRound();
+	SplitSprites4xAndRound(1.0f);
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());

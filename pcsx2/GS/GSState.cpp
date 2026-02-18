@@ -4323,7 +4323,7 @@ bool GSState::SpriteDrawWithoutGaps()
 // likely due to internal precision of GS). Rounding error may impact triangles and lines also, but this is only
 // implemented for sprites at the moment.
 // Return true if the sprites were split (and thus vertices were quadrupled), otherwise false.
-bool GSState::SplitSprites4xAndRound()
+bool GSState::SplitSprites4xAndRound(float upscale)
 {
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
 	// at pixel centers (at least if we do mathematically correct interpolation without rounding errors):
@@ -4351,7 +4351,7 @@ bool GSState::SplitSprites4xAndRound()
 		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
 
 		u32 i_out = 0;
-		for (u32 i = 0; i < m_index.tail; i += 2)
+		for (u32 i = 0; i < m_index.tail; i += 2, i_out += 8)
 		{
 			GSVertex v0 = vtx[i + 0];
 			GSVertex v1 = vtx[i + 1];
@@ -4439,8 +4439,6 @@ bool GSState::SplitSprites4xAndRound()
 			m_index.buff[i_out + 6] = i_out + 6;
 			m_index.buff[i_out + 7] = i_out + 7;
 
-			i_out += 8;
-
 			// Top left pixel. Empty unless splitting both X and Y.
 			vtl0 = v0;
 			vtl1 = v0;
@@ -4514,6 +4512,19 @@ bool GSState::SplitSprites4xAndRound()
 				vl1.V -= 16;
 				vbr0.V -= 16;
 				vbr1.V -= 16;
+			}
+
+			// Adjust UVs to be in upscaled pixel center.
+			if (upscale != 1.0f && (half_u || half_v))
+			{
+				const float u_upscale_offset = half_u ? 8.0f * (1.0f - 1.0f / upscale) : 0.0f;
+				const float v_upscale_offset = half_v ? 8.0f * (1.0f - 1.0f / upscale) : 0.0f;
+
+				for (int j = 0; j < 8; j++)
+				{
+					vtx_out[i_out + j].ST.S = u_upscale_offset;
+					vtx_out[i_out + j].ST.T = v_upscale_offset;
+				}
 			}
 		}
 

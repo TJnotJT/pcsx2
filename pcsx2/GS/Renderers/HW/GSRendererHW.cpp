@@ -8120,14 +8120,19 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	// Sprite splitting/rounding to emulate UV rounding error on GS.
 	// Only implemented for native resolution currently.
-	if (GetUpscaleMultiplier() == 1.0f)
+	if (GetUpscaleMultiplier() == 1.0f || 1)
 	{
-		if (SplitSprites4xAndRound())
+		if (SplitSprites4xAndRound(rt->GetScale()))
 		{
 			// Need to adjust drawlist counts since each sprite becomes 4 sprites.
 			for (u32 i = 0; i < m_drawlist.size(); i++)
 			{
 				m_drawlist[i] *= 4;
+			}
+
+			if (rt->GetScale() != 1.0f)
+			{
+				m_conf.vs.sprite_offset = true;
 			}
 		}
 	}

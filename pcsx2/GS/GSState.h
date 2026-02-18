@@ -486,7 +486,7 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
-	bool SplitSprites4xAndRound();
+	bool SplitSprites4xAndRound(float upscale);
 };
 
 // We put this in the header because of Multi-ISA.

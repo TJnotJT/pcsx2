@@ -1381,6 +1381,11 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	VS_OUTPUT lt = vs_main(load_vertex(vid_lt));
 	VS_OUTPUT rb = vs_main(load_vertex(vid_rb));
+
+	#if SPRITE_OFFSET
+		lt.t
+	#endif
+
 	VS_OUTPUT vtx = rb;
 
 	bool is_right = ((vid & 1u) != 0u);
