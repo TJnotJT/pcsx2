@@ -6639,6 +6639,12 @@ void GSRendererHW::SetupROV()
 	                     ((full_barrier && m_conf.ps.IsFeedbackLoopDepth()) ||
 	                     m_conf.alpha_second_pass.enable);
 
+	if (m_rov_preset == 4)
+	{
+		use_rov_color |= m_conf.rt != nullptr;
+		use_rov_depth |= m_conf.ds != nullptr;
+	}
+
 	// In certain cases using a ROV with depth or color will force the other one.
 	// We have to use this twice: once before when deciding whether to use ROV
 	// and later when we commit to using ROV.
