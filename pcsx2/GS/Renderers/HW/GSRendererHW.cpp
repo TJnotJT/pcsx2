@@ -6850,6 +6850,10 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	const GSTextureCache::Source* tex, const TextureMinMaxResult& tmm, GSTextureCache::SourceRegion& source_region,
 	bool& target_region, GSVector2i& unscaled_size, float& scale, GSDevice::RecycledTexture& src_copy)
 {
+	if (s_n == 491)
+	{
+		m_downscale_source = true;
+	}
 
 	const int tex_diff = tex->m_from_target ? static_cast<int>(m_cached_ctx.TEX0.TBP0 - tex->m_from_target->m_TEX0.TBP0) : static_cast<int>(m_cached_ctx.TEX0.TBP0 - tex->m_TEX0.TBP0);
 	const int frame_diff = rt ? static_cast<int>(m_cached_ctx.FRAME.Block() - rt->m_TEX0.TBP0) : 0;
@@ -7084,6 +7088,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		return;
 	}
 
+	if (s_n == 491)
+	{
+		m_downscale_source = true;
+	}
+
 	if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
@@ -7093,6 +7102,22 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
 				src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+		}
+		else if (s_n == 491)
+		{
+			const GSVector4 dRect = GSVector4(src_target->GetUnscaledRect());
+
+			g_gs_device->StretchRect(src_target->m_texture, src_copy.get(), dRect, ShaderConvert::COPY, false);
+
+			GSTexture* tex = g_gs_device->CreateRenderTarget(320, 224, src_target->m_texture->GetFormat(), true, true);
+
+			const GSVector4 dRect2 = GSVector4(0.5f, 0.5f, 320.5f, 224.5f);
+
+			g_gs_device->StretchRect(src_copy.get(), GSVector4(0.5f / 640.0f, 0.5f / 447.0f, 640.5f / 641.0f, 448.5f / 447.0f), tex, dRect2, ShaderConvert::COPY, false);
+
+			g_gs_device->StretchRect(tex, dRect2 / GSVector4(320.0f, 224.0f).xyxy(), src_copy.get(), dRect + GSVector4(0.5f).xxxx(), ShaderConvert::COPY, false);
+
+			g_gs_device->Recycle(tex);
 		}
 		else
 		{
@@ -7108,6 +7133,9 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				copy_rect += GSVector4i(source_region.GetMinX(), source_region.GetMinY()).xyxy();
 			}
 			const GSVector4 dRect = GSVector4((copy_rect + GSVector4i(-1, 1).xxyy()).rintersect(src_target->GetUnscaledRect()));
+
+			g_gs_device->StretchRect(src_target->m_texture, src_copy.get(), dRect, ShaderConvert::COPY, false);
+
 			g_gs_device->FilteredDownsampleTexture(src_target->m_texture, src_copy.get(), downsample_factor, clamp_min, dRect);
 		}
 	}
@@ -9358,6 +9386,7 @@ bool GSRendererHW::TextureCoversWithoutGapsNotEqual()
 
 int GSRendererHW::IsScalingDraw(GSTextureCache::Source* src, bool no_gaps)
 {
+	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Normal;
 	if (GSConfig.UserHacks_NativeScaling == GSNativeScaling::Off)
 		return 0;
 
