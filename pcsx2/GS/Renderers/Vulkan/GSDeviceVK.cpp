@@ -420,7 +420,8 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_line_rasterization = SupportsExtension(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME, false);
 	m_optional_extensions.vk_khr_driver_properties = SupportsExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
-	m_optional_extensions.vk_ext_dynamic_local_read = SupportsExtension(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME, false);
+	m_optional_extensions.vk_khr_dynamic_rendering_local_read =
+		SupportsExtension(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME, false);
 
 	if (m_optional_extensions.vk_swapchain_maintenance1)
 	{
@@ -621,7 +622,8 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		device_info.ppEnabledLayerNames = layer_names;
 	}
 
-	// provoking vertex
+	VkPhysicalDeviceVulkan13Features featuresVK13 = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 	VkPhysicalDeviceProvokingVertexFeaturesEXT provoking_vertex_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT};
 	VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT rasterization_order_access_feature = {
@@ -633,7 +635,12 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 	// VK_EXT_swapchain_maintenance1 types/enums are aliases of VK_KHR_swapchain_maintenance1 types/enums.
 	VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchain_maintenance1_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
+	VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read_features = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR};
 
+	featuresVK13.dynamicRendering = VK_TRUE;
+	featuresVK13.synchronization2 = VK_TRUE;
+	Vulkan::AddPointerToChain(&device_info, &featuresVK13);
 	if (m_optional_extensions.vk_ext_provoking_vertex)
 	{
 		provoking_vertex_feature.provokingVertexLast = VK_TRUE;
@@ -658,6 +665,11 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 	{
 		swapchain_maintenance1_feature.swapchainMaintenance1 = VK_TRUE;
 		Vulkan::AddPointerToChain(&device_info, &swapchain_maintenance1_feature);
+	}
+	if (m_optional_extensions.vk_khr_dynamic_rendering_local_read)
+	{
+		dynamic_rendering_local_read_features.dynamicRenderingLocalRead = VK_TRUE;
+		Vulkan::AddPointerToChain(&device_info, &dynamic_rendering_local_read_features);
 	}
 
 	VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
@@ -731,7 +743,7 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR, nullptr, VK_TRUE};
 	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT};
-	VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_local_read_features = {
+	VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read_features = {
 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR };
 
 	// Vulkan 1.3 features
@@ -758,9 +770,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		(rasterization_order_access_feature.rasterizationOrderColorAttachmentAccess == VK_TRUE);
 	m_optional_extensions.vk_ext_attachment_feedback_loop_layout &=
 		(attachment_feedback_loop_feature.attachmentFeedbackLoopLayout == VK_TRUE);
-	m_optional_extensions.vk_ext_dynamic_local_read &=
-		(dynamic_local_read_features.dynamicRenderingLocalRead == VK_TRUE);
-
+	m_optional_extensions.vk_khr_dynamic_rendering_local_read &=
+		(dynamic_rendering_local_read_features.dynamicRenderingLocalRead == VK_TRUE);
 	m_optional_extensions.vk_dynamic_rendering = (featuresVK13.dynamicRendering == VK_TRUE);
 	m_optional_extensions.vk_synchronization2 = (featuresVK13.synchronization2 == VK_TRUE);
 
@@ -847,6 +858,12 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		m_optional_extensions.vk_khr_driver_properties ? "supported" : "NOT supported");
 	Console.WriteLn("VK_EXT_attachment_feedback_loop_layout is %s",
 		m_optional_extensions.vk_ext_attachment_feedback_loop_layout ? "supported" : "NOT supported");
+	Console.WriteLn("VK_dynamic_rendering is %s",
+		m_optional_extensions.vk_dynamic_rendering ? "supported" : "NOT supported");
+	Console.WriteLn("VK_synchronization2 is %s",
+		m_optional_extensions.vk_synchronization2 ? "supported" : "NOT supported");
+	Console.WriteLn("VK_KHR_dynamic_rendering_local_read is %s",
+		m_optional_extensions.vk_khr_dynamic_rendering_local_read ? "supported" : "NOT supported");
 
 	return true;
 }
