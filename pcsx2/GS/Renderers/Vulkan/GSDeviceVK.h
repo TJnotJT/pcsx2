@@ -31,6 +31,7 @@ public:
 	enum : u32
 	{
 		NUM_COMMAND_BUFFERS = 3,
+		MAX_COLOR_ATTACHMENTS = 2,
 	};
 
 	struct OptionalExtensions
@@ -46,6 +47,195 @@ public:
 		bool vk_khr_driver_properties : 1;
 		bool vk_khr_shader_non_semantic_info : 1;
 		bool vk_ext_attachment_feedback_loop_layout : 1;
+	};
+
+	class RenderPass
+	{
+	private:
+		friend class GSDeviceVK;
+		static std::map<u64, VkRenderPass> render_pass_cache;
+
+		union
+		{
+			struct
+			{
+				u64 color_format0 : 8;
+				u64 color_format1 : 8;
+				u64 depth_format : 8;
+				u64 color_load_op0 : 2;
+				u64 color_load_op1 : 2;
+				u64 color_store_op0 : 4;
+				u64 color_store_op1 : 4;
+				u64 depth_load_op : 2;
+				u64 depth_store_op : 1;
+				u64 stencil_load_op : 2;
+				u64 stencil_store_op : 1;
+				u64 color_feedback_loop : 1;
+				u64 depth_sampling : 1;
+				u64 num_color_attachments : 2;
+			};
+
+			u64 key;
+		} key = { {0} };
+
+	public:
+		RenderPass() // Null
+		{
+		}
+
+		RenderPass(VkFormat color_format, VkFormat depth_format,
+			VkAttachmentLoadOp color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
+			VkAttachmentStoreOp color_store_op = VK_ATTACHMENT_STORE_OP_STORE,
+			VkAttachmentLoadOp depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
+			VkAttachmentStoreOp depth_store_op = VK_ATTACHMENT_STORE_OP_STORE,
+			VkAttachmentLoadOp stencil_load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			VkAttachmentStoreOp stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			bool color_feedback_loop = false, bool depth_sampling = false)
+		{
+			this->key.color_format0 = color_format;
+			this->key.color_format1 = VK_FORMAT_UNDEFINED;
+			this->key.depth_format = depth_format;
+			this->key.color_load_op0 = color_load_op;
+			this->key.color_load_op1 = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			this->key.color_store_op0 = color_store_op;
+			this->key.color_store_op1 = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			this->key.depth_load_op = depth_load_op;
+			this->key.stencil_load_op = stencil_load_op;
+			this->key.stencil_store_op = stencil_store_op;
+			this->key.color_feedback_loop = color_feedback_loop;
+			this->key.depth_sampling = depth_sampling;
+			this->key.num_color_attachments = 1;
+		}
+
+		bool IsNull() const
+		{
+			return key.key == 0;
+		}
+
+		VkRenderPass GetRenderPassVK();
+
+		bool operator!=(const RenderPass& other) const
+		{
+			return key.key != other.key.key;
+		}
+
+		bool operator==(const RenderPass& other) const
+		{
+			return key.key == other.key.key;
+		}
+
+		VkAttachmentLoadOp GetColorLoadOp(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkAttachmentLoadOp>(i == 0 ? key.color_load_op0 : key.color_load_op1);
+		}
+
+		VkAttachmentStoreOp GetColorStoreOp(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkAttachmentStoreOp>(i == 0 ? key.color_store_op0 : key.color_store_op1);
+		}
+
+		VkFormat GetColorFormat(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkFormat>(i == 0 ? key.color_format0 : key.color_format1);
+		}
+
+		void SetColorLoadOp(u32 i, VkAttachmentLoadOp op)
+		{
+			switch (i)
+			{
+				case 0:
+					key.color_load_op0 = op;
+					break;
+				case 1:
+					key.color_load_op1 = op;
+					break;
+				default:
+					pxFail("Bad index");
+			}
+		}
+
+		void SetColorStoreOp(u32 i, VkAttachmentStoreOp op)
+		{
+			switch (i)
+			{
+				case 0:
+					key.color_store_op0 = op;
+					break;
+				case 1:
+					key.color_store_op1 = op;
+					break;
+				default:
+					pxFail("Bad index");
+			}
+		}
+
+		void SetColorFormat(u32 i, VkFormat fmt)
+		{
+			switch (i)
+			{
+				case 0:
+					key.color_format0 = fmt;
+					break;
+				case 1:
+					key.color_format1 = fmt;
+					break;
+				default:
+					pxFail("Bad index");
+			}
+		}
+
+		VkAttachmentLoadOp GetDepthLoadOp() const
+		{
+			return static_cast<VkAttachmentLoadOp>(key.depth_load_op);
+		}
+
+		void SetDepthLoadOp(VkAttachmentLoadOp op)
+		{
+			key.depth_load_op = op;
+		}
+
+		VkFormat GetDepthFormat() const
+		{
+			return static_cast<VkFormat>(key.depth_format);
+		}
+
+		void SetDepthFormat(VkFormat fmt)
+		{
+			key.depth_format = fmt;
+		}
+
+		VkAttachmentLoadOp GetStencilLoadOp() const
+		{
+			return static_cast<VkAttachmentLoadOp>(key.stencil_load_op);
+		}
+
+		void SetStencilLoadOp(VkAttachmentLoadOp op)
+		{
+			key.stencil_load_op = op;
+		}
+
+		bool GetColorFeedbackLoop() const
+		{
+			return key.color_feedback_loop;
+		}
+
+		void SetColorFeedbackLoop(bool fbl)
+		{
+			key.color_feedback_loop = fbl;
+		}
+
+		bool GetDepthSampling() const
+		{
+			return key.depth_sampling;
+		}
+
+		void SetDepthSampling(bool samp)
+		{
+			key.depth_sampling = samp;
+		}
 	};
 
 	// Global state accessors
@@ -82,7 +272,7 @@ public:
 	__fi bool IsDeviceAMD() const { return (m_device_properties.vendorID == 0x1002); }
 
 	// Creates a simple render pass.
-	VkRenderPass GetRenderPass(VkFormat color_format, VkFormat depth_format,
+	RenderPass GetRenderPass(VkFormat color_format, VkFormat depth_format,
 		VkAttachmentLoadOp color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
 		VkAttachmentStoreOp color_store_op = VK_ATTACHMENT_STORE_OP_STORE,
 		VkAttachmentLoadOp depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
@@ -92,7 +282,7 @@ public:
 		bool depth_sampling = false);
 
 	// Gets a non-clearing version of the specified render pass. Slow, don't call in hot path.
-	VkRenderPass GetRenderPassForRestarting(VkRenderPass pass);
+	RenderPass GetRenderPassForRestarting(const RenderPass& pass);
 
 	// These command buffers are allocated per-frame. They are valid until the command buffer
 	// is submitted, after that you should call these functions again.
@@ -159,25 +349,6 @@ private:
 	bool AllocatePreinitializedGPUBuffer(u32 size, VkBuffer* gpu_buffer, VmaAllocation* gpu_allocation,
 		VkBufferUsageFlags gpu_usage, const std::function<void(void*)>& fill_callback);
 
-	union RenderPassCacheKey
-	{
-		struct
-		{
-			u32 color_format : 8;
-			u32 depth_format : 8;
-			u32 color_load_op : 2;
-			u32 color_store_op : 1;
-			u32 depth_load_op : 2;
-			u32 depth_store_op : 1;
-			u32 stencil_load_op : 2;
-			u32 stencil_store_op : 1;
-			u32 color_feedback_loop : 1;
-			u32 depth_sampling : 1;
-		};
-
-		u32 key;
-	};
-
 	using ExtensionList = std::vector<const char*>;
 	static bool SelectInstanceExtensions(ExtensionList* extension_list, const WindowInfo& wi, OptionalExtensions* oe,
 		bool enable_debug_utils);
@@ -189,8 +360,6 @@ private:
 	bool CreateAllocator();
 	bool CreateCommandBuffers();
 	bool CreateGlobalDescriptorPool();
-
-	VkRenderPass CreateCachedRenderPass(RenderPassCacheKey key);
 
 	void CommandBufferCompleted(u32 index);
 	void ActivateCommandBuffer(u32 index);
@@ -279,8 +448,6 @@ private:
 	u32 m_current_frame = 0;
 
 	bool m_last_submit_failed = false;
-
-	std::map<u32, VkRenderPass> m_render_pass_cache;
 
 	VkDebugUtilsMessengerEXT m_debug_messenger_callback = VK_NULL_HANDLE;
 
@@ -397,7 +564,7 @@ private:
 	std::array<VkPipeline, NUM_INTERLACE_SHADERS> m_interlace{};
 	VkPipeline m_colclip_setup_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkPipeline m_colclip_finish_pipelines[2][2] = {}; // [depth][feedback_loop]
-	VkRenderPass m_date_image_setup_render_passes[2][2] = {}; // [depth][clear]
+	RenderPass m_date_image_setup_render_passes[2][2] = {}; // [depth][clear]
 	VkPipeline m_date_image_setup_pipelines[2][4] = {}; // [depth][datm]
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
@@ -407,16 +574,16 @@ private:
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
-	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
-	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
-	VkRenderPass m_utility_color_render_pass_discard = VK_NULL_HANDLE;
-	VkRenderPass m_utility_depth_render_pass_load = VK_NULL_HANDLE;
-	VkRenderPass m_utility_depth_render_pass_clear = VK_NULL_HANDLE;
-	VkRenderPass m_utility_depth_render_pass_discard = VK_NULL_HANDLE;
-	VkRenderPass m_date_setup_render_pass = VK_NULL_HANDLE;
-	VkRenderPass m_swap_chain_render_pass = VK_NULL_HANDLE;
+	RenderPass m_utility_color_render_pass_load;
+	RenderPass m_utility_color_render_pass_clear;
+	RenderPass m_utility_color_render_pass_discard;
+	RenderPass m_utility_depth_render_pass_load;
+	RenderPass m_utility_depth_render_pass_clear;
+	RenderPass m_utility_depth_render_pass_discard;
+	RenderPass m_date_setup_render_pass;
+	RenderPass m_swap_chain_render_pass;
 
-	VkRenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
+	RenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
 
 	VkDescriptorSetLayout m_cas_ds_layout = VK_NULL_HANDLE;
 	VkPipelineLayout m_cas_pipeline_layout = VK_NULL_HANDLE;
@@ -491,7 +658,7 @@ public:
 	/// Returns true if Vulkan is suitable as a default for the devices in the system.
 	static bool IsSuitableDefaultRenderer();
 
-	__fi VkRenderPass GetTFXRenderPass(bool rt, bool ds, bool colclip, bool stencil, bool fbl, bool dsp,
+	__fi RenderPass GetTFXRenderPass(bool rt, bool ds, bool colclip, bool stencil, bool fbl, bool dsp,
 		VkAttachmentLoadOp rt_op, VkAttachmentLoadOp ds_op) const
 	{
 		return m_tfx_render_pass[rt][ds][colclip][stencil][fbl][dsp][rt_op][ds_op];
@@ -610,10 +777,10 @@ public:
 	// When Bind() is next called, the pass will be restarted.
 	// Calling this function is allowed even if a pass has not begun.
 	bool InRenderPass();
-	void BeginRenderPass(VkRenderPass rp, const GSVector4i& rect);
-	void BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count);
-	void BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, u32 clear_color);
-	void BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, float depth, u8 stencil);
+	void BeginRenderPass(const RenderPass& rp, const GSVector4i& rect);
+	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count);
+	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, u32 clear_color);
+	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, float depth, u8 stencil);
 	void EndRenderPass();
 
 	void SetViewport(const VkViewport& viewport);
@@ -674,7 +841,7 @@ private:
 	GSTextureVK* m_current_render_target = nullptr;
 	GSTextureVK* m_current_depth_target = nullptr;
 	VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE;
-	VkRenderPass m_current_render_pass = VK_NULL_HANDLE;
+	RenderPass m_current_render_pass;
 	GSVector4i m_current_render_pass_area = GSVector4i::zero();
 
 	GSVector4i m_scissor = GSVector4i::zero();
