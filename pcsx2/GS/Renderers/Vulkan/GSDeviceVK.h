@@ -70,7 +70,8 @@ public:
 	__fi bool UseFeedbackLoopLayout() const
 	{
 		return (m_optional_extensions.vk_ext_attachment_feedback_loop_layout &&
-				!m_optional_extensions.vk_ext_rasterization_order_attachment_access);
+			!m_optional_extensions.vk_ext_rasterization_order_attachment_access &&
+			!(m_optional_extensions.vk_dynamic_rendering && m_optional_extensions.vk_khr_dynamic_rendering_local_read));
 	}
 
 	__fi bool UseDynamicRendering() const
@@ -82,6 +83,8 @@ public:
 	{
 		return m_optional_extensions.vk_synchronization2;
 	}
+
+	void SetPipelineRenderPass(const RenderPass& rp, Vulkan::GraphicsPipelineBuilder& gpb);
 
 	// Helpers for getting constants
 	__fi u32 GetBufferCopyOffsetAlignment() const
@@ -610,6 +613,7 @@ public:
 	// Calling this function is allowed even if a pass has not begun.
 	bool InRenderPass();
 	void BeginRenderPass(const RenderPass& rp, const GSVector4i& rect);
+	void BeginDynamicRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv = nullptr, u32 cv_count = 0);
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count);
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, u32 clear_color);
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, float depth, u8 stencil);

@@ -3714,6 +3714,18 @@ static void SetPipelineProvokingVertex(const GSDevice::FeatureSupport& features,
 		gpb.SetProvokingVertex(VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
 }
 
+__fi void GSDeviceVK::SetPipelineRenderPass(const RenderPass& rp, Vulkan::GraphicsPipelineBuilder& gpb)
+{
+	if (UseDynamicRendering())
+	{
+		gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
+	}
+	else
+	{
+		gpb.SetRenderPass(GetRenderPassVK(rp), 0);
+	}
+}
+
 VkShaderModule GSDeviceVK::GetUtilityVertexShader(const std::string& source, const char* replace_main = nullptr)
 {
 	std::stringstream ss;
@@ -3964,18 +3976,6 @@ bool GSDeviceVK::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(vs);
 
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
-
 	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		const bool depth = HasDepthOutput(i);
@@ -4016,7 +4016,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		if (rp.IsNull())
 			return false;
 
-		SetRenderPass(gpb, rp);
+		SetPipelineRenderPass(rp, gpb);
 
 		if (IsDATMConvertShader(i))
 		{
@@ -4049,7 +4049,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		if (i == ShaderConvert::COPY)
 		{
 			// compile color copy pipelines
-			SetRenderPass(gpb, m_utility_color_render_pass_discard);
+			SetPipelineRenderPass(m_utility_color_render_pass_discard, gpb);
 			for (u32 j = 0; j < 16; j++)
 			{
 				pxAssert(!m_color_copy[j]);
@@ -4066,7 +4066,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		}
 		else if (i == ShaderConvert::RTA_CORRECTION)
 		{
-			SetRenderPass(gpb, m_utility_color_render_pass_discard);
+			SetPipelineRenderPass(m_utility_color_render_pass_discard, gpb);
 			for (u32 j = 16; j < 32; j++)
 			{
 				pxAssert(!m_color_copy[j]);
@@ -4092,8 +4092,8 @@ bool GSDeviceVK::CompileConvertPipelines()
 				{
 					pxAssert(!arr[ds][fbl]);
 
-					SetRenderPass(gpb, GetTFXRenderPass(true, ds != 0, is_setup, false, fbl != 0, false,
-						VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE));
+					SetPipelineRenderPass(GetTFXRenderPass(true, ds != 0, is_setup, false, fbl != 0, false,
+						VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE), gpb);
 					arr[ds][fbl] = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
 					if (!arr[ds][fbl])
 						return false;
@@ -4138,7 +4138,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 		for (u32 ds = 0; ds < 2; ds++)
 		{
-			SetRenderPass(gpb, m_date_image_setup_render_passes[ds][0]);
+			SetPipelineRenderPass(m_date_image_setup_render_passes[ds][0], gpb);
 			m_date_image_setup_pipelines[ds][datm] =
 				gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
 			if (!m_date_image_setup_pipelines[ds][datm])
@@ -4173,17 +4173,6 @@ bool GSDeviceVK::CompilePresentPipelines()
 	ScopedGuard vs_guard([this, &vs]() { vkDestroyShaderModule(m_device, vs, nullptr); });
 
 	Vulkan::GraphicsPipelineBuilder gpb;
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
 
 	SetPipelineProvokingVertex(m_features, gpb);
 	AddUtilityVertexAttributes(gpb);
@@ -4196,7 +4185,7 @@ bool GSDeviceVK::CompilePresentPipelines()
 	gpb.SetVertexShader(vs);
 	gpb.SetDepthState(false, false, VK_COMPARE_OP_ALWAYS);
 	gpb.SetNoStencilState();
-	SetRenderPass(gpb, m_swap_chain_render_pass);
+	SetPipelineRenderPass(m_swap_chain_render_pass, gpb);
 
 	for (PresentShader i = PresentShader::COPY; i < PresentShader::Count; i = static_cast<PresentShader>(static_cast<int>(i) + 1))
 	{
@@ -4240,17 +4229,6 @@ bool GSDeviceVK::CompileInterlacePipelines()
 	ScopedGuard vs_guard([this, &vs]() { vkDestroyShaderModule(m_device, vs, nullptr); });
 
 	Vulkan::GraphicsPipelineBuilder gpb;
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
 	SetPipelineProvokingVertex(m_features, gpb);
 	AddUtilityVertexAttributes(gpb);
 	gpb.SetPipelineLayout(m_utility_pipeline_layout);
@@ -4260,7 +4238,7 @@ bool GSDeviceVK::CompileInterlacePipelines()
 	gpb.SetNoCullRasterizationState();
 	gpb.SetNoDepthTestState();
 	gpb.SetNoBlendingState();
-	SetRenderPass(gpb, rp);
+	SetPipelineRenderPass(rp, gpb);
 	gpb.SetVertexShader(vs);
 
 	for (int i = 0; i < static_cast<int>(m_interlace.size()); i++)
@@ -4302,17 +4280,6 @@ bool GSDeviceVK::CompileMergePipelines()
 	ScopedGuard vs_guard([this, &vs]() { vkDestroyShaderModule(m_device, vs, nullptr); });
 
 	Vulkan::GraphicsPipelineBuilder gpb;
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
 	SetPipelineProvokingVertex(m_features, gpb);
 	AddUtilityVertexAttributes(gpb);
 	gpb.SetPipelineLayout(m_utility_pipeline_layout);
@@ -4321,7 +4288,7 @@ bool GSDeviceVK::CompileMergePipelines()
 	gpb.AddDynamicState(VK_DYNAMIC_STATE_LINE_WIDTH);
 	gpb.SetNoCullRasterizationState();
 	gpb.SetNoDepthTestState();
-	SetRenderPass(gpb, rp);
+	SetPipelineRenderPass(rp, gpb);
 	gpb.SetVertexShader(vs);
 
 	for (int i = 0; i < static_cast<int>(m_merge.size()); i++)
@@ -4353,17 +4320,6 @@ bool GSDeviceVK::CompilePostProcessingPipelines()
 		return false;
 
 	Vulkan::GraphicsPipelineBuilder gpb;
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
 	SetPipelineProvokingVertex(m_features, gpb);
 	AddUtilityVertexAttributes(gpb);
 	gpb.SetPipelineLayout(m_utility_pipeline_layout);
@@ -4373,7 +4329,7 @@ bool GSDeviceVK::CompilePostProcessingPipelines()
 	gpb.SetNoCullRasterizationState();
 	gpb.SetNoDepthTestState();
 	gpb.SetNoBlendingState();
-	SetRenderPass(gpb, rp);
+	SetPipelineRenderPass(rp, gpb);
 
 	{
 		const std::optional<std::string> vshader = ReadShaderSource("shaders/vulkan/convert.glsl");
@@ -4511,20 +4467,9 @@ bool GSDeviceVK::CompileImGuiPipeline()
 	ScopedGuard ps_guard([this, &ps]() { vkDestroyShaderModule(m_device, ps, nullptr); });
 
 	Vulkan::GraphicsPipelineBuilder gpb;
-	// FIXME: Duplicated code with CreateTFXPipeline()
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
 	SetPipelineProvokingVertex(m_features, gpb);
 	gpb.SetPipelineLayout(m_utility_pipeline_layout);
-	SetRenderPass(gpb, m_swap_chain_render_pass);
+	SetPipelineRenderPass(m_swap_chain_render_pass, gpb);
 	gpb.AddVertexBuffer(0, sizeof(ImDrawVert), VK_VERTEX_INPUT_RATE_VERTEX);
 	gpb.AddVertexAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, pos));
 	gpb.AddVertexAttribute(1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(ImDrawVert, uv));
@@ -4941,30 +4886,19 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	Vulkan::GraphicsPipelineBuilder gpb;
 	SetPipelineProvokingVertex(m_features, gpb);
 
-	const auto SetRenderPass = [this](Vulkan::GraphicsPipelineBuilder& gpb, const RenderPass& rp) {
-		if (UseDynamicRendering())
-		{
-			gpb.SetDynamicRenderPass(rp, m_features.stencil_buffer);
-		}
-		else
-		{
-			gpb.SetRenderPass(GetRenderPassVK(rp), 0);
-		}
-	};
-
 	// Common state
 	gpb.SetPipelineLayout(m_tfx_pipeline_layout);
 	if (IsDATEModePrimIDInit(p.ps.date))
 	{
 		// DATE image prepass
-		SetRenderPass(gpb, m_date_image_setup_render_passes[p.ds][0]);
+		SetPipelineRenderPass(m_date_image_setup_render_passes[p.ds][0], gpb);
 	}
 	else
 	{
-		SetRenderPass(gpb, GetTFXRenderPass(p.rt, p.ds, p.ps.colclip_hw, p.dss.date,
+		SetPipelineRenderPass(GetTFXRenderPass(p.rt, p.ds, p.ps.colclip_hw, p.dss.date,
 				p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
 				p.rt ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-				p.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE));
+				p.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE), gpb);
 	}
 	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
 	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
@@ -5337,51 +5271,12 @@ void GSDeviceVK::BeginRenderPass(const RenderPass& rp, const GSVector4i& rect)
 	if (!m_current_render_pass.IsNull())
 		EndRenderPass();
 
-	static int i = 0;
-	Console.Warning("%d", i++);
-
 	m_current_render_pass = rp;
 	m_current_render_pass_area = rect;
 
 	if (UseDynamicRendering())
 	{
-		std::array<VkRenderingAttachmentInfo, MAX_COLOR_ATTACHMENTS> color;
-
-		for (u32 i = 0; i < rp.GetColorAttachmentCount(); i++)
-		{
-			color[i] = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_render_target->GetView(),
-				m_current_render_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-				rp.GetColorLoadOp(i), rp.GetColorStoreOp(i), {} };
-		}
-
-		VkRenderingAttachmentInfo depth{};
-		VkRenderingAttachmentInfo stencil{};
-
-		VkRenderingAttachmentInfo* depth_ptr = nullptr;
-		VkRenderingAttachmentInfo* stencil_ptr = nullptr;
-
-		if (rp.GetDepthAttachmentCount())
-		{
-			depth = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
-			m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-			rp.GetDepthLoadOp(), rp.GetDepthStoreOp(), {} };
-			depth_ptr = &depth;
-
-			if (m_features.stencil_buffer)
-			{
-				stencil = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
-					m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-					rp.GetStencilLoadOp(), rp.GetStencilStoreOp(), {} };
-				stencil_ptr = &stencil;
-			}
-		}
-
-		const VkRenderingInfo begin_info = { VK_STRUCTURE_TYPE_RENDERING_INFO, nullptr, static_cast<VkRenderingFlags>(0),
-			{{rect.x, rect.y}, {static_cast<u32>(rect.width()), static_cast<u32>(rect.height())}},
-			1, 0, rp.GetColorAttachmentCount(), color.data(), depth_ptr, stencil_ptr };
-
-		m_command_buffer_render_passes++;
-		vkCmdBeginRendering(GetCurrentCommandBuffer(), &begin_info);
+		BeginDynamicRenderPass(rp, rect);
 	}
 	else
 	{
@@ -5395,6 +5290,50 @@ void GSDeviceVK::BeginRenderPass(const RenderPass& rp, const GSVector4i& rect)
 	}
 }
 
+void GSDeviceVK::BeginDynamicRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count)
+{
+	std::array<VkRenderingAttachmentInfo, MAX_COLOR_ATTACHMENTS> color;
+
+	u32 i = 0;
+	for (i = 0; i < rp.GetColorAttachmentCount(); i++)
+	{
+		color[i] = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_render_target->GetView(),
+			m_current_render_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
+			rp.GetColorLoadOp(i), rp.GetColorStoreOp(i), (cv && i < cv_count) ? cv[i] : VkClearValue{} };
+	}
+
+	VkRenderingAttachmentInfo depth{};
+	VkRenderingAttachmentInfo stencil{};
+
+	VkRenderingAttachmentInfo* depth_ptr = nullptr;
+	VkRenderingAttachmentInfo* stencil_ptr = nullptr;
+
+	if (rp.GetDepthAttachmentCount())
+	{
+		depth = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
+		m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
+		rp.GetDepthLoadOp(), rp.GetDepthStoreOp(), (cv && i < cv_count) ? cv[i] : VkClearValue{} };
+		depth_ptr = &depth;
+
+		if (m_features.stencil_buffer)
+		{
+			stencil = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
+				m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
+				rp.GetStencilLoadOp(), rp.GetStencilStoreOp(), (cv && i < cv_count) ? cv[i] : VkClearValue{} };
+			stencil_ptr = &stencil;
+		}
+
+		i++;
+	}
+
+	const VkRenderingInfo begin_info = { VK_STRUCTURE_TYPE_RENDERING_INFO, nullptr, static_cast<VkRenderingFlags>(0),
+		{{rect.x, rect.y}, {static_cast<u32>(rect.width()), static_cast<u32>(rect.height())}},
+		1, 0, rp.GetColorAttachmentCount(), color.data(), depth_ptr, stencil_ptr };
+
+	m_command_buffer_render_passes++;
+	vkCmdBeginRendering(GetCurrentCommandBuffer(), &begin_info);
+}
+
 void GSDeviceVK::BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count)
 {
 	if (!m_current_render_pass.IsNull())
@@ -5405,47 +5344,7 @@ void GSDeviceVK::BeginClearRenderPass(const RenderPass& rp, const GSVector4i& re
 
 	if (UseDynamicRendering())
 	{
-		// FIXME: Duplicated code with BeginRenderPass()
-		std::array<VkRenderingAttachmentInfo, MAX_COLOR_ATTACHMENTS> color;
-
-		u32 i = 0;
-		for (i = 0; i < rp.GetColorAttachmentCount(); i++)
-		{
-			color[i] = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_render_target->GetView(),
-				m_current_render_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-				rp.GetColorLoadOp(i), rp.GetColorStoreOp(i), cv[i] };
-		}
-
-		VkRenderingAttachmentInfo depth{};
-		VkRenderingAttachmentInfo stencil{};
-
-		VkRenderingAttachmentInfo* depth_ptr = nullptr;
-		VkRenderingAttachmentInfo* stencil_ptr = nullptr;
-
-		if (rp.GetDepthAttachmentCount())
-		{
-			depth = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
-			m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-			rp.GetDepthLoadOp(), rp.GetDepthStoreOp(), cv[i] };
-			depth_ptr = &depth;
-
-			if (m_features.stencil_buffer)
-			{
-				stencil = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, nullptr, m_current_depth_target->GetView(),
-					m_current_depth_target->GetVkLayout(), VK_RESOLVE_MODE_NONE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
-					rp.GetStencilLoadOp(), rp.GetStencilStoreOp(), cv[i] };
-				stencil_ptr = &stencil;
-			}
-
-			i++;
-		}
-
-		const VkRenderingInfo begin_info = { VK_STRUCTURE_TYPE_RENDERING_INFO, nullptr, static_cast<VkRenderingFlags>(0),
-			{{rect.x, rect.y}, {static_cast<u32>(rect.width()), static_cast<u32>(rect.height())}},
-			1, 0, rp.GetColorAttachmentCount(), color.data(), depth_ptr, stencil_ptr };
-
-		m_command_buffer_render_passes++;
-		vkCmdBeginRendering(GetCurrentCommandBuffer(), &begin_info);
+		BeginDynamicRenderPass(rp, rect, cv, cv_count);
 	}
 	else
 	{
@@ -5473,14 +5372,10 @@ void GSDeviceVK::BeginClearRenderPass(const RenderPass& rp, const GSVector4i& re
 	BeginClearRenderPass(rp, rect, &cv, 1);
 }
 
-// FIXME: Code duplicated with BeginRenderPass
 void GSDeviceVK::BeginPresentRenderPass(const RenderPass& rp, const GSVector4i& rect, GSTextureVK* tex)
 {
 	if (!m_current_render_pass.IsNull())
 		EndRenderPass();
-
-	static int i = 0;
-	Console.Warning("%d", i++);
 
 	if (UseDynamicRendering())
 	{
@@ -5489,7 +5384,7 @@ void GSDeviceVK::BeginPresentRenderPass(const RenderPass& rp, const GSVector4i& 
 			rp.GetColorLoadOp(0), rp.GetColorStoreOp(0), s_present_clear_color };
 
 		const VkRenderingInfo begin_info = { VK_STRUCTURE_TYPE_RENDERING_INFO, nullptr, static_cast<VkRenderingFlags>(0),
-			{{rect.x, rect.y}, {static_cast<u32>(rect.width()), static_cast<u32>(rect.height())}},
+			{{rect.x, rect.y}, {static_cast<u32>(rect.width()), static_cast<u32>(rect.height())} },
 			1, 0, 1, &color, nullptr, nullptr };
 
 		m_command_buffer_render_passes++;
