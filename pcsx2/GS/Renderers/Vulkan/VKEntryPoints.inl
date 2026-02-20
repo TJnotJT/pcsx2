@@ -226,6 +226,12 @@ VULKAN_DEVICE_ENTRY_POINT(vkBindImageMemory2, true)
 // Vulkan 1.3 functions.
 VULKAN_DEVICE_ENTRY_POINT(vkGetDeviceBufferMemoryRequirements, false)
 VULKAN_DEVICE_ENTRY_POINT(vkGetDeviceImageMemoryRequirements, false)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdBeginRendering, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdEndRendering, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdPipelineBarrier2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCreateRenderPass2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdBeginRenderPass2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdEndRenderPass2, true)
 
 #ifdef _WIN32
 VULKAN_DEVICE_ENTRY_POINT(vkAcquireFullScreenExclusiveModeEXT, false)

@@ -31,6 +31,11 @@ public:
 		Count
 	};
 
+	static VkImageLayout GetVkImageLayout(GSTextureVK::Layout layout);
+
+	static VkImageMemoryBarrier2 CreateBarrier(VkImageAspectFlags aspect, Layout old_layout, Layout new_layout,
+		VkImage image = VK_NULL_HANDLE, u32 base_mip_level = 0, u32 num_mip_levels = 1);
+
 	~GSTextureVK() override;
 
 	static std::unique_ptr<GSTextureVK> Create(Usage usage, Format format, int width, int height, int levels);
