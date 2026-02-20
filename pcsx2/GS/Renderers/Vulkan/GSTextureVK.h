@@ -20,9 +20,12 @@ public:
 		DepthStencilAttachment,
 		ShaderReadOnly,
 		ClearDst,
-		TransferSrc,
-		TransferDst,
-		TransferSelf,
+		CopySrc,
+		CopyDst,
+		CopySelf,
+		BlitSrc,
+		BlitDst,
+		BlitSelf,
 		PresentSrc,
 		FeedbackLoop,
 		ReadWriteImage,
@@ -30,6 +33,10 @@ public:
 		General,
 		Count
 	};
+
+	static VkImageLayout GetVkImageLayout(GSTextureVK::Layout layout);
+
+	static VkMemoryBarrier2 GetBarrierFlags(Layout old_layout, Layout new_layout, bool color);
 
 	~GSTextureVK() override;
 
