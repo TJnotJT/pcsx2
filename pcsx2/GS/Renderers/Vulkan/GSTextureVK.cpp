@@ -13,18 +13,18 @@
 
 VkFramebuffer GSTextureVK::CreateNullFramebuffer(u32 w, u32 h)
 {
-	const VkRenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
+	const GSDeviceVK::RenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
 		VK_FORMAT_UNDEFINED,
 		VK_FORMAT_UNDEFINED,
 		VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 		VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, false, false);
 
-	if (!rp)
+	if (rp.IsNull())
 		return VK_NULL_HANDLE;
 	
 	Vulkan::FramebufferBuilder fbb;
 	fbb.SetSize(w, h, 1);
-	fbb.SetRenderPass(rp);
+	fbb.SetRenderPass(GSDeviceVK::GetInstance()->GetRenderPassVK(rp));
 
 	return fbb.Create(GSDeviceVK::GetInstance()->GetDevice());
 }
@@ -807,12 +807,13 @@ VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool
 			return fb;
 	}
 
-	const VkRenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
+	GSDeviceVK::RenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
 		!IsDepthStencil() ? m_vk_format : VK_FORMAT_UNDEFINED,
 		!IsDepthStencil() ? (depth_texture ? depth_texture->m_vk_format : VK_FORMAT_UNDEFINED) : m_vk_format,
 		VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_LOAD,
-		VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, feedback_loop_color, feedback_loop_depth);
-	if (!rp)
+		VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+		feedback_loop_color, feedback_loop_depth);
+	if (rp.IsNull())
 		return VK_NULL_HANDLE;
 
 	Vulkan::FramebufferBuilder fbb;
@@ -820,7 +821,7 @@ VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool
 	if (depth_texture)
 		fbb.AddAttachment(depth_texture->m_view);
 	fbb.SetSize(m_size.x, m_size.y, 1);
-	fbb.SetRenderPass(rp);
+	fbb.SetRenderPass(GSDeviceVK::GetInstance()->GetRenderPassVK(rp));
 
 	VkFramebuffer fb = fbb.Create(GSDeviceVK::GetInstance()->GetDevice());
 	if (!fb)
