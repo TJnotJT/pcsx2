@@ -8,6 +8,7 @@
 #include "GS/Renderers/Vulkan/GSTextureVK.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
+#include "GS/Renderers/Vulkan/VKBuilders.h"
 
 #include "common/HashCombine.h"
 #include "common/ReadbackSpinManager.h"
@@ -52,194 +53,8 @@ public:
 		bool vk_khr_dynamic_rendering_local_read : 1;
 	};
 
-	class RenderPass
-	{
-	private:
-		friend class GSDeviceVK;
-		static std::map<u64, VkRenderPass> render_pass_cache;
-
-		union
-		{
-			struct
-			{
-				u64 color_format0 : 8;
-				u64 color_format1 : 8;
-				u64 depth_format : 8;
-				u64 color_load_op0 : 2;
-				u64 color_load_op1 : 2;
-				u64 color_store_op0 : 4;
-				u64 color_store_op1 : 4;
-				u64 depth_load_op : 2;
-				u64 depth_store_op : 1;
-				u64 stencil_load_op : 2;
-				u64 stencil_store_op : 1;
-				u64 color_feedback_loop : 1;
-				u64 depth_sampling : 1;
-				u64 num_color_attachments : 2;
-			};
-
-			u64 key;
-		} key = { {0} };
-
-	public:
-		RenderPass() // Null
-		{
-		}
-
-		RenderPass(VkFormat color_format, VkFormat depth_format,
-			VkAttachmentLoadOp color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
-			VkAttachmentStoreOp color_store_op = VK_ATTACHMENT_STORE_OP_STORE,
-			VkAttachmentLoadOp depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
-			VkAttachmentStoreOp depth_store_op = VK_ATTACHMENT_STORE_OP_STORE,
-			VkAttachmentLoadOp stencil_load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-			VkAttachmentStoreOp stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			bool color_feedback_loop = false, bool depth_sampling = false)
-		{
-			this->key.color_format0 = color_format;
-			this->key.color_format1 = VK_FORMAT_UNDEFINED;
-			this->key.depth_format = depth_format;
-			this->key.color_load_op0 = color_load_op;
-			this->key.color_load_op1 = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-			this->key.color_store_op0 = color_store_op;
-			this->key.color_store_op1 = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			this->key.depth_load_op = depth_load_op;
-			this->key.stencil_load_op = stencil_load_op;
-			this->key.stencil_store_op = stencil_store_op;
-			this->key.color_feedback_loop = color_feedback_loop;
-			this->key.depth_sampling = depth_sampling;
-			this->key.num_color_attachments = 1;
-		}
-
-		bool IsNull() const
-		{
-			return key.key == 0;
-		}
-
-		VkRenderPass GetRenderPassVK();
-
-		bool operator!=(const RenderPass& other) const
-		{
-			return key.key != other.key.key;
-		}
-
-		bool operator==(const RenderPass& other) const
-		{
-			return key.key == other.key.key;
-		}
-
-		VkAttachmentLoadOp GetColorLoadOp(u32 i)  const
-		{
-			pxAssert(i < MAX_COLOR_ATTACHMENTS);
-			return static_cast<VkAttachmentLoadOp>(i == 0 ? key.color_load_op0 : key.color_load_op1);
-		}
-
-		VkAttachmentStoreOp GetColorStoreOp(u32 i)  const
-		{
-			pxAssert(i < MAX_COLOR_ATTACHMENTS);
-			return static_cast<VkAttachmentStoreOp>(i == 0 ? key.color_store_op0 : key.color_store_op1);
-		}
-
-		VkFormat GetColorFormat(u32 i)  const
-		{
-			pxAssert(i < MAX_COLOR_ATTACHMENTS);
-			return static_cast<VkFormat>(i == 0 ? key.color_format0 : key.color_format1);
-		}
-
-		void SetColorLoadOp(u32 i, VkAttachmentLoadOp op)
-		{
-			switch (i)
-			{
-				case 0:
-					key.color_load_op0 = op;
-					break;
-				case 1:
-					key.color_load_op1 = op;
-					break;
-				default:
-					pxFail("Bad index");
-			}
-		}
-
-		void SetColorStoreOp(u32 i, VkAttachmentStoreOp op)
-		{
-			switch (i)
-			{
-				case 0:
-					key.color_store_op0 = op;
-					break;
-				case 1:
-					key.color_store_op1 = op;
-					break;
-				default:
-					pxFail("Bad index");
-			}
-		}
-
-		void SetColorFormat(u32 i, VkFormat fmt)
-		{
-			switch (i)
-			{
-				case 0:
-					key.color_format0 = fmt;
-					break;
-				case 1:
-					key.color_format1 = fmt;
-					break;
-				default:
-					pxFail("Bad index");
-			}
-		}
-
-		VkAttachmentLoadOp GetDepthLoadOp() const
-		{
-			return static_cast<VkAttachmentLoadOp>(key.depth_load_op);
-		}
-
-		void SetDepthLoadOp(VkAttachmentLoadOp op)
-		{
-			key.depth_load_op = op;
-		}
-
-		VkFormat GetDepthFormat() const
-		{
-			return static_cast<VkFormat>(key.depth_format);
-		}
-
-		void SetDepthFormat(VkFormat fmt)
-		{
-			key.depth_format = fmt;
-		}
-
-		VkAttachmentLoadOp GetStencilLoadOp() const
-		{
-			return static_cast<VkAttachmentLoadOp>(key.stencil_load_op);
-		}
-
-		void SetStencilLoadOp(VkAttachmentLoadOp op)
-		{
-			key.stencil_load_op = op;
-		}
-
-		bool GetColorFeedbackLoop() const
-		{
-			return key.color_feedback_loop;
-		}
-
-		void SetColorFeedbackLoop(bool fbl)
-		{
-			key.color_feedback_loop = fbl;
-		}
-
-		bool GetDepthSampling() const
-		{
-			return key.depth_sampling;
-		}
-
-		void SetDepthSampling(bool samp)
-		{
-			key.depth_sampling = samp;
-		}
-	};
+	using RenderPass = Vulkan::RenderPass;
+	VkRenderPass GetRenderPassVK(const RenderPass& rp);
 
 	// Global state accessors
 	__fi VkInstance GetVulkanInstance() const { return m_instance; }
@@ -256,6 +71,16 @@ public:
 	{
 		return (m_optional_extensions.vk_ext_attachment_feedback_loop_layout &&
 				!m_optional_extensions.vk_ext_rasterization_order_attachment_access);
+	}
+
+	__fi bool UseDynamicRendering() const
+	{
+		return m_optional_extensions.vk_dynamic_rendering;
+	}
+
+	__fi bool UseSynchronization2() const
+	{
+		return m_optional_extensions.vk_synchronization2;
 	}
 
 	// Helpers for getting constants
@@ -407,6 +232,8 @@ private:
 	VkPhysicalDevice m_physical_device = VK_NULL_HANDLE;
 	VkDevice m_device = VK_NULL_HANDLE;
 	VmaAllocator m_allocator = VK_NULL_HANDLE;
+
+	std::map<u64, VkRenderPass> m_render_pass_cache;
 
 	VkCommandBuffer m_current_command_buffer = VK_NULL_HANDLE;
 
@@ -733,6 +560,8 @@ public:
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None);
+	void OMSetDynamicRenderingTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
+		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
@@ -784,7 +613,9 @@ public:
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count);
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, u32 clear_color);
 	void BeginClearRenderPass(const RenderPass& rp, const GSVector4i& rect, float depth, u8 stencil);
+	void BeginPresentRenderPass(const RenderPass& rp, const GSVector4i& rect, GSTextureVK* tex);
 	void EndRenderPass();
+	void EndPresentRenderPass();
 
 	void SetViewport(const VkViewport& viewport);
 	void SetScissor(const GSVector4i& scissor);
@@ -843,7 +674,8 @@ private:
 
 	GSTextureVK* m_current_render_target = nullptr;
 	GSTextureVK* m_current_depth_target = nullptr;
-	VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE;
+	VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE; // Use with render passes.
+	VkRenderingInfo m_current_rendering; // Use with dynamic rendering.
 	RenderPass m_current_render_pass;
 	GSVector4i m_current_render_pass_area = GSVector4i::zero();
 

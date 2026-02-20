@@ -765,7 +765,7 @@ VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool
 	if (depth_texture)
 		fbb.AddAttachment(depth_texture->m_view);
 	fbb.SetSize(m_size.x, m_size.y, 1);
-	fbb.SetRenderPass(rp.GetRenderPassVK());
+	fbb.SetRenderPass(GSDeviceVK::GetInstance()->GetRenderPassVK(rp));
 
 	VkFramebuffer fb = fbb.Create(GSDeviceVK::GetInstance()->GetDevice());
 	if (!fb)
