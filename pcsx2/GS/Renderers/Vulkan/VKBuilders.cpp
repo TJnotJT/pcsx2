@@ -3,7 +3,6 @@
 
 #include "GS/Renderers/Vulkan/VKBuilders.h"
 
-#include "common/Assertions.h"
 #include "common/Console.h"
 
 #include <limits>
@@ -562,6 +561,22 @@ void Vulkan::GraphicsPipelineBuilder::SetRenderPass(VkRenderPass render_pass, u3
 {
 	m_ci.renderPass = render_pass;
 	m_ci.subpass = subpass;
+	m_rendering_info = {};
+}
+
+void Vulkan::GraphicsPipelineBuilder::SetDynamicRenderPass(const RenderPass& render_pass, bool stencil)
+{
+	m_ci.renderPass = VK_NULL_HANDLE;
+	m_ci.subpass = 0;
+
+	for (u32 i = 0; i < render_pass.GetColorAttachmentCount(); i++)
+	{
+		m_color_formats[i] = render_pass.GetColorFormat(i);
+	}
+	m_rendering_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, nullptr, 0, render_pass.GetColorAttachmentCount(),
+		m_color_formats.data(), render_pass.GetDepthFormat(), stencil ? render_pass.GetDepthFormat() : VK_FORMAT_UNDEFINED };
+
+	AddPointerToChain(&m_ci, &m_rendering_info);
 }
 
 void Vulkan::GraphicsPipelineBuilder::SetProvokingVertex(VkProvokingVertexModeEXT mode)
@@ -950,96 +965,6 @@ void Vulkan::FramebufferBuilder::SetSize(u32 width, u32 height, u32 layers)
 void Vulkan::FramebufferBuilder::SetRenderPass(VkRenderPass render_pass)
 {
 	m_ci.renderPass = render_pass;
-}
-
-Vulkan::RenderPassBuilder::RenderPassBuilder()
-{
-	Clear();
-}
-
-void Vulkan::RenderPassBuilder::Clear()
-{
-	m_ci = {};
-	m_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	m_attachments = {};
-	m_attachment_references = {};
-	m_num_attachment_references = 0;
-	m_subpasses = {};
-}
-
-VkRenderPass Vulkan::RenderPassBuilder::Create(VkDevice device, bool clear /*= true*/)
-{
-	VkRenderPass rp;
-	VkResult res = vkCreateRenderPass(device, &m_ci, nullptr, &rp);
-	if (res != VK_SUCCESS)
-	{
-		LOG_VULKAN_ERROR(res, "vkCreateRenderPass() failed: ");
-		return VK_NULL_HANDLE;
-	}
-
-	return rp;
-}
-
-u32 Vulkan::RenderPassBuilder::AddAttachment(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp load_op,
-	VkAttachmentStoreOp store_op, VkImageLayout initial_layout, VkImageLayout final_layout)
-{
-	pxAssert(m_ci.attachmentCount < MAX_ATTACHMENTS);
-
-	const u32 index = m_ci.attachmentCount;
-	VkAttachmentDescription& ad = m_attachments[index];
-	ad.format = format;
-	ad.samples = samples;
-	ad.loadOp = load_op;
-	ad.storeOp = store_op;
-	ad.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	ad.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	ad.initialLayout = initial_layout;
-	ad.finalLayout = final_layout;
-
-	m_ci.attachmentCount++;
-	m_ci.pAttachments = m_attachments.data();
-
-	return index;
-}
-
-u32 Vulkan::RenderPassBuilder::AddSubpass()
-{
-	pxAssert(m_ci.subpassCount < MAX_SUBPASSES);
-
-	const u32 index = m_ci.subpassCount;
-	VkSubpassDescription& sp = m_subpasses[index];
-	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-
-	m_ci.subpassCount++;
-	m_ci.pSubpasses = m_subpasses.data();
-
-	return index;
-}
-
-void Vulkan::RenderPassBuilder::AddSubpassColorAttachment(u32 subpass, u32 attachment, VkImageLayout layout)
-{
-	pxAssert(subpass < m_ci.subpassCount && m_num_attachment_references < MAX_ATTACHMENT_REFERENCES);
-
-	VkAttachmentReference& ar = m_attachment_references[m_num_attachment_references++];
-	ar.attachment = attachment;
-	ar.layout = layout;
-
-	VkSubpassDescription& sp = m_subpasses[subpass];
-	if (sp.colorAttachmentCount == 0)
-		sp.pColorAttachments = &ar;
-	sp.colorAttachmentCount++;
-}
-
-void Vulkan::RenderPassBuilder::AddSubpassDepthAttachment(u32 subpass, u32 attachment, VkImageLayout layout)
-{
-	pxAssert(subpass < m_ci.subpassCount && m_num_attachment_references < MAX_ATTACHMENT_REFERENCES);
-
-	VkAttachmentReference& ar = m_attachment_references[m_num_attachment_references++];
-	ar.attachment = attachment;
-	ar.layout = layout;
-
-	VkSubpassDescription& sp = m_subpasses[subpass];
-	sp.pDepthStencilAttachment = &ar;
 }
 
 Vulkan::BufferViewBuilder::BufferViewBuilder()

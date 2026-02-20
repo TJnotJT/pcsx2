@@ -5,6 +5,7 @@
 
 #include "GS/Renderers/Vulkan/VKLoader.h"
 
+#include "common/Assertions.h"
 #include "common/StringUtil.h"
 
 #include <array>
@@ -24,6 +25,227 @@ namespace Vulkan
 
 	const char* VkResultToString(VkResult res);
 	void LogVulkanResult(const char* func_name, VkResult res, const char* msg, ...);
+
+	class RenderPass
+	{
+	private:
+		union
+		{
+			struct
+			{
+				u64 color_format0 : 8;
+				u64 color_format1 : 8;
+				u64 depth_format : 8;
+				u64 color_load_op0 : 2;
+				u64 color_load_op1 : 2;
+				u64 color_store_op0 : 4;
+				u64 color_store_op1 : 4;
+				u64 depth_load_op : 2;
+				u64 depth_store_op : 1;
+				u64 stencil_load_op : 2;
+				u64 stencil_store_op : 1;
+				u64 color_feedback_loop : 1;
+				u64 depth_sampling : 1;
+			};
+
+			u64 key;
+		} key = { {0} };
+
+	public:
+		static constexpr u32 MAX_COLOR_ATTACHMENTS = 2;
+
+		RenderPass() // Null
+		{
+		}
+
+		RenderPass(VkFormat color_format, VkFormat depth_format,
+			VkAttachmentLoadOp color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
+			VkAttachmentStoreOp color_store_op = VK_ATTACHMENT_STORE_OP_STORE,
+			VkAttachmentLoadOp depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
+			VkAttachmentStoreOp depth_store_op = VK_ATTACHMENT_STORE_OP_STORE,
+			VkAttachmentLoadOp stencil_load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			VkAttachmentStoreOp stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			bool color_feedback_loop = false, bool depth_sampling = false)
+		{
+			this->key.color_format0 = color_format;
+			this->key.color_format1 = VK_FORMAT_UNDEFINED;
+			this->key.depth_format = depth_format;
+			this->key.color_load_op0 = color_load_op;
+			this->key.color_load_op1 = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			this->key.color_store_op0 = color_store_op;
+			this->key.color_store_op1 = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			this->key.depth_load_op = depth_load_op;
+			this->key.stencil_load_op = stencil_load_op;
+			this->key.stencil_store_op = stencil_store_op;
+			this->key.color_feedback_loop = color_feedback_loop;
+			this->key.depth_sampling = depth_sampling;
+		}
+
+		bool IsNull() const
+		{
+			return key.key == 0;
+		}
+
+		u64 GetKey() const
+		{
+			return key.key;
+		}
+
+		bool operator!=(const RenderPass& other) const
+		{
+			return key.key != other.key.key;
+		}
+
+		bool operator==(const RenderPass& other) const
+		{
+			return key.key == other.key.key;
+		}
+
+		VkAttachmentLoadOp GetColorLoadOp(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkAttachmentLoadOp>(i == 0 ? key.color_load_op0 : key.color_load_op1);
+		}
+
+		VkAttachmentStoreOp GetColorStoreOp(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkAttachmentStoreOp>(i == 0 ? key.color_store_op0 : key.color_store_op1);
+		}
+
+		VkFormat GetColorFormat(u32 i)  const
+		{
+			pxAssert(i < MAX_COLOR_ATTACHMENTS);
+			return static_cast<VkFormat>(i == 0 ? key.color_format0 : key.color_format1);
+		}
+
+		void SetColorLoadOp(u32 i, VkAttachmentLoadOp op)
+		{
+			switch (i)
+			{
+			case 0:
+				key.color_load_op0 = op;
+				break;
+			case 1:
+				key.color_load_op1 = op;
+				break;
+			default:
+				pxFail("Bad index");
+			}
+		}
+
+		void SetColorStoreOp(u32 i, VkAttachmentStoreOp op)
+		{
+			switch (i)
+			{
+			case 0:
+				key.color_store_op0 = op;
+				break;
+			case 1:
+				key.color_store_op1 = op;
+				break;
+			default:
+				pxFail("Bad index");
+			}
+		}
+
+		void SetColorFormat(u32 i, VkFormat fmt)
+		{
+			switch (i)
+			{
+			case 0:
+				key.color_format0 = fmt;
+				break;
+			case 1:
+				key.color_format1 = fmt;
+				break;
+			default:
+				pxFail("Bad index");
+			}
+		}
+
+		VkAttachmentLoadOp GetDepthLoadOp() const
+		{
+			return static_cast<VkAttachmentLoadOp>(key.depth_load_op);
+		}
+
+		void SetDepthLoadOp(VkAttachmentLoadOp op)
+		{
+			key.depth_load_op = op;
+		}
+
+		VkAttachmentStoreOp GetDepthStoreOp() const
+		{
+			return static_cast<VkAttachmentStoreOp>(key.depth_store_op);
+		}
+
+		void SetDepthStoreOp(VkAttachmentStoreOp op)
+		{
+			key.depth_store_op = op;
+		}
+
+		VkFormat GetDepthFormat() const
+		{
+			return static_cast<VkFormat>(key.depth_format);
+		}
+
+		void SetDepthFormat(VkFormat fmt)
+		{
+			key.depth_format = fmt;
+		}
+
+		VkAttachmentLoadOp GetStencilLoadOp() const
+		{
+			return static_cast<VkAttachmentLoadOp>(key.stencil_load_op);
+		}
+
+		void SetStencilLoadOp(VkAttachmentLoadOp op)
+		{
+			key.stencil_load_op = op;
+		}
+
+		VkAttachmentStoreOp GetStencilStoreOp() const
+		{
+			return static_cast<VkAttachmentStoreOp>(key.stencil_store_op);
+		}
+
+		void SetStencilStoreOp(VkAttachmentStoreOp op)
+		{
+			key.stencil_store_op = op;
+		}
+
+		bool GetColorFeedbackLoop() const
+		{
+			return key.color_feedback_loop;
+		}
+
+		void SetColorFeedbackLoop(bool fbl)
+		{
+			key.color_feedback_loop = fbl;
+		}
+
+		bool GetDepthSampling() const
+		{
+			return key.depth_sampling;
+		}
+
+		void SetDepthSampling(bool samp)
+		{
+			key.depth_sampling = samp;
+		}
+
+		u32 GetColorAttachmentCount() const
+		{
+			return key.color_format0 == VK_FORMAT_UNDEFINED ? 0
+				: key.color_format1 == VK_FORMAT_UNDEFINED ? 1
+				: 2;
+		}
+
+		u32 GetDepthAttachmentCount() const
+		{
+			return key.depth_format == VK_FORMAT_UNDEFINED ? 0 : 1;
+		}
+	};
 
 	class DescriptorSetLayoutBuilder
 	{
@@ -138,6 +360,7 @@ namespace Vulkan
 
 		void SetPipelineLayout(VkPipelineLayout layout);
 		void SetRenderPass(VkRenderPass render_pass, u32 subpass);
+		void SetDynamicRenderPass(const RenderPass& render_pass, bool stencil);
 
 		void SetProvokingVertex(VkProvokingVertexModeEXT mode);
 
@@ -168,6 +391,11 @@ namespace Vulkan
 
 		VkPipelineRasterizationProvokingVertexStateCreateInfoEXT m_provoking_vertex;
 		VkPipelineRasterizationLineStateCreateInfoEXT m_line_rasterization_state;
+
+		// For dynamic rendering.
+		std::array<VkFormat, RenderPass::MAX_COLOR_ATTACHMENTS> m_color_formats;
+		VkPipelineRenderingCreateInfo m_rendering_info;
+		bool m_dynamic_rendering = false;
 	};
 
 	class ComputePipelineBuilder
@@ -291,37 +519,6 @@ namespace Vulkan
 	private:
 		VkFramebufferCreateInfo m_ci;
 		std::array<VkImageView, MAX_ATTACHMENTS> m_images;
-	};
-
-	class RenderPassBuilder
-	{
-		enum : u32
-		{
-			MAX_ATTACHMENTS = 2,
-			MAX_ATTACHMENT_REFERENCES = 2,
-			MAX_SUBPASSES = 1,
-		};
-
-	public:
-		RenderPassBuilder();
-
-		void Clear();
-
-		VkRenderPass Create(VkDevice device, bool clear = true);
-
-		u32 AddAttachment(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp load_op,
-			VkAttachmentStoreOp store_op, VkImageLayout initial_layout, VkImageLayout final_layout);
-
-		u32 AddSubpass();
-		void AddSubpassColorAttachment(u32 subpass, u32 attachment, VkImageLayout layout);
-		void AddSubpassDepthAttachment(u32 subpass, u32 attachment, VkImageLayout layout);
-
-	private:
-		VkRenderPassCreateInfo m_ci;
-		std::array<VkAttachmentDescription, MAX_ATTACHMENTS> m_attachments;
-		std::array<VkAttachmentReference, MAX_ATTACHMENT_REFERENCES> m_attachment_references;
-		u32 m_num_attachment_references = 0;
-		std::array<VkSubpassDescription, MAX_SUBPASSES> m_subpasses;
 	};
 
 	class BufferViewBuilder
