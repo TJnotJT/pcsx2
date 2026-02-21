@@ -4523,6 +4523,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const int dU = U1 - U0;
 		const int dV = V1 - V0;
 
+		const bool int_x0 = (X0 & 0xF) == 0;
+		const bool int_y0 = (Y0 & 0xF) == 0;
 		const bool int_dx = (dX & 0xF) == 0;
 		const bool int_dy = (dY & 0xF) == 0;
 		const bool int_scale_u = (dU % dX) == 0;
@@ -4537,10 +4539,18 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		changed |= (half_u || half_v);
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
-			
+		
+		// For triangles, the power-of-two condition seems to apply only when both dX and dY are powers to two.
+		const bool pow2_x = (primclass == GS_TRIANGLE_CLASS) ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
+		const bool pow2_y = (primclass == GS_TRIANGLE_CLASS) ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
+
 		// Whether U, V will round down at pixel centers in X, Y.
-		const bool round_down_u = half_u && (U1 > U0) && !IsPow2(dX);
-		const bool round_down_v = half_v && (V1 > V0) && !IsPow2(dY);
+		const bool round_down_u = half_u && (U1 > U0) && !pow2_x;
+		const bool round_down_v = half_v && (V1 > V0) && !pow2_y;
+
+		// Whether to split the primitive so that the top- and left-most pixels are rounded differently.
+		const bool split_x = round_down_u && int_x0;
+		const bool split_y = round_down_v && int_y0;
 
 		// Round up X if on texel boundary (rounding down handled later).
 		if (half_u)
@@ -4570,7 +4580,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		// Top left pixel. Empty unless splitting both X and Y.
 		vtl0 = v0;
 		vtl1 = v0;
-		if (round_down_u && round_down_v)
+		if (split_x && split_y)
 		{
 			vtl1.XYZ.X += 16;
 			vtl1.XYZ.Y += 16;
@@ -4583,12 +4593,12 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		vl1 = v0;
 		vl1.XYZ.Y = v1.XYZ.Y;
 		vl1.V = v1.V;
-		if (round_down_u)
+		if (split_x)
 		{
 			vl1.XYZ.X += 16;
 			vl1.U += 16 * scale_u;
 		}
-		if (round_down_v)
+		if (split_y)
 		{
 			vl0.XYZ.Y += 16;
 			vl0.V += 16 * scale_v;
@@ -4599,12 +4609,12 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		vt1 = v0;
 		vt1.XYZ.X = v1.XYZ.X;
 		vt1.U = v1.U;
-		if (round_down_v)
+		if (split_y)
 		{
 			vt1.XYZ.Y += 16;
 			vt1.V += 16 * scale_v;
 		}
-		if (round_down_u)
+		if (split_x)
 		{
 			vt0.XYZ.X += 16;
 			vt0.U += 16 * scale_u;
@@ -4613,18 +4623,18 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		// Bottom right rectangle. Whole sprite if not splitting X nor Y.
 		vbr0 = v0;
 		vbr1 = v1;
-		if (round_down_u)
+		if (split_x)
 		{
 			vbr0.XYZ.X += 16;
 			vbr0.U += 16 * scale_u;
 		}
-		if (round_down_v)
+		if (split_y)
 		{
 			vbr0.XYZ.Y += 16;
 			vbr0.V += 16 * scale_v;
 		}
 
-		// Round down X if needed.
+		// Round down U if needed.
 		if (round_down_u)
 		{
 			vt0.U -= 16;
@@ -4633,7 +4643,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			vbr1.U -= 16;
 		}
 
-		// Round down Y if needed.
+		// Round down V if needed.
 		if (round_down_v)
 		{
 			vl0.V -= 16;
