@@ -4548,6 +4548,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const bool round_down_u = half_u && (U1 > U0) && !pow2_x;
 		const bool round_down_v = half_v && (V1 > V0) && !pow2_y;
 
+		// FIXME: Currently broken if we try to round down U0 == 0 or V0 == 0!!
+
 		// Whether to split the primitive so that the top- and left-most pixels are rounded differently.
 		const bool split_x = round_down_u && int_x0;
 		const bool split_y = round_down_v && int_y0;
