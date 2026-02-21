@@ -4323,7 +4323,8 @@ bool GSState::SpriteDrawWithoutGaps()
 // likely due to internal precision of GS). Rounding error may impact triangles and lines also, but this is only
 // implemented for sprites at the moment.
 // Return true if the sprites were split (and thus vertices were quadrupled), otherwise false.
-bool GSState::SplitSprites4xAndRound()
+template<u32 primclass>
+bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 {
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
 	// at pixel centers (at least if we do mathematically correct interpolation without rounding errors):
@@ -4340,196 +4341,299 @@ bool GSState::SplitSprites4xAndRound()
 	// suggesting that reciprocals < 1/ 512 are somehow treated differently. Fortunately, a width or height of 640
 	// rounds down the UVs, so no changes are needed to the below code (640 is likely the most common size > 512).
 
-	if (m_vt.m_primclass == GS_SPRITE_CLASS && PRIM->FST && !m_vt.IsRealLinear())
+	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
+
+	// Only applies to UVs and point-sampled draws.
+	if (!PRIM->FST || m_vt.IsRealLinear())
+		return false;
+
+	// How many vertices for each old quad.
+	constexpr u32 n = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
+
+	// Number of vertices for each new quad.
+	constexpr u32 n_out = primclass == GS_TRIANGLE_CLASS ? 4 : 2;
+	
+	const bool iip = PRIM->IIP;
+
+	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
+
+	GSVertex* RESTRICT vtx = m_vertex.buff;
+	u16* RESTRICT index = m_index.buff;
+	GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
+
+	// Corners of right-angle corners for triangles forming quads.
+	std::vector<u32> tri_quad_corners;
+
+	// Need an axis-aligned quad check for triangles.
+	if (primclass == GS_TRIANGLE_CLASS && !(m_quad_check_valid && m_are_quads))
 	{
-		while (m_vertex.maxcount < 4 * m_index.tail)
-			GrowVertexBuffer();
+		if (m_index.tail % 6 != 0)
+			return false;
+	
+		// Make sure the used attributes are flat.
+		const bool using_z = !m_context->ZBUF.ZMSK || (m_context->TEST.ZTST != ZTST_ALWAYS);
+		if ((using_z && !m_vt.m_eq.z) || (PRIM->FGE && !m_vt.m_eq.f) || !m_vt.m_eq.rgba)
+			return false;
 
-		const GSVector4i xyof = m_context->scissor.xyof.xyxy();
-
-		GSVertex* RESTRICT vtx = m_vertex.buff;
-		GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
-
-		u32 i_out = 0;
-		for (u32 i = 0; i < m_index.tail; i += 2, i_out += 8)
+		for (u32 i = 0; i < m_index.tail; i += 6)
 		{
-			GSVertex v0 = vtx[i + 0];
-			GSVertex v1 = vtx[i + 1];
+			const u16* idx0 = index + i + 0;
+			const u16* idx1 = index + i + 3;
 
-			// Make sure flat attributes are the same.
-			v0.RGBAQ = v1.RGBAQ;
-			v0.FOG = v1.FOG;
-			v0.XYZ.Z = v1.XYZ.Z;
+			TriangleOrdering tri0, tri1;
 
-			// Make sure vertices are top-left and bottom-right.
-			if (v0.XYZ.X > v1.XYZ.X)
-			{
-				std::swap(v0.XYZ.X, v1.XYZ.X);
-				std::swap(v0.U, v1.U);
-			}
+			if (!AreTrianglesQuad<1, 1>(vtx, idx0, idx1, &tri0, &tri1))
+				return false;
 
-			if (v0.XYZ.Y > v1.XYZ.Y)
-			{
-				std::swap(v0.XYZ.Y, v1.XYZ.Y);
-				std::swap(v0.V, v1.V);
-			}
+			// Save only the right angle corners.
+			tri_quad_corners.push_back(idx0[tri0.b]);
+			tri_quad_corners.push_back(idx1[tri1.b]);
+		}
+	}
 
-			const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
-			const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
-			const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
-			const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
-			const int U0 = static_cast<int>(v0.U);
-			const int V0 = static_cast<int>(v0.V);
-			const int U1 = static_cast<int>(v1.U);
-			const int V1 = static_cast<int>(v1.V);
+	// Make sure the vertex buffer has enough space.
+	// This probably overallocates for triangles.
+	while (m_vertex.maxcount < 4 * m_index.tail)
+		GrowVertexBuffer();
 
-			const int dX = X1 - X0;
-			const int dY = Y1 - Y0;
-			const int dU = U1 - U0;
-			const int dV = V1 - V0;
+	bool changed = false; // Did any vertices change?
 
-			const bool int_dx = (dX & 0xF) == 0;
-			const bool int_dy = (dY & 0xF) == 0;
-			const bool int_scale_u = (dU % dX) == 0;
-			const bool int_scale_v = (dV % dY) == 0;
-			const int scale_u = dU / dX;
-			const int scale_v = dV / dY;
+	u32 i_out = 0;
+	for (u32 i = 0; i < m_index.tail; i += n, i_out += 4 * n_out)
+	{
+		GSVertex v0, v1; // Corners of the quad.
 
-			// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-			const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
-			const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
+		if constexpr (primclass == GS_TRIANGLE_CLASS)
+		{
+			v0 = vtx[tri_quad_corners[i + 0]];
+			v1 = vtx[tri_quad_corners[i + 1]];
+		}
+		else
+		{
+			v0 = vtx[i + 0];
+			v1 = vtx[i + 1];
+		}
 
-			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
+		// Make sure flat attributes are the same.
+		v0.RGBAQ = v1.RGBAQ;
+		v0.FOG = v1.FOG;
+		v0.XYZ.Z = v1.XYZ.Z;
+		if (primclass == GS_TRIANGLE_CLASS && !iip)
+		{
+			// Get color of provoking vertex.
+			v0.RGBAQ = v1.RGBAQ = vtx[index[i + 5]].RGBAQ;
+		}
+
+		// Make sure vertices are top-left and bottom-right.
+		if (v0.XYZ.X > v1.XYZ.X)
+		{
+			std::swap(v0.XYZ.X, v1.XYZ.X);
+			std::swap(v0.U, v1.U);
+		}
+
+		if (v0.XYZ.Y > v1.XYZ.Y)
+		{
+			std::swap(v0.XYZ.Y, v1.XYZ.Y);
+			std::swap(v0.V, v1.V);
+		}
+
+		const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
+		const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
+		const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
+		const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
+		const int U0 = static_cast<int>(v0.U);
+		const int V0 = static_cast<int>(v0.V);
+		const int U1 = static_cast<int>(v1.U);
+		const int V1 = static_cast<int>(v1.V);
+
+		const int dX = X1 - X0;
+		const int dY = Y1 - Y0;
+		const int dU = U1 - U0;
+		const int dV = V1 - V0;
+
+		const bool int_dx = (dX & 0xF) == 0;
+		const bool int_dy = (dY & 0xF) == 0;
+		const bool int_scale_u = (dU % dX) == 0;
+		const bool int_scale_v = (dV % dY) == 0;
+		const int scale_u = dU / dX;
+		const int scale_v = dV / dY;
+
+		// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
+		const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
+		const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
+
+		changed |= (half_u || half_v);
+
+		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 			
-			// Whether U, V will round down at pixel centers in X, Y.
-			const bool round_down_u = half_u && (U1 > U0) && !IsPow2(dX);
-			const bool round_down_v = half_v && (V1 > V0) && !IsPow2(dY);
+		// Whether U, V will round down at pixel centers in X, Y.
+		const bool round_down_u = half_u && (U1 > U0) && !IsPow2(dX);
+		const bool round_down_v = half_v && (V1 > V0) && !IsPow2(dY);
 
-			// Round up X if on texel boundary (rounding down handled later).
-			if (half_u)
-			{
-				v0.U += 8;
-				v1.U += 8;
-			}
-
-			// Round up Y if on texel boundary (rounding down handled later).
-			if (half_v)
-			{
-				v0.V += 8;
-				v1.V += 8;
-			}
-
-			// Get references to new vertices.
-			GSVertex& vtl0 = vtx_out[i_out + 0];
-			GSVertex& vtl1 = vtx_out[i_out + 1];
-			GSVertex& vt0 = vtx_out[i_out + 2];
-			GSVertex& vt1 = vtx_out[i_out + 3];
-			GSVertex& vl0 = vtx_out[i_out + 4];
-			GSVertex& vl1 = vtx_out[i_out + 5];
-			GSVertex& vbr0 = vtx_out[i_out + 6];
-			GSVertex& vbr1 = vtx_out[i_out + 7];
-
-			// Indices for sprites.
-			m_index.buff[i_out + 0] = i_out + 0;
-			m_index.buff[i_out + 1] = i_out + 1;
-			m_index.buff[i_out + 2] = i_out + 2;
-			m_index.buff[i_out + 3] = i_out + 3;
-			m_index.buff[i_out + 4] = i_out + 4;
-			m_index.buff[i_out + 5] = i_out + 5;
-			m_index.buff[i_out + 6] = i_out + 6;
-			m_index.buff[i_out + 7] = i_out + 7;
-
-			// Top left pixel. Empty unless splitting both X and Y.
-			vtl0 = v0;
-			vtl1 = v0;
-			if (round_down_u && round_down_v)
-			{
-				vtl1.XYZ.X += 16;
-				vtl1.XYZ.Y += 16;
-				vtl1.U += 16 * scale_u;
-				vtl1.V += 16 * scale_v;
-			}
-
-			// Left vertical strip. Empty unless splitting X.
-			vl0 = v0;
-			vl1 = v0;
-			vl1.XYZ.Y = v1.XYZ.Y;
-			vl1.V = v1.V;
-			if (round_down_u)
-			{
-				vl1.XYZ.X += 16;
-				vl1.U += 16 * scale_u;
-			}
-			if (round_down_v)
-			{
-				vl0.XYZ.Y += 16;
-				vl0.V += 16 * scale_v;
-			}
-
-			// Top horizontal strip. Empty unless splitting Y.
-			vt0 = v0;
-			vt1 = v0;
-			vt1.XYZ.X = v1.XYZ.X;
-			vt1.U = v1.U;
-			if (round_down_v)
-			{
-				vt1.XYZ.Y += 16;
-				vt1.V += 16 * scale_v;
-			}
-			if (round_down_u)
-			{
-				vt0.XYZ.X += 16;
-				vt0.U += 16 * scale_u;
-			}
-
-			// Bottom right rectangle. Whole sprite if not splitting X nor Y.
-			vbr0 = v0;
-			vbr1 = v1;
-			if (round_down_u)
-			{
-				vbr0.XYZ.X += 16;
-				vbr0.U += 16 * scale_u;
-			}
-			if (round_down_v)
-			{
-				vbr0.XYZ.Y += 16;
-				vbr0.V += 16 * scale_v;
-			}
-
-			// Round down X if needed.
-			if (round_down_u)
-			{
-				vt0.U -= 16;
-				vt1.U -= 16;
-				vbr0.U -= 16;
-				vbr1.U -= 16;
-			}
-
-			// Round down Y if needed.
-			if (round_down_v)
-			{
-				vl0.V -= 16;
-				vl1.V -= 16;
-				vbr0.V -= 16;
-				vbr1.V -= 16;
-			}
-		}
-
-		// Replace old sprites with new split sprites.
-		std::swap(m_vertex.buff, m_vertex.buff_copy);
-		m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail = i_out;
-
-		// Dump vertices for debugging.
-		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
+		// Round up X if on texel boundary (rounding down handled later).
+		if (half_u)
 		{
-			DumpVertices(GetDrawDumpPath("%05d_vertex_sprite_split.txt", s_n));
+			v0.U += 8;
+			v1.U += 8;
 		}
 
-		return true;
+		// Round up Y if on texel boundary (rounding down handled later).
+		if (half_v)
+		{
+			v0.V += 8;
+			v1.V += 8;
+		}
+
+		// Get references to new vertices. Triangles need 4 vertices per quad.
+		// Fill in the verties so that top-left is first and bottom-right is last.
+		GSVertex& vtl0 = vtx_out[i_out + n_out * 0 + 0];
+		GSVertex& vtl1 = vtx_out[i_out + n_out * 1 - 1];
+		GSVertex& vt0 = vtx_out[i_out + n_out * 1 + 0];
+		GSVertex& vt1 = vtx_out[i_out + n_out * 2 - 1];
+		GSVertex& vl0 = vtx_out[i_out + n_out * 2 + 0];
+		GSVertex& vl1 = vtx_out[i_out + n_out * 3 - 1];
+		GSVertex& vbr0 = vtx_out[i_out + n_out * 3 + 0];
+		GSVertex& vbr1 = vtx_out[i_out + n_out * 4 - 1];
+
+		// Top left pixel. Empty unless splitting both X and Y.
+		vtl0 = v0;
+		vtl1 = v0;
+		if (round_down_u && round_down_v)
+		{
+			vtl1.XYZ.X += 16;
+			vtl1.XYZ.Y += 16;
+			vtl1.U += 16 * scale_u;
+			vtl1.V += 16 * scale_v;
+		}
+
+		// Left vertical strip. Empty unless splitting X.
+		vl0 = v0;
+		vl1 = v0;
+		vl1.XYZ.Y = v1.XYZ.Y;
+		vl1.V = v1.V;
+		if (round_down_u)
+		{
+			vl1.XYZ.X += 16;
+			vl1.U += 16 * scale_u;
+		}
+		if (round_down_v)
+		{
+			vl0.XYZ.Y += 16;
+			vl0.V += 16 * scale_v;
+		}
+
+		// Top horizontal strip. Empty unless splitting Y.
+		vt0 = v0;
+		vt1 = v0;
+		vt1.XYZ.X = v1.XYZ.X;
+		vt1.U = v1.U;
+		if (round_down_v)
+		{
+			vt1.XYZ.Y += 16;
+			vt1.V += 16 * scale_v;
+		}
+		if (round_down_u)
+		{
+			vt0.XYZ.X += 16;
+			vt0.U += 16 * scale_u;
+		}
+
+		// Bottom right rectangle. Whole sprite if not splitting X nor Y.
+		vbr0 = v0;
+		vbr1 = v1;
+		if (round_down_u)
+		{
+			vbr0.XYZ.X += 16;
+			vbr0.U += 16 * scale_u;
+		}
+		if (round_down_v)
+		{
+			vbr0.XYZ.Y += 16;
+			vbr0.V += 16 * scale_v;
+		}
+
+		// Round down X if needed.
+		if (round_down_u)
+		{
+			vt0.U -= 16;
+			vt1.U -= 16;
+			vbr0.U -= 16;
+			vbr1.U -= 16;
+		}
+
+		// Round down Y if needed.
+		if (round_down_v)
+		{
+			vl0.V -= 16;
+			vl1.V -= 16;
+			vbr0.V -= 16;
+			vbr1.V -= 16;
+		}
+
+		// Fill in the top-right and bottom-left vertices for triangles.
+		if constexpr (primclass == GS_TRIANGLE_CLASS)
+		{
+			for (u32 j = 0; j < 16; j += 4)
+			{
+				// top-right
+				vtx_out[j + 1] = vtx_out[j + 0];
+				vtx_out[j + 1].XYZ.X = vtx_out[j + 3].XYZ.X;
+				vtx_out[j + 1].U = vtx_out[j + 3].U;
+
+				// bottom-left
+				vtx_out[j + 2] = vtx_out[j + 0];
+				vtx_out[j + 2].XYZ.Y = vtx_out[j + 3].XYZ.Y;
+				vtx_out[j + 2].V = vtx_out[j + 3].V;
+			}
+		}
+	}
+
+	if (!changed)
+		return false;
+
+	// Replace old prims with new split prims.
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+	m_vertex.head = m_vertex.next = m_vertex.tail = i_out;
+	m_index.tail = 4 * m_index.tail;
+
+	// Get the new indices.
+	if constexpr (primclass == GS_TRIANGLE_CLASS)
+	{
+		for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
+		{
+			m_index.buff[i + 0] = v + 0;
+			m_index.buff[i + 1] = v + 1;
+			m_index.buff[i + 2] = v + 2;
+			m_index.buff[i + 3] = v + 1;
+			m_index.buff[i + 4] = v + 2;
+			m_index.buff[i + 5] = v + 3;
+		}
 	}
 	else
 	{
-		return false;
+		for (u32 i = 0; i < m_index.tail; i++)
+			m_index.buff[i] = i;
+	}
+
+	// Dump vertices for debugging.
+	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
+	{
+		DumpVertices(GetDrawDumpPath("%05d_vertex_sprite_split.txt", s_n));
+	}
+
+	return true;
+}
+
+bool GSState::SplitAxisAlignedPrims4xAndRound()
+{
+	switch (m_vt.m_primclass)
+	{
+		case GS_TRIANGLE_CLASS:
+			return SplitAxisAlignedPrims4xAndRoundImpl<GS_TRIANGLE_CLASS>();
+		case GS_SPRITE_CLASS:
+			return SplitAxisAlignedPrims4xAndRoundImpl<GS_SPRITE_CLASS>();
+		default:
+			return false;
 	}
 }
 

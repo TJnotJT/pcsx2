@@ -8118,13 +8118,13 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
-	// Sprite splitting/rounding to emulate UV rounding error on GS.
+	// Axis-aligned prim splitting/rounding to emulate UV rounding error on GS.
 	// Only implemented for native resolution currently.
 	if (GetUpscaleMultiplier() == 1.0f)
 	{
-		if (SplitSprites4xAndRound())
+		if (SplitAxisAlignedPrims4xAndRound())
 		{
-			// Need to adjust drawlist counts since each sprite becomes 4 sprites.
+			// Need to adjust drawlist counts since each prim becomes 4 new prims.
 			for (u32 i = 0; i < m_drawlist.size(); i++)
 			{
 				m_drawlist[i] *= 4;

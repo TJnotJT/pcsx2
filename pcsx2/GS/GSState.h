@@ -486,7 +486,9 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
-	bool SplitSprites4xAndRound();
+	template<u32 primclass>
+	bool SplitAxisAlignedPrims4xAndRoundImpl();
+	bool SplitAxisAlignedPrims4xAndRound();
 };
 
 // We put this in the header because of Multi-ISA.
