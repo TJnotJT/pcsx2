@@ -4343,6 +4343,11 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
 
+	if (primclass == GS_TRIANGLE_CLASS)
+	{
+		//return false;
+	}
+
 	if (PRIM->TME && primclass == GS_TRIANGLE_CLASS && !m_vt.IsRealLinear())
 	{
 		if (m_index.tail % 6 != 0)
@@ -4403,6 +4408,9 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	constexpr u32 n_out = primclass == GS_TRIANGLE_CLASS ? 4 : 2;
 	
 	const bool iip = PRIM->IIP;
+	const bool fge = PRIM->FGE;
+	const bool using_z = !m_context->ZBUF.ZMSK ||
+	                     (m_context->TEST.ZTE && m_context->TEST.ZTST != ZTST_ALWAYS);
 
 	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
 
@@ -4419,11 +4427,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		if (m_index.tail % 6 != 0)
 			return false;
 	
-		// Make sure the used attributes are flat.
-		const bool using_z = !m_context->ZBUF.ZMSK || (m_context->TEST.ZTST != ZTST_ALWAYS);
-		if ((using_z && !m_vt.m_eq.z) || (PRIM->FGE && !m_vt.m_eq.f) || ((m_vt.m_eq.rgba & 0xFFFF) != 0xFFFF))
-			return false;
-
 		for (u32 i = 0; i < m_index.tail; i += 6)
 		{
 			const u16* idx0 = index + i + 0;
@@ -4450,6 +4453,26 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	u32 i_out = 0;
 	for (u32 i = 0; i < m_index.tail; i += n, i_out += 4 * n_out)
 	{
+		// For triangles, make sure the attributes are flat.
+		if constexpr (primclass == GS_TRIANGLE_CLASS)
+		{
+			const u32 Z = vtx[index[i + 0]].XYZ.Z;
+			const u32 FOG = vtx[index[i + 0]].FOG;
+			const u32 RGBA = vtx[index[i + 0]].RGBAQ.U32[0];
+			bool not_flat = false;
+			for (u32 j = 1; j < 6; j++)
+			{
+				not_flat |= (using_z && vtx[index[i + j]].XYZ.Z != Z);
+				not_flat |= (fge && vtx[index[i + j]].FOG != FOG);
+				not_flat |= (iip && vtx[index[i + j]].RGBAQ.U32[0] != RGBA);
+			}
+			// Check only provoking vertices for flat colors.
+			not_flat |= (!iip && vtx[index[i + 2]].RGBAQ.U32[0] != vtx[index[i + 5]].RGBAQ.U32[0]);
+
+			if (not_flat)
+				return false;
+		}
+
 		GSVertex v0, v1; // Corners of the quad.
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
@@ -4625,20 +4648,29 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			for (u32 j = 0; j < 16; j += 4)
 			{
 				// top-right
-				vtx_out[j + 1] = vtx_out[j + 0];
-				vtx_out[j + 1].XYZ.X = vtx_out[j + 3].XYZ.X;
-				vtx_out[j + 1].U = vtx_out[j + 3].U;
+				vtx_out[i_out + j + 1] = vtx_out[i_out + j + 0];
+				vtx_out[i_out + j + 1].XYZ.X = vtx_out[i_out + j + 3].XYZ.X;
+				vtx_out[i_out + j + 1].U = vtx_out[i_out + j + 3].U;
 
 				// bottom-left
-				vtx_out[j + 2] = vtx_out[j + 0];
-				vtx_out[j + 2].XYZ.Y = vtx_out[j + 3].XYZ.Y;
-				vtx_out[j + 2].V = vtx_out[j + 3].V;
+				vtx_out[i_out + j + 2] = vtx_out[i_out + j + 0];
+				vtx_out[i_out + j + 2].XYZ.Y = vtx_out[i_out + j + 3].XYZ.Y;
+				vtx_out[i_out + j + 2].V = vtx_out[i_out + j + 3].V;
 			}
 		}
 	}
 
 	if (!changed)
 		return false;
+
+	if (primclass == GS_TRIANGLE_CLASS)
+	{
+		Console.Warning("!!!TRIANGLESPLIT2!!! %d", s_n);
+		if (!GSConfig.HWDumpDirectory.empty())
+		{
+			DumpVertices(GetDrawDumpPath("%05d_vertex_before.txt", s_n));
+		}
+	}
 
 	// Replace old prims with new split prims.
 	std::swap(m_vertex.buff, m_vertex.buff_copy);
@@ -4650,18 +4682,26 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	{
 		for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
 		{
-			m_index.buff[i + 0] = v + 0;
-			m_index.buff[i + 1] = v + 1;
-			m_index.buff[i + 2] = v + 2;
-			m_index.buff[i + 3] = v + 1;
-			m_index.buff[i + 4] = v + 2;
-			m_index.buff[i + 5] = v + 3;
+			index[i + 0] = v + 0;
+			index[i + 1] = v + 1;
+			index[i + 2] = v + 2;
+			index[i + 3] = v + 1;
+			index[i + 4] = v + 2;
+			index[i + 5] = v + 3;
 		}
 	}
 	else
 	{
 		for (u32 i = 0; i < m_index.tail; i++)
-			m_index.buff[i] = i;
+			index[i] = i;
+	}
+
+	if (primclass == GS_TRIANGLE_CLASS)
+	{
+		if (!GSConfig.HWDumpDirectory.empty())
+		{
+			DumpVertices(GetDrawDumpPath("%05d_vertex_after.txt", s_n));
+		}
 	}
 
 	// Dump vertices for debugging.
