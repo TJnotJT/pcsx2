@@ -2087,7 +2087,7 @@ void GSState::FlushPrim()
 		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
 		if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
 		{
-			if (!PRIM->FST) // STQ's
+			if (!PRIM->FST && 0) // STQ's
 			{
 				const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
 				// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
@@ -4343,8 +4343,42 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
 
+	if (PRIM->TME && primclass == GS_TRIANGLE_CLASS && !m_vt.IsRealLinear())
+	{
+		if (m_index.tail % 6 != 0)
+			return false;
+
+		bool pow2 = true;
+		for (u32 i = 0; i < m_index.tail; i += 6)
+		{
+			const u16* idx0 = m_index.buff + i + 0;
+			const u16* idx1 = m_index.buff + i + 3;
+
+			TriangleOrdering tri0, tri1;
+
+			if (PRIM->FST)
+			{
+				if (!AreTrianglesQuad<1, 1>(m_vertex.buff, idx0, idx1, &tri0, &tri1))
+					return false;
+			}
+			else
+			{
+				if (!AreTrianglesQuad<1, 0>(m_vertex.buff, idx0, idx1, &tri0, &tri1))
+					return false;
+			}
+
+			const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
+			const int dX = m_vertex.buff[idx1[tri1.b]].XYZ.X - m_vertex.buff[idx0[tri0.b]].XYZ.X;
+			const int dY = m_vertex.buff[idx1[tri1.b]].XYZ.Y - m_vertex.buff[idx0[tri0.b]].XYZ.Y;
+			pow2 = pow2 && IsPow2(dX) && IsPow2(dY);
+		}
+		if (pow2)
+			return false;
+		Console.Warning("!!!TRIANGLESPLIT!!!");
+	}
+
 	// Only applies to UVs and point-sampled draws.
-	if (!PRIM->FST || m_vt.IsRealLinear())
+	if (!(PRIM->TME && PRIM->FST) || m_vt.IsRealLinear())
 		return false;
 
 	// How many vertices for each old quad.
@@ -4365,14 +4399,14 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	std::vector<u32> tri_quad_corners;
 
 	// Need an axis-aligned quad check for triangles.
-	if (primclass == GS_TRIANGLE_CLASS && !(m_quad_check_valid && m_are_quads))
+	if (primclass == GS_TRIANGLE_CLASS)
 	{
 		if (m_index.tail % 6 != 0)
 			return false;
 	
 		// Make sure the used attributes are flat.
 		const bool using_z = !m_context->ZBUF.ZMSK || (m_context->TEST.ZTST != ZTST_ALWAYS);
-		if ((using_z && !m_vt.m_eq.z) || (PRIM->FGE && !m_vt.m_eq.f) || !m_vt.m_eq.rgba)
+		if ((using_z && !m_vt.m_eq.z) || (PRIM->FGE && !m_vt.m_eq.f) || ((m_vt.m_eq.rgba & 0xFFFF) != 0xFFFF))
 			return false;
 
 		for (u32 i = 0; i < m_index.tail; i += 6)
@@ -4389,6 +4423,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			tri_quad_corners.push_back(idx0[tri0.b]);
 			tri_quad_corners.push_back(idx1[tri1.b]);
 		}
+
+		Console.Warning("!!!TRIANGLESPLIT!!!");
 	}
 
 	// Make sure the vertex buffer has enough space.
@@ -4405,8 +4441,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
-			v0 = vtx[tri_quad_corners[i + 0]];
-			v1 = vtx[tri_quad_corners[i + 1]];
+			v0 = vtx[tri_quad_corners[2 * (i / n) + 0]];
+			v1 = vtx[tri_quad_corners[2 * (i / n) + 1]];
 		}
 		else
 		{
@@ -4599,6 +4635,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	// Get the new indices.
 	if constexpr (primclass == GS_TRIANGLE_CLASS)
 	{
+		Console.Warning("!!!TRIANGLESPLIT!!!");
 		for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
 		{
 			m_index.buff[i + 0] = v + 0;
