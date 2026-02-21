@@ -2087,7 +2087,7 @@ void GSState::FlushPrim()
 		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
 		if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
 		{
-			if (!PRIM->FST && 0) // STQ's
+			if (!PRIM->FST) // STQ's
 			{
 				const bool is_sprite = GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS;
 				// ST's have the lowest 9 bits (or greater depending on exponent difference) rounding down (from hardware tests).
@@ -4371,10 +4371,25 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			const int dX = m_vertex.buff[idx1[tri1.b]].XYZ.X - m_vertex.buff[idx0[tri0.b]].XYZ.X;
 			const int dY = m_vertex.buff[idx1[tri1.b]].XYZ.Y - m_vertex.buff[idx0[tri0.b]].XYZ.Y;
 			pow2 = pow2 && IsPow2(dX) && IsPow2(dY);
+
+			const bool using_z = !m_context->ZBUF.ZMSK || (m_context->TEST.ZTST != ZTST_ALWAYS);
+			const u32 Z = m_vertex.buff[m_index.buff[i + 0]].XYZ.Z;
+			for (u32 j = 1; j < 6; j++)
+			{
+				if (using_z && m_vertex.buff[m_index.buff[i + j]].XYZ.Z != Z)
+					return false;
+				if (PRIM->FGE && m_vertex.buff[m_index.buff[i + j]].FOG != m_vertex.buff[m_index.buff[i + 0]].FOG)
+					return false;
+				if (PRIM->IIP && m_vertex.buff[m_index.buff[i + j]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + 0]].RGBAQ.U32[0])
+					return false;
+			}
+			if (!PRIM->IIP && m_vertex.buff[m_index.buff[i + 2]].RGBAQ.U32[0] != m_vertex.buff[m_index.buff[i + 5]].RGBAQ.U32[0])
+				return false;
 		}
 		if (pow2)
 			return false;
-		Console.Warning("!!!TRIANGLESPLIT!!!");
+		// DumpVertices(GetDrawDumpPath("%05d_vertex.txt", s_n));
+		Console.Warning("!!!TRIANGLESPLIT!!! %d FST=%d", s_n, PRIM->FST);
 	}
 
 	// Only applies to UVs and point-sampled draws.
@@ -4423,8 +4438,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			tri_quad_corners.push_back(idx0[tri0.b]);
 			tri_quad_corners.push_back(idx1[tri1.b]);
 		}
-
-		Console.Warning("!!!TRIANGLESPLIT!!!");
 	}
 
 	// Make sure the vertex buffer has enough space.
@@ -4635,7 +4648,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	// Get the new indices.
 	if constexpr (primclass == GS_TRIANGLE_CLASS)
 	{
-		Console.Warning("!!!TRIANGLESPLIT!!!");
 		for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
 		{
 			m_index.buff[i + 0] = v + 0;
