@@ -8129,6 +8129,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			{
 				m_drawlist[i] *= 4;
 			}
+			m_conf.vs.bias_uv = true;
 		}
 	}
 

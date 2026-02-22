@@ -56,7 +56,7 @@ void main()
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset;
+		vec2 uv = a_uv - TextureOffset + (VS_BIAS_UV == 0 ? vec2(0.0f) : a_st);
 		vec2 st = a_st - TextureOffset;
 
 		// Integer nomalized
@@ -133,7 +133,7 @@ ProcessedVertex load_vertex(uint index)
 	vtx.p.y = -vtx.p.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset;
+		vec2 uv = a_uv - TextureOffset + (VS_BIAS_UV == 0 ? vec2(0.0f) : a_st);
 		vec2 st = a_st - TextureOffset;
 		vtx.ti.xy = uv * TextureScale;
 
