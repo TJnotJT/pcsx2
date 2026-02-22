@@ -4493,6 +4493,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		// Triangles are rounded differently based on whether the diagonal that the
 		// two triangles meet in is top-left to bottom-right or top-right to bottom-left.
 		// Note that the two vertices are the right angle corners of two different triangles.
+		// Need to set this before we swap the attributes.
 		const bool diag_tl_to_br = v0.XYZ.X > v1.XYZ.X;
 
 		// Make sure flat attributes are the same.
@@ -4541,18 +4542,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 		const bool int_x0 = (X0 & 0xF) == 0;
 		const bool int_y0 = (Y0 & 0xF) == 0;
-		//const bool int_dx = (dX & 0xF) == 0;
-		//const bool int_dy = (dY & 0xF) == 0;
-		//const bool int_scale_u = (dU % dX) == 0;
-		//const bool int_scale_v = (dV % dY) == 0;
 		const int scale_u = dU / dX;
 		const int scale_v = dV / dY;
-
-		//// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-		//const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
-		//const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
-
-		////changed |= (half_u || half_v);
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 		
@@ -4561,60 +4552,17 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const bool pow2_x = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
 		const bool pow2_y = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
 
-		// Whether U, V will round down at pixel centers in X, Y.
-		//const bool round_down_u = half_u && (U1 > U0) && !pow2_x;
-		//const bool round_down_v = half_v && (V1 > V0) && !pow2_y;
+		const bool round_down_tl_u = (U1 > U0) && !pow2_x && !int_x0;
+		const bool round_down_tl_v = (V1 > V0) && !pow2_y && !int_y0;
 
-		//bool round_down_u, round_down_v;
-		//if constexpr (primclass == GS_TRIANGLE_CLASS)
-		//{
-		//	// For triangles, the power-of-two condition seems to apply only when both dX and dY are powers to two.
-		//	round_down_u = (U1 > U0) && !(pow2_x && pow2_y);
-		//	round_down_v = (V1 > V0) && !(pow2_x && pow2_y);
-		//}
-		//else
-		//{
-		//	round_down_u = (U1 > U0) && !pow2_x;
-		//	round_down_v = (V1 > V0) && !pow2_y;
-		//}
+		const bool round_down_t_u = (U1 > U0) && !pow2_x;
+		const bool round_down_t_v = (V1 > V0) && !pow2_y && !int_y0;
 
-		bool round_down_tl_u, round_down_tl_v;
-		bool round_down_t_u, round_down_t_v;
-		bool round_down_l_u, round_down_l_v;
-		bool round_down_br_u, round_down_br_v;
-		//if constexpr (primclass == GS_TRIANGLE_CLASS)
-		//{
-		//	// For triangles, rounding of axes are not independent and depend on power-of-2 of width and height.
-		//	round_down_tl_u = (U1 > U0) && !(pow2_x && pow2_y) && !int_x0;
-		//	round_down_tl_v = (V1 > V0) && !(pow2_x && pow2_y) && !int_y0;
+		const bool round_down_l_u = (U1 > U0) && !pow2_x && !int_x0;
+		const bool round_down_l_v = (V1 > V0) && !pow2_y;
 
-		//	round_down_t_u = (U1 > U0) && !(pow2_x && pow2_y);
-		//	round_down_t_v = (V1 > V0) && !(pow2_x && pow2_y) && !int_y0;
-
-		//	round_down_l_u = (U1 > U0) && !(pow2_x && pow2_y) && !int_x0;
-		//	round_down_l_v = (V1 > V0) && !(pow2_x && pow2_y);
-
-		//	round_down_br_u = (U1 > U0) && !(pow2_x && pow2_y);
-		//	round_down_br_v = (V1 > V0) && !(pow2_x && pow2_y);
-
-		//	/*round_down_br_u = round_down_l_u = round_down_t_u = (U1 > U0) && !(pow2_x && pow2_y) && !int_x0;
-		//	round_down_br_v = round_down_l_v = round_down_t_v = (V1 > V0) && !(pow2_x && pow2_y);*/
-		//}
-		//else
-		//{
-		//	// For sprites, rounding of axes are independent.
-		round_down_tl_u = (U1 > U0) && !pow2_x && !int_x0;
-		round_down_tl_v = (V1 > V0) && !pow2_y && !int_y0;
-
-		round_down_t_u = (U1 > U0) && !pow2_x;
-		round_down_t_v = (V1 > V0) && !pow2_y && !int_y0;
-
-		round_down_l_u = (U1 > U0) && !pow2_x && !int_x0;
-		round_down_l_v = (V1 > V0) && !pow2_y;
-
-		round_down_br_u = (U1 > U0) && !pow2_x;
-		round_down_br_v = (V1 > V0) && !pow2_y;
-		//}
+		const bool round_down_br_u = (U1 > U0) && !pow2_x;
+		const bool round_down_br_v = (V1 > V0) && !pow2_y;
 
 		const bool round_down_u_all = round_down_tl_u && round_down_t_u && round_down_l_u && round_down_br_u;
 		const bool round_up_u_all = !round_down_tl_u && !round_down_t_u && !round_down_l_u && !round_down_br_u;
@@ -4632,28 +4580,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		v1.ST.S = 0.0f;
 		v1.ST.T = 0.0f;
 
-		// Round up U if on texel boundary (rounding down handled later).
-		//if (half_u)
-		//if (allow_round_u)
-		//{
-		//	/*v0.U += 8;
-		//	v1.U += 8;*/
-		//	v0.ST.S = small_val;
-		//	v1.ST.S = small_val;
-		//}
-
-		// Round up V if on texel boundary (rounding down handled later).
-		//if (half_v)
-		//if (allow_round_v)
-		//{
-		//	/*v0.V += 8;
-		//	v1.V += 8;*/
-		//	v0.ST.T = small_val;
-		//	v1.ST.T = small_val;
-		//}
-
-		// Get references to new vertices. Triangles need 4 vertices per quad.
-		// Fill in the vertices so that top-left is first and bottom-right is last.
+		// New vertices.
 		GSVertex vtx_tmp[8];
 		GSVertex& vtl0 = vtx_tmp[0];
 		GSVertex& vtl1 = vtx_tmp[1];
@@ -4721,34 +4648,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			vbr0.V += 16 * scale_v;
 		}
 
-		// Round down U if needed.
-		//if (round_down_u)
-		//{
-		//	/*vt0.U -= 16;
-		//	vt1.U -= 16;
-		//	vbr0.U -= 16;
-		//	vbr1.U -= 16;*/
-
-		//	vt0.ST.S = -small_val;
-		//	vt1.ST.S = -small_val;
-		//	vbr0.ST.S = -small_val;
-		//	vbr1.ST.S = -small_val;
-		//}
-
-		//// Round down V if needed.
-		//if (round_down_v)
-		//{
-		//	//vl0.V -= 16;
-		//	//vl1.V -= 16;
-		//	//vbr0.V -= 16;
-		//	//vbr1.V -= 16;
-
-		//	vl0.ST.T = -small_val;
-		//	vl1.ST.T = -small_val;
-		//	vbr0.ST.T = -small_val;
-		//	vbr1.ST.T = -small_val;
-		//}
-
 		changed |= (allow_round_u || allow_round_v);
 
 		if (allow_round_u)
@@ -4784,21 +4683,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		// Fill in the top-right and bottom-left vertices for triangles.
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
-			//for (u32 j = 0; j < 16; j += 4)
-			//{
-			//	// top-right
-			//	vtx_out[i_out + j + 1] = vtx_out[i_out + j + 0];
-			//	vtx_out[i_out + j + 1].XYZ.X = vtx_out[i_out + j + 3].XYZ.X;
-			//	vtx_out[i_out + j + 1].U = vtx_out[i_out + j + 3].U;
-			//	vtx_out[i_out + j + 1].ST.S = vtx_out[i_out + j + 3].ST.S;
-
-			//	// bottom-left
-			//	vtx_out[i_out + j + 2] = vtx_out[i_out + j + 0];
-			//	vtx_out[i_out + j + 2].XYZ.Y = vtx_out[i_out + j + 3].XYZ.Y;
-			//	vtx_out[i_out + j + 2].V = vtx_out[i_out + j + 3].V;
-			//	vtx_out[i_out + j + 2].ST.T = vtx_out[i_out + j + 3].ST.T;
-			//}
-			
 			// Take X attributes from first vertex and Y from second.
 			const auto CombineXY = [](const GSVertex& vx, const GSVertex& vy) {
 				GSVertex v = vx;
@@ -4809,8 +4693,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			};
 
 			// Arrange the new triangles so that the firsts triangles is the top-left region
-			// and the second triangles is the bottom-right region. This is needed
-			// for the following adjustment to V rounding.
+			// and the second triangles is the bottom-right region. This is needed for the
+			// adjustment of V rounding in the bottom-right region.
 			for (u32 j = 0, k = 0; j < 8; j += 2, k += 6)
 			{
 				// First triangle.
@@ -4825,7 +4709,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			}
 
 			// If the diagonal where the two triangles meet is top-right to bottom-left,
-			// then the lower triangle always appears to round V up rather than down.
+			// then the bottom-right triangle always appears to round V up rather than down.
 			// Warning: This is not totally accurate. The border of the two triangles might
 			// have been modified by the splitting.
 			if (!diag_tl_to_br && round_down_br_v && allow_round_v)
@@ -4855,7 +4739,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
-		Console.Warning("!!!TRIANGLESPLIT2!!! %d", s_n);
+		//Console.Warning("!!!TRIANGLESPLIT2!!! %d", s_n);
 		if (!GSConfig.HWDumpDirectory.empty())
 		{
 			//DumpVertices(GetDrawDumpPath("%05d_vertex_before.txt", s_n));
@@ -4868,23 +4752,10 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	m_index.tail = 4 * m_index.tail;
 
 	// Get the new indices.
-	//if constexpr (primclass == GS_TRIANGLE_CLASS)
-	//{
-	//	for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
-	//	{
-	//		index[i + 0] = v + 0;
-	//		index[i + 1] = v + 1;
-	//		index[i + 2] = v + 2;
-	//		index[i + 3] = v + 1;
-	//		index[i + 4] = v + 2;
-	//		index[i + 5] = v + 3;
-	//	}
-	//}
-	//else
-	//{
 	for (u32 i = 0; i < m_index.tail; i++)
+	{
 		index[i] = i;
-	//}
+	}
 
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
