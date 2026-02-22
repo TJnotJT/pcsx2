@@ -18,6 +18,7 @@
 #include <sstream>
 #include <iomanip>
 #include <bit>
+#include <numeric>
 
 int GSState::s_n = 0;
 int GSState::s_last_transfer_draw_n = 0;
@@ -4405,7 +4406,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	constexpr u32 n = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
 
 	// Number of vertices for each new quad.
-	constexpr u32 n_out = primclass == GS_TRIANGLE_CLASS ? 4 : 2;
+	constexpr u32 n_out = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
 	
 	const bool iip = PRIM->IIP;
 	const bool fge = PRIM->FGE;
@@ -4414,16 +4415,16 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
 
-	GSVertex* RESTRICT vtx = m_vertex.buff;
-	u16* RESTRICT index = m_index.buff;
-	GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
-
+	
 	// Corners of right-angle corners for triangles forming quads.
 	std::vector<u32> tri_quad_corners;
 
 	// Need an axis-aligned quad check for triangles.
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
+		GSVertex* RESTRICT vtx = m_vertex.buff;
+		u16* RESTRICT index = m_index.buff;
+
 		if (m_index.tail % 6 != 0)
 			return false;
 	
@@ -4444,9 +4445,12 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	}
 
 	// Make sure the vertex buffer has enough space.
-	// This probably overallocates for triangles.
 	while (m_vertex.maxcount < 4 * m_index.tail)
 		GrowVertexBuffer();
+
+	GSVertex* RESTRICT vtx = m_vertex.buff;
+	u16* RESTRICT index = m_index.buff;
+	GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
 
 	bool changed = false; // Did any vertices change?
 
@@ -4486,6 +4490,11 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			v1 = vtx[i + 1];
 		}
 
+		// Triangles are rounded differently based on whether the diagonal that the
+		// two triangles meet in is top-left to bottom-right or top-right to bottom-left.
+		// Note that the two vertices are the right angle corners of two different triangles.
+		const bool diag_tl_to_br = v0.XYZ.X > v1.XYZ.X;
+
 		// Make sure flat attributes are the same.
 		v0.RGBAQ = v1.RGBAQ;
 		v0.FOG = v1.FOG;
@@ -4523,20 +4532,27 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const int dU = U1 - U0;
 		const int dV = V1 - V0;
 
+		// Only allow adjustment if the denominator of dU/dX or dV/dY in lowest terms is < 16.
+		// Otherwise it might mess up the actual value since we adjust with 1/16 increments.
+		const int dX_lowest = dX / std::gcd(dX, dU);
+		const int dY_lowest = dY / std::gcd(dY, dV);
+		const bool allow_round_u = dX_lowest < 16;
+		const bool allow_round_v = dY_lowest < 16;
+
 		const bool int_x0 = (X0 & 0xF) == 0;
 		const bool int_y0 = (Y0 & 0xF) == 0;
-		const bool int_dx = (dX & 0xF) == 0;
-		const bool int_dy = (dY & 0xF) == 0;
-		const bool int_scale_u = (dU % dX) == 0;
-		const bool int_scale_v = (dV % dY) == 0;
+		//const bool int_dx = (dX & 0xF) == 0;
+		//const bool int_dy = (dY & 0xF) == 0;
+		//const bool int_scale_u = (dU % dX) == 0;
+		//const bool int_scale_v = (dV % dY) == 0;
 		const int scale_u = dU / dX;
 		const int scale_v = dV / dY;
 
-		// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
-		const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
-		const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
+		//// Whether pixel centers in X, Y correspond to texel boundaries in U, V.
+		//const bool half_u = int_dx && int_scale_u && ((U0 + scale_u * (16 - (X0 & 0xF))) & 0xF) == 0;
+		//const bool half_v = int_dy && int_scale_v && ((V0 + scale_v * (16 - (Y0 & 0xF))) & 0xF) == 0;
 
-		//changed |= (half_u || half_v);
+		////changed |= (half_u || half_v);
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 		
@@ -4561,8 +4577,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		//	round_down_u = (U1 > U0) && !pow2_x;
 		//	round_down_v = (V1 > V0) && !pow2_y;
 		//}
-
-		changed = true;
 
 		bool round_down_tl_u, round_down_tl_v;
 		bool round_down_t_u, round_down_t_v;
@@ -4608,8 +4622,8 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const bool round_up_v_all = !round_down_tl_v && !round_down_t_v && !round_down_l_v && !round_down_br_v;
 
 		// Whether to split the primitive so that the top- and left-most pixels are rounded differently.
-		const bool split_x = !(round_down_u_all || round_up_u_all);
-		const bool split_y = !(round_down_v_all || round_up_v_all);
+		const bool split_x = allow_round_u && !(round_down_u_all || round_up_u_all);
+		const bool split_y = allow_round_v && !(round_down_v_all || round_up_v_all);
 
 		constexpr float small_val = 1.0f;
 
@@ -4618,34 +4632,37 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		v1.ST.S = 0.0f;
 		v1.ST.T = 0.0f;
 
-		// Round up X if on texel boundary (rounding down handled later).
+		// Round up U if on texel boundary (rounding down handled later).
 		//if (half_u)
-		{
-			/*v0.U += 8;
-			v1.U += 8;*/
-			v0.ST.S = small_val;
-			v1.ST.S = small_val;
-		}
+		//if (allow_round_u)
+		//{
+		//	/*v0.U += 8;
+		//	v1.U += 8;*/
+		//	v0.ST.S = small_val;
+		//	v1.ST.S = small_val;
+		//}
 
-		// Round up Y if on texel boundary (rounding down handled later).
+		// Round up V if on texel boundary (rounding down handled later).
 		//if (half_v)
-		{
-			/*v0.V += 8;
-			v1.V += 8;*/
-			v0.ST.T = small_val;
-			v1.ST.T = small_val;
-		}
+		//if (allow_round_v)
+		//{
+		//	/*v0.V += 8;
+		//	v1.V += 8;*/
+		//	v0.ST.T = small_val;
+		//	v1.ST.T = small_val;
+		//}
 
 		// Get references to new vertices. Triangles need 4 vertices per quad.
-		// Fill in the verties so that top-left is first and bottom-right is last.
-		GSVertex& vtl0 = vtx_out[i_out + n_out * 0 + 0];
-		GSVertex& vtl1 = vtx_out[i_out + n_out * 1 - 1];
-		GSVertex& vt0 = vtx_out[i_out + n_out * 1 + 0];
-		GSVertex& vt1 = vtx_out[i_out + n_out * 2 - 1];
-		GSVertex& vl0 = vtx_out[i_out + n_out * 2 + 0];
-		GSVertex& vl1 = vtx_out[i_out + n_out * 3 - 1];
-		GSVertex& vbr0 = vtx_out[i_out + n_out * 3 + 0];
-		GSVertex& vbr1 = vtx_out[i_out + n_out * 4 - 1];
+		// Fill in the vertices so that top-left is first and bottom-right is last.
+		GSVertex vtx_tmp[8];
+		GSVertex& vtl0 = vtx_tmp[0];
+		GSVertex& vtl1 = vtx_tmp[1];
+		GSVertex& vt0 = vtx_tmp[2];
+		GSVertex& vt1 = vtx_tmp[3];
+		GSVertex& vl0 = vtx_tmp[4];
+		GSVertex& vl1 = vtx_tmp[5];
+		GSVertex& vbr0 = vtx_tmp[6];
+		GSVertex& vbr1 = vtx_tmp[7];
 
 		// Top left pixel. Empty unless splitting both X and Y.
 		vtl0 = v0;
@@ -4732,43 +4749,102 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		//	vbr1.ST.T = -small_val;
 		//}
 
-		vtl0.ST.S = round_down_tl_u ? -small_val : small_val;
-		vtl1.ST.S = round_down_tl_u ? -small_val : small_val;
-		vtl0.ST.T = round_down_tl_v ? -small_val : small_val;
-		vtl1.ST.T = round_down_tl_v ? -small_val : small_val;
+		changed |= (allow_round_u || allow_round_v);
 
-		vt0.ST.S = round_down_t_u ? -small_val : small_val;
-		vt1.ST.S = round_down_t_u ? -small_val : small_val;
-		vt0.ST.T = round_down_t_v ? -small_val : small_val;
-		vt1.ST.T = round_down_t_v ? -small_val : small_val;
+		if (allow_round_u)
+		{
+			vtl0.ST.S = round_down_tl_u ? -small_val : small_val;
+			vtl1.ST.S = round_down_tl_u ? -small_val : small_val;
 
-		vl0.ST.S = round_down_l_u ? -small_val : small_val;
-		vl1.ST.S = round_down_l_u ? -small_val : small_val;
-		vl0.ST.T = round_down_l_v ? -small_val : small_val;
-		vl1.ST.T = round_down_l_v ? -small_val : small_val;
+			vt0.ST.S = round_down_t_u ? -small_val : small_val;
+			vt1.ST.S = round_down_t_u ? -small_val : small_val;
+		
+			vl0.ST.S = round_down_l_u ? -small_val : small_val;
+			vl1.ST.S = round_down_l_u ? -small_val : small_val;
 
-		vbr0.ST.S = round_down_br_u ? -small_val : small_val;
-		vbr1.ST.S = round_down_br_u ? -small_val : small_val;
-		vbr0.ST.T = round_down_br_v ? -small_val : small_val;
-		vbr1.ST.T = round_down_br_v ? -small_val : small_val;
+			vbr0.ST.S = round_down_br_u ? -small_val : small_val;
+			vbr1.ST.S = round_down_br_u ? -small_val : small_val;
+		}
+
+		if (allow_round_v)
+		{
+			vtl0.ST.T = round_down_tl_v ? -small_val : small_val;
+			vtl1.ST.T = round_down_tl_v ? -small_val : small_val;
+
+			vt0.ST.T = round_down_t_v ? -small_val : small_val;
+			vt1.ST.T = round_down_t_v ? -small_val : small_val;
+
+			vl0.ST.T = round_down_l_v ? -small_val : small_val;
+			vl1.ST.T = round_down_l_v ? -small_val : small_val;
+
+			vbr0.ST.T = round_down_br_v ? -small_val : small_val;
+			vbr1.ST.T = round_down_br_v ? -small_val : small_val;
+		}
 
 		// Fill in the top-right and bottom-left vertices for triangles.
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
-			for (u32 j = 0; j < 16; j += 4)
-			{
-				// top-right
-				vtx_out[i_out + j + 1] = vtx_out[i_out + j + 0];
-				vtx_out[i_out + j + 1].XYZ.X = vtx_out[i_out + j + 3].XYZ.X;
-				vtx_out[i_out + j + 1].U = vtx_out[i_out + j + 3].U;
-				vtx_out[i_out + j + 1].ST.S = vtx_out[i_out + j + 3].ST.S;
+			//for (u32 j = 0; j < 16; j += 4)
+			//{
+			//	// top-right
+			//	vtx_out[i_out + j + 1] = vtx_out[i_out + j + 0];
+			//	vtx_out[i_out + j + 1].XYZ.X = vtx_out[i_out + j + 3].XYZ.X;
+			//	vtx_out[i_out + j + 1].U = vtx_out[i_out + j + 3].U;
+			//	vtx_out[i_out + j + 1].ST.S = vtx_out[i_out + j + 3].ST.S;
 
-				// bottom-left
-				vtx_out[i_out + j + 2] = vtx_out[i_out + j + 0];
-				vtx_out[i_out + j + 2].XYZ.Y = vtx_out[i_out + j + 3].XYZ.Y;
-				vtx_out[i_out + j + 2].V = vtx_out[i_out + j + 3].V;
-				vtx_out[i_out + j + 2].ST.T = vtx_out[i_out + j + 3].ST.T;
+			//	// bottom-left
+			//	vtx_out[i_out + j + 2] = vtx_out[i_out + j + 0];
+			//	vtx_out[i_out + j + 2].XYZ.Y = vtx_out[i_out + j + 3].XYZ.Y;
+			//	vtx_out[i_out + j + 2].V = vtx_out[i_out + j + 3].V;
+			//	vtx_out[i_out + j + 2].ST.T = vtx_out[i_out + j + 3].ST.T;
+			//}
+			
+			// Take X attributes from first vertex and Y from second.
+			const auto CombineXY = [](const GSVertex& vx, const GSVertex& vy) {
+				GSVertex v = vx;
+				v.XYZ.Y = vy.XYZ.Y;
+				v.V = vy.V;
+				v.ST.T = vy.ST.T;
+				return v;
+			};
+
+			// Arrange the new triangles so that the firsts triangles is the top-left region
+			// and the second triangles is the bottom-right region. This is needed
+			// for the following adjustment to V rounding.
+			for (u32 j = 0, k = 0; j < 8; j += 2, k += 6)
+			{
+				// First triangle.
+				vtx_out[i_out + k + 0] = vtx_tmp[j + 0];
+				vtx_out[i_out + k + 1] = CombineXY(vtx_tmp[j + 1], vtx_tmp[j + 0]);
+				vtx_out[i_out + k + 2] = CombineXY(vtx_tmp[j + 0], vtx_tmp[j + 1]);
+				
+				// Second triangle.
+				vtx_out[i_out + k + 3] = vtx_tmp[j + 1];
+				vtx_out[i_out + k + 4] = CombineXY(vtx_tmp[j + 0], vtx_tmp[j + 1]);
+				vtx_out[i_out + k + 5] = CombineXY(vtx_tmp[j + 1], vtx_tmp[j + 0]);
 			}
+
+			// If the diagonal where the two triangles meet is top-right to bottom-left,
+			// then the lower triangle always appears to round V up rather than down.
+			// Warning: This is not totally accurate. The border of the two triangles might
+			// have been modified by the splitting.
+			if (!diag_tl_to_br && round_down_br_v && allow_round_v)
+			{
+				vtx_out[i_out + 21].ST.T = small_val;
+				vtx_out[i_out + 22].ST.T = small_val;
+				vtx_out[i_out + 23].ST.T = small_val;
+			}
+		}
+		else
+		{
+			vtx_out[i_out + 0] = vtx_tmp[0];
+			vtx_out[i_out + 1] = vtx_tmp[1];
+			vtx_out[i_out + 2] = vtx_tmp[2];
+			vtx_out[i_out + 3] = vtx_tmp[3];
+			vtx_out[i_out + 4] = vtx_tmp[4];
+			vtx_out[i_out + 5] = vtx_tmp[5];
+			vtx_out[i_out + 6] = vtx_tmp[6];
+			vtx_out[i_out + 7] = vtx_tmp[7];
 		}
 	}
 
@@ -4792,23 +4868,23 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	m_index.tail = 4 * m_index.tail;
 
 	// Get the new indices.
-	if constexpr (primclass == GS_TRIANGLE_CLASS)
-	{
-		for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
-		{
-			index[i + 0] = v + 0;
-			index[i + 1] = v + 1;
-			index[i + 2] = v + 2;
-			index[i + 3] = v + 1;
-			index[i + 4] = v + 2;
-			index[i + 5] = v + 3;
-		}
-	}
-	else
-	{
-		for (u32 i = 0; i < m_index.tail; i++)
-			index[i] = i;
-	}
+	//if constexpr (primclass == GS_TRIANGLE_CLASS)
+	//{
+	//	for (u32 i = 0, v = 0; i < m_index.tail; i += 6, v += 4)
+	//	{
+	//		index[i + 0] = v + 0;
+	//		index[i + 1] = v + 1;
+	//		index[i + 2] = v + 2;
+	//		index[i + 3] = v + 1;
+	//		index[i + 4] = v + 2;
+	//		index[i + 5] = v + 3;
+	//	}
+	//}
+	//else
+	//{
+	for (u32 i = 0; i < m_index.tail; i++)
+		index[i] = i;
+	//}
 
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
