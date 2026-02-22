@@ -236,7 +236,7 @@ struct alignas(32) GSVertexSW
 
 	typedef void (*ConvertVertexBufferPtr)(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTRICT dst, const GSVertex* RESTRICT src, u32 count);
 
-	static ConvertVertexBufferPtr s_cvb[4][2][2][2];
+	static ConvertVertexBufferPtr s_cvb[4][2][2][2][2];
 
 	static void InitStatic();
 };

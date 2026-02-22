@@ -49,11 +49,14 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	data.index_count = hw.m_index.tail;
 	data.scanmsk_value = env.SCANMSK.MSK;
 
+	const u32 uv_bias = static_cast<u32>(hw.SplitAxisAlignedPrims4xAndRound());
+
 	// Skip per pixel division if q is constant.
 	// Optimize the division by 1 with a nop. It also means that GS_SPRITE_CLASS must be processed when !vt.m_eq.q.
 	// If you have both GS_SPRITE_CLASS && vt.m_eq.q, it will depends on the first part of the 'OR'.
 	const u32 q_div = !hw.IsMipMapActive() && ((vt.m_eq.q && vt.m_min.t.z != 1.0f) || (!vt.m_eq.q && vt.m_primclass == GS_SPRITE_CLASS));
-	GSVertexSW::s_cvb[vt.m_primclass][PRIM->TME][PRIM->FST][q_div](context, data.vertex, hw.m_vertex.buff, hw.m_vertex.next);
+	GSVertexSW::s_cvb[vt.m_primclass][PRIM->TME][PRIM->FST][q_div][uv_bias](
+		context, data.vertex, hw.m_vertex.buff, hw.m_vertex.next);
 
 	GSVector4i scissor = context->scissor.in;
 	GSVector4i bbox = GSVector4i(vt.m_min.p.floor().xyxy(vt.m_max.p.ceil())).rintersect(scissor);
