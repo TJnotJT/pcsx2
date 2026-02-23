@@ -3617,6 +3617,8 @@ static void AddShaderHeader(std::stringstream& ss)
 		ss << "#define DISABLE_TEXTURE_BARRIER 1\n";
 	if (features.texture_barrier && dev->UseFeedbackLoopLayout())
 		ss << "#define HAS_FEEDBACK_LOOP_LAYOUT 1\n";
+
+	ss << "#define ROUND_UV_THRESHOLD " << 16.0f / ROUND_UV_DENOMINATOR << "\n";
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)

@@ -289,6 +289,11 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
+// This is chosen because it seems that interpolated UV values on the GPU can be systematically too large.
+// Larger values mean that threshold for rounding is smaller but that the rounding will be applied to
+// more primitives. Current value chosen by hand based on ad hoc testing of some dumps.
+constexpr u32 ROUND_UV_DENOMINATOR = 32;
+
 struct alignas(16) GSHWDrawConfig
 {
 	enum class Topology: u8

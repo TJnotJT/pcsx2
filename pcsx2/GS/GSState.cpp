@@ -4534,23 +4534,32 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool round_down_u = (U1 > U0) && !pow2_x;
 		const bool round_down_v = (V1 > V0) && !pow2_y;
 
+		// Only allow adjustment if the denominator of dU/dX or dV/dY in lowest terms is small enough.
+		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447).
+		const int dX_lowest = dX / std::gcd(dX, dU);
+		const int dY_lowest = dY / std::gcd(dY, dV);
+		const bool allow_round_u = dX_lowest < ROUND_UV_DENOMINATOR;
+		const bool allow_round_v = dY_lowest < ROUND_UV_DENOMINATOR;
+
 		for (u32 j = 0; j < n; j++)
 		{
-			// Round down bits.
-			u32 ru = static_cast<bool>(round_down_u);
-			u32 rv = static_cast<bool>(round_down_v);
+			bool round_down_v2 = round_down_v;
 
 			// For triangles, the behavior is slightly different for the bottom-right triangle
 			// if the diagonal between the shared edge goes top-right to bottom-left:
 			// the bottom-right triangle has V rounded up instead of down.
 			if (primclass == GS_TRIANGLE_CLASS && j >= 3)
 			{
-				rv &= static_cast<u32>(diag_tl_to_br);
+				round_down_v2 = round_down_v2 && diag_tl_to_br;
 			}
+
+			// Round down bits.
+			u32 ru = allow_round_u ? 1 + static_cast<bool>(round_down_u) : 0;
+			u32 rv = allow_round_v ? 1 + static_cast<bool>(round_down_v2) : 0;
 
 			vtx[i + j].ST.S = static_cast<float>(X0) / 16.0f; // Save X0 in unused S.
 			vtx[i + j].ST.T = static_cast<float>(Y0) / 16.0f; // Save Y0 in unused T.
-			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 1)); // Save rounding info in unused Q.
+			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 2)); // Save rounding info in unused Q.
 		}
 	}
 
