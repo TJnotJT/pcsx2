@@ -241,11 +241,6 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 			if (fst)
 			{
 				t = GSVector4(xyzuvf.uph16() << (16 - 4));
-
-				if (uv_bias)
-				{
-					t += stcq.xyzw(GSVector4::zero()) * static_cast<float>(1 << (16 - 4));
-				}
 			}
 			else if (q_div)
 			{
@@ -454,8 +449,7 @@ void GSRendererSW::Draw()
 			break;
 	}
 
-	// Axis-aligned prim splitting/rounding to emulate UV rounding error on GS.
-	const u32 uv_bias = static_cast<u32>(SplitAxisAlignedPrims4xAndRound());
+	const u32 round_uv = static_cast<u32>(GetVertexUVRoundingInfo());
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
@@ -473,7 +467,7 @@ void GSRendererSW::Draw()
 	// If you have both GS_SPRITE_CLASS && m_vt.m_eq.q, it will depends on the first part of the 'OR'
 	u32 q_div = !IsMipMapActive() && ((m_vt.m_eq.q && m_vt.m_min.t.z != 1.0f) || (!m_vt.m_eq.q && m_vt.m_primclass == GS_SPRITE_CLASS));
 
-	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][PRIM->FST][q_div][uv_bias](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
+	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][PRIM->FST][q_div][round_uv](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
 
 	std::memcpy(sd->index, m_index.buff, sizeof(u16) * m_index.tail);
 
@@ -490,6 +484,8 @@ void GSRendererSW::Draw()
 	{
 		return;
 	}
+
+	sd->global.sel.rounduv = !!round_uv;
 
 	if constexpr (LOG && false)
 	{

@@ -3352,6 +3352,31 @@ void GSState::GrowVertexBuffer()
 	m_vertex.maxcount = maxcount - 3; // -3 to have some space at the end of the buffer before DrawingKick can grow it
 }
 
+bool GSState::DeindexVertices()
+{
+	if (m_index.tail > UINT16_MAX) [[unlikely]]
+	{
+		Console.Warning("Error: Cannot deindex %u (> %u) vertices.", m_index.tail, UINT16_MAX);
+		return false;
+	}
+
+	while (m_vertex.maxcount < m_index.tail)
+	{
+		GrowVertexBuffer();
+	}
+
+	for (int i = static_cast<int>(m_index.tail) - 1; i >= 0; i--)
+	{
+		m_vertex.buff_copy[i] = m_vertex.buff[m_index.buff[i]];
+		m_index.buff[i] = static_cast<u16>(i);
+	}
+
+	std::swap(m_vertex.buff, m_vertex.buff_copy);
+	m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail;
+
+	return true;
+}
+
 // For returning order of vertices to form a right triangle
 struct TriangleOrdering
 {
@@ -4325,7 +4350,7 @@ bool GSState::SpriteDrawWithoutGaps()
 // implemented for sprites at the moment.
 // Return true if the sprites were split (and thus vertices were quadrupled), otherwise false.
 template<u32 primclass>
-bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
+bool GSState::GetVertexUVRoundingInfoImpl()
 {
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
 	// at pixel centers (at least if we do mathematically correct interpolation without rounding errors):
@@ -4335,7 +4360,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	// - If the width and/or height is a power of 2, the UVs always round up (when on a texel boundary).
 	// To emulate this behavior, each sprite is split into 4 new sprites for the top, left, top-left, and bottom-right pixels,
 	// and the UVs are adjusted.
-	
+
 	// Side note: The reason for this behavior might be due to the GS fixed-point precision for computing gradients,
 	// since power-of-2 and non-power-of-2 denominators have different behavior. However, this pattern only seems to
 	// hold when the width or height is <= 512 pixels. At > 512 pixels, the rounding seems to be sporadically up/down,
@@ -4343,11 +4368,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 	// rounds down the UVs, so no changes are needed to the below code (640 is likely the most common size > 512).
 
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
-
-	if (primclass == GS_TRIANGLE_CLASS)
-	{
-		//return false;
-	}
 
 	if (PRIM->TME && primclass == GS_TRIANGLE_CLASS && !m_vt.IsRealLinear())
 	{
@@ -4407,19 +4427,19 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 	// Number of vertices for each new quad.
 	constexpr u32 n_out = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
-	
+
 	const bool iip = PRIM->IIP;
 	const bool fge = PRIM->FGE;
 	const bool using_z = !m_context->ZBUF.ZMSK ||
-	                     (m_context->TEST.ZTE && m_context->TEST.ZTST != ZTST_ALWAYS);
+		(m_context->TEST.ZTE && m_context->TEST.ZTST != ZTST_ALWAYS);
 
 	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
 
-	
 	// Corners of right-angle corners for triangles forming quads.
 	std::vector<u32> tri_quad_corners;
 
-	// Need an axis-aligned quad check for triangles.
+	// For efficiency, only apply this to draws where all triangles form axis-aligned quads.
+	// Other types of draws may not need accurate UV rounding.
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
 		GSVertex* RESTRICT vtx = m_vertex.buff;
@@ -4427,7 +4447,7 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 
 		if (m_index.tail % 6 != 0)
 			return false;
-	
+
 		for (u32 i = 0; i < m_index.tail; i += 6)
 		{
 			const u16* idx0 = index + i + 0;
@@ -4438,45 +4458,23 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 			if (!AreTrianglesQuad<1, 1>(vtx, idx0, idx1, &tri0, &tri1))
 				return false;
 
-			// Save only the right angle corners.
-			tri_quad_corners.push_back(idx0[tri0.b]);
-			tri_quad_corners.push_back(idx1[tri1.b]);
+			// Save the right angle corners.
+			tri_quad_corners.push_back(i + 0 + tri0.b);
+			tri_quad_corners.push_back(i + 3 + tri1.b);
 		}
 	}
 
-	// Make sure the vertex buffer has enough space.
-	while (m_vertex.maxcount < 4 * m_index.tail)
-		GrowVertexBuffer();
+	if constexpr (primclass == GS_TRIANGLE_CLASS)
+	{
+		if (!DeindexVertices()) [[unlikely]]
+			return false;
+	}
 
 	GSVertex* RESTRICT vtx = m_vertex.buff;
-	u16* RESTRICT index = m_index.buff;
-	GSVertex* RESTRICT vtx_out = m_vertex.buff_copy;
+	const u32 count = m_index.tail;
 
-	bool changed = false; // Did any vertices change?
-
-	u32 i_out = 0;
-	for (u32 i = 0; i < m_index.tail; i += n, i_out += 4 * n_out)
+	for (u32 i = 0; i < count; i += n)
 	{
-		// For triangles, make sure the attributes are flat.
-		if constexpr (primclass == GS_TRIANGLE_CLASS)
-		{
-			const u32 Z = vtx[index[i + 0]].XYZ.Z;
-			const u32 FOG = vtx[index[i + 0]].FOG;
-			const u32 RGBA = vtx[index[i + 0]].RGBAQ.U32[0];
-			bool not_flat = false;
-			for (u32 j = 1; j < 6; j++)
-			{
-				not_flat |= (using_z && vtx[index[i + j]].XYZ.Z != Z);
-				not_flat |= (fge && vtx[index[i + j]].FOG != FOG);
-				not_flat |= (iip && vtx[index[i + j]].RGBAQ.U32[0] != RGBA);
-			}
-			// Check only provoking vertices for flat colors.
-			not_flat |= (!iip && vtx[index[i + 2]].RGBAQ.U32[0] != vtx[index[i + 5]].RGBAQ.U32[0]);
-
-			if (not_flat)
-				return false;
-		}
-
 		GSVertex v0, v1; // Corners of the quad.
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
@@ -4495,16 +4493,6 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		// Note that the two vertices are the right angle corners of two different triangles.
 		// Need to set this before we swap the attributes.
 		const bool diag_tl_to_br = v0.XYZ.X > v1.XYZ.X;
-
-		// Make sure flat attributes are the same.
-		v0.RGBAQ = v1.RGBAQ;
-		v0.FOG = v1.FOG;
-		v0.XYZ.Z = v1.XYZ.Z;
-		if (primclass == GS_TRIANGLE_CLASS && !iip)
-		{
-			// Get color of provoking vertex.
-			v0.RGBAQ = v1.RGBAQ = vtx[index[i + 5]].RGBAQ;
-		}
 
 		// Make sure vertices are top-left and bottom-right.
 		if (v0.XYZ.X > v1.XYZ.X)
@@ -4533,255 +4521,50 @@ bool GSState::SplitAxisAlignedPrims4xAndRoundImpl()
 		const int dU = U1 - U0;
 		const int dV = V1 - V0;
 
-		// Only allow adjustment if the denominator of dU/dX or dV/dY in lowest terms is < 16.
-		// Otherwise it might mess up the actual value since we adjust with 1/16 increments.
-		const int dX_lowest = dX / std::gcd(dX, dU);
-		const int dY_lowest = dY / std::gcd(dY, dV);
-		const bool allow_round_u = dX_lowest < 16;
-		const bool allow_round_v = dY_lowest < 16;
-
 		const bool int_x0 = (X0 & 0xF) == 0;
 		const bool int_y0 = (Y0 & 0xF) == 0;
-		const int scale_u = dU / dX;
-		const int scale_v = dV / dY;
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
-		
+
 		// For triangles, the power-of-two condition seems to apply to the whole prim only when
 		// both dX and dY are powers to two.
 		const bool pow2_x = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
 		const bool pow2_y = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
 
-		const bool round_down_tl_u = (U1 > U0) && !pow2_x && !int_x0;
-		const bool round_down_tl_v = (V1 > V0) && !pow2_y && !int_y0;
+		const bool round_down_u = (U1 > U0) && !pow2_x;
+		const bool round_down_v = (V1 > V0) && !pow2_y;
 
-		const bool round_down_t_u = (U1 > U0) && !pow2_x;
-		const bool round_down_t_v = (V1 > V0) && !pow2_y && !int_y0;
-
-		const bool round_down_l_u = (U1 > U0) && !pow2_x && !int_x0;
-		const bool round_down_l_v = (V1 > V0) && !pow2_y;
-
-		const bool round_down_br_u = (U1 > U0) && !pow2_x;
-		const bool round_down_br_v = (V1 > V0) && !pow2_y;
-
-		const bool round_down_u_all = round_down_tl_u && round_down_t_u && round_down_l_u && round_down_br_u;
-		const bool round_up_u_all = !round_down_tl_u && !round_down_t_u && !round_down_l_u && !round_down_br_u;
-		const bool round_down_v_all = round_down_tl_v && round_down_t_v && round_down_l_v && round_down_br_v;
-		const bool round_up_v_all = !round_down_tl_v && !round_down_t_v && !round_down_l_v && !round_down_br_v;
-
-		// Whether to split the primitive so that the top- and left-most pixels are rounded differently.
-		const bool split_x = allow_round_u && !(round_down_u_all || round_up_u_all);
-		const bool split_y = allow_round_v && !(round_down_v_all || round_up_v_all);
-
-		constexpr float small_val = 1.0f;
-
-		v0.ST.S = 0.0f;
-		v0.ST.T = 0.0f;
-		v1.ST.S = 0.0f;
-		v1.ST.T = 0.0f;
-
-		// New vertices.
-		GSVertex vtx_tmp[8];
-		GSVertex& vtl0 = vtx_tmp[0];
-		GSVertex& vtl1 = vtx_tmp[1];
-		GSVertex& vt0 = vtx_tmp[2];
-		GSVertex& vt1 = vtx_tmp[3];
-		GSVertex& vl0 = vtx_tmp[4];
-		GSVertex& vl1 = vtx_tmp[5];
-		GSVertex& vbr0 = vtx_tmp[6];
-		GSVertex& vbr1 = vtx_tmp[7];
-
-		// Top left pixel. Empty unless splitting both X and Y.
-		vtl0 = v0;
-		vtl1 = v0;
-		if (split_x && split_y)
+		for (u32 j = 0; j < n; j++)
 		{
-			vtl1.XYZ.X += 16;
-			vtl1.XYZ.Y += 16;
-			vtl1.U += 16 * scale_u;
-			vtl1.V += 16 * scale_v;
-		}
+			// Round down bits.
+			u32 ru = static_cast<bool>(round_down_u);
+			u32 rv = static_cast<bool>(round_down_v);
 
-		// Left vertical strip. Empty unless splitting X.
-		vl0 = v0;
-		vl1 = v0;
-		vl1.XYZ.Y = v1.XYZ.Y;
-		vl1.V = v1.V;
-		if (split_x)
-		{
-			vl1.XYZ.X += 16;
-			vl1.U += 16 * scale_u;
-		}
-		if (split_y)
-		{
-			vl0.XYZ.Y += 16;
-			vl0.V += 16 * scale_v;
-		}
-
-		// Top horizontal strip. Empty unless splitting Y.
-		vt0 = v0;
-		vt1 = v0;
-		vt1.XYZ.X = v1.XYZ.X;
-		vt1.U = v1.U;
-		if (split_y)
-		{
-			vt1.XYZ.Y += 16;
-			vt1.V += 16 * scale_v;
-		}
-		if (split_x)
-		{
-			vt0.XYZ.X += 16;
-			vt0.U += 16 * scale_u;
-		}
-
-		// Bottom right rectangle. Whole sprite if not splitting X nor Y.
-		vbr0 = v0;
-		vbr1 = v1;
-		if (split_x)
-		{
-			vbr0.XYZ.X += 16;
-			vbr0.U += 16 * scale_u;
-		}
-		if (split_y)
-		{
-			vbr0.XYZ.Y += 16;
-			vbr0.V += 16 * scale_v;
-		}
-
-		changed |= (allow_round_u || allow_round_v);
-
-		if (allow_round_u)
-		{
-			vtl0.ST.S = round_down_tl_u ? -small_val : small_val;
-			vtl1.ST.S = round_down_tl_u ? -small_val : small_val;
-
-			vt0.ST.S = round_down_t_u ? -small_val : small_val;
-			vt1.ST.S = round_down_t_u ? -small_val : small_val;
-		
-			vl0.ST.S = round_down_l_u ? -small_val : small_val;
-			vl1.ST.S = round_down_l_u ? -small_val : small_val;
-
-			vbr0.ST.S = round_down_br_u ? -small_val : small_val;
-			vbr1.ST.S = round_down_br_u ? -small_val : small_val;
-		}
-
-		if (allow_round_v)
-		{
-			vtl0.ST.T = round_down_tl_v ? -small_val : small_val;
-			vtl1.ST.T = round_down_tl_v ? -small_val : small_val;
-
-			vt0.ST.T = round_down_t_v ? -small_val : small_val;
-			vt1.ST.T = round_down_t_v ? -small_val : small_val;
-
-			vl0.ST.T = round_down_l_v ? -small_val : small_val;
-			vl1.ST.T = round_down_l_v ? -small_val : small_val;
-
-			vbr0.ST.T = round_down_br_v ? -small_val : small_val;
-			vbr1.ST.T = round_down_br_v ? -small_val : small_val;
-		}
-
-		// Fill in the top-right and bottom-left vertices for triangles.
-		if constexpr (primclass == GS_TRIANGLE_CLASS)
-		{
-			// Take X attributes from first vertex and Y from second.
-			const auto CombineXY = [](const GSVertex& vx, const GSVertex& vy) {
-				GSVertex v = vx;
-				v.XYZ.Y = vy.XYZ.Y;
-				v.V = vy.V;
-				v.ST.T = vy.ST.T;
-				return v;
-			};
-
-			// Arrange the new triangles so that the firsts triangles is the top-left region
-			// and the second triangles is the bottom-right region. This is needed for the
-			// adjustment of V rounding in the bottom-right region.
-			for (u32 j = 0, k = 0; j < 8; j += 2, k += 6)
+			// For triangles, the behavior is slightly different for the bottom-right triangle
+			// if the diagonal between the shared edge goes top-right to bottom-left:
+			// the bottom-right triangle has V rounded up instead of down.
+			if (primclass == GS_TRIANGLE_CLASS && j >= 3)
 			{
-				// First triangle.
-				vtx_out[i_out + k + 0] = vtx_tmp[j + 0];
-				vtx_out[i_out + k + 1] = CombineXY(vtx_tmp[j + 1], vtx_tmp[j + 0]);
-				vtx_out[i_out + k + 2] = CombineXY(vtx_tmp[j + 0], vtx_tmp[j + 1]);
-				
-				// Second triangle.
-				vtx_out[i_out + k + 3] = vtx_tmp[j + 1];
-				vtx_out[i_out + k + 4] = CombineXY(vtx_tmp[j + 0], vtx_tmp[j + 1]);
-				vtx_out[i_out + k + 5] = CombineXY(vtx_tmp[j + 1], vtx_tmp[j + 0]);
+				rv &= static_cast<u32>(diag_tl_to_br);
 			}
 
-			// If the diagonal where the two triangles meet is top-right to bottom-left,
-			// then the bottom-right triangle always appears to round V up rather than down.
-			// Warning: This is not totally accurate. The border of the two triangles might
-			// have been modified by the splitting.
-			if (!diag_tl_to_br && round_down_br_v && allow_round_v)
-			{
-				vtx_out[i_out + 21].ST.T = small_val;
-				vtx_out[i_out + 22].ST.T = small_val;
-				vtx_out[i_out + 23].ST.T = small_val;
-			}
+			vtx[i + j].ST.S = static_cast<float>(X0) / 16.0f; // Save X0 in unused S.
+			vtx[i + j].ST.T = static_cast<float>(Y0) / 16.0f; // Save Y0 in unused T.
+			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 1)); // Save rounding info in unused Q.
 		}
-		else
-		{
-			vtx_out[i_out + 0] = vtx_tmp[0];
-			vtx_out[i_out + 1] = vtx_tmp[1];
-			vtx_out[i_out + 2] = vtx_tmp[2];
-			vtx_out[i_out + 3] = vtx_tmp[3];
-			vtx_out[i_out + 4] = vtx_tmp[4];
-			vtx_out[i_out + 5] = vtx_tmp[5];
-			vtx_out[i_out + 6] = vtx_tmp[6];
-			vtx_out[i_out + 7] = vtx_tmp[7];
-		}
-	}
-
-	if (!changed)
-		return false;
-
-	GL_INS("GS: Splitting prims to emulate UV rounding.");
-
-	if (primclass == GS_TRIANGLE_CLASS)
-	{
-		//Console.Warning("!!!TRIANGLESPLIT2!!! %d", s_n);
-		if (!GSConfig.HWDumpDirectory.empty())
-		{
-			//DumpVertices(GetDrawDumpPath("%05d_vertex_before.txt", s_n));
-		}
-	}
-
-	// Replace old prims with new split prims.
-	std::swap(m_vertex.buff, m_vertex.buff_copy);
-	m_vertex.head = m_vertex.next = m_vertex.tail = i_out;
-	m_index.tail = 4 * m_index.tail;
-
-	// Get the new indices.
-	for (u32 i = 0; i < m_index.tail; i++)
-	{
-		index[i] = i;
-	}
-
-	if (primclass == GS_TRIANGLE_CLASS)
-	{
-		if (!GSConfig.HWDumpDirectory.empty())
-		{
-			//DumpVertices(GetDrawDumpPath("%05d_vertex_after.txt", s_n));
-		}
-	}
-
-	// Dump vertices for debugging.
-	if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()) && GSConfig.SaveInfo)
-	{
-		DumpVertices(GetDrawDumpPath("%05d_vertex_split.txt", s_n));
 	}
 
 	return true;
 }
 
-bool GSState::SplitAxisAlignedPrims4xAndRound()
+bool GSState::GetVertexUVRoundingInfo()
 {
 	switch (m_vt.m_primclass)
 	{
 		case GS_TRIANGLE_CLASS:
-			return SplitAxisAlignedPrims4xAndRoundImpl<GS_TRIANGLE_CLASS>();
+			return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS>();
 		case GS_SPRITE_CLASS:
-			return SplitAxisAlignedPrims4xAndRoundImpl<GS_SPRITE_CLASS>();
+			return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS>();
 		default:
 			return false;
 	}

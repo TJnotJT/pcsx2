@@ -20,7 +20,11 @@ layout(std140, set = 0, binding = 0) uniform cb0
 
 layout(location = 0) out VSOutput
 {
-	vec4 t;
+	#if VS_ROUND_UV != 0
+		flat vec4 t;
+	#else
+		vec4 t;
+	#endif
 	vec4 ti;
 
 	#if VS_IIP != 0
@@ -56,7 +60,7 @@ void main()
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset + (VS_BIAS_UV == 0 ? vec2(0.0f) : a_st);
+		vec2 uv = a_uv - TextureOffset;
 		vec2 st = a_st - TextureOffset;
 
 		// Integer nomalized
@@ -133,7 +137,7 @@ ProcessedVertex load_vertex(uint index)
 	vtx.p.y = -vtx.p.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset + (VS_BIAS_UV == 0 ? vec2(0.0f) : a_st);
+		vec2 uv = a_uv - TextureOffset;
 		vec2 st = a_st - TextureOffset;
 		vtx.ti.xy = uv * TextureScale;
 
@@ -291,6 +295,7 @@ void main()
 #define PS_ZFLOOR 0
 #define PS_FEEDBACK_LOOP 0
 #define PS_TEX_IS_FB 0
+#define PS_ROUND_UV 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -326,7 +331,11 @@ layout(std140, set = 0, binding = 1) uniform cb1
 
 layout(location = 0) in VSOutput
 {
-	vec4 t;
+	#if PS_ROUND_UV != 0
+		flat vec4 t;
+	#else
+		vec4 t;
+	#endif
 	vec4 ti;
 	#if PS_IIP != 0
 		vec4 c;
@@ -501,6 +510,30 @@ vec4 clamp_wrap_uv(vec4 uv)
 	#endif
 
 	return uv;
+}
+
+vec2 round_uv()
+{
+	// Where X, Y are at left and top of prim.
+	// Top-left of the prim saved in unused texture coords.
+	ivec2 topleft = ivec2(floor(gl_FragCoord.xy) == vsIn.t.xy);
+
+	// Extract flags for whether to round U, V up/down.
+	// Saved in unused texture coords.
+	int round_bits = int(vsIn.t.w);
+	ivec2 round_down = ivec2(round_bits & 1, (round_bits >> 1) & 2);
+
+	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
+	vec2 uvi = round(8.0f * vsIn.ti.zw) / 8.0f; // Round to nearest half texel.
+	
+	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(0.5f, 0.5f))); // Are we close to half texel?
+	ivec2 do_round_up = close & ~topleft & ~round_down;
+	ivec2 do_round_down = close & ~topleft & round_down;
+
+	uv = mix(uv, uvi + 0.5f, bvec2(do_round_up));
+	uv = mix(uv, uvi - 0.5f, bvec2(do_round_down));
+
+	return uv / 16.0f / WH.xy; // Return normalized coords.
 }
 
 mat4 sample_4c(vec4 uv)
@@ -924,7 +957,7 @@ vec4 ps_color()
 	vec2 st = vsIn.t.xy / vsIn.t.w;
 	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
 #else
-	vec2 st = vsIn.ti.xy;
+	vec2 st = PS_ROUND_UV != 0 ? round_uv() : vsIn.ti.xy;
 	vec2 st_int = vsIn.ti.zw;
 #endif
 

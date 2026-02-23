@@ -4998,15 +4998,8 @@ void GSRendererHW::HandleProvokingVertexFirst()
 		return;
 
 	// De-index the vertices using the copy buffer
-	while (m_vertex.maxcount < m_index.tail)
-		GrowVertexBuffer();
-	for (int i = static_cast<int>(m_index.tail) - 1; i >= 0; i--)
-	{
-		m_vertex.buff_copy[i] = m_vertex.buff[m_index.buff[i]];
-		m_index.buff[i] = static_cast<u16>(i);
-	}
-	std::swap(m_vertex.buff, m_vertex.buff_copy);
-	m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail;
+	if (!DeindexVertices()) [[unlikely]]
+		return;
 
 	// Put correct color in the first vertex
 	for (u32 i = 0; i < m_index.tail; i += n)
@@ -8122,14 +8115,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Only implemented for native resolution currently.
 	if (GetUpscaleMultiplier() == 1.0f)
 	{
-		if (SplitAxisAlignedPrims4xAndRound())
+		if (GetVertexUVRoundingInfo())
 		{
-			// Need to adjust drawlist counts since each prim becomes 4 new prims.
-			for (u32 i = 0; i < m_drawlist.size(); i++)
-			{
-				m_drawlist[i] *= 4;
-			}
-			m_conf.vs.bias_uv = true;
+			m_conf.vs.round_uv = true;
+			m_conf.ps.round_uv = true;
 		}
 	}
 
