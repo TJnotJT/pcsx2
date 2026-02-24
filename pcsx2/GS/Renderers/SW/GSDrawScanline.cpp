@@ -270,11 +270,6 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 		if (sel.fst)
 		{
 			LOCAL_STEP.stq = GSVector4::cast(GSVector4i(tstep));
-
-			if (sel.rounduv)
-			{
-
-			}
 		}
 		else
 		{
@@ -1078,6 +1073,48 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						v = VectorI::cast(t);
 					}
 
+					// FIXME: Must also add to mipmapping?
+					if (sel.rounduv)
+					{
+#if _M_SSE >= 0x501
+						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
+
+						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx().aaaa() == curr_x;
+						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy().aaaa() == VectorI(top);
+
+						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz().aaaa() & VectorI(0xffff);
+						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().aaaa().srl32<16>();
+#else
+						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+
+						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
+						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy() == VectorI(top);
+
+						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
+						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
+#endif
+						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
+						const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
+
+						const VectorI round_up_u = (round_setting_u == VectorI(1) & ~at_left) |
+						                           (round_setting_u == VectorI(2) & at_left);
+						const VectorI round_up_v = (round_setting_v == VectorI(1) & ~at_top) |
+						                           (round_setting_v == VectorI(2) & at_top);
+
+						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+						VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+						constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+
+						VectorI close_u = (u - ui).abs32() <= threshold;
+						VectorI close_v = (v - vi).abs32() <= threshold;
+
+						u = u.blend8(ui - threshold, close_u & round_down_u);
+						u = u.blend8(ui + threshold, close_u & round_up_u);
+						v = v.blend8(vi - threshold, close_v & round_down_v);
+						v = v.blend8(vi + threshold, close_v & round_up_v);
+					}
+
 					if (sel.ltf)
 					{
 						uf = u.xxzzlh().srl16<12>();
@@ -1090,22 +1127,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 					VectorI uv0 = u.sra32<16>().ps32(v.sra32<16>());
 					VectorI uv1 = uv0;
-
-					if (sel.rounduv)
-					{
-						GSVector4i at_left = GSVector4i::cast(scan.p).uph16().xxxx() == GSVector4i(left) + GSVector4i::cxpr(0, 1, 2, 3);
-						GSVector4i at_top = GSVector4i::cast(scan.p).uph16().yyyy() == GSVector4i(top);
-						
-						GSVector4i round_setting = GSVector4i::cast(scan.t).zzzz();
-						//int2 round_down = int2(round_setting == 2) & ~topleft;
-						//int2 round_up = int2(round_setting == 1) | (int2(round_setting == 2) & topleft);
-
-						// Gotta do UV at the same time :/
-						GSVector4i uv0i = uv0i & GSVector4i(0xffff8000);
-						GSVector4i close = (uv0 - uv0i).abs32() <= GSVector4i(0x10000 / ROUND_UV_DENOMINATOR);
-
-
-					}
 
 					VectorI tmin = VectorI::broadcast128(global.t.min);
 					VectorI tmax = VectorI::broadcast128(global.t.max);
@@ -1755,6 +1776,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #else
 			test = const_test[7 + (steps & (steps >> 31))];
 #endif
+		}
+
+		if (sel.rounduv)
+		{
+			left += vlen;
 		}
 	}
 }

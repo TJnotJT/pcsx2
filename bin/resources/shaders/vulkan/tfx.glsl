@@ -531,7 +531,7 @@ vec4 round_uv()
 
 	// Extract flags in unused Q for whether to round U, V.
 	int round_bits = int(vsIn.t.w);
-	ivec2 round_setting = ivec2(round_bits & 3, (round_bits >> 2) & 3);
+	ivec2 round_setting = ivec2(round_bits & 3, (round_bits >> 8) & 3);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_setting, ivec2(2))) & ~topleft;

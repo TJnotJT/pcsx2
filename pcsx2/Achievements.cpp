@@ -2372,12 +2372,14 @@ bool Achievements::PrepareAchievementsWindow()
 
 	if (s_subset_list)
 	{
-		rc_client_destroy_subset_list(s_subset_list);
+		// FIXME: Remove after debugging.
+		//rc_client_destroy_subset_list(s_subset_list);
 		s_subset_list = nullptr;
 	}
 	CloseSubset();
 
-	s_subset_list = rc_client_create_subset_list(s_client);
+	// FIXME: Remove after debugging.
+	s_subset_list = nullptr;// rc_client_create_subset_list(s_client);
 
 	if (s_achievement_list)
 		rc_client_destroy_achievement_list(s_achievement_list);

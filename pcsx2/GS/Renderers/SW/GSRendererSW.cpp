@@ -27,7 +27,7 @@ GSRendererSW::GSRendererSW(int threads)
 	m_nativeres = true; // ignore ini, sw is always native
 
 	m_tc = std::make_unique<GSTextureCacheSW>();
-	m_rl = GSRasterizerList::Create(threads);
+	m_rl = GSRasterizerList::Create(0); // FIXME: Remove after debugging.
 
 	m_output = (u8*)_aligned_malloc(1024 * 1024 * sizeof(u32), VECTOR_ALIGNMENT);
 
@@ -245,7 +245,7 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 				if (round_uv)
 				{
 					// Get rounding flags.
-					t = t.insert32<3, 2>(GSVector4::cast(GSVector4i(stcq)));
+					t = t.insert32<2, 2>(GSVector4::cast(GSVector4i(stcq).uph8()));
 				}
 			}
 			else if (q_div)
