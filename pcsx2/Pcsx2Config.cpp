@@ -1020,7 +1020,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapIntEnumEx(OsdMessagesPos, "OsdMessagesPos");
 	SettingsWrapIntEnumEx(OsdPerformancePos, "OsdPerformancePos");
 
-	SettingsWrapIntEnumEx(Renderer, "Renderer");
+	//SettingsWrapIntEnumEx(Renderer, "Renderer");
+	Renderer = GSRendererType::SW;
 	SettingsWrapEntryEx(UpscaleMultiplier, "upscale_multiplier");
 
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
