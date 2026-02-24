@@ -5,8 +5,8 @@
 // Vertex Shader
 //////////////////////////////////////////////////////////////////////
 // FIXME: REMOVE AFTER DEBUGGING
-#ifndef ROUND_UV_THRESHOLD
-#define ROUND_UV_THRESHOLD 0.5
+#ifndef PS_ROUND_UV_THRESHOLD
+#define PS_ROUND_UV_THRESHOLD 0.5
 #endif
 
 #if defined(VERTEX_SHADER)
@@ -29,6 +29,7 @@ layout(location = 0) out VSOutput
 	#else
 		vec4 t;
 	#endif
+
 	vec4 ti;
 
 	#if VS_IIP != 0
@@ -345,7 +346,9 @@ layout(location = 0) in VSOutput
 	#else
 		vec4 t;
 	#endif
+
 	vec4 ti;
+
 	#if PS_IIP != 0
 		vec4 c;
 	#else
@@ -523,8 +526,7 @@ vec4 clamp_wrap_uv(vec4 uv)
 
 vec4 round_uv()
 {
-	// Where X, Y are at left and top of prim.
-	// Top-left of the prim saved in unused ST.
+	// Top-left X, Y of the prim saved in unused texture coords.
 	ivec2 topleft = ivec2(equal(floor(gl_FragCoord.xy), vsIn.t.xy));
 
 	// Extract flags in unused Q for whether to round U, V.
@@ -539,11 +541,11 @@ vec4 round_uv()
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
 	
-	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(ROUND_UV_THRESHOLD)));
+	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 
 	// Round only if close to a half texel.
-	uv = mix(uv, uvi - ROUND_UV_THRESHOLD, bvec2(close & round_down));
-	uv = mix(uv, uvi + ROUND_UV_THRESHOLD, bvec2(close & round_up));
+	uv = mix(uv, uvi - PS_ROUND_UV_THRESHOLD, bvec2(close & round_down));
+	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 }

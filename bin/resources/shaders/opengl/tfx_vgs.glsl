@@ -20,8 +20,14 @@ layout(std140, binding = 1) uniform cb20
 
 out SHADER
 {
-	vec4 t_float;
+	#if VS_ROUND_UV != 0
+		flat vec4 t_float;
+	#else
+		vec4 t_float;
+	#endif
+	
 	vec4 t_int;
+
 	#if VS_IIP != 0
 		vec4 c;
 	#else
