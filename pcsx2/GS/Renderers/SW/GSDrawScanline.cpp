@@ -11,7 +11,7 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
-//#define ENABLE_JIT_RASTERIZER
+#define ENABLE_JIT_RASTERIZER
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -161,7 +161,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 	sel.fb = global.sel.fb;
 	sel.zb = global.sel.zb;
 	sel.zoverflow = global.sel.zoverflow;
-	sel.zequal = global.sel.zequal;
+	sel.zflat = global.sel.zflat;
 	sel.notest = global.sel.notest;
 
 	return (data.setup_prim = m_sp_map[sel]) != nullptr;
@@ -233,7 +233,7 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 		}
 		else
 		{
-			local.p.z = vertex[index[1]].t.U32[3]; // u32 z is bypassed in t.w
+			local.p.z = vertex[index[sel.prim != GS_SPRITE_CLASS ? 0 : 1]].t.U32[3]; // u32 z is bypassed in t.w
 		}
 	}
 
@@ -1074,7 +1074,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 
 					// FIXME: Must also add to mipmapping?
-					if (sel.rounduv)
+					if (sel.rounduv && 0)
 					{
 #if _M_SSE >= 0x501
 						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
