@@ -276,7 +276,7 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 			if (round_uv)
 			{
 				// Get primitive top-left.
-				dst->p = dst->p.insert32<0, 2>(GSVector4::cast(GSVector4i(stcq).ps16()));
+				dst->p = dst->p.insert32<0, 2>(GSVector4::cast(GSVector4i(stcq).ps32()));
 			}
 
 			xyzuvf = xyzuvf.min_u32(z_max);

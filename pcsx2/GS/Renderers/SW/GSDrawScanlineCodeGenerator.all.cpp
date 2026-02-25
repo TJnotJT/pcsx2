@@ -646,8 +646,14 @@ void GSDrawScanlineCodeGenerator::Init()
 
 	if (m_sel.rounduv)
 	{
+		//mov(eax, _rip_local(temp.bp.x));
+		//cmp(eax, 0);
+		//je("@f");
+		//db(0xcc);
+		//L("@@");
+
 		mov(_rip_local(temp.round.left), ebx);
-		mov(_rip_local(temp.round.top), a2);
+		mov(_rip_local(temp.round.top), a2.cvt32());
 		mov(eax, ptr[a3 + offsetof(GSVertexSW, p.z)]);
 		mov(_rip_local(temp.round.primtl), eax);
 		mov(eax, ptr[a3 + offsetof(GSVertexSW, t.z)]);
@@ -1015,7 +1021,9 @@ void GSDrawScanlineCodeGenerator::Step()
 
 	if (m_sel.rounduv)
 	{
-		add(_rip_local(temp.round.left), vecints);
+		mov(eax, _rip_local(temp.round.left));
+		add(eax, vecints);
+		mov(_rip_local(temp.round.left), eax);
 	}
 }
 
@@ -1185,7 +1193,10 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 		movdqa(xym3, _t);
 	}
 
-	RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7, xym8);
+	if (m_sel.rounduv)
+	{
+		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7);
+	}
 
 	if (m_sel.ltf)
 	{
@@ -3296,129 +3307,113 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 		pinsrd(dst, src, i);
 }
 
-void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm& tmp1, const XYm& tmp2,
-	const XYm& tmp3, const XYm& tmp4, const XYm& tmp5, const XYm& tmp6, const XYm& tmp7)
+void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm& tmp1,
+	const XYm& tmp2, const XYm& tmp3, const XYm& tmp4, const XYm& tmp5, const XYm& tmp6)
 {
-#if USING_XMM
-	// const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
-
-	movd(tmp1, _rip_local(temp.round.left));
-	pshufd(tmp1, tmp1, 0);
-	paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
-
-	// const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
-
-	movd(tmp2, _rip_local(temp.round.primtl));
-	punpckhwd(tmp2, tmp2);
-	pshufd(tmp2, tmp2, 0);
-	pcmpeqd(tmp1, tmp2);
-
-	// const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
-
-	mov(eax, _rip_local(temp.round.flags));
-	and_(eax, 0xffff);
-	movd(tmp2, eax);
-	pshufd(tmp2, tmp2, 0);
-
-	// const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-
-	pcmpeqd(tmp3, tmp3);
-	pxor(tmp1, tmp3);
-	mov(eax, 2);
-	mov(tmp3, eax);
-	pshufd(tmp3, tmp3, 0);
-	pcmpeqd(tmp3, tmp2);
-	pand(tmp3, tmp1);
-
-	// const VectorI round_up_u = ((round_setting_u == VectorI(1)) & ~at_left) |
-	//	                          ((round_setting_u == VectorI(2)) & at_left);
-
-	mov(eax, 1);
-	mov(tmp4, eax);
-	pshufd(tmp4, tmp4, 0);
-	pcmpeqd(tmp4, tmp2);
-	pand(tmp4, tmp3);
-	pcmpeqd(tmp5, tmp5);
-	pxor(tmp1, tmp5);
-	mov(eax, 2);
-	mov(tmp5, eax);
-	pshufd(tmp5, tmp5, 0);
-	pcmpeqd(tmp5, tmp2);
-	por(tmp4, tmp5);
-
-	// VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-
-	mov(eax, 0x4000);
-	mov(tmp5, eax);
-	pshufd(tmp5, tmp5, 0);
-	paddd(tmp5, u);
-	mov(eax, ~(0x8000 - 1));
-	mov(tmp6, eax);
-	pshufd(tmp6, tmp6, 0);
-	pand(tmp5, tmp6);
-
-	// constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
-	// VectorI close_u = (u - ui).abs32() <= threshold;
-
-	mov(tmp6, u);
-	psubd(tmp6, tmp5);
-	pabsd(tmp6, tmp6);
-	mov(eax, 0x10000 / ROUND_UV_DENOMINATOR);
-	mov(tmp7, eax);
-	pshufd(tmp7, tmp7, 0);
-	pcmpled(tmp6, tmp7);
-
-	// u = u.blend8(ui - threshold, close_u & round_down_u);
-	// u = u.blend8(ui + threshold, close_u & round_up_u);
-	pand(tmp3, tmp6);
-	pand(tmp4, tmp6);
-	paddd(tmp5, tmp7);
-	// Need to use a blend here...
-
-#else
-	vbroadcasti128(tmp1, _rip_local(temp.left));
-#endif
-	paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
-
-
-	/*if (sel.rounduv && 0)
+	// TODO: Use broadcastGPRToVec instead of mov and pshufd?
+	for (int i = 0; i < 2; i++)
 	{
-#if _M_SSE >= 0x501
-		const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
+		mov(eax, _rip_local(temp.bp.x));
+		cmp(eax, 0);
+		je("@f");
+		//db(0xcc);
+		L("@@");
 
-		const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx().aaaa() == curr_x;
-		const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy().aaaa() == VectorI(top);
+		// const VectorI curr = i == 0 ? VectorI(left) + VectorI::cxpr(0, 1, 2, 3) : VectorI(top);
 
-		const VectorI round_setting_u = VectorI::cast(scan.t).zzzz().aaaa() & VectorI(0xffff);
-		const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().aaaa().srl32<16>();
-#else
-		const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+		movd(tmp1, i == 0 ? _rip_local(temp.round.left) : _rip_local(temp.round.top));
+		pshufd(tmp1, tmp1, 0);
+		if (i == 0)
+			paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
 
-		const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
-		const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy() == VectorI(top);
+		// const VectorI primtl = i == 0 ? VectorI(primtl).upl16().xxxx() :
+		//                                 VectorI(primtl).upl16().yyyy();
+		// const VectorI at_topleft = primtl == curr;
 
-		const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
-		const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
-#endif
-		const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-		const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
+		movd(tmp2, _rip_local(temp.round.primtl));
+		pxor(tmp3, tmp3);
+		punpcklwd(tmp2, tmp3);
+		pshufd(tmp2, tmp2, _MM_SHUFFLE(i, i, i, i));
+		pcmpeqd(tmp1, tmp2);
 
-		const VectorI round_up_u = (round_setting_u == VectorI(1) & ~at_left) |
-			(round_setting_u == VectorI(2) & at_left);
-		const VectorI round_up_v = (round_setting_v == VectorI(1) & ~at_top) |
-			(round_setting_v == VectorI(2) & at_top);
+		// const VectorI round_setting = i == 0 ? VectorI::cast(flags & 0xffff) : VectorI::cast(flags >> 16);
 
-		VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-		VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+		mov(eax, _rip_local(temp.round.flags));
+		if (i == 0)
+			and_(eax, 0xffff);
+		else
+			shr(eax, 16);
+		movd(tmp2, eax);
+		pshufd(tmp2, tmp2, 0);
 
-		constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+		// const VectorI round_down = (round_setting == VectorI(2)) & ~at_topleft;
 
-		VectorI close_u = (u - ui).abs32() <= threshold;
-		VectorI close_v = (v - vi).abs32() <= threshold;
+		mov(eax, 2);
+		movd(tmp4, eax);
+		pshufd(tmp4, tmp4, 0);
+		pcmpeqd(tmp4, tmp2);
+		movaps(tmp3, tmp1);
+		pandn(tmp3, tmp4);
 
-		u = u.blend8(ui - threshold, close_u & round_down_u);
-		u = u.blend8(ui + threshold, close_u & round_up_u);
-		v = v.blend8(vi - threshold, close_v & round_down_v);
-		v = v.blend8(vi + threshold, close_v & round_up_v);
-	*/}
+		// const VectorI round_up = ((round_setting == VectorI(1)) & ~at_topleft) |
+		//	                        ((round_setting == VectorI(2)) & at_topleft);
+
+		mov(eax, 1);
+		movd(tmp5, eax);
+		pshufd(tmp5, tmp5, 0);
+		pcmpeqd(tmp5, tmp2);
+		movaps(tmp4, tmp1);
+		pandn(tmp4, tmp5);
+		mov(eax, 2);
+		movd(tmp5, eax);
+		pshufd(tmp5, tmp5, 0);
+		pcmpeqd(tmp5, tmp2);
+		pand(tmp5, tmp1);
+		por(tmp4, tmp5);
+
+		// VectorI uvi = (uv + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+		const XYm& uv = i == 0 ? u : v;
+		mov(eax, 0x4000);
+		movd(tmp1, eax);
+		pshufd(tmp1, tmp1, 0);
+		paddd(tmp1, uv);
+		mov(eax, ~(0x8000 - 1));
+		movd(tmp2, eax);
+		pshufd(tmp2, tmp2, 0);
+		pand(tmp1, tmp2);
+
+		// constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+		// VectorI close = (uv - uvi).abs32() <= threshold;
+
+		movaps(tmp2, uv);
+		psubd(tmp2, tmp1);
+		pabsd(tmp2, tmp2);
+		mov(eax, 0x10000 / ROUND_UV_DENOMINATOR);
+		movd(tmp5, eax);
+		pshufd(tmp5, tmp5, 0);
+		pcmpgtd(tmp2, tmp5);
+		pcmpeqd(tmp6, tmp6);
+		pxor(tmp2, tmp6);
+
+		// round_down = round_down & close;
+		// round_up = round_up & close;
+		pand(tmp3, tmp2);
+		pand(tmp4, tmp2);
+
+		// VectorI uv_down = (uvi - threshold) & round_down;
+		// VectorI uv_up = (uvi + threshold) & round_up;
+		// uv = (uv & ~(round_down | round_up)) | uv_down | uv_up;
+		movaps(tmp2, tmp1);
+		movaps(tmp6, tmp1);
+		psubd(tmp2, tmp5);
+		paddd(tmp6, tmp5);
+		pand(tmp2, tmp3);
+		pand(tmp6, tmp4);
+		por(tmp3, tmp4);
+		pandn(tmp3, uv);
+		por(tmp3, tmp2);
+		por(tmp3, tmp6);
+		movaps(uv, tmp3);
+	}
 }

@@ -1074,7 +1074,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					}
 
 					// FIXME: Must also add to mipmapping?
-					if (sel.rounduv && 0)
+					if (sel.rounduv)
 					{
 #if _M_SSE >= 0x501
 						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
@@ -1093,6 +1093,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
 						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
 #endif
+						// FIXME: Use the local.temp.round variables.
 						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
 						const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
 

@@ -165,7 +165,7 @@ private:
 		int pixels,      int mip_offset);
 	void ReadTexelImpl(const Xmm& dst, const Xmm& addr, u8 i, bool texInA3, bool preserveDst);
 	void RoundUV(const XYm& u, const XYm& v, const XYm& tmp1, const XYm& tmp2, const XYm& tmp3,
-		const XYm& tmp4, const XYm& tmp5, const XYm& tmp6, const XYm& tmp7);
+		const XYm& tmp4, const XYm& tmp5, const XYm& tmp6);
 };
 
 MULTI_ISA_UNSHARED_END
