@@ -644,6 +644,16 @@ void GSDrawScanlineCodeGenerator::Init()
 		lea(a0.cvt32(), ptr[a0 - vecints]); // steps
 	}
 
+	if (m_sel.rounduv)
+	{
+		mov(_rip_local(temp.round.left), ebx);
+		mov(_rip_local(temp.round.top), a2);
+		mov(eax, ptr[a3 + offsetof(GSVertexSW, p.z)]);
+		mov(_rip_local(temp.round.primtl), eax);
+		mov(eax, ptr[a3 + offsetof(GSVertexSW, t.z)]);
+		mov(_rip_local(temp.round.flags), eax);
+	}
+
 	// a0 = steps
 	// a1 = skip
 	// a2[x64] = top
@@ -1002,6 +1012,11 @@ void GSDrawScanlineCodeGenerator::Step()
 		pmovsxbd(_test, ptr[rax * 8 + t2]);
 #endif
 	}
+
+	if (m_sel.rounduv)
+	{
+		add(_rip_local(temp.round.left), vecints);
+	}
 }
 
 /// Inputs: xym0[x86]=z, xym7[x64]=z0, t1=fza_base, t0=fza_offset, _test
@@ -1169,6 +1184,8 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 		movdqa(xym2, _s);
 		movdqa(xym3, _t);
 	}
+
+	RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7, xym8);
 
 	if (m_sel.ltf)
 	{
@@ -3277,4 +3294,131 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 		movd(dst, src);
 	else
 		pinsrd(dst, src, i);
+}
+
+void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm& tmp1, const XYm& tmp2,
+	const XYm& tmp3, const XYm& tmp4, const XYm& tmp5, const XYm& tmp6, const XYm& tmp7)
+{
+#if USING_XMM
+	// const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+
+	movd(tmp1, _rip_local(temp.round.left));
+	pshufd(tmp1, tmp1, 0);
+	paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
+
+	// const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
+
+	movd(tmp2, _rip_local(temp.round.primtl));
+	punpckhwd(tmp2, tmp2);
+	pshufd(tmp2, tmp2, 0);
+	pcmpeqd(tmp1, tmp2);
+
+	// const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
+
+	mov(eax, _rip_local(temp.round.flags));
+	and_(eax, 0xffff);
+	movd(tmp2, eax);
+	pshufd(tmp2, tmp2, 0);
+
+	// const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
+
+	pcmpeqd(tmp3, tmp3);
+	pxor(tmp1, tmp3);
+	mov(eax, 2);
+	mov(tmp3, eax);
+	pshufd(tmp3, tmp3, 0);
+	pcmpeqd(tmp3, tmp2);
+	pand(tmp3, tmp1);
+
+	// const VectorI round_up_u = ((round_setting_u == VectorI(1)) & ~at_left) |
+	//	                          ((round_setting_u == VectorI(2)) & at_left);
+
+	mov(eax, 1);
+	mov(tmp4, eax);
+	pshufd(tmp4, tmp4, 0);
+	pcmpeqd(tmp4, tmp2);
+	pand(tmp4, tmp3);
+	pcmpeqd(tmp5, tmp5);
+	pxor(tmp1, tmp5);
+	mov(eax, 2);
+	mov(tmp5, eax);
+	pshufd(tmp5, tmp5, 0);
+	pcmpeqd(tmp5, tmp2);
+	por(tmp4, tmp5);
+
+	// VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+	mov(eax, 0x4000);
+	mov(tmp5, eax);
+	pshufd(tmp5, tmp5, 0);
+	paddd(tmp5, u);
+	mov(eax, ~(0x8000 - 1));
+	mov(tmp6, eax);
+	pshufd(tmp6, tmp6, 0);
+	pand(tmp5, tmp6);
+
+	// constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+	// VectorI close_u = (u - ui).abs32() <= threshold;
+
+	mov(tmp6, u);
+	psubd(tmp6, tmp5);
+	pabsd(tmp6, tmp6);
+	mov(eax, 0x10000 / ROUND_UV_DENOMINATOR);
+	mov(tmp7, eax);
+	pshufd(tmp7, tmp7, 0);
+	pcmpled(tmp6, tmp7);
+
+	// u = u.blend8(ui - threshold, close_u & round_down_u);
+	// u = u.blend8(ui + threshold, close_u & round_up_u);
+	pand(tmp3, tmp6);
+	pand(tmp4, tmp6);
+	paddd(tmp5, tmp7);
+	// Need to use a blend here...
+
+#else
+	vbroadcasti128(tmp1, _rip_local(temp.left));
+#endif
+	paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
+
+
+	/*if (sel.rounduv && 0)
+	{
+#if _M_SSE >= 0x501
+		const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
+
+		const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx().aaaa() == curr_x;
+		const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy().aaaa() == VectorI(top);
+
+		const VectorI round_setting_u = VectorI::cast(scan.t).zzzz().aaaa() & VectorI(0xffff);
+		const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().aaaa().srl32<16>();
+#else
+		const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+
+		const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
+		const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy() == VectorI(top);
+
+		const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
+		const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
+#endif
+		const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
+		const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
+
+		const VectorI round_up_u = (round_setting_u == VectorI(1) & ~at_left) |
+			(round_setting_u == VectorI(2) & at_left);
+		const VectorI round_up_v = (round_setting_v == VectorI(1) & ~at_top) |
+			(round_setting_v == VectorI(2) & at_top);
+
+		VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+		VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+		constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+
+		VectorI close_u = (u - ui).abs32() <= threshold;
+		VectorI close_v = (v - vi).abs32() <= threshold;
+
+		u = u.blend8(ui - threshold, close_u & round_down_u);
+		u = u.blend8(ui + threshold, close_u & round_up_u);
+		v = v.blend8(vi - threshold, close_v & round_down_v);
+		v = v.blend8(vi + threshold, close_v & round_up_v);
+	*/}
 }

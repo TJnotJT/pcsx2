@@ -236,6 +236,7 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i uv_minmax[2];
 		GSVector4i trb, tga;
 		GSVector4i test;
+		struct { u32 left, top, primtl, flags; } round;
 	} temp;
 
 #endif
@@ -297,6 +298,8 @@ struct GSScanlineConstantData : public GSAlignedClass<32>
 		{ -3.0f , -2.0f , -1.0f , 0.0f},
 	};
 	alignas(16) float m_log2_coef_128b[4][4] = {};
+
+	alignas(32) u32 m_offsets[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
 	constexpr GSScanlineConstantData()
 	{
