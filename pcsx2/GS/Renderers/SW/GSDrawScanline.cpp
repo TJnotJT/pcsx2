@@ -1091,11 +1091,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
 						const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
 
-						// FIXME: Need to remove the & ~at_left and the & ~at_top here for round up?
-						// Or maybe just make it exact if exactly on top/left?
-						const VectorI round_up_u = ((round_setting_u == VectorI(1)) & ~at_left) |
+						const VectorI round_up_u = (round_setting_u == VectorI(1)) |
 						                           ((round_setting_u == VectorI(2)) & at_left);
-						const VectorI round_up_v = ((round_setting_v == VectorI(1)) & ~at_top) |
+						const VectorI round_up_v = (round_setting_v == VectorI(1)) |
 						                           ((round_setting_v == VectorI(2)) & at_top);
 
 						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));

@@ -3308,6 +3308,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 	// TODO: Implement using AVX2 also.
 	for (int i = 0; i < 2; i++)
 	{
+		// FIXME: Remove after debugging.
 		mov(eax, _rip_local(temp.bp.x));
 		cmp(eax, 0);
 		je("@f");
@@ -3350,15 +3351,13 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		movaps(tmp3, tmp1);
 		pandn(tmp3, tmp4);
 
-		// const VectorI round_up = ((round_setting == VectorI(1)) & ~at_topleft) |
+		// const VectorI round_up = (round_setting == VectorI(1)) |
 		//	                        ((round_setting == VectorI(2)) & at_topleft);
 
 		mov(eax, 1);
-		movd(tmp5, eax);
-		pshufd(tmp5, tmp5, 0);
-		pcmpeqd(tmp5, tmp2);
-		movaps(tmp4, tmp1);
-		pandn(tmp4, tmp5);
+		movd(tmp4, eax);
+		pshufd(tmp4, tmp4, 0);
+		pcmpeqd(tmp4, tmp2);
 		mov(eax, 2);
 		movd(tmp5, eax);
 		pshufd(tmp5, tmp5, 0);
@@ -3393,12 +3392,14 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 
 		// round_down = round_down & close;
 		// round_up = round_up & close;
+		
 		pand(tmp3, tmp2);
 		pand(tmp4, tmp2);
 
 		// VectorI uv_down = (uvi - threshold) & round_down;
 		// VectorI uv_up = (uvi + threshold) & round_up;
 		// uv = (uv & ~(round_down | round_up)) | uv_down | uv_up;
+		
 		movaps(tmp2, tmp1);
 		movaps(tmp6, tmp1);
 		psubd(tmp2, tmp5);
