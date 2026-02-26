@@ -4370,7 +4370,7 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
 
 	// Only applies to UVs and point-sampled draws.
-	if (!(PRIM->TME && PRIM->FST) || m_vt.IsRealLinear())
+	if (!(PRIM->TME && PRIM->FST))
 		return false;
 
 	// How many vertices for each quad.
