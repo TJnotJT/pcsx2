@@ -691,11 +691,11 @@ void GSDrawScanlineCodeGenerator::Init()
 	{
 		if (m_sel.prim != GS_SPRITE_CLASS)
 		{
-			// f = GSVector4i(v.t).zzzzh().zzzz().add16(m_local.d[skip].f);
+			// f = GSVector4i(m_sel.zflat ? v.p : v.t).zzzzh().zzzz().add16(m_local.d[skip].f);
 			if (isYmm)
-				vbroadcastss(f, ptr[a3 + offsetof(GSVertexSW, t.w)]);
+				vbroadcastss(f, ptr[a3 + (m_sel.zflat ? offsetof(GSVertexSW, p.w) : offsetof(GSVertexSW, t.w))]);
 			else
-				movss(f, ptr[a3 + offsetof(GSVertexSW, t.w)]); // v.t.w
+				movss(f, ptr[a3 + (m_sel.zflat ? offsetof(GSVertexSW, p.w) : offsetof(GSVertexSW, t.w))]);
 
 			cvttps2dq(f, f);
 			punpcklwd(f, f);
@@ -1189,7 +1189,7 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 
 	if (m_sel.rounduv)
 	{
-		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7);
+		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym8);
 	}
 
 	if (m_sel.ltf)

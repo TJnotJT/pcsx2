@@ -1447,7 +1447,7 @@ void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW&
 	pxAssert(m_pixels.actual <= m_pixels.total);
 
 	// FIXME: Remove after debugging.
-	m_local.temp.bp.x = (GSState::s_n == 4) && (debug_prim==2);
+	m_local.temp.bp.x = (GSState::s_n == 8) && (debug_prim==1);
 
 	m_draw_scanline(pixels, left, top, scan, m_local);
 }

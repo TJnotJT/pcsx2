@@ -529,9 +529,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	if (sel.prim != GS_SPRITE_CLASS && sel.fwrite && sel.fge)
 	{
 #if _M_SSE >= 0x501
-		f = GSVector8i::broadcast16(GSVector4i(scan.t).srl<12>()).add16(local.d[skip].f);
+		f = GSVector8i::broadcast16(GSVector4i(sel.zflat ? scan.p : scan.t).srl<12>()).add16(local.d[skip].f);
 #else
-		f = GSVector4i(scan.t).zzzzh().zzzz().add16(local.d[skip].f);
+		f = GSVector4i(sel.zflat ? scan.p : scan.t).zzzzh().zzzz().add16(local.d[skip].f);
 #endif
 	}
 
