@@ -10,8 +10,8 @@ struct GSVertex;
 
 struct alignas(32) GSVertexSW
 {
-	// When drawing sprites:
-	// p: x y _ f
+	// When drawing prims with flat z:
+	// p: x y tl f
 	// t: s t q z
 	// c: r g b a
 	// Otherwise:
@@ -19,6 +19,7 @@ struct alignas(32) GSVertexSW
 	// t: s t q f
 	// c: r g b a
 	// cov is placed in x since by the time it's known, xy are no longer needed
+	// When doing accurate uv rounding 'tl' is used to save primitive top-left and q is used to save flags.
 
 	GSVector4 p, _pad, t, c;
 
@@ -236,7 +237,7 @@ struct alignas(32) GSVertexSW
 
 	typedef void (*ConvertVertexBufferPtr)(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTRICT dst, const GSVertex* RESTRICT src, u32 count);
 
-	static ConvertVertexBufferPtr s_cvb[4][2][2][2];
+	static ConvertVertexBufferPtr s_cvb[4][2][2][2][2][2];
 
 	static void InitStatic();
 };

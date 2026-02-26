@@ -161,7 +161,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 	sel.fb = global.sel.fb;
 	sel.zb = global.sel.zb;
 	sel.zoverflow = global.sel.zoverflow;
-	sel.zequal = global.sel.zequal;
+	sel.zflat = global.sel.zflat;
 	sel.notest = global.sel.notest;
 
 	return (data.setup_prim = m_sp_map[sel]) != nullptr;
@@ -215,58 +215,53 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 
 	GSVector4 tstep = dscan.t * step_shift;
 
-	if (has_z || has_f)
+	if (has_z)
 	{
-		if (sel.prim != GS_SPRITE_CLASS)
+		if (!sel.zflat)
 		{
-			if (has_f)
-			{
+			const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
+			const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
 #if _M_SSE >= 0x501
-				local.d8.p.f = GSVector4i(tstep).extract32<3>();
-
-				GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
+			GSVector4::storel(&local.d8.p.z, dz.mul64(GSVector4::f32to64(shift)));
 #else
-				GSVector4 df = dscan.t.wwww();
-
-				local.d4.f = GSVector4i(tstep).zzzzh().wwww();
+			local.d4.z = dz.mul64(GSVector4::f32to64(shift));
 #endif
-
-				for (int i = 0; i < vlen; i++)
-				{
-					local.d[i].f = VectorI(df * shift[1 + i]).xxzzlh();
-				}
-			}
-
-			if (has_z && !sel.zequal)
+			for (int i = 0; i < vlen; i++)
 			{
-				const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
-				const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
-#if _M_SSE >= 0x501
-				GSVector4::storel(&local.d8.p.z, dz.mul64(GSVector4::f32to64(shift)));
-#else
-				local.d4.z = dz.mul64(GSVector4::f32to64(shift));
-#endif
-				for (int i = 0; i < vlen; i++)
-				{
-					local.d[i].z = dzf * shift[i + 1];
-				}
+				local.d[i].z = dzf * shift[i + 1];
 			}
 		}
 		else
 		{
-			if (has_f)
-			{
-#if _M_SSE >= 0x501
-				local.p.f = GSVector4i(vertex[index[1]].p).extract32<3>();
-#else
-				local.p.f = GSVector4i(vertex[index[1]].p).zzzzh().zzzz();
-#endif
-			}
+			local.p.z = vertex[index[sel.prim != GS_SPRITE_CLASS ? 0 : 1]].t.U32[3]; // u32 z is bypassed in t.w
+		}
+	}
 
-			if (has_z)
+	if (has_f)
+	{
+		if (sel.prim != GS_SPRITE_CLASS)
+		{
+#if _M_SSE >= 0x501
+			local.d8.p.f = GSVector4i(tstep).extract32<3>();
+
+			GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
+#else
+			GSVector4 df = dscan.t.wwww();
+
+			local.d4.f = GSVector4i(tstep).zzzzh().wwww();
+#endif
+			for (int i = 0; i < vlen; i++)
 			{
-				local.p.z = vertex[index[1]].t.U32[3]; // u32 z is bypassed in t.w
+				local.d[i].f = VectorI(df * shift[1 + i]).xxzzlh();
 			}
+		}
+		else
+		{
+#if _M_SSE >= 0x501
+			local.p.f = GSVector4i(vertex[index[1]].p).extract32<3>();
+#else
+			local.p.f = GSVector4i(vertex[index[1]].p).zzzzh().zzzz();
+#endif
 		}
 	}
 
@@ -531,31 +526,20 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	const GSVector2i* fza_base = &global.fzbr[top];
 	const GSVector2i* fza_offset = &global.fzbc[left >> 2];
 
-	if (sel.prim != GS_SPRITE_CLASS)
+	if (sel.prim != GS_SPRITE_CLASS && sel.fwrite && sel.fge)
 	{
-		if (sel.fwrite && sel.fge)
-		{
 #if _M_SSE >= 0x501
-			f = GSVector8i::broadcast16(GSVector4i(scan.t).srl<12>()).add16(local.d[skip].f);
+		f = GSVector8i::broadcast16(GSVector4i(scan.t).srl<12>()).add16(local.d[skip].f);
 #else
-			f = GSVector4i(scan.t).zzzzh().zzzz().add16(local.d[skip].f);
+		f = GSVector4i(scan.t).zzzzh().zzzz().add16(local.d[skip].f);
 #endif
-		}
+	}
 
-		if (sel.zb)
-		{
-			if (sel.zequal)
-			{
-				u32 z = static_cast<u32>(scan.p.F64[1]);
-				z0 = VectorF::cast(VectorI(z));
-			}
-			else
-			{
-				VectorF zbase = VectorF::broadcast64(&scan.p.z);
-				z0 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[0]));
-				z1 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[vlen/2]));
-			}
-		}
+	if (sel.zb && !sel.zflat)
+	{
+		VectorF zbase = VectorF::broadcast64(&scan.p.z);
+		z0 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[0]));
+		z1 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[vlen/2]));
 	}
 
 	if (sel.fb)
@@ -643,13 +627,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			{
 				za = (fza_base->y + fza_offset->y) % HALF_VM_SIZE;
 
-				if (sel.prim != GS_SPRITE_CLASS)
+				if (!sel.zflat)
 				{
-					if (sel.zequal)
-					{
-						zs = VectorI::cast(z0);
-					}
-					else if (sel.zoverflow)
+					if (sel.zoverflow)
 					{
 						// SSE only has double to int32 conversion, no double to uint32
 						// Work around this by subtracting 0x80000000 before converting, then adding it back after
@@ -1085,6 +1065,51 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					{
 						u = VectorI::cast(s);
 						v = VectorI::cast(t);
+					}
+
+					// FIXME: Must also add to mipmapping?
+					if (sel.rounduv)
+					{
+#if _M_SSE >= 0x501
+						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
+
+						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx().aaaa() == curr_x;
+						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy().aaaa() == VectorI(top);
+
+						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz().aaaa() & VectorI(0xffff);
+						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().aaaa().srl32<16>();
+#else
+						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+
+						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
+						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy() == VectorI(top);
+
+						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
+						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
+#endif
+						// FIXME: Use the local.temp.round variables.
+						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
+						const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
+
+						// FIXME: Need to remove the & ~at_left and the & ~at_top here for round up?
+						// Or maybe just make it exact if exactly on top/left?
+						const VectorI round_up_u = ((round_setting_u == VectorI(1)) & ~at_left) |
+						                           ((round_setting_u == VectorI(2)) & at_left);
+						const VectorI round_up_v = ((round_setting_v == VectorI(1)) & ~at_top) |
+						                           ((round_setting_v == VectorI(2)) & at_top);
+
+						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+						VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+						constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+
+						VectorI close_u = (u - ui).abs32() <= threshold;
+						VectorI close_v = (v - vi).abs32() <= threshold;
+
+						u = u.blend8(ui - threshold, close_u & round_down_u);
+						u = u.blend8(ui + threshold, close_u & round_up_u);
+						v = v.blend8(vi - threshold, close_v & round_down_v);
+						v = v.blend8(vi + threshold, close_v & round_up_v);
 					}
 
 					if (sel.ltf)
@@ -1681,27 +1706,24 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 		fza_offset += vlen / 4;
 
-		if (sel.prim != GS_SPRITE_CLASS)
+		if (sel.prim != GS_SPRITE_CLASS && sel.fwrite && sel.fge)
 		{
-			if (sel.zb && !sel.zequal)
-			{
 #if _M_SSE >= 0x501
-				GSVector8 add = GSVector8::broadcast64(&local.d8.p.z);
+			f = f.add16(GSVector8i::broadcast16(&local.d8.p.f));
 #else
-				GSVector4 add = local.d4.z;
+			f = f.add16(local.d4.f);
 #endif
-				z0 = z0.add64(add);
-				z1 = z1.add64(add);
-			}
+		}
 
-			if (sel.fwrite && sel.fge)
-			{
+		if (sel.zb && !sel.zflat)
+		{
 #if _M_SSE >= 0x501
-				f = f.add16(GSVector8i::broadcast16(&local.d8.p.f));
+			GSVector8 add = GSVector8::broadcast64(&local.d8.p.z);
 #else
-				f = f.add16(local.d4.f);
+			GSVector4 add = local.d4.z;
 #endif
-			}
+			z0 = z0.add64(add);
+			z1 = z1.add64(add);
 		}
 
 		if (sel.fb)
@@ -1751,6 +1773,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 #else
 			test = const_test[7 + (steps & (steps >> 31))];
 #endif
+		}
+
+		if (sel.rounduv)
+		{
+			left += vlen;
 		}
 	}
 }
