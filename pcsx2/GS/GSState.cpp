@@ -4502,7 +4502,9 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 			vtx[i + j].ST.S = static_cast<float>(X0) / 16.0f; // Save X0 in unused S.
 			vtx[i + j].ST.T = static_cast<float>(Y0) / 16.0f; // Save Y0 in unused T.
-			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 8)); // Save rounding info in unused Q.
+			
+			// Save rounding info in unused Q. Warning: don't use more than 24 bits.
+			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 16));
 		}
 	}
 

@@ -244,8 +244,8 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 
 				if (round_uv)
 				{
-					// Get rounding flags. FIXME: Just store in 16 x 2 bits and avoid the uph8(). Woul dneed to changes HW shaders also.
-					t = t.insert32<2, 2>(GSVector4::cast(GSVector4i(stcq).uph8()));
+					// Get rounding flags.
+					t = t.insert32<3, 2>(GSVector4::cast(GSVector4i(stcq)));
 				}
 			}
 			else if (q_div)
