@@ -20,8 +20,14 @@ layout(std140, binding = 1) uniform cb20
 
 out SHADER
 {
-	vec4 t_float;
+	#if VS_ROUND_UV != 0
+		flat vec4 t_float;
+	#else
+		vec4 t_float;
+	#endif
+	
 	vec4 t_int;
+
 	#if VS_IIP != 0
 		vec4 c;
 	#else
@@ -35,7 +41,11 @@ const float exp_min32 = exp2(-32.0f);
 
 layout(location = 0) in vec2  i_st;
 layout(location = 2) in vec4  i_c;
+#if VS_ROUND_UV
+layout(location = 3) in uint i_q;
+#else
 layout(location = 3) in float i_q;
+#endif
 layout(location = 4) in uvec2 i_p;
 layout(location = 5) in uint  i_z;
 layout(location = 6) in uvec2 i_uv;
@@ -46,9 +56,16 @@ void texture_coord()
 	vec2 uv = vec2(i_uv) - TextureOffset;
 	vec2 st = i_st - TextureOffset;
 
+#if VS_ROUND_UV
+	VSout.t_float.x = float((i_q >> 0) & 0xFFF);
+	VSout.t_float.y = float((i_q >> 12) & 0xFFF);
+	VSout.t_float.z = float((i_q >> 24) & 0xF);
+	VSout.t_float.w = float((i_q >> 28) & 0xF);
+#else
 	// Float coordinate
 	VSout.t_float.xy = st;
 	VSout.t_float.w  = i_q;
+#endif
 
 	// Integer coordinate => normalized
 	VSout.t_int.xy = uv * TextureScale;
@@ -78,7 +95,9 @@ void vs_main()
 	texture_coord();
 
 	VSout.c = i_c;
+#if VS_ROUND_UV == 0
 	VSout.t_float.z = i_f.x; // pack for with texture
+#endif
 
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
@@ -134,8 +153,15 @@ ProcessedVertex load_vertex(uint index)
 	vec2 uv = vec2(i_uv) - TextureOffset;
 	vec2 st = i_st - TextureOffset;
 
+#if VS_ROUND_UV
+	VSout.t_float.x = float((i_q >> 0) & 0xFFF);
+	VSout.t_float.y = float((i_q >> 12) & 0xFFF);
+	VSout.t_float.z = float((i_q >> 24) & 0xF);
+	VSout.t_float.w = float((i_q >> 28) & 0xF);
+#else
 	vtx.t_float.xy = st;
 	vtx.t_float.w  = i_q;
+#endif
 
 	vtx.t_int.xy = uv * TextureScale;
 #if VS_FST
@@ -145,7 +171,9 @@ ProcessedVertex load_vertex(uint index)
 #endif
 
 	vtx.c = i_c;
+#if VS_ROUND_UV == 0
 	vtx.t_float.z = i_f.x;
+#endif
 
 	return vtx;
 }

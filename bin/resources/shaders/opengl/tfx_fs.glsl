@@ -62,7 +62,12 @@ layout(std140, binding = 0) uniform cb21
 
 in SHADER
 {
-	vec4 t_float;
+	#if PS_ROUND_UV != 0
+		flat vec4 t_float; // Contains UV rounding config.
+	#else
+		vec4 t_float;
+	#endif
+
 	vec4 t_int;
 
 	#if PS_IIP != 0
@@ -250,6 +255,31 @@ vec4 clamp_wrap_uv(vec4 uv)
 #endif
 
 	return uv_out;
+}
+
+vec4 round_uv()
+{
+	// Top-left X, Y of the prim saved in unused texture coords.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.t_float.xy)));
+
+	// Get flags for whether to round U, V.
+	ivec2 round_flags = ivec2(PSin.t_float.zw);
+
+	// Being on the top or left pixels converts round down to round up.
+	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
+	ivec2 round_up = ivec2(equal(round_flags, ivec2(1))) |
+	                 (ivec2(equal(round_flags, ivec2(2))) & topleft);
+
+	vec2 uv = PSin.t_int.zw; // Unnormalized UVs.
+	vec2 uvi = round(PSin.t_int.zw / 8.0f) * 8.0f; // Nearest half texel.
+	
+	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+
+	// Round only if close to a half texel.
+	uv = mix(uv, uvi - PS_ROUND_UV_THRESHOLD, bvec2(close & round_down));
+	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
+
+	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 }
 
 mat4 sample_4c(vec4 uv)
@@ -661,6 +691,10 @@ vec4 ps_color()
 #if (PS_FST == 0)
 	vec2 st = PSin.t_float.xy / vec2(PSin.t_float.w);
 	vec2 st_int = PSin.t_int.zw / vec2(PSin.t_float.w);
+#elif PS_ROUND_UV != 0
+	vec4 t_int_rounded = round_uv();
+	vec2 st = t_int_rounded.xy;
+	vec2 st_int = t_int_rounded.zw;
 #else
 	// Note xy are normalized coordinate
 	vec2 st = PSin.t_int.xy;

@@ -751,6 +751,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	PreloadFrameWithGSData = false;
 	Mipmap = true;
 	HWMipmap = true;
+	AccurateUVRounding = true;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1020,10 +1021,13 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapIntEnumEx(OsdMessagesPos, "OsdMessagesPos");
 	SettingsWrapIntEnumEx(OsdPerformancePos, "OsdPerformancePos");
 
-	SettingsWrapIntEnumEx(Renderer, "Renderer");
+	// FIXME: Remove after debugging.
+	//SettingsWrapIntEnumEx(Renderer, "Renderer");
+	Renderer = GSRendererType::SW;
 	SettingsWrapEntryEx(UpscaleMultiplier, "upscale_multiplier");
 
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
+	SettingsWrapBitBoolEx(AccurateUVRounding, "AccurateUVRounding");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");

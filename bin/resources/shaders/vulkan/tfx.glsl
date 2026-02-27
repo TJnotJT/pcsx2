@@ -20,7 +20,12 @@ layout(std140, set = 0, binding = 0) uniform cb0
 
 layout(location = 0) out VSOutput
 {
-	vec4 t;
+	#if VS_ROUND_UV != 0
+		flat vec4 t;
+	#else
+		vec4 t;
+	#endif
+
 	vec4 ti;
 
 	#if VS_IIP != 0
@@ -34,7 +39,11 @@ layout(location = 0) out VSOutput
 
 layout(location = 0) in vec2 a_st;
 layout(location = 1) in uvec4 a_c;
+#if VS_ROUND_UV
+layout(location = 2) in uint a_q;
+#else
 layout(location = 2) in float a_q;
+#endif
 layout(location = 3) in uvec2 a_p;
 layout(location = 4) in uint a_z;
 layout(location = 5) in uvec2 a_uv;
@@ -70,9 +79,16 @@ void main()
 			vsOut.ti.zw = st / TextureScale;
 		#endif
 
-		// Float coords
-		vsOut.t.xy = st;
-		vsOut.t.w = a_q;
+		#if VS_ROUND_UV
+			vsOut.t.x = float((a_q >> 0) & 0xFFF);
+			vsOut.t.y = float((a_q >> 12) & 0xFFF);
+			vsOut.t.z = float((a_q >> 24) & 0xF);
+			vsOut.t.w = float((a_q >> 28) & 0xF);
+		#else
+			// Float coords
+			vsOut.t.xy = st;
+			vsOut.t.w = a_q;
+		#endif
 	#else
 		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vsOut.ti = vec4(0.0f);
@@ -143,8 +159,15 @@ ProcessedVertex load_vertex(uint index)
 			vtx.ti.zw = st / TextureScale;
 		#endif
 
-		vtx.t.xy = st;
-		vtx.t.w = a_q;
+		#if VS_ROUND_UV
+			vsOut.t.x = float((a_q >> 0) & 0xFFF);
+			vsOut.t.y = float((a_q >> 12) & 0xFFF);
+			vsOut.t.z = float((a_q >> 24) & 0xF);
+			vsOut.t.w = float((a_q >> 28) & 0xF);
+		#else
+			vtx.t.xy = st;
+			vtx.t.w = a_q;
+		#endif
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
@@ -291,6 +314,7 @@ void main()
 #define PS_ZFLOOR 0
 #define PS_FEEDBACK_LOOP 0
 #define PS_TEX_IS_FB 0
+#define PS_ROUND_UV 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -326,8 +350,14 @@ layout(std140, set = 0, binding = 1) uniform cb1
 
 layout(location = 0) in VSOutput
 {
-	vec4 t;
+	#if PS_ROUND_UV != 0
+		flat vec4 t;
+	#else
+		vec4 t;
+	#endif
+
 	vec4 ti;
+
 	#if PS_IIP != 0
 		vec4 c;
 	#else
@@ -501,6 +531,31 @@ vec4 clamp_wrap_uv(vec4 uv)
 	#endif
 
 	return uv;
+}
+
+vec4 round_uv()
+{
+	// Top-left X, Y of the prim saved in unused texture coords.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.t.xy)));
+
+	// Extract flags for whether to round U, V.
+	ivec2 round_flags = ivec2(vsIn.t.zw);
+
+	// Being on the top or left pixels converts round down to round up.
+	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
+	ivec2 round_up = ivec2(equal(round_flags, ivec2(1))) |
+	                 (ivec2(equal(round_flags, ivec2(2))) & topleft);
+
+	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
+	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
+	
+	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+
+	// Round only if close to a half texel.
+	uv = mix(uv, uvi - PS_ROUND_UV_THRESHOLD, bvec2(close & round_down));
+	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
+
+	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 }
 
 mat4 sample_4c(vec4 uv)
@@ -923,6 +978,10 @@ vec4 ps_color()
 #if PS_FST == 0
 	vec2 st = vsIn.t.xy / vsIn.t.w;
 	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
+#elif PS_ROUND_UV != 0
+	vec4 ti_rounded = round_uv();
+	vec2 st = ti_rounded.xy;
+	vec2 st_int = ti_rounded.zw;
 #else
 	vec2 st = vsIn.ti.xy;
 	vec2 st_int = vsIn.ti.zw;
