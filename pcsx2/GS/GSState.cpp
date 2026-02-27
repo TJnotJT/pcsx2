@@ -4513,15 +4513,14 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				round_down_v2 = round_down_v2 && diag_tl_to_br;
 			}
 
-			// Round down bits: 0 for no round, 1 for round up, 2 for round down.
-			u32 ru = allow_round_u ? 1 + static_cast<bool>(round_down_u) : 0;
-			u32 rv = allow_round_v ? 1 + static_cast<bool>(round_down_v2) : 0;
-
-			vtx[i + j].ST.S = static_cast<float>(X0) / 16.0f; // Save X0 in unused S.
-			vtx[i + j].ST.T = static_cast<float>(Y0) / 16.0f; // Save Y0 in unused T.
+			// Rounding settings (4 bits each for U, V): 0 for no round, 1 for round up, 2 for round down.
+			u32 round_settings = (allow_round_u ? 1 + static_cast<bool>(round_down_u) : 0) |
+			                     (allow_round_v ? 1 + static_cast<bool>(round_down_v2) : 0) << 4;
 			
-			// Save rounding info in unused Q. Warning: don't use more than 24 bits.
-			vtx[i + j].RGBAQ.Q = static_cast<float>(ru | (rv << 16));
+			u32 prim_topleft = ((X0 >> 4) & 0xFFF) | (((Y0 >> 4) & 0xFFF) << 12); // Pack 12 bits for X0, Y0.
+			
+			// Save rounding info in unused Q bits.
+			vtx[i + j].RGBAQ.Q = std::bit_cast<float>(prim_topleft | (round_settings << 24));
 		}
 	}
 

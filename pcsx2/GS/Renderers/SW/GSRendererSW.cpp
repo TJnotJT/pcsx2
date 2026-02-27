@@ -206,7 +206,7 @@ GSTexture* GSRendererSW::GetFeedbackOutput(float& scale)
 MULTI_ISA_DEF(void GSVertexSWInitStatic();)
 
 #if MULTI_ISA_COMPILE_ONCE
-GSVertexSW::ConvertVertexBufferPtr GSVertexSW::s_cvb[4][2][2][2][2][2];
+GSVertexSW::ConvertVertexBufferPtr GSVertexSW::s_cvb[4][2][2][2][2];
 void GSVertexSW::InitStatic()
 {
 	MULTI_ISA_SELECT(GSVertexSWInitStatic)();
@@ -215,7 +215,7 @@ void GSVertexSW::InitStatic()
 
 MULTI_ISA_UNSHARED_START
 
-template <u32 primclass, u32 tme, u32 fst, u32 q_div, u32 zflat, u32 round_uv>
+template <u32 primclass, u32 tme, u32 fst, u32 q_div, u32 round_uv>
 void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTRICT dst, const GSVertex* RESTRICT src, u32 count)
 {
 	// FIXME q_div wasn't added to AVX2 code path.
@@ -244,8 +244,8 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 
 				if (round_uv)
 				{
-					// Get rounding flags.
-					t = t.insert32<3, 2>(GSVector4::cast(GSVector4i(stcq)));
+					// Get rounding data in unused Q.
+					t = t.insert32<3, 2>(stcq);
 				}
 			}
 			else if (q_div)
@@ -269,15 +269,9 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 			}
 		}
 
-		if (zflat)
+		if (primclass == GS_SPRITE_CLASS)
 		{
 			dst->p = GSVector4(xy).xyyw(GSVector4(xyzuvf)) * s_pos_scale;
-
-			if (round_uv)
-			{
-				// Get primitive top-left.
-				dst->p = dst->p.insert32<0, 2>(GSVector4::cast(GSVector4i(stcq).ps32()));
-			}
 
 			xyzuvf = xyzuvf.min_u32(z_max);
 			t = t.insert32<1, 3>(GSVector4::cast(xyzuvf));
@@ -420,8 +414,7 @@ void GSRendererSW::RewriteVerticesIfSTOverflow()
 
 void GSVertexSWInitStatic()
 {
-#define InitCVB6(P, T, F, Q, Z, R) GSVertexSW::s_cvb[P][T][F][Q][Z][R] = ConvertVertexBuffer<P, T, F, Q, Z, R>;
-#define InitCVB5(P, T, F, Q, Z) InitCVB6(P, T, F, Q, Z, 0) InitCVB6(P, T, F, Q, Z, 1)
+#define InitCVB5(P, T, F, Q, R) GSVertexSW::s_cvb[P][T][F][Q][R] = ConvertVertexBuffer<P, T, F, Q, R>;
 #define InitCVB4(P, T, F, Q) InitCVB5(P, T, F, Q, 0) InitCVB5(P, T, F, Q, 1)
 #define InitCVB3(P, T, F) InitCVB4(P, T, F, 0) InitCVB4(P, T, F, 1)
 #define InitCVB2(P, T) InitCVB3(P, T, 0) InitCVB3(P, T, 1)
@@ -463,7 +456,6 @@ void GSRendererSW::Draw()
 	}
 
 	const u32 round_uv = static_cast<u32>(GetVertexUVRoundingInfo());
-	const u32 zflat = round_uv | static_cast<u32>(m_vt.m_primclass == GS_SPRITE_CLASS || m_vt.m_primclass == GS_POINT_CLASS);
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
@@ -481,7 +473,7 @@ void GSRendererSW::Draw()
 	// If you have both GS_SPRITE_CLASS && m_vt.m_eq.q, it will depends on the first part of the 'OR'
 	u32 q_div = !IsMipMapActive() && ((m_vt.m_eq.q && m_vt.m_min.t.z != 1.0f) || (!m_vt.m_eq.q && m_vt.m_primclass == GS_SPRITE_CLASS));
 
-	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][PRIM->FST][q_div][zflat][round_uv](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
+	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][PRIM->FST][q_div][round_uv](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
 
 	std::memcpy(sd->index, m_index.buff, sizeof(u16) * m_index.tail);
 
@@ -500,7 +492,6 @@ void GSRendererSW::Draw()
 	}
 	
 	sd->global.sel.rounduv = !!round_uv;
-	sd->global.sel.zflat = !!zflat;
 
 	if constexpr (LOG && false)
 	{

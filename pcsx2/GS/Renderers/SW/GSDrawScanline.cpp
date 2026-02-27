@@ -161,7 +161,7 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 	sel.fb = global.sel.fb;
 	sel.zb = global.sel.zb;
 	sel.zoverflow = global.sel.zoverflow;
-	sel.zflat = global.sel.zflat;
+	sel.zequal = global.sel.zequal;
 	sel.notest = global.sel.notest;
 
 	return (data.setup_prim = m_sp_map[sel]) != nullptr;
@@ -215,53 +215,58 @@ void GSDrawScanline::CSetupPrim(const GSVertexSW* vertex, const u16* index, cons
 
 	GSVector4 tstep = dscan.t * step_shift;
 
-	if (has_z)
-	{
-		if (!sel.zflat)
-		{
-			const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
-			const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
-#if _M_SSE >= 0x501
-			GSVector4::storel(&local.d8.p.z, dz.mul64(GSVector4::f32to64(shift)));
-#else
-			local.d4.z = dz.mul64(GSVector4::f32to64(shift));
-#endif
-			for (int i = 0; i < vlen; i++)
-			{
-				local.d[i].z = dzf * shift[i + 1];
-			}
-		}
-		else
-		{
-			local.p.z = vertex[index[sel.prim != GS_SPRITE_CLASS ? 0 : 1]].t.U32[3]; // u32 z is bypassed in t.w
-		}
-	}
-
-	if (has_f)
+	if (has_z || has_f)
 	{
 		if (sel.prim != GS_SPRITE_CLASS)
 		{
-#if _M_SSE >= 0x501
-			local.d8.p.f = GSVector4i(tstep).extract32<3>();
-
-			GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
-#else
-			GSVector4 df = dscan.t.wwww();
-
-			local.d4.f = GSVector4i(tstep).zzzzh().wwww();
-#endif
-			for (int i = 0; i < vlen; i++)
+			if (has_f)
 			{
-				local.d[i].f = VectorI(df * shift[1 + i]).xxzzlh();
+#if _M_SSE >= 0x501
+				local.d8.p.f = GSVector4i(tstep).extract32<3>();
+
+				GSVector8 df = GSVector8::broadcast32(&dscan.t.w);
+#else
+				GSVector4 df = dscan.t.wwww();
+
+				local.d4.f = GSVector4i(tstep).zzzzh().wwww();
+#endif
+
+				for (int i = 0; i < vlen; i++)
+				{
+					local.d[i].f = VectorI(df * shift[1 + i]).xxzzlh();
+				}
+			}
+
+			if (has_z && !sel.zequal)
+			{
+				const GSVector4 dz = GSVector4::broadcast64(&dscan.p.z);
+				const VectorF dzf(static_cast<float>(dscan.p.F64[1]));
+#if _M_SSE >= 0x501
+				GSVector4::storel(&local.d8.p.z, dz.mul64(GSVector4::f32to64(shift)));
+#else
+				local.d4.z = dz.mul64(GSVector4::f32to64(shift));
+#endif
+				for (int i = 0; i < vlen; i++)
+				{
+					local.d[i].z = dzf * shift[i + 1];
+				}
 			}
 		}
 		else
 		{
+			if (has_f)
+			{
 #if _M_SSE >= 0x501
-			local.p.f = GSVector4i(vertex[index[1]].p).extract32<3>();
+				local.p.f = GSVector4i(vertex[index[1]].p).extract32<3>();
 #else
-			local.p.f = GSVector4i(vertex[index[1]].p).zzzzh().zzzz();
+				local.p.f = GSVector4i(vertex[index[1]].p).zzzzh().zzzz();
 #endif
+			}
+
+			if (has_z)
+			{
+				local.p.z = vertex[index[1]].t.U32[3]; // u32 z is bypassed in t.w
+			}
 		}
 	}
 
@@ -526,20 +531,53 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 	const GSVector2i* fza_base = &global.fzbr[top];
 	const GSVector2i* fza_offset = &global.fzbc[left >> 2];
 
-	if (sel.prim != GS_SPRITE_CLASS && sel.fwrite && sel.fge)
+	if (sel.rounduv)
 	{
-#if _M_SSE >= 0x501
-		f = GSVector8i::broadcast16(GSVector4i(sel.zflat ? scan.p : scan.t).srl<12>()).add16(local.d[skip].f);
-#else
-		f = GSVector4i(sel.zflat ? scan.p : scan.t).zzzzh().zzzz().add16(local.d[skip].f);
-#endif
+		local.temp.round.left = left;
+
+		const u32 bits = scan.t.U32[2];
+		const int prim_left = (bits >> 0) & 0xFFF;
+		const int prim_top = (bits >> 12) & 0xFFF;
+		const int flags_u = (bits >> 24) & 0xF;
+		int flags_v = (bits >> 28) & 0xF;
+
+		if (prim_top == top)
+		{
+			// For top pixels convert V round-down to round-up.
+			flags_v = ((flags_v & 2) >> 1) | (flags_v & ~2);
+		}
+
+		local.temp.round.left = left;
+		local.temp.round.prim_left = prim_left;
+		local.temp.round.flags_u = flags_u;
+		local.temp.round.flags_v = flags_v;
 	}
 
-	if (sel.zb && !sel.zflat)
+	if (sel.prim != GS_SPRITE_CLASS)
 	{
-		VectorF zbase = VectorF::broadcast64(&scan.p.z);
-		z0 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[0]));
-		z1 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[vlen/2]));
+		if (sel.fwrite && sel.fge)
+		{
+#if _M_SSE >= 0x501
+			f = GSVector8i::broadcast16(GSVector4i(scan.t).srl<12>()).add16(local.d[skip].f);
+#else
+			f = GSVector4i(scan.t).zzzzh().zzzz().add16(local.d[skip].f);
+#endif
+		}
+
+		if (sel.zb)
+		{
+			if (sel.zequal)
+			{
+				u32 z = static_cast<u32>(scan.p.F64[1]);
+				z0 = VectorF::cast(VectorI(z));
+			}
+			else
+			{
+				VectorF zbase = VectorF::broadcast64(&scan.p.z);
+				z0 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[0]));
+				z1 = zbase.add64(VectorF::f32to64(&local.d[skip].z.F32[vlen / 2]));
+			}
+		}
 	}
 
 	if (sel.fb)
@@ -627,9 +665,13 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 			{
 				za = (fza_base->y + fza_offset->y) % HALF_VM_SIZE;
 
-				if (!sel.zflat)
+				if (sel.prim != GS_SPRITE_CLASS)
 				{
-					if (sel.zoverflow)
+					if (sel.zequal)
+					{
+						zs = VectorI::cast(z0);
+					}
+					else if (sel.zoverflow)
 					{
 						// SSE only has double to int32 conversion, no double to uint32
 						// Work around this by subtracting 0x80000000 before converting, then adding it back after
@@ -1070,31 +1112,19 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					// FIXME: Must also add to mipmapping?
 					if (sel.rounduv)
 					{
-#if _M_SSE >= 0x501
-						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3, 4, 5, 6, 7);
+						const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
 
-						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx().aaaa() == curr_x;
-						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy().aaaa() == VectorI(top);
+						const VectorI at_left = curr_x == VectorI(local.temp.round.prim_left);
 
-						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz().aaaa() & VectorI(0xffff);
-						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().aaaa().srl32<16>();
-#else
-						const VectorI curr_x = VectorI(left) + VectorI::cxpr(0, 1, 2, 3);
+						const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
+						const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
 
-						const VectorI at_left = VectorI::cast(scan.p).uph16().xxxx() == curr_x;
-						const VectorI at_top = VectorI::cast(scan.p).uph16().yyyy() == VectorI(top);
-
-						const VectorI round_setting_u = VectorI::cast(scan.t).zzzz() & VectorI(0xffff);
-						const VectorI round_setting_v = VectorI::cast(scan.t).zzzz().srl32<16>();
-#endif
-						// FIXME: Use the local.temp.round variables.
 						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-						const VectorI round_down_v = (round_setting_v == VectorI(2)) & ~at_top;
+						const VectorI round_down_v = (round_setting_v == VectorI(2));
 
 						const VectorI round_up_u = (round_setting_u == VectorI(1)) |
 						                           ((round_setting_u == VectorI(2)) & at_left);
-						const VectorI round_up_v = (round_setting_v == VectorI(1)) |
-						                           ((round_setting_v == VectorI(2)) & at_top);
+						const VectorI round_up_v = (round_setting_v == VectorI(1));
 
 						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
 						VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
@@ -1704,24 +1734,27 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 		fza_offset += vlen / 4;
 
-		if (sel.prim != GS_SPRITE_CLASS && sel.fwrite && sel.fge)
+		if (sel.prim != GS_SPRITE_CLASS)
 		{
+			if (sel.zb && !sel.zequal)
+			{
 #if _M_SSE >= 0x501
-			f = f.add16(GSVector8i::broadcast16(&local.d8.p.f));
+				GSVector8 add = GSVector8::broadcast64(&local.d8.p.z);
 #else
-			f = f.add16(local.d4.f);
+				GSVector4 add = local.d4.z;
 #endif
-		}
+				z0 = z0.add64(add);
+				z1 = z1.add64(add);
+			}
 
-		if (sel.zb && !sel.zflat)
-		{
+			if (sel.fwrite && sel.fge)
+			{
 #if _M_SSE >= 0x501
-			GSVector8 add = GSVector8::broadcast64(&local.d8.p.z);
+				f = f.add16(GSVector8i::broadcast16(&local.d8.p.f));
 #else
-			GSVector4 add = local.d4.z;
+				f = f.add16(local.d4.f);
 #endif
-			z0 = z0.add64(add);
-			z1 = z1.add64(add);
+			}
 		}
 
 		if (sel.fb)
@@ -1775,7 +1808,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 		if (sel.rounduv)
 		{
-			left += vlen;
+			local.temp.round.left += vlen;
 		}
 	}
 }

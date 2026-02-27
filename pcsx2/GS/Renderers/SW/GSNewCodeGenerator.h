@@ -192,6 +192,7 @@ public:
 	void align(int x = 16) { return actual.align(x); }
 	void db(int code) { actual.db(code); }
 	void L(const std::string& label) { actual.L(label); }
+	void L(Label& label) { actual.L(label); }
 
 	void cdqe() { actual.cdqe(); }
 	void ret(int imm = 0) { actual.ret(imm); }

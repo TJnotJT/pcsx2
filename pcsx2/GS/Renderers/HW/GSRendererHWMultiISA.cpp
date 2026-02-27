@@ -50,13 +50,12 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	data.scanmsk_value = env.SCANMSK.MSK;
 
 	const u32 round_uv = static_cast<u32>(hw.GetVertexUVRoundingInfo());
-	const u32 zflat = round_uv | static_cast<u32>(vt.m_primclass == GS_SPRITE_CLASS || vt.m_primclass == GS_POINT_CLASS);
 
 	// Skip per pixel division if q is constant.
 	// Optimize the division by 1 with a nop. It also means that GS_SPRITE_CLASS must be processed when !vt.m_eq.q.
 	// If you have both GS_SPRITE_CLASS && vt.m_eq.q, it will depends on the first part of the 'OR'.
 	const u32 q_div = !hw.IsMipMapActive() && ((vt.m_eq.q && vt.m_min.t.z != 1.0f) || (!vt.m_eq.q && vt.m_primclass == GS_SPRITE_CLASS));
-	GSVertexSW::s_cvb[vt.m_primclass][PRIM->TME][PRIM->FST][q_div][zflat][round_uv](
+	GSVertexSW::s_cvb[vt.m_primclass][PRIM->TME][PRIM->FST][q_div][round_uv](
 		context, data.vertex, hw.m_vertex.buff, hw.m_vertex.next);
 
 	GSVector4i scissor = context->scissor.in;
@@ -93,7 +92,6 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	gd.sel.prim = primclass;
 
 	gd.sel.rounduv = !!round_uv;
-	gd.sel.zflat = !!zflat;
 
 	u32 fm = context->FRAME.FBMSK;
 	u32 zm = context->ZBUF.ZMSK || context->TEST.ZTE == 0 ? 0xffffffff : 0;
