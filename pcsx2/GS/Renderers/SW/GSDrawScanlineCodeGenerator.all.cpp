@@ -691,6 +691,12 @@ void GSDrawScanlineCodeGenerator::Init()
 		shr(ebx, 12);
 		and_(ebx, 0xFFF);
 		shr(eax, 28);
+
+		//mov(r14, _rip_local(temp.bp.x));
+		//cmp(r14, 0);
+		//je("@f");
+		//db(0xcc);
+		//L("@@");
 		
 		// if (prim_top == top)
 		// {
@@ -698,7 +704,7 @@ void GSDrawScanlineCodeGenerator::Init()
 		// }
 		
 		Label end_if;
-		cmp(ebx, a3.cvt32());
+		cmp(ebx, a2.cvt32());
 		je("@f");
 		jmp(end_if);
 		L("@@");
@@ -1256,7 +1262,7 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 
 	if (m_sel.rounduv)
 	{
-		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym8);
+		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7);
 	}
 
 	if (m_sel.ltf)
@@ -3378,11 +3384,11 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		// i == 1: V rounding.
 	
 		// FIXME: Remove after debugging.
-		mov(eax, _rip_local(temp.bp.x));
-		cmp(eax, 0);
-		je("@f");
+		//mov(r14, _rip_local(temp.bp.x));
+		//cmp(r14, 0);
+		//je("@f");
 		//db(0xcc);
-		L("@@");
+		//L("@@");
 
 		if (i == 0)
 		{
