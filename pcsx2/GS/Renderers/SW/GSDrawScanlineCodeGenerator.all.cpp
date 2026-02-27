@@ -1189,7 +1189,8 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 
 	if (m_sel.rounduv)
 	{
-		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym8);
+		// FIXME: Uncomment after testing!
+		//RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym8);
 	}
 
 	if (m_sel.ltf)

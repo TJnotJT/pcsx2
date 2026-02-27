@@ -4386,7 +4386,7 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 	// Corners of right-angle corners for triangles forming quads.
 	std::vector<u32> tri_quad_corners;
 
-	// Only apply this to draws where all triangles form axis-aligned quads.
+	// Only apply this to draws where all triangles form axis-aligned quads and attributes are flat.
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
 		GSVertex* RESTRICT vtx = m_vertex.buff;
@@ -4403,6 +4403,23 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			TriangleOrdering tri0, tri1;
 
 			if (!AreTrianglesQuad<1, 1>(vtx, idx0, idx1, &tri0, &tri1))
+				return false;
+
+			// Make sure the attributes are flat.
+			const u32 Z = vtx[index[i + 0]].XYZ.Z;
+			const u32 FOG = vtx[index[i + 0]].FOG;
+			const u32 RGBA = vtx[index[i + 0]].RGBAQ.U32[0];
+			bool not_flat = false;
+			for (u32 j = 1; j < 6; j++)
+			{
+				not_flat |= (using_z && vtx[index[i + j]].XYZ.Z != Z);
+				not_flat |= (fge && vtx[index[i + j]].FOG != FOG);
+				not_flat |= (iip && vtx[index[i + j]].RGBAQ.U32[0] != RGBA);
+			}
+			// Check only provoking vertices for flat shading.
+			not_flat |= (!iip && vtx[index[i + 2]].RGBAQ.U32[0] != vtx[index[i + 5]].RGBAQ.U32[0]);
+
+			if (not_flat)
 				return false;
 
 			// Save the right angle corners.
