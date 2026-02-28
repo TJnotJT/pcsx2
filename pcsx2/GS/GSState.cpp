@@ -4469,32 +4469,36 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 		// For triangles, the power-of-two condition applies to the whole prim only when both dX and dY are powers to two.
 		// For sprites, the power-of-two condition applies to each axis separately.
-		const bool pow2_x = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
-		const bool pow2_y = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
+		const bool pow2_dX = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
+		const bool pow2_dY = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
 
-		const bool round_down_u = (U1 > U0) && !pow2_x;
-		const bool round_down_v = (V1 > V0) && !pow2_y;
+		const bool round_down_U = (U1 > U0) && !pow2_dX;
+		const bool round_down_V = (V1 > V0) && !pow2_dY;
 
-		// Only allow adjustment if the denominator of dU/dX or dV/dY in lowest terms is small enough.
-		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447).
+		// Only allow adjustment if:
+		// - The coordinates are half-texel aligned.
+		// - The denominator of dU/dX or dV/dY in lowest terms are small enough.
+		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447 or U0 = 1/16).
+		const bool aligned_XU = ((X0 | X1 | U0 | U1) & 7) == 0;
+		const bool aligned_YV = ((Y0 | Y1 | V0 | V1) & 7) == 0;
 		const int dX_lowest = dX / std::gcd(dX, dU);
 		const int dY_lowest = dY / std::gcd(dY, dV);
-		const bool allow_round_u = dX_lowest < ROUND_UV_DENOMINATOR;
-		const bool allow_round_v = dY_lowest < ROUND_UV_DENOMINATOR;
+		const bool allow_round_U = aligned_XU && dX_lowest < ROUND_UV_DENOMINATOR;
+		const bool allow_round_V = aligned_YV && dY_lowest < ROUND_UV_DENOMINATOR;
 
 		for (u32 j = 0; j < n; j++)
 		{
-			bool round_down_v2 = round_down_v;
+			bool round_down_V2 = round_down_V;
 
 			// For triangles, bottom-right triangles have V rounded up instead of down.
 			if (primclass == GS_TRIANGLE_CLASS && j >= 3)
 			{
-				round_down_v2 = round_down_v2 && diag_tl_to_br;
+				round_down_V2 = round_down_V2 && diag_tl_to_br;
 			}
 
 			// Rounding settings (4 bits each for U, V): 0 for no round, 1 for round up, 2 for round down.
-			u32 round_settings = (allow_round_u ? 1 + static_cast<bool>(round_down_u) : 0) |
-			                     (allow_round_v ? 1 + static_cast<bool>(round_down_v2) : 0) << 4;
+			u32 round_settings = (allow_round_U ? 1 + static_cast<bool>(round_down_U) : 0) |
+			                     (allow_round_V ? 1 + static_cast<bool>(round_down_V2) : 0) << 4;
 			
 			u32 prim_topleft = ((X0 >> 4) & 0xFFF) | (((Y0 >> 4) & 0xFFF) << 12); // Pack 12 bits for X0, Y0.
 			

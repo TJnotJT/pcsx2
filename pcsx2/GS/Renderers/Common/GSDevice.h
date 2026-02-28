@@ -289,9 +289,10 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
-// The reciprocal of this value is used as a threshold for determining when to round UVs.
-// Chosen by hand based on ad hoc testing of some dumps.
+// Threshold for determining when to round UVs. Chosen by hand based on ad hoc testing of some dumps.
+// Use half-texel scale as we only round coordinates that are half-texel aligned.
 constexpr u32 ROUND_UV_DENOMINATOR = 32;
+constexpr float ROUND_UV_THRESHOLD = 8.0f / static_cast<float>(ROUND_UV_DENOMINATOR); // Fixed-point 12.4 units.
 
 struct alignas(16) GSHWDrawConfig
 {
