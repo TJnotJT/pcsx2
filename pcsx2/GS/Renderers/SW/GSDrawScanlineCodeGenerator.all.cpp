@@ -1654,6 +1654,11 @@ void GSDrawScanlineCodeGenerator::SampleTextureLOD()
 		movdqa(xym3, _t);
 	}
 
+	if (m_sel.rounduv)
+	{
+		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7);
+	}
+
 	// xym2 = u
 	// xym3 = v
 	// xym4 = q

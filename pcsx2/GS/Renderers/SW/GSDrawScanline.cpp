@@ -483,6 +483,36 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 	}
 }
 
+__fi static void RoundUV(VectorI& u, VectorI& v, const GSScanlineLocalData& local)
+{
+	const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
+
+	const VectorI at_left = curr_x == VectorI(local.temp.round.prim_left);
+
+	const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
+	const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
+
+	const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
+	const VectorI round_down_v = (round_setting_v == VectorI(2));
+
+	const VectorI round_up_u = (round_setting_u == VectorI(1)) |
+		((round_setting_u == VectorI(2)) & at_left);
+	const VectorI round_up_v = (round_setting_v == VectorI(1));
+
+	VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+	VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+
+	constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
+
+	VectorI close_u = (u - ui).abs32() <= threshold;
+	VectorI close_v = (v - vi).abs32() <= threshold;
+
+	u = u.blend8(ui - threshold, close_u & round_down_u);
+	u = u.blend8(ui + threshold, close_u & round_up_u);
+	v = v.blend8(vi - threshold, close_v & round_down_v);
+	v = v.blend8(vi + threshold, close_v & round_up_v);
+}
+
 void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
 {
 	CDrawScanline(pixels, left, top, scan, local, GlobalFromLocal(local).sel);
@@ -761,6 +791,11 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					{
 						u = VectorI::cast(s);
 						v = VectorI::cast(t);
+					}
+
+					if (sel.rounduv)
+					{
+						RoundUV(u, v, local);
 					}
 
 					if (!sel.lcm)
@@ -1109,35 +1144,9 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						v = VectorI::cast(t);
 					}
 
-					// FIXME: Must also add to mipmapping?
 					if (sel.rounduv)
 					{
-						const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
-
-						const VectorI at_left = curr_x == VectorI(local.temp.round.prim_left);
-
-						const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
-						const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
-
-						const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-						const VectorI round_down_v = (round_setting_v == VectorI(2));
-
-						const VectorI round_up_u = (round_setting_u == VectorI(1)) |
-						                           ((round_setting_u == VectorI(2)) & at_left);
-						const VectorI round_up_v = (round_setting_v == VectorI(1));
-
-						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-						VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-
-						constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
-
-						VectorI close_u = (u - ui).abs32() <= threshold;
-						VectorI close_v = (v - vi).abs32() <= threshold;
-
-						u = u.blend8(ui - threshold, close_u & round_down_u);
-						u = u.blend8(ui + threshold, close_u & round_up_u);
-						v = v.blend8(vi - threshold, close_v & round_down_v);
-						v = v.blend8(vi + threshold, close_v & round_up_v);
+						RoundUV(u, v, local);
 					}
 
 					if (sel.ltf)
