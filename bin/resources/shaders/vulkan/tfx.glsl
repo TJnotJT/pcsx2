@@ -20,18 +20,15 @@ layout(std140, set = 0, binding = 0) uniform cb0
 
 layout(location = 0) out VSOutput
 {
-	#if VS_ROUND_UV != 0
-		flat vec4 t;
-	#else
-		vec4 t;
-	#endif
-
+	vec4 t;
 	vec4 ti;
-
 	#if VS_IIP != 0
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+	#if VS_ROUND_UV
+		flat uvec4 rounduv;
 	#endif
 } vsOut;
 
@@ -79,16 +76,9 @@ void main()
 			vsOut.ti.zw = st / TextureScale;
 		#endif
 
-		#if VS_ROUND_UV
-			vsOut.t.x = float((a_q >> 0) & 0xFFF);
-			vsOut.t.y = float((a_q >> 12) & 0xFFF);
-			vsOut.t.z = float((a_q >> 24) & 0xF);
-			vsOut.t.w = float((a_q >> 28) & 0xF);
-		#else
-			// Float coords
-			vsOut.t.xy = st;
-			vsOut.t.w = a_q;
-		#endif
+		// Float coords
+		vsOut.t.xy = st;
+		vsOut.t.w = a_q;
 	#else
 		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vsOut.ti = vec4(0.0f);
@@ -100,6 +90,13 @@ void main()
 
 	vsOut.c = vec4(a_c);
 	vsOut.t.z = a_f.r;
+
+#if VS_ROUND_UV
+	vsOut.rounduv.x = (a_q >> 0) & 0xFFF; // Prim left
+	vsOut.rounduv.y = (a_q >> 12) & 0xFFF; // Prim top
+	vsOut.rounduv.z = (a_q >> 24) & 0xF; // Round U flags
+	vsOut.rounduv.w = (a_q >> 28) & 0xF; // ROund V flags
+#endif
 }
 
 #else // VS_EXPAND
@@ -108,7 +105,11 @@ struct RawVertex
 {
 	vec2 ST;
 	uint RGBA;
+#if VS_ROUND_UV
+	uint Q;
+#else
 	float Q;
+#endif
 	uint XY;
 	uint Z;
 	uint UV;
@@ -125,6 +126,7 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+	uvec4 rounduv;
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -134,7 +136,11 @@ ProcessedVertex load_vertex(uint index)
 	vec2 a_st = rvtx.ST;
 	uvec4 a_c = uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),
 	                  bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8));
+#if VS_ROUND_UV
+	uint a_q = rvtx.Q;
+#else
 	float a_q = rvtx.Q;
+#endif
 	uvec2 a_p = uvec2(bitfieldExtract(rvtx.XY, 0, 16), bitfieldExtract(rvtx.XY, 16, 16));
 	uint a_z = rvtx.Z;
 	uvec2 a_uv = uvec2(bitfieldExtract(rvtx.UV, 0, 16), bitfieldExtract(rvtx.UV, 16, 16));
@@ -159,15 +165,8 @@ ProcessedVertex load_vertex(uint index)
 			vtx.ti.zw = st / TextureScale;
 		#endif
 
-		#if VS_ROUND_UV
-			vsOut.t.x = float((a_q >> 0) & 0xFFF);
-			vsOut.t.y = float((a_q >> 12) & 0xFFF);
-			vsOut.t.z = float((a_q >> 24) & 0xF);
-			vsOut.t.w = float((a_q >> 28) & 0xF);
-		#else
-			vtx.t.xy = st;
-			vtx.t.w = a_q;
-		#endif
+		vtx.t.xy = st;
+		vtx.t.w = float(a_q);
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
@@ -175,6 +174,13 @@ ProcessedVertex load_vertex(uint index)
 
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
+
+#if VS_ROUND_UV
+	vtx.rounduv.x = (a_q >> 0) & 0xFFF; // Prim left
+	vtx.rounduv.y = (a_q >> 12) & 0xFFF; // Prim top
+	vtx.rounduv.z = (a_q >> 24) & 0xF; // Round U flags
+	vtx.rounduv.w = (a_q >> 28) & 0xF; // ROund V flags
+#endif
 
 	return vtx;
 }
@@ -240,6 +246,9 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
+#if VS_ROUND_UV
+	vsOut.rounduv = vtx.rounduv;
+#endif
 }
 
 #endif // VS_EXPAND
@@ -350,18 +359,17 @@ layout(std140, set = 0, binding = 1) uniform cb1
 
 layout(location = 0) in VSOutput
 {
-	#if PS_ROUND_UV != 0
-		flat vec4 t;
-	#else
-		vec4 t;
-	#endif
-
+	vec4 t;
 	vec4 ti;
 
 	#if PS_IIP != 0
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+
+	#if PS_ROUND_UV
+		flat uvec4 rounduv;
 	#endif
 } vsIn;
 
@@ -535,11 +543,12 @@ vec4 clamp_wrap_uv(vec4 uv)
 
 vec4 round_uv()
 {
-	// Top-left X, Y of the prim saved in unused texture coords.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.t.xy)));
+#if PS_ROUND_UV
+	// Whether we are at the top or left of the prim.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.rounduv.xy)));
 
 	// Extract flags for whether to round U, V.
-	ivec2 round_flags = ivec2(vsIn.t.zw);
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
@@ -556,6 +565,9 @@ vec4 round_uv()
 	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
+#else
+	return vec4(0.0f);
+#endif
 }
 
 mat4 sample_4c(vec4 uv)

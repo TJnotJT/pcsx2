@@ -1338,10 +1338,10 @@ VS_OUTPUT vs_main(VS_INPUT input)
 		}
 
 		#if VS_ROUND_UV
-			output.t.x = float((a_q >> 0) & 0xFFF);
-			output.t.y = float((a_q >> 12) & 0xFFF);
-			output.t.z = float((a_q >> 24) & 0xF);
-			output.t.w = float((a_q >> 28) & 0xF);
+			output.t.x = float((input.q >> 0) & 0xFFF);
+			output.t.y = float((input.q >> 12) & 0xFFF);
+			output.t.z = float((input.q >> 24) & 0xF);
+			output.t.w = float((input.q >> 28) & 0xF);
 		#else
 			// Float coords
 			output.t.xy = st;
@@ -1356,7 +1356,10 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	}
 
 	output.c = input.c;
+
+	#if VS_ROUND_UV == 0
 	output.t.z = input.f.r;
+	#endif
 
 	return output;
 }

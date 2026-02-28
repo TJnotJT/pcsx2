@@ -4376,11 +4376,6 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 	// How many vertices for each quad.
 	constexpr u32 n = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
 
-	const bool iip = PRIM->IIP;
-	const bool fge = PRIM->FGE;
-	const bool using_z = !m_context->ZBUF.ZMSK ||
-		(m_context->TEST.ZTE && m_context->TEST.ZTST != ZTST_ALWAYS);
-
 	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
 
 	// Corners of right-angle corners for triangles forming quads.
@@ -4504,7 +4499,7 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			u32 prim_topleft = ((X0 >> 4) & 0xFFF) | (((Y0 >> 4) & 0xFFF) << 12); // Pack 12 bits for X0, Y0.
 			
 			// Save rounding info in unused Q bits.
-			vtx[i + j].RGBAQ.Q = std::bit_cast<float>(prim_topleft | (round_settings << 24));
+			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
 		}
 	}
 

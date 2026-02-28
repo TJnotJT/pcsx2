@@ -59,8 +59,7 @@ void texture_coord()
 #if VS_ROUND_UV
 	VSout.t_float.x = float((i_q >> 0) & 0xFFF);
 	VSout.t_float.y = float((i_q >> 12) & 0xFFF);
-	VSout.t_float.z = float((i_q >> 24) & 0xF);
-	VSout.t_float.w = float((i_q >> 28) & 0xF);
+	VSout.t_float.w = float((i_q >> 24) & 0xFF);
 #else
 	// Float coordinate
 	VSout.t_float.xy = st;
@@ -95,9 +94,7 @@ void vs_main()
 	texture_coord();
 
 	VSout.c = i_c;
-#if VS_ROUND_UV == 0
-	VSout.t_float.z = i_f.x; // pack for with texture
-#endif
+	VSout.t_float.z = i_f.x; // pack fog with texture
 
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
@@ -110,7 +107,11 @@ struct RawVertex
 {
 	vec2 ST;
 	uint RGBA;
+#if VS_ROUND_UV
+	uint Q;
+#else
 	float Q;
+#endif
 	uint XY;
 	uint Z;
 	uint UV;
@@ -136,7 +137,11 @@ ProcessedVertex load_vertex(uint index)
 	vec2 i_st = rvtx.ST;
 	vec4 i_c = vec4(uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),
 	                      bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8)));
+#if VS_ROUND_UV
+	uint i_q = rvtx.Q;
+#else
 	float i_q = rvtx.Q;
+#endif
 	uvec2 i_p = uvec2(bitfieldExtract(rvtx.XY, 0, 16), bitfieldExtract(rvtx.XY, 16, 16));
 	uint i_z = rvtx.Z;
 	uvec2 i_uv = uvec2(bitfieldExtract(rvtx.UV, 0, 16), bitfieldExtract(rvtx.UV, 16, 16));
@@ -154,10 +159,9 @@ ProcessedVertex load_vertex(uint index)
 	vec2 st = i_st - TextureOffset;
 
 #if VS_ROUND_UV
-	VSout.t_float.x = float((i_q >> 0) & 0xFFF);
-	VSout.t_float.y = float((i_q >> 12) & 0xFFF);
-	VSout.t_float.z = float((i_q >> 24) & 0xF);
-	VSout.t_float.w = float((i_q >> 28) & 0xF);
+	vtx.t_float.x = float((i_q >> 0) & 0xFFF);
+	vtx.t_float.y = float((i_q >> 12) & 0xFFF);
+	vtx.t_float.w = float((i_q >> 24) & 0xFF);
 #else
 	vtx.t_float.xy = st;
 	vtx.t_float.w  = i_q;
