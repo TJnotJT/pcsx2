@@ -19,6 +19,10 @@ MULTI_ISA_UNSHARED_IMPL;
 
 int GSRasterizerData::s_counter = 0;
 
+// FIXME: Remove after debugging.
+int debug_prim = 0;
+int last_s_n = 0;
+
 static int compute_best_thread_height(int threads)
 {
 	// - for more threads screen segments should be smaller to better distribute the pixels
@@ -1085,6 +1089,14 @@ void GSRasterizer::DrawSprite(const GSVertexSW* vertex, const u16* index)
 {
 	m_primcount++;
 
+	// FIXME: Remove after debugging.
+	if (GSState::s_n != last_s_n)
+	{
+		last_s_n = GSState::s_n;
+		debug_prim = 0;
+	}
+	debug_prim++;
+
 	const GSVertexSW& v0 = vertex[index[0]];
 	const GSVertexSW& v1 = vertex[index[1]];
 
@@ -1433,6 +1445,11 @@ void GSRasterizer::DrawScanline(int pixels, int left, int top, const GSVertexSW&
 	//m_pixels.total += ((left + pixels + (PIXELS_PER_LOOP - 1)) & ~(PIXELS_PER_LOOP - 1)) - left;
 
 	pxAssert(m_pixels.actual <= m_pixels.total);
+
+	// FIXME: Remove after debugging.
+	if (GSState::s_n == 190)
+		printf("");
+	m_local.temp.bp.x = (GSState::s_n == 190);
 
 	m_draw_scanline(pixels, left, top, scan, m_local);
 }

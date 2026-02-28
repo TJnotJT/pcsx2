@@ -289,6 +289,12 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
+// Threshold for determining when to round UVs. Chosen by hand based on ad hoc testing of some dumps.
+// Use twice the denominator in the threshold as we allow position/texture coordinates to be at
+// half-texel increments for rounding.
+constexpr u32 ROUND_UV_DENOMINATOR = 32;
+constexpr float ROUND_UV_THRESHOLD = 16.0f / static_cast<float>(2 * ROUND_UV_DENOMINATOR); // 16.0f = 1 texel.
+
 struct alignas(16) GSHWDrawConfig
 {
 	enum class Topology: u8
@@ -314,9 +320,10 @@ struct alignas(16) GSHWDrawConfig
 				u8 fst : 1;
 				u8 tme : 1;
 				u8 iip : 1;
-				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
+				u8 point_size : 1;    ///< Set when points need to be expanded without VS expanding.
 				VSExpand expand : 2;
-				u8 _free : 2;
+				u8 round_uv : 1;
+				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -415,6 +422,9 @@ struct alignas(16) GSHWDrawConfig
 
 				// Scan mask
 				u32 scanmsk : 2;
+
+				// Round UV
+				u32 round_uv : 1;
 			};
 
 			struct

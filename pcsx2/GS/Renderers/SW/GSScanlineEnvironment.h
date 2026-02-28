@@ -56,6 +56,7 @@ union GSScanlineSelector
 		u32 notest : 1; // 55 (no ztest, no atest, no date, no scissor test, and horizontally aligned to 4 pixels)
 		// TODO: 1D texture flag? could save 2 texture reads and 4 lerps with bilinear, and also the texture coordinate clamp/wrap code in one direction
 		u32 zequal : 1; // 56
+		u32 rounduv : 1; // 57
 		u32 breakpoint : 1; // Insert a trap to stop the program, helpful to stop debugger on a program
 	};
 
@@ -234,6 +235,8 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i uv_minmax[2];
 		GSVector4i trb, tga;
 		GSVector4i test;
+		struct { u32 left, prim_left, flags_u, flags_v; } round;
+		GSVector4i bp; // FIXME: Remove after debugging.
 	} temp;
 
 #endif
@@ -295,6 +298,8 @@ struct GSScanlineConstantData : public GSAlignedClass<32>
 		{ -3.0f , -2.0f , -1.0f , 0.0f},
 	};
 	alignas(16) float m_log2_coef_128b[4][4] = {};
+
+	alignas(32) u32 m_offsets[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
 	constexpr GSScanlineConstantData()
 	{
