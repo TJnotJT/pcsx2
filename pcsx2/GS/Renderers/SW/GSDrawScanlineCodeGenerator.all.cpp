@@ -3456,14 +3456,14 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		pshufd(tmp2, tmp2, 0);
 		pand(tmp1, tmp2);
 
-		// constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+		// constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD));
 		// VectorI close_u = (u - ui).abs32() <= threshold;
 		// VectorI close_v = (v - vi).abs32() <= threshold;
 
 		movaps(tmp2, uv);
 		psubd(tmp2, tmp1);
 		pabsd(tmp2, tmp2);
-		mov(eax, 0x10000 / ROUND_UV_DENOMINATOR);
+		mov(eax, static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
 		movd(tmp5, eax);
 		pshufd(tmp5, tmp5, 0);
 		pcmpgtd(tmp2, tmp5);

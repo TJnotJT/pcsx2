@@ -1308,7 +1308,7 @@ std::string GSDeviceOGL::GenGlslHeader(const std::string_view entry, GLenum type
 		header += "#define PS_HAS_CONSERVATIVE_DEPTH 0\n";
 	}
 
-	header += "#define PS_ROUND_UV_THRESHOLD " + std::to_string(16.0f / ROUND_UV_DENOMINATOR) + "\n";
+	header += "#define PS_ROUND_UV_THRESHOLD " + std::to_string(ROUND_UV_THRESHOLD) + "\n";
 
 	// Allow to puts several shader in 1 files
 	switch (type)

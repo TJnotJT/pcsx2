@@ -92,11 +92,11 @@ struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
 	uint4 c : COLOR0;
-	#if VS_ROUND_UV
+#if VS_ROUND_UV
 	uint q : TEXCOORD1;
-	#else
+#else
 	float q : TEXCOORD1;
-	#endif
+#endif
 	uint2 p : POSITION0;
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
@@ -107,11 +107,7 @@ struct VS_OUTPUT
 {
 	float4 p : SV_Position;
 
-#if VS_ROUND_UV != 0
-	nointerpolation float4 t : TEXCOORD0; // Contains UV rounding config.
-#else
 	float4 t : TEXCOORD0;
-#endif
 
 	float4 ti : TEXCOORD2;
 
@@ -119,6 +115,10 @@ struct VS_OUTPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
+#endif
+
+#if VS_ROUND_UV
+	nointerpolation uint4 rounduv : TEXCOORD3;
 #endif
 };
 
@@ -126,11 +126,7 @@ struct PS_INPUT
 {
 	noperspective centroid float4 p : SV_Position;
 
-#if PS_ROUND_UV != 0
-	nointerpolation float4 t : TEXCOORD0; // Contains UV rounding config.
-#else
 	float4 t : TEXCOORD0;
-#endif
 
 	float4 ti : TEXCOORD2;
 
@@ -138,6 +134,10 @@ struct PS_INPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
+#endif
+
+#if PS_ROUND_UV
+	nointerpolation uint4 rounduv : TEXCOORD3;
 #endif
 
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
@@ -344,15 +344,16 @@ float4 clamp_wrap_uv(float4 uv)
 
 float4 round_uv(PS_INPUT input)
 {
+#if PS_ROUND_UV
 	// Top-left X, Y of the prim saved in unused texture coords.
-	int2 topleft = int2(int2(input.p.xy) == int2(input.t.xy));
+	int2 topleft = int2(int2(input.p.xy) == int2(input.rounduv.xy));
 
 	// Get flags for whether to round U, V.
-	int2 round_flags = int2(input.t.zw);
+	int2 round_flags = int2(input.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	int2 round_down = int2(round_flags == 2) & ~topleft;
-	int2 round_up = int2(round_flags == 1) | (int2(round_setting == 2) & topleft);
+	int2 round_up = int2(round_flags == 1) | (int2(round_flags == 2) & topleft);
 
 	float2 uv = input.ti.zw; // Unnormalized UVs.
 	float2 uvi = round(input.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
@@ -364,6 +365,9 @@ float4 round_uv(PS_INPUT input)
 	uv = bool2(close & round_up) ? uvi + PS_ROUND_UV_THRESHOLD : uv;
 
 	return float4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
+#else
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
+#endif
 }
 
 float4x4 sample_4c(float4 uv, float uv_w, int2 xy)
@@ -1301,6 +1305,16 @@ cbuffer cb0
 	uint BaseVertex; // Only used in DX11.
 };
 
+uint4 extract_round_uv_bits(uint q)
+{
+	return uint4(
+		(q >> 0) & 0xFFF,  // Prim left
+		(q >> 12) & 0xFFF, // Prim top
+		(q >> 24) & 0xF,   // Round U flags
+		(q >> 28) & 0xF    // Round V flags
+	);
+}
+
 VS_OUTPUT vs_main(VS_INPUT input)
 {
 	// Clamp to max depth, gs doesn't wrap
@@ -1337,16 +1351,9 @@ VS_OUTPUT vs_main(VS_INPUT input)
 			output.ti.zw = st / TextureScale;
 		}
 
-		#if VS_ROUND_UV
-			output.t.x = float((input.q >> 0) & 0xFFF);
-			output.t.y = float((input.q >> 12) & 0xFFF);
-			output.t.z = float((input.q >> 24) & 0xF);
-			output.t.w = float((input.q >> 28) & 0xF);
-		#else
-			// Float coords
-			output.t.xy = st;
-			output.t.w = input.q;
-		#endif
+		// Float coords
+		output.t.xy = st;
+		output.t.w = input.q;
 	}
 	else
 	{
@@ -1356,10 +1363,11 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	}
 
 	output.c = input.c;
-
-	#if VS_ROUND_UV == 0
 	output.t.z = input.f.r;
-	#endif
+
+#if VS_ROUND_UV
+	output.rounduv = extract_round_uv_bits(input.q);
+#endif
 
 	return output;
 }
@@ -1370,11 +1378,11 @@ struct VS_RAW_INPUT
 {
 	float2 ST;
 	uint RGBA;
-	#if VS_ROUND_UV
+#if VS_ROUND_UV
 	uint Q;
-	#else
+#else
 	float Q;
-	#endif
+#endif
 	uint XY;
 	uint Z;
 	uint UV;

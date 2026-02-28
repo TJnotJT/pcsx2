@@ -1129,7 +1129,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
 						VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
 
-						constexpr VectorI threshold = VectorI::cxpr(0x10000 / ROUND_UV_DENOMINATOR);
+						constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
 
 						VectorI close_u = (u - ui).abs32() <= threshold;
 						VectorI close_v = (v - vi).abs32() <= threshold;

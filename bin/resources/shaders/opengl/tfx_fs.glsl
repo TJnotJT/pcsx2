@@ -62,18 +62,15 @@ layout(std140, binding = 0) uniform cb21
 
 in SHADER
 {
-	#if PS_ROUND_UV != 0
-		flat vec4 t_float; // Contains UV rounding config.
-	#else
-		vec4 t_float;
-	#endif
-
+	vec4 t_float;
 	vec4 t_int;
-
 	#if PS_IIP != 0
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+	#if PS_ROUND_UV
+		flat uvec4 rounduv;
 	#endif
 } PSin;
 
@@ -259,11 +256,12 @@ vec4 clamp_wrap_uv(vec4 uv)
 
 vec4 round_uv()
 {
+#if PS_ROUND_UV
 	// Top-left X, Y of the prim saved in unused texture coords.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.t_float.xy)));
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.rounduv.xy)));
 
 	// Get flags for whether to round U, V.
-	ivec2 round_flags = ivec2(PSin.t_float.zw);
+	ivec2 round_flags = ivec2(PSin.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
@@ -280,6 +278,9 @@ vec4 round_uv()
 	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
+#else
+	return vec4(0.0f);
+#endif
 }
 
 mat4 sample_4c(vec4 uv)

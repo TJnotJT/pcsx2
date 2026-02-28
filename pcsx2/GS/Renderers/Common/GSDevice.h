@@ -290,9 +290,10 @@ struct HWBlend
 };
 
 // Threshold for determining when to round UVs. Chosen by hand based on ad hoc testing of some dumps.
-// Use half-texel scale as we only round coordinates that are half-texel aligned.
+// Use twice the denominator in the threshold as we allow position/texture coordinates to be at
+// half-texel increments for rounding.
 constexpr u32 ROUND_UV_DENOMINATOR = 32;
-constexpr float ROUND_UV_THRESHOLD = 8.0f / static_cast<float>(ROUND_UV_DENOMINATOR); // Fixed-point 12.4 units.
+constexpr float ROUND_UV_THRESHOLD = 16.0f / static_cast<float>(2 * ROUND_UV_DENOMINATOR); // 16.0f = 1 texel.
 
 struct alignas(16) GSHWDrawConfig
 {

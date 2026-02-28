@@ -32,6 +32,16 @@ layout(location = 0) out VSOutput
 	#endif
 } vsOut;
 
+uvec4 extract_round_uv_bits(uint q)
+{
+	return uvec4(
+		(q >> 0) & 0xFFF,  // Prim left
+		(q >> 12) & 0xFFF, // Prim top
+		(q >> 24) & 0xF,   // Round U flags
+		(q >> 28) & 0xF    // Round V flags
+	);
+}
+
 #if VS_EXPAND == 0
 
 layout(location = 0) in vec2 a_st;
@@ -92,10 +102,7 @@ void main()
 	vsOut.t.z = a_f.r;
 
 #if VS_ROUND_UV
-	vsOut.rounduv.x = (a_q >> 0) & 0xFFF; // Prim left
-	vsOut.rounduv.y = (a_q >> 12) & 0xFFF; // Prim top
-	vsOut.rounduv.z = (a_q >> 24) & 0xF; // Round U flags
-	vsOut.rounduv.w = (a_q >> 28) & 0xF; // ROund V flags
+	vsOut.rounduv = extract_round_uv_bits(a_q);
 #endif
 }
 
@@ -126,7 +133,9 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+#if VS_ROUND_UV
 	uvec4 rounduv;
+#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -176,10 +185,7 @@ ProcessedVertex load_vertex(uint index)
 	vtx.t.z = a_f.r;
 
 #if VS_ROUND_UV
-	vtx.rounduv.x = (a_q >> 0) & 0xFFF; // Prim left
-	vtx.rounduv.y = (a_q >> 12) & 0xFFF; // Prim top
-	vtx.rounduv.z = (a_q >> 24) & 0xF; // Round U flags
-	vtx.rounduv.w = (a_q >> 28) & 0xF; // ROund V flags
+	vtx.rounduv = extract_round_uv_bits(a_q);
 #endif
 
 	return vtx;
