@@ -27,15 +27,32 @@ out SHADER
 	#else
 		flat vec4 c;
 	#endif
+	#if VS_ROUND_UV
+		flat uvec4 rounduv;
+	#endif
 } VSout;
 
 const float exp_min32 = exp2(-32.0f);
+
+uvec4 extract_round_uv_bits(uint q)
+{
+	return uvec4(
+		(q >> 0) & 0xFFF,  // Prim left
+		(q >> 12) & 0xFFF, // Prim top
+		(q >> 24) & 0xF,   // Round U flags
+		(q >> 28) & 0xF    // Round V flags
+	);
+}
 
 #if VS_EXPAND == 0
 
 layout(location = 0) in vec2  i_st;
 layout(location = 2) in vec4  i_c;
+#if VS_ROUND_UV
+layout(location = 3) in uint i_q;
+#else
 layout(location = 3) in float i_q;
+#endif
 layout(location = 4) in uvec2 i_p;
 layout(location = 5) in uint  i_z;
 layout(location = 6) in uvec2 i_uv;
@@ -78,10 +95,14 @@ void vs_main()
 	texture_coord();
 
 	VSout.c = i_c;
-	VSout.t_float.z = i_f.x; // pack for with texture
+	VSout.t_float.z = i_f.x; // pack fog with texture
 
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
+	#endif
+
+	#if VS_ROUND_UV
+		VSout.rounduv = extract_round_uv_bits(i_q);
 	#endif
 }
 
@@ -91,7 +112,11 @@ struct RawVertex
 {
 	vec2 ST;
 	uint RGBA;
+#if VS_ROUND_UV
+	uint Q;
+#else
 	float Q;
+#endif
 	uint XY;
 	uint Z;
 	uint UV;
@@ -108,6 +133,9 @@ struct ProcessedVertex
 	vec4 t_float;
 	vec4 t_int;
 	vec4 c;
+#if VS_ROUND_UV
+	uvec4 rounduv;
+#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -117,7 +145,11 @@ ProcessedVertex load_vertex(uint index)
 	vec2 i_st = rvtx.ST;
 	vec4 i_c = vec4(uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),
 	                      bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8)));
+#if VS_ROUND_UV
+	uint i_q = rvtx.Q;
+#else
 	float i_q = rvtx.Q;
+#endif
 	uvec2 i_p = uvec2(bitfieldExtract(rvtx.XY, 0, 16), bitfieldExtract(rvtx.XY, 16, 16));
 	uint i_z = rvtx.Z;
 	uvec2 i_uv = uvec2(bitfieldExtract(rvtx.UV, 0, 16), bitfieldExtract(rvtx.UV, 16, 16));
@@ -146,6 +178,10 @@ ProcessedVertex load_vertex(uint index)
 
 	vtx.c = i_c;
 	vtx.t_float.z = i_f.x;
+
+#if VS_ROUND_UV
+	vtx.rounduv = extract_round_uv_bits(i_q);
+#endif
 
 	return vtx;
 }
@@ -210,6 +246,9 @@ void main()
 	VSout.t_float = vtx.t_float;
 	VSout.t_int = vtx.t_int;
 	VSout.c = vtx.c;
+#if VS_ROUND_UV
+	VSout.rounduv = vtx.rounduv;
+#endif
 }
 
 #endif // VS_EXPAND
