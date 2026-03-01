@@ -63,4 +63,11 @@ enum class PS_ROV_DEPTH : uint32_t
 	READ_ONLY = 2,
 };
 
+enum class PS_ROUND_UV : uint32_t
+{
+	NONE    = 0, // No special rounding.
+	NEAREST = 1, // Rounding for correct nearest sampling.
+	LINEAR  = 2, // Rounding for correct bilinear sampling. 
+};
+
 } // namespace GSShader
