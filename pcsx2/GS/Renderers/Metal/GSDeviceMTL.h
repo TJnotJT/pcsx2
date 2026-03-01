@@ -203,6 +203,7 @@ public:
 				bool fst        : 1;
 				bool point_size : 1;
 				GSMTLExpandType expand : 2;
+				bool round_uv   : 1;
 			};
 			u8 key;
 		};
