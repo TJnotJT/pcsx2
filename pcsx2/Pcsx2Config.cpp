@@ -755,6 +755,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWAccurateAlphaTest = false;
 	HWAA1 = false;
 	UseDebugBlend = false;
+	AccurateUVRounding = true;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1043,6 +1044,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(HWAccurateAlphaTest);
 	SettingsWrapBitBool(HWAA1);
 	SettingsWrapBitBool(UseDebugBlend);
+	SettingsWrapBitBoolEx(AccurateUVRounding, "AccurateUVRounding");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
