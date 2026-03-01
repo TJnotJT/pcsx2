@@ -28,7 +28,21 @@ layout(location = 0) out VSOutput
 	#else
 		flat vec4 c;
 	#endif
+	#if VS_ROUND_UV
+		flat uvec4 rounduv;
+	#endif
 } vsOut;
+
+uvec4 extract_round_uv_bits(float q)
+{
+	uint qi = floatBitsToUint(q);
+	return uvec4(
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
+	);
+}
 
 #if VS_EXPAND == 0
 
@@ -84,6 +98,10 @@ void main()
 
 	vsOut.c = vec4(a_c);
 	vsOut.t.z = a_f.r;
+
+#if VS_ROUND_UV
+	vsOut.rounduv = extract_round_uv_bits(a_q);
+#endif
 }
 
 #else // VS_EXPAND
@@ -109,6 +127,9 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+#if VS_ROUND_UV
+	uvec4 rounduv;
+#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -152,6 +173,10 @@ ProcessedVertex load_vertex(uint index)
 
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
+
+#if VS_ROUND_UV
+	vtx.rounduv = extract_round_uv_bits(a_q);
+#endif
 
 	return vtx;
 }
@@ -217,6 +242,9 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
+#if VS_ROUND_UV
+	vsOut.rounduv = vtx.rounduv;
+#endif
 }
 
 #endif // VS_EXPAND
@@ -291,6 +319,7 @@ void main()
 #define PS_ZFLOOR 0
 #define PS_FEEDBACK_LOOP 0
 #define PS_TEX_IS_FB 0
+#define PS_ROUND_UV 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -332,6 +361,9 @@ layout(location = 0) in VSOutput
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+	#if PS_ROUND_UV
+		flat uvec4 rounduv;
 	#endif
 } vsIn;
 
@@ -501,6 +533,35 @@ vec4 clamp_wrap_uv(vec4 uv)
 	#endif
 
 	return uv;
+}
+
+vec4 round_uv()
+{
+#if PS_ROUND_UV
+	// Whether we are at the top or left of the prim.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.rounduv.xy)));
+
+	// Extract flags for whether to round U, V.
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
+
+	// Being on the top or left pixels converts round down to round up.
+	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
+	ivec2 round_up = ivec2(equal(round_flags, ivec2(1))) |
+	                 (ivec2(equal(round_flags, ivec2(2))) & topleft);
+
+	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
+	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
+	
+	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+
+	// Round only if close to a half texel.
+	uv = mix(uv, uvi - PS_ROUND_UV_THRESHOLD, bvec2(close & round_down));
+	uv = mix(uv, uvi + PS_ROUND_UV_THRESHOLD, bvec2(close & round_up));
+
+	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
+#else
+	return vec4(0.0f);
+#endif
 }
 
 mat4 sample_4c(vec4 uv)
@@ -923,6 +984,10 @@ vec4 ps_color()
 #if PS_FST == 0
 	vec2 st = vsIn.t.xy / vsIn.t.w;
 	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
+#elif PS_ROUND_UV != 0
+	vec4 ti_rounded = round_uv();
+	vec2 st = ti_rounded.xy;
+	vec2 st_int = ti_rounded.zw;
 #else
 	vec2 st = vsIn.ti.xy;
 	vec2 st_int = vsIn.ti.zw;
