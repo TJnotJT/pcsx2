@@ -92,11 +92,7 @@ struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
 	uint4 c : COLOR0;
-#if VS_ROUND_UV
-	uint q : TEXCOORD1;
-#else
 	float q : TEXCOORD1;
-#endif
 	uint2 p : POSITION0;
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
@@ -1298,13 +1294,14 @@ cbuffer cb0
 	uint BaseVertex; // Only used in DX11.
 };
 
-uint4 extract_round_uv_bits(uint q)
+uint4 extract_round_uv_bits(float q)
 {
+	uint qi = asuint(q);
 	return uint4(
-		(q >> 0) & 0xFFF,  // Prim left
-		(q >> 12) & 0xFFF, // Prim top
-		(q >> 24) & 0xF,   // Round U flags
-		(q >> 28) & 0xF    // Round V flags
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
 	);
 }
 
@@ -1370,11 +1367,7 @@ struct VS_RAW_INPUT
 {
 	float2 ST;
 	uint RGBA;
-#if VS_ROUND_UV
-	uint Q;
-#else
 	float Q;
-#endif
 	uint XY;
 	uint Z;
 	uint UV;

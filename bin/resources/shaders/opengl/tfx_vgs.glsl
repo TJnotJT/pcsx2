@@ -34,13 +34,14 @@ out SHADER
 
 const float exp_min32 = exp2(-32.0f);
 
-uvec4 extract_round_uv_bits(uint q)
+uvec4 extract_round_uv_bits(float q)
 {
+	uint qi = floatBitsToUint(q);
 	return uvec4(
-		(q >> 0) & 0xFFF,  // Prim left
-		(q >> 12) & 0xFFF, // Prim top
-		(q >> 24) & 0xF,   // Round U flags
-		(q >> 28) & 0xF    // Round V flags
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
 	);
 }
 
@@ -48,11 +49,7 @@ uvec4 extract_round_uv_bits(uint q)
 
 layout(location = 0) in vec2  i_st;
 layout(location = 2) in vec4  i_c;
-#if VS_ROUND_UV
-layout(location = 3) in uint i_q;
-#else
 layout(location = 3) in float i_q;
-#endif
 layout(location = 4) in uvec2 i_p;
 layout(location = 5) in uint  i_z;
 layout(location = 6) in uvec2 i_uv;
@@ -112,11 +109,7 @@ struct RawVertex
 {
 	vec2 ST;
 	uint RGBA;
-#if VS_ROUND_UV
-	uint Q;
-#else
 	float Q;
-#endif
 	uint XY;
 	uint Z;
 	uint UV;
@@ -145,11 +138,7 @@ ProcessedVertex load_vertex(uint index)
 	vec2 i_st = rvtx.ST;
 	vec4 i_c = vec4(uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),
 	                      bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8)));
-#if VS_ROUND_UV
-	uint i_q = rvtx.Q;
-#else
 	float i_q = rvtx.Q;
-#endif
 	uvec2 i_p = uvec2(bitfieldExtract(rvtx.XY, 0, 16), bitfieldExtract(rvtx.XY, 16, 16));
 	uint i_z = rvtx.Z;
 	uvec2 i_uv = uvec2(bitfieldExtract(rvtx.UV, 0, 16), bitfieldExtract(rvtx.UV, 16, 16));
