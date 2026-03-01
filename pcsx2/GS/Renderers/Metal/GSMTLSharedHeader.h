@@ -167,6 +167,7 @@ enum GSMTLFnConstants
 	GSMTLConstantIndex_DEPTH_FEEDBACK,
 	GSMTLConstantIndex_FST,
 	GSMTLConstantIndex_IIP,
+	GSMTLConstantIndex_VS_ROUND_UV,
 	GSMTLConstantIndex_VS_POINT_SIZE,
 	GSMTLConstantIndex_VS_EXPAND_TYPE,
 	GSMTLConstantIndex_PS_AEM_FMT,
@@ -227,4 +228,20 @@ enum GSMTLFnConstants
 	GSMTLConstantIndex_PS_AA1,
 	GSMTLConstantIndex_PS_ABE,
 	GSMTLConstantIndex_PS_SW_ANISO,
+	GSMTLConstantIndex_PS_ROUND_UV,
 };
+
+// Threshold for determining when to round UVs. Chosen by hand based on ad hoc testing of some dumps.
+// Use twice the denominator in the threshold as we allow position/texture coordinates to be at
+// half-texel increments for rounding.
+#if defined(__METAL_VERSION__)
+	#define CONSTANT constant
+#else
+	#define CONSTANT 
+#endif
+constexpr CONSTANT int ROUND_UV_DENOMINATOR_MTL = 32;
+constexpr CONSTANT float ROUND_UV_THRESHOLD_MTL = (16.0f / float(2 * ROUND_UV_DENOMINATOR_MTL)); // 16.0f = 1 texel.
+constexpr CONSTANT int ROUND_UV_UP_MTL = 1;
+constexpr CONSTANT int ROUND_UV_DOWN_MTL = 2;
+constexpr CONSTANT int ROUND_UV_SWAP_MTL = 8;
+#undef CONSTANT
