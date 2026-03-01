@@ -162,6 +162,17 @@ void GSDrawScanlineCodeGenerator::broadcastsd(const XYm& reg, const Address& mem
 #endif
 }
 
+void GSDrawScanlineCodeGenerator::broadcastss(const XYm& reg, const Address& mem)
+{
+#if USING_YMM
+	vbroadcastss(reg, mem);
+#else
+	movd(reg, mem);
+	pshufd(reg, reg, 0);
+#endif
+}
+
+
 void GSDrawScanlineCodeGenerator::broadcastGPRToVec(const XYm& vec, const Xbyak::Reg32& gpr)
 {
 	movd(Xmm(vec.getIdx()), gpr);
@@ -3399,14 +3410,12 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		{
 			// const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
 
-			movd(tmp1, _rip_local(temp.round.left));
-			pshufd(tmp1, tmp1, 0);
+			broadcastss(tmp1, _rip_local(temp.round.left));
 			paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
 
 			// const VectorI at_left = VectorI(local.temp.round.prim_left) == curr_x;
 
-			movd(tmp2, _rip_local(temp.round.prim_left));
-			pshufd(tmp2, tmp2, 0);
+			broadcastss(tmp2, _rip_local(temp.round.prim_left));
 			pcmpeqd(tmp1, tmp2);
 		}
 
@@ -3420,8 +3429,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		// const VectorI round_down_v = (round_setting_v == VectorI(2));
 
 		mov(eax, 2);
-		movd(tmp3, eax);
-		pshufd(tmp3, tmp3, 0);
+		broadcastGPRToVec(tmp3, eax);
 		pcmpeqd(tmp3, tmp2);
 		if (i == 0)
 		{
@@ -3435,14 +3443,12 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		// const VectorI round_up_v = (round_setting_v == VectorI(1));
 
 		mov(eax, 1);
-		movd(tmp4, eax);
-		pshufd(tmp4, tmp4, 0);
+		broadcastGPRToVec(tmp4, eax);
 		pcmpeqd(tmp4, tmp2);
 		if (i == 0)
 		{
 			mov(eax, 2);
-			movd(tmp5, eax);
-			pshufd(tmp5, tmp5, 0);
+			broadcastGPRToVec(tmp5, eax);
 			pcmpeqd(tmp5, tmp2);
 			pand(tmp5, tmp1);
 			por(tmp4, tmp5);
@@ -3453,12 +3459,10 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 
 		const XYm& uv = i == 0 ? u : v;
 		mov(eax, 0x4000);
-		movd(tmp1, eax);
-		pshufd(tmp1, tmp1, 0);
+		broadcastGPRToVec(tmp1, eax);
 		paddd(tmp1, uv);
 		mov(eax, ~(0x8000 - 1));
-		movd(tmp2, eax);
-		pshufd(tmp2, tmp2, 0);
+		broadcastGPRToVec(tmp2, eax);
 		pand(tmp1, tmp2);
 
 		// constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD));
@@ -3469,8 +3473,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		psubd(tmp2, tmp1);
 		pabsd(tmp2, tmp2);
 		mov(eax, static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
-		movd(tmp5, eax);
-		pshufd(tmp5, tmp5, 0);
+		broadcastGPRToVec(tmp5, eax);
 		pcmpgtd(tmp2, tmp5);
 		pcmpeqd(tmp6, tmp6);
 		pxor(tmp2, tmp6);
