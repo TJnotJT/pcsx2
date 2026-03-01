@@ -237,7 +237,6 @@ struct alignas(32) GSScanlineLocalData // per prim variables, each thread has it
 		GSVector4i trb, tga;
 		GSVector4i test;
 		struct { u32 left, prim_left, flags_u, flags_v; } round;
-		GSVector4i bp; // FIXME: Remove after debugging.
 	} temp;
 
 #endif

@@ -702,12 +702,6 @@ void GSDrawScanlineCodeGenerator::Init()
 		shr(ebx, 12);
 		and_(ebx, 0xFFF);
 		shr(eax, 28);
-
-		//mov(r14, _rip_local(temp.bp.x));
-		//cmp(r14, 0);
-		//je("@f");
-		//db(0xcc);
-		//L("@@");
 		
 		// if (prim_top == top)
 		// {
@@ -3393,18 +3387,10 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm& tmp1,
 	const XYm& tmp2, const XYm& tmp3, const XYm& tmp4, const XYm& tmp5, const XYm& tmp6)
 {
-	// TODO: Implement using AVX2 also.
 	for (int i = 0; i < 2; i++)
 	{
 		// i == 0: U rounding.
 		// i == 1: V rounding.
-	
-		// FIXME: Remove after debugging.
-		//mov(r14, _rip_local(temp.bp.x));
-		//cmp(r14, 0);
-		//je("@f");
-		//db(0xcc);
-		//L("@@");
 
 		if (i == 0)
 		{
