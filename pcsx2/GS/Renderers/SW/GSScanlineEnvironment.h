@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "GS/Renderers/Common/GSVertex.h"
 #include "GS/GSLocalMemory.h"
 #include "GS/GSVector.h"
 
@@ -299,7 +300,23 @@ struct GSScanlineConstantData : public GSAlignedClass<32>
 	};
 	alignas(16) float m_log2_coef_128b[4][4] = {};
 
+	// Constants for UV rounding.
 	alignas(32) u32 m_offsets[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+	alignas(32) u32 m_round_up[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+	alignas(32) u32 m_round_down[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+	alignas(32) u32 m_quarter_texel[8] = {
+		0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000
+	};
+	alignas(32) u32 m_half_texel_mask[8] = {
+		~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1),
+		~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1),
+	};
+	alignas(32) u32 m_round_threshold[8] = {
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), // 0x1000 = 1/16 texel.
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD),
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD),
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD),
+	};
 
 	constexpr GSScanlineConstantData()
 	{

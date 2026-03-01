@@ -3411,7 +3411,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 			// const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
 
 			broadcastss(tmp1, _rip_local(temp.round.left));
-			paddd(tmp1, _rip_const(&g_const.m_offsets[0]));
+			paddd(tmp1, _rip_const(g_const.m_offsets));
 
 			// const VectorI at_left = VectorI(local.temp.round.prim_left) == curr_x;
 
@@ -3422,14 +3422,13 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		// const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
 		// const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
 
-		movd(tmp2, i == 0 ? _rip_local(temp.round.flags_u) : _rip_local(temp.round.flags_v));
-		pshufd(tmp2, tmp2, 0);
+		broadcastss(tmp2, i == 0 ? _rip_local(temp.round.flags_u) : _rip_local(temp.round.flags_v));
 
-		// const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-		// const VectorI round_down_v = (round_setting_v == VectorI(2));
+		// const VectorI round_down_const = VectorI::load<true>(g_const.m_round_down);
+		// const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
+		// const VectorI round_down_v = (round_setting_v == round_down_const);
 
-		mov(eax, 2);
-		broadcastGPRToVec(tmp3, eax);
+		movaps(tmp3, _rip_const(g_const.m_round_down));
 		pcmpeqd(tmp3, tmp2);
 		if (i == 0)
 		{
@@ -3438,42 +3437,39 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 			pandn(tmp3, tmp4);
 		}
 
-		// const VectorI round_up_u = (round_setting_u == VectorI(1)) |
-		//                            ((round_setting_u == VectorI(2)) & at_left);
-		// const VectorI round_up_v = (round_setting_v == VectorI(1));
+		// const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
+		// const VectorI round_up_u = (round_setting_u == round_up_const) |
+		//                            ((round_setting_u == round_down_const) & at_left);
+		// const VectorI round_up_v = (round_setting_v == round_up_const);
 
-		mov(eax, 1);
-		broadcastGPRToVec(tmp4, eax);
+		movaps(tmp4, _rip_const(g_const.m_round_up));
 		pcmpeqd(tmp4, tmp2);
 		if (i == 0)
 		{
-			mov(eax, 2);
-			broadcastGPRToVec(tmp5, eax);
+			movaps(tmp5, _rip_const(g_const.m_round_down));
 			pcmpeqd(tmp5, tmp2);
 			pand(tmp5, tmp1);
 			por(tmp4, tmp5);
 		}
 
-		// VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-		// VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+		// const VectorI quarter_texel = VectorI::load<true>(g_const.m_quarter_texel);
+		// const VectorI half_texel_mask = VectorI::load<true>(g_const.m_half_texel_mask);
+		// VectorI ui = (u + quarter_texel) & half_texel_mask;
+		// VectorI vi = (v + quarter_texel) & half_texel_mask;
 
 		const XYm& uv = i == 0 ? u : v;
-		mov(eax, 0x4000);
-		broadcastGPRToVec(tmp1, eax);
+		movaps(tmp1, _rip_const(g_const.m_quarter_texel));
 		paddd(tmp1, uv);
-		mov(eax, ~(0x8000 - 1));
-		broadcastGPRToVec(tmp2, eax);
-		pand(tmp1, tmp2);
+		pand(tmp1, _rip_const(g_const.m_half_texel_mask));
 
-		// constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD));
+		// const VectorI threshold = VectorI::load<true>(g_const.m_round_threshold);
 		// VectorI close_u = (u - ui).abs32() <= threshold;
 		// VectorI close_v = (v - vi).abs32() <= threshold;
 
 		movaps(tmp2, uv);
 		psubd(tmp2, tmp1);
 		pabsd(tmp2, tmp2);
-		mov(eax, static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
-		broadcastGPRToVec(tmp5, eax);
+		movaps(tmp5, _rip_const(g_const.m_round_threshold));
 		pcmpgtd(tmp2, tmp5);
 		pcmpeqd(tmp6, tmp6);
 		pxor(tmp2, tmp6);

@@ -44,3 +44,8 @@ struct alignas(32) GSVertexPT1
 
 static_assert(sizeof(GSVertexPT1) == sizeof(GSVertex));
 
+// Threshold for determining when to round UVs. Chosen by hand based on ad hoc testing of some dumps.
+// Use twice the denominator in the threshold as we allow position/texture coordinates to be at
+// half-texel increments for rounding.
+constexpr u32 ROUND_UV_DENOMINATOR = 32;
+constexpr float ROUND_UV_THRESHOLD = 16.0f / static_cast<float>(2 * ROUND_UV_DENOMINATOR); // 16.0f = 1 texel.

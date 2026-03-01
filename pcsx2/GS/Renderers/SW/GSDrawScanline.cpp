@@ -485,25 +485,33 @@ __ri static void WritePixel(const T& src, int addr, int i, u32 psm, const GSScan
 
 __fi static void RoundUV(VectorI& u, VectorI& v, const GSScanlineLocalData& local)
 {
+	// Determine if we're at left edge of prim. Top edge handling is in init.
 	const VectorI curr_x = VectorI(local.temp.round.left) + VectorI::load<true>(g_const.m_offsets);
-
 	const VectorI at_left = curr_x == VectorI(local.temp.round.prim_left);
 
+	// Get round settings from memory.
 	const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
 	const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
 
-	const VectorI round_down_u = (round_setting_u == VectorI(2)) & ~at_left;
-	const VectorI round_down_v = (round_setting_v == VectorI(2));
+	// Determine round down.
+	const VectorI round_down_const = VectorI::load<true>(g_const.m_round_down);
+	const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
+	const VectorI round_down_v = (round_setting_v == round_down_const);
 
-	const VectorI round_up_u = (round_setting_u == VectorI(1)) |
-		((round_setting_u == VectorI(2)) & at_left);
-	const VectorI round_up_v = (round_setting_v == VectorI(1));
+	// Determine round up.
+	// U round down gets converted to round up at left pixels.
+	const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
+	const VectorI round_up_u = (round_setting_u == round_up_const) |
+	                           ((round_setting_u == round_down_const) & at_left);
+	const VectorI round_up_v = (round_setting_v == round_up_const);
 
-	VectorI ui = (u + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
-	VectorI vi = (v + VectorI(0x4000)) & VectorI(~(0x8000 - 1));
+	// Round U, V, to nearest half texel.
+	const VectorI quarter_texel = VectorI::load<true>(g_const.m_quarter_texel);
+	const VectorI half_texel_mask = VectorI::load<true>(g_const.m_half_texel_mask);
+	VectorI ui = (u + quarter_texel) & half_texel_mask;
+	VectorI vi = (v + quarter_texel) & half_texel_mask;
 
-	constexpr VectorI threshold = VectorI::cxpr(static_cast<int>(0x1000 * ROUND_UV_THRESHOLD)); // 0x1000 = 1/16 texel.
-
+	const VectorI threshold = VectorI::load<true>(g_const.m_round_threshold);
 	VectorI close_u = (u - ui).abs32() <= threshold;
 	VectorI close_v = (v - vi).abs32() <= threshold;
 
