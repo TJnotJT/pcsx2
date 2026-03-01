@@ -316,8 +316,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
+				u8 round_uv : 1;
 				VSExpand expand : 3;
-				u8 _free : 1;
 			};
 			u8 key;
 		};
@@ -423,6 +423,9 @@ struct alignas(16) GSHWDrawConfig
 				// AA1
 				PS_AA1 aa1 : 2; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
 				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE interaction.
+				
+				// Round UV
+				u32 round_uv : 1;
 			};
 
 			struct
