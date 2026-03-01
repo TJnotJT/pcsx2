@@ -753,6 +753,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	Mipmap = true;
 	HWMipmap = true;
 	HWAccurateAlphaTest = false;
+	AccurateUVRounding = true;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1036,6 +1037,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
 	SettingsWrapBitBool(HWAccurateAlphaTest);
+	SettingsWrapBitBoolEx(AccurateUVRounding, "AccurateUVRounding");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
