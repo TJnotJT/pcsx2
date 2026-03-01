@@ -341,8 +341,9 @@ float4 round_uv(PS_INPUT input)
 	int2 round_flags = int2(input.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
-	int2 round_down = int2(round_flags == 2) & ~topleft;
-	int2 round_up = int2(round_flags == 1) | (int2(round_flags == 2) & topleft);
+	int2 round_down = int2(round_flags == PS_ROUND_UV_DOWN) & ~topleft;
+	int2 round_up = int2(round_flags == PS_ROUND_UV_UP) |
+	                (int2(round_flags == PS_ROUND_UV_DOWN) & topleft);
 
 	float2 uv = input.ti.zw; // Unnormalized UVs.
 	float2 uvi = round(input.ti.zw / 8.0f) * 8.0f; // Nearest half texel.

@@ -545,9 +545,9 @@ vec4 round_uv()
 	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
-	ivec2 round_down = ivec2(equal(round_flags, ivec2(2))) & ~topleft;
-	ivec2 round_up = ivec2(equal(round_flags, ivec2(1))) |
-	                 (ivec2(equal(round_flags, ivec2(2))) & topleft);
+	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
+	ivec2 round_up = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_UP))) |
+	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.

@@ -226,3 +226,5 @@ enum GSMTLFnConstants
 // half-texel increments for rounding.
 #define ROUND_UV_DENOMINATOR_MTL 32
 #define ROUND_UV_THRESHOLD_MTL (16.0f / float(2 * ROUND_UV_DENOMINATOR_MTL)) // 16.0f = 1 texel.
+#define ROUND_UV_UP_MTL 1
+#define ROUND_UV_DOWN_MTL 2

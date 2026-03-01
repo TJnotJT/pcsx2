@@ -482,8 +482,9 @@ struct PSMain
 			int2 round_flags = int2(in.rounduv.zw);
 
 			// Being on the top or left pixels converts round down to round up.
-			int2 round_down = int2(round_flags == 2) & ~topleft;
-			int2 round_up = int2(round_flags == 1) | (int2(round_flags == 2) & topleft);
+			int2 round_down = int2(round_flags == ROUND_UV_DOWN_MTL) & ~topleft;
+			int2 round_up = int2(round_flags == ROUND_UV_UP_MTL) |
+			                (int2(round_flags == ROUND_UV_DOWN_MTL) & topleft);
 
 			float2 uv = in.ti.zw; // Unnormalized UVs.
 			float2 uvi = round(in.ti.zw / 8.0f) * 8.0f; // Nearest half texel.

@@ -1765,6 +1765,8 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PIXEL_SHADER", 1);
 		sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", m_conservative_depth);
 		sm.AddMacro("PS_ROUND_UV_THRESHOLD", std::to_string(ROUND_UV_THRESHOLD));
+		sm.AddMacro("PS_ROUND_UV_UP", std::to_string(ROUND_UV_UP));
+		sm.AddMacro("PS_ROUND_UV_DOWN", std::to_string(ROUND_UV_DOWN));
 		sm.AddMacro("PS_FST", sel.fst);
 		sm.AddMacro("PS_WMS", sel.wms);
 		sm.AddMacro("PS_WMT", sel.wmt);

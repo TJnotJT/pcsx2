@@ -703,9 +703,10 @@ void GSDrawScanlineCodeGenerator::Init()
 		and_(ebx, 0xFFF);
 		shr(eax, 28);
 		
+		static_assert((ROUND_UV_DOWN >> 1) == ROUND_UV_UP);
 		// if (prim_top == top)
 		// {
-		//   flags_v = ((flags_v & 2) >> 1) | (flags_v & ~2);
+		//   flags_v = ((flags_v & ROUND_UV_DOWN) >> 1) | (flags_v & ~ROUND_UV_DOWN);
 		// }
 		
 		Label end_if;
@@ -714,9 +715,9 @@ void GSDrawScanlineCodeGenerator::Init()
 		jmp(end_if);
 		L("@@");
 		mov(ebx, eax);
-		and_(ebx, 2);
+		and_(ebx, ROUND_UV_DOWN);
 		shr(ebx, 1);
-		and_(eax, ~2);
+		and_(eax, ~ROUND_UV_DOWN);
 		or_(eax, ebx);
 		L(end_if);
 		

@@ -3626,6 +3626,8 @@ static void AddShaderHeader(std::stringstream& ss)
 		ss << "#define HAS_FEEDBACK_LOOP_LAYOUT 1\n";
 
 	ss << "#define PS_ROUND_UV_THRESHOLD " << ROUND_UV_THRESHOLD << "\n";
+	ss << "#define PS_ROUND_UV_UP " << ROUND_UV_UP << "\n";
+	ss << "#define PS_ROUND_UV_DOWN " << ROUND_UV_DOWN << "\n";
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)

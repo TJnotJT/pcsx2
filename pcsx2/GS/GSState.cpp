@@ -4496,8 +4496,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			}
 
 			// Rounding settings (4 bits each for U, V): 0 for no round, 1 for round up, 2 for round down.
-			u32 round_settings = (allow_round_U ? 1 + static_cast<bool>(round_down_U) : 0) |
-			                     (allow_round_V ? 1 + static_cast<bool>(round_down_V2) : 0) << 4;
+			u32 round_settings = (allow_round_U ? (round_down_U ? ROUND_UV_DOWN : ROUND_UV_UP) : 0) |
+			                     (allow_round_V ? (round_down_V2 ? ROUND_UV_DOWN : ROUND_UV_UP) : 0) << 4;
 			
 			u32 prim_topleft = ((X0 >> 4) & 0xFFF) | (((Y0 >> 4) & 0xFFF) << 12); // Pack 12 bits for X0, Y0.
 			

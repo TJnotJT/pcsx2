@@ -2093,6 +2093,8 @@ static_assert(offsetof(GSHWDrawConfig::PSConstantBuffer, ScaleFactor)      == of
 
 static_assert(ROUND_UV_DENOMINATOR_MTL == ROUND_UV_DENOMINATOR);
 static_assert(ROUND_UV_THRESHOLD_MTL == ROUND_UV_THRESHOLD);
+static_assert(ROUND_UV_UP_MTL == ROUND_UV_UP);
+static_assert(ROUND_UV_DOWN_MTL == ROUND_UV_DOWN);
 
 void GSDeviceMTL::SetupDestinationAlpha(GSTexture* rt, GSTexture* ds, const GSVector4i& r, SetDATM datm)
 {

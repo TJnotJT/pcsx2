@@ -301,8 +301,14 @@ struct GSScanlineConstantData : public GSAlignedClass<32>
 
 	// Constants for UV rounding.
 	alignas(32) u32 m_offsets[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
-	alignas(32) u32 m_round_up[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
-	alignas(32) u32 m_round_down[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+	alignas(32) u32 m_round_up[8] = {
+		ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP,
+		ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP,
+	};
+	alignas(32) u32 m_round_down[8] = {
+		ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN,
+		ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN,
+	};
 	alignas(32) u32 m_quarter_texel[8] = {
 		0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000
 	};

@@ -582,7 +582,8 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 		if (prim_top == top)
 		{
 			// For top pixels, round up V instead of round-down.
-			flags_v = ((flags_v & 2) >> 1) | (flags_v & ~2);
+			static_assert((ROUND_UV_DOWN >> 1) == ROUND_UV_UP);
+			flags_v = ((flags_v & ROUND_UV_DOWN) >> 1) | (flags_v & ~ROUND_UV_DOWN);
 		}
 
 		local.temp.round.left = left;
