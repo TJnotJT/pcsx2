@@ -4418,27 +4418,27 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 	for (u32 i = 0; i < count; i += n)
 	{
-		GSVertex v[2]; // Corners of the quad.
+		GSVertex v0, v1; // Corners of the quad.
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
-			v[0] = vtx[tri_quad_corners[2 * (i / n) + 0]];
-			v[1] = vtx[tri_quad_corners[2 * (i / n) + 1]];
+			v0 = vtx[tri_quad_corners[2 * (i / n) + 0]];
+			v1 = vtx[tri_quad_corners[2 * (i / n) + 1]];
 		}
 		else
 		{
-			v[0] = vtx[i + 0];
-			v[1] = vtx[i + 1];
+			v0 = vtx[i + 0];
+			v1 = vtx[i + 1];
 		}
 
-		const int X0 = static_cast<int>(v[0].XYZ.X) - xyof.x;
-		const int Y0 = static_cast<int>(v[0].XYZ.Y) - xyof.y;
-		const int X1 = static_cast<int>(v[1].XYZ.X) - xyof.x;
-		const int Y1 = static_cast<int>(v[1].XYZ.Y) - xyof.y;
-		const int U0 = static_cast<int>(v[0].U);
-		const int V0 = static_cast<int>(v[0].V);
-		const int U1 = static_cast<int>(v[1].U);
-		const int V1 = static_cast<int>(v[1].V);
+		const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
+		const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
+		const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
+		const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
+		const int U0 = static_cast<int>(v0.U);
+		const int V0 = static_cast<int>(v0.V);
+		const int U1 = static_cast<int>(v1.U);
+		const int V1 = static_cast<int>(v1.V);
 
 		const int dX = X1 - X0;
 		const int dY = Y1 - Y0;
@@ -4472,15 +4472,15 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		{
 			u32 round_U; // Round flag for U.
 			u32 round_V; // Round flag for V.
-			int sX0; // Stepping origin X (no error at these X).
-			int sY0; // Stepping origin Y (no error at these Y).
+			int sX; // Stepping origin X (no error at these X).
+			int sY; // Stepping origin Y (no error at these Y).
 
 			if constexpr (primclass == GS_TRIANGLE_CLASS)
 			{
 				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
 				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
-				const bool bottom_right_triangle = (v[j / 3].XYZ.X == std::max(X0, X1)) &&
-												   (v[j / 3].XYZ.Y == std::max(Y0, Y1));
+				const bool bottom_right_triangle = ((j < 3 ? X0 : X1) == std::max(X0, X1)) &&
+												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1));
 
 				// Determine whether stepping direction of U, V is negative.
 				const bool negU = (dX < 0) != (dU < 0);
@@ -4492,8 +4492,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 				// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
 				// so there's no error at the first vertex of the left edge.
-				sX0 = std::min(X0, X1);
-				sY0 = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
+				sX = std::min(X0, X1);
+				sY = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
 			}
 			else
 			{
@@ -4503,14 +4503,14 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 				// Hypothesis: The GS step in the direction specified by vertices when rasterizing
 				// sprites so there's no error at the X or Y of the first vertex.
-				sX0 = X0;
-				sY0 = Y0;
+				sX = X0;
+				sY = Y0;
 			}
 
 			// Rounding settings (4 bits each for each U, V).
 			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			const u32 prim_topleft = ((sX0 >> 4) & 0xFFF) | (((sY0 >> 4) & 0xFFF) << 12); // 12 bits for each sX0, sY0.
+			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
 			
 			// Save rounding info in unused Q bits.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
