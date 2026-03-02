@@ -4491,12 +4491,13 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				round_V = (negV || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 				// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
-				// so there is no error at the first vertex of the left edge.
+				// so there's no error at the first vertex of the left edge.
 				sX0 = std::min(X0, X1);
 				sY0 = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
 			}
 			else
 			{
+				// For sprites, treat each axis independently.
 				round_U = ((dU < 0) || pow2_dX) ? ROUND_UV_UP : ROUND_UV_DOWN;
 				round_V = ((dV < 0) || pow2_dY) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
