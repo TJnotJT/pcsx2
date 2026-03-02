@@ -70,9 +70,6 @@ in SHADER
 	#else
 		flat vec4 c;
 	#endif
-	#if PS_ROUND_UV
-		flat uvec4 rounduv;
-	#endif
 } PSin;
 
 #define TARGET_0_QUALIFIER out
@@ -259,10 +256,11 @@ vec4 round_uv()
 {
 #if PS_ROUND_UV
 	// Top-left X, Y of the prim saved in unused texture coords.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.rounduv.xy)));
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.t_float.xy)));
 
 	// Get flags for whether to round U, V.
-	ivec2 round_flags = ivec2(PSin.rounduv.zw);
+	int round_flags_i = int(PSin.t_float.w);
+	ivec2 round_flags = ivec2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;

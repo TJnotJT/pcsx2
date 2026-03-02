@@ -110,10 +110,6 @@ struct VS_OUTPUT
 #else
 	nointerpolation float4 c : COLOR0;
 #endif
-
-#if VS_ROUND_UV
-	nointerpolation uint4 rounduv : TEXCOORD3;
-#endif
 };
 
 struct PS_INPUT
@@ -125,9 +121,6 @@ struct PS_INPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
-#endif
-#if PS_ROUND_UV
-	nointerpolation uint4 rounduv : TEXCOORD3;
 #endif
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
@@ -335,10 +328,11 @@ float4 round_uv(PS_INPUT input)
 {
 #if PS_ROUND_UV
 	// Top-left X, Y of the prim saved in unused texture coords.
-	int2 topleft = int2(int2(input.p.xy) == int2(input.rounduv.xy));
+	int2 topleft = int2(int2(input.p.xy) == int2(input.t.xy));
 
 	// Get flags for whether to round U, V.
-	int2 round_flags = int2(input.rounduv.zw);
+	int round_flags_i = int(input.t.w);
+	int2 round_flags = int2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
 
 	// Being on the top or left pixels converts round down to round up.
 	int2 round_down = int2(round_flags == PS_ROUND_UV_DOWN) & ~topleft;
@@ -1295,17 +1289,6 @@ cbuffer cb0
 	uint BaseVertex; // Only used in DX11.
 };
 
-uint4 extract_round_uv_bits(float q)
-{
-	uint qi = asuint(q);
-	return uint4(
-		(qi >> 0) & 0xFFF,  // Prim left
-		(qi >> 12) & 0xFFF, // Prim top
-		(qi >> 24) & 0xF,   // Round U flags
-		(qi >> 28) & 0xF    // Round V flags
-	);
-}
-
 VS_OUTPUT vs_main(VS_INPUT input)
 {
 	// Clamp to max depth, gs doesn't wrap
@@ -1354,10 +1337,6 @@ VS_OUTPUT vs_main(VS_INPUT input)
 
 	output.c = input.c;
 	output.t.z = input.f.r;
-
-#if VS_ROUND_UV
-	output.rounduv = extract_round_uv_bits(input.q);
-#endif
 
 	return output;
 }

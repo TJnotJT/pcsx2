@@ -27,23 +27,9 @@ out SHADER
 	#else
 		flat vec4 c;
 	#endif
-	#if VS_ROUND_UV
-		flat uvec4 rounduv;
-	#endif
 } VSout;
 
 const float exp_min32 = exp2(-32.0f);
-
-uvec4 extract_round_uv_bits(float q)
-{
-	uint qi = floatBitsToUint(q);
-	return uvec4(
-		(qi >> 0) & 0xFFF,  // Prim left
-		(qi >> 12) & 0xFFF, // Prim top
-		(qi >> 24) & 0xF,   // Round U flags
-		(qi >> 28) & 0xF    // Round V flags
-	);
-}
 
 #if VS_EXPAND == 0
 
@@ -97,10 +83,6 @@ void vs_main()
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
 	#endif
-
-	#if VS_ROUND_UV
-		VSout.rounduv = extract_round_uv_bits(i_q);
-	#endif
 }
 
 #else // VS_EXPAND
@@ -126,9 +108,6 @@ struct ProcessedVertex
 	vec4 t_float;
 	vec4 t_int;
 	vec4 c;
-#if VS_ROUND_UV
-	uvec4 rounduv;
-#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -167,10 +146,6 @@ ProcessedVertex load_vertex(uint index)
 
 	vtx.c = i_c;
 	vtx.t_float.z = i_f.x;
-
-#if VS_ROUND_UV
-	vtx.rounduv = extract_round_uv_bits(i_q);
-#endif
 
 	return vtx;
 }
@@ -235,9 +210,6 @@ void main()
 	VSout.t_float = vtx.t_float;
 	VSout.t_int = vtx.t_int;
 	VSout.c = vtx.c;
-#if VS_ROUND_UV
-	VSout.rounduv = vtx.rounduv;
-#endif
 }
 
 #endif // VS_EXPAND

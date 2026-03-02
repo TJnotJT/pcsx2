@@ -28,21 +28,7 @@ layout(location = 0) out VSOutput
 	#else
 		flat vec4 c;
 	#endif
-	#if VS_ROUND_UV
-		flat uvec4 rounduv;
-	#endif
 } vsOut;
-
-uvec4 extract_round_uv_bits(float q)
-{
-	uint qi = floatBitsToUint(q);
-	return uvec4(
-		(qi >> 0) & 0xFFF,  // Prim left
-		(qi >> 12) & 0xFFF, // Prim top
-		(qi >> 24) & 0xF,   // Round U flags
-		(qi >> 28) & 0xF    // Round V flags
-	);
-}
 
 #if VS_EXPAND == 0
 
@@ -98,10 +84,6 @@ void main()
 
 	vsOut.c = vec4(a_c);
 	vsOut.t.z = a_f.r;
-
-#if VS_ROUND_UV
-	vsOut.rounduv = extract_round_uv_bits(a_q);
-#endif
 }
 
 #else // VS_EXPAND
@@ -127,9 +109,6 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
-#if VS_ROUND_UV
-	uvec4 rounduv;
-#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -173,10 +152,6 @@ ProcessedVertex load_vertex(uint index)
 
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
-
-#if VS_ROUND_UV
-	vtx.rounduv = extract_round_uv_bits(a_q);
-#endif
 
 	return vtx;
 }
@@ -242,9 +217,6 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
-#if VS_ROUND_UV
-	vsOut.rounduv = vtx.rounduv;
-#endif
 }
 
 #endif // VS_EXPAND
@@ -361,9 +333,6 @@ layout(location = 0) in VSOutput
 		vec4 c;
 	#else
 		flat vec4 c;
-	#endif
-	#if PS_ROUND_UV
-		flat uvec4 rounduv;
 	#endif
 } vsIn;
 
@@ -539,10 +508,11 @@ vec4 round_uv()
 {
 #if PS_ROUND_UV
 	// Whether we are at the top or left of the prim.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.rounduv.xy)));
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.t.xy)));
 
 	// Extract flags for whether to round U, V.
-	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
+	int round_flags_i = int(vsIn.t.w);
+	ivec2 round_flags = ivec2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;

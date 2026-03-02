@@ -4508,10 +4508,20 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			// Rounding settings (4 bits each for each U, V).
 			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
-			
-			// Save rounding info in unused Q bits.
-			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
+			if (GSIsHardwareRenderer())
+			{
+				// Save the rounding info in unused S, T, Q attributes.
+				vtx[i + j].RGBAQ.Q = static_cast<float>(round_settings);
+				vtx[i + j].ST.S = static_cast<float>(sX >> 4);
+				vtx[i + j].ST.T = static_cast<float>(sY >> 4);
+			}
+			else
+			{
+				// SW scanline renderer doesn't have as many free bits so pack everything into Q.
+				const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
+
+				vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
+			}
 		}
 	}
 
