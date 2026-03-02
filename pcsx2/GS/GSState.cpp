@@ -4460,12 +4460,10 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447 or U0 = 1/16).
 		const bool aligned_XU = ((X0 | X1 | U0 | U1) & 7) == 0;
 		const bool aligned_YV = ((Y0 | Y1 | V0 | V1) & 7) == 0;
-		const bool int_dUdX = (abs_dU % abs_dX) == 0;
-		const bool int_dVdY = (abs_dV % abs_dY) == 0;
-		const int dX_lowest = abs_dX / std::gcd(abs_dX, abs_dU);
-		const int dY_lowest = abs_dY / std::gcd(abs_dY, abs_dV);
-		const bool allow_round_U = int_dUdX || (aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR));
-		const bool allow_round_V = int_dVdY || (aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR));
+		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
+		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
+		const bool allow_round_U = dU != 0 && aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR);
+		const bool allow_round_V = dV != 0 && aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR);
 
 		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
