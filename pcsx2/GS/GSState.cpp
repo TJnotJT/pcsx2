@@ -4444,10 +4444,10 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const int dY = Y1 - Y0;
 		const int dU = U1 - U0;
 		const int dV = V1 - V0;
-		const int abs_dX = std::abs(X1 - X0);
-		const int abs_dY = std::abs(Y1 - Y0);
-		const int abs_dU = std::abs(U1 - U0);
-		const int abs_dV = std::abs(V1 - V0);
+		const int abs_dX = std::abs(dX);
+		const int abs_dY = std::abs(dY);
+		const int abs_dU = std::abs(dU);
+		const int abs_dV = std::abs(dV);
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 
@@ -4456,7 +4456,7 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 		// Only allow adjustment if:
 		// - The coordinates are half-texel aligned, or dU/dX or dV/dY is an integer.
-		// - The denominator of dU/dX or dV/dY in lowest terms are small enough.
+		// - The denominator of dU/dX or dV/dY in lowest terms is small enough.
 		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447 or U0 = 1/16).
 		const bool aligned_XU = ((X0 | X1 | U0 | U1) & 7) == 0;
 		const bool aligned_YV = ((Y0 | Y1 | V0 | V1) & 7) == 0;
@@ -4464,15 +4464,16 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool int_dVdY = (abs_dV % abs_dY) == 0;
 		const int dX_lowest = abs_dX / std::gcd(abs_dX, abs_dU);
 		const int dY_lowest = abs_dY / std::gcd(abs_dY, abs_dV);
-		const bool allow_round_U = int_dUdX || ((aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR));
-		const bool allow_round_V = int_dVdY || ((aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR));
+		const bool allow_round_U = int_dUdX || (aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR));
+		const bool allow_round_V = int_dVdY || (aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR));
 
+		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
 		{
 			u32 round_U; // Round flag for U.
 			u32 round_V; // Round flag for V.
-			int sX0; // Stepping origin X.
-			int sY0; // Stepping origin Y.
+			int sX0; // Stepping origin X (no error at these X).
+			int sY0; // Stepping origin Y (no error at these Y).
 
 			if constexpr (primclass == GS_TRIANGLE_CLASS)
 			{
@@ -4485,10 +4486,12 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				const bool negU = (dX < 0) != (dU < 0);
 				const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
 
+				// For triangles, both dX and dY must be powers of 2 for no error.
 				round_U = (negU || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 				round_V = (negV || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
-				// Hypothesis: triangles step along the left edge and left-to-right on scanlines.
+				// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
+				// so there is no error at the first vertex of the left edge.
 				sX0 = std::min(X0, X1);
 				sY0 = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
 			}
@@ -4497,16 +4500,16 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				round_U = ((dU < 0) || pow2_dX) ? ROUND_UV_UP : ROUND_UV_DOWN;
 				round_V = ((dV < 0) || pow2_dY) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
-				// Hypothesis: The GS step in the direction specified by vertices when
-				// rasterizing sprites.
+				// Hypothesis: The GS step in the direction specified by vertices when rasterizing
+				// sprites so there's no error at the X or Y of the first vertex.
 				sX0 = X0;
 				sY0 = Y0;
 			}
 
 			// Rounding settings (4 bits each for each U, V).
-			u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
+			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			u32 prim_topleft = ((sX0 >> 4) & 0xFFF) | (((sY0 >> 4) & 0xFFF) << 12); // 12 bits for each sX0, sY0.
+			const u32 prim_topleft = ((sX0 >> 4) & 0xFFF) | (((sY0 >> 4) & 0xFFF) << 12); // 12 bits for each sX0, sY0.
 			
 			// Save rounding info in unused Q bits.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
