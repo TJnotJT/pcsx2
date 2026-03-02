@@ -4464,39 +4464,47 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool int_dVdY = (abs_dV % abs_dY) == 0;
 		const int dX_lowest = abs_dX / std::gcd(abs_dX, abs_dU);
 		const int dY_lowest = abs_dY / std::gcd(abs_dY, abs_dV);
-		const bool allow_round_U = (aligned_XU || int_dUdX) && (dX_lowest < ROUND_UV_DENOMINATOR);
-		const bool allow_round_V = (aligned_YV || int_dVdY) && (dY_lowest < ROUND_UV_DENOMINATOR);
+		const bool allow_round_U = int_dUdX || ((aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR));
+		const bool allow_round_V = int_dVdY || ((aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR));
 
 		for (u32 j = 0; j < n; j++)
 		{
-			u32 round_U = 0;
-			u32 round_V = 0;
-			int sX0 = -1; // Stepping origin X.
-			int sY0 = -1; // Stepping origin Y.
+			u32 round_U; // Round flag for U.
+			u32 round_V; // Round flag for V.
+			int sX0; // Stepping origin X.
+			int sY0; // Stepping origin Y.
 
 			if constexpr (primclass == GS_TRIANGLE_CLASS)
 			{
-				const bool bottom_right_triangle = (v[j].XYZ.X == std::max(X0, X1)) &&
-												   (v[j].XYZ.Y == std::max(Y0, Y1));
-				const bool posU = (dX * dU > 0);
-				const bool posV = (dY * dV > 0) != bottom_right_triangle; // Bottom-right triangle flips direction of V.
+				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
+				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
+				const bool bottom_right_triangle = (v[j / 3].XYZ.X == std::max(X0, X1)) &&
+												   (v[j / 3].XYZ.Y == std::max(Y0, Y1));
 
-				round_U = (posU && !(pow2_dX && pow2_dY)) ? ROUND_UV_DOWN : ROUND_UV_UP;
-				round_V = (posV && !(pow2_dX && pow2_dY)) ? ROUND_UV_DOWN : ROUND_UV_UP;
+				// Determine whether stepping direction of U, V is negative.
+				const bool negU = (dX < 0) != (dU < 0);
+				const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
+
+				round_U = (negU || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = (negV || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+
+				// Hypothesis: triangles step along the left edge and left-to-right on scanlines.
 				sX0 = std::min(X0, X1);
-				sY0 = std::min(Y0, Y1);
+				sY0 = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
 			}
 			else
 			{
-				round_U = ((dU > 0) && !pow2_dX) ? ROUND_UV_DOWN : ROUND_UV_UP;
-				round_V = ((dV > 0) && !pow2_dY) ? ROUND_UV_DOWN : ROUND_UV_UP;
+				round_U = ((dU < 0) || pow2_dX) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = ((dV < 0) || pow2_dY) ? ROUND_UV_UP : ROUND_UV_DOWN;
+
+				// Hypothesis: The GS step in the direction specified by vertices when
+				// rasterizing sprites.
 				sX0 = X0;
 				sY0 = Y0;
 			}
 
-			// Rounding settings (4 bits each for U, V).
-			u32 round_settings = (allow_round_U ? round_U : 0) |
-			                     (allow_round_V ? round_V : 0) << 4;
+			// Rounding settings (4 bits each for each U, V).
+			u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
 			u32 prim_topleft = ((sX0 >> 4) & 0xFFF) | (((sY0 >> 4) & 0xFFF) << 12); // 12 bits for each sX0, sY0.
 			
