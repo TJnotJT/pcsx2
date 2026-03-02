@@ -4431,23 +4431,6 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			v1 = vtx[i + 1];
 		}
 
-		// Triangles are rounded differently based on whether the diagonal that the
-		// two triangles meet at is top-left to bottom-right or top-right to bottom-left.
-		const bool diag_tl_to_br = v0.XYZ.X > v1.XYZ.X;
-
-		// Make sure vertices are top-left and bottom-right.
-		if (v0.XYZ.X > v1.XYZ.X)
-		{
-			std::swap(v0.XYZ.X, v1.XYZ.X);
-			std::swap(v0.U, v1.U);
-		}
-
-		if (v0.XYZ.Y > v1.XYZ.Y)
-		{
-			std::swap(v0.XYZ.Y, v1.XYZ.Y);
-			std::swap(v0.V, v1.V);
-		}
-
 		const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
 		const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
 		const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
@@ -4461,46 +4444,71 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const int dY = Y1 - Y0;
 		const int dU = U1 - U0;
 		const int dV = V1 - V0;
-
-		const bool int_x0 = (X0 & 0xF) == 0;
-		const bool int_y0 = (Y0 & 0xF) == 0;
+		const int abs_dX = std::abs(dX);
+		const int abs_dY = std::abs(dY);
+		const int abs_dU = std::abs(dU);
+		const int abs_dV = std::abs(dV);
 
 		const auto IsPow2 = [](int i) { return (i & (i - 1)) == 0; };
 
-		// For triangles, the power-of-two condition applies to the whole prim only when both dX and dY are powers to two.
-		// For sprites, the power-of-two condition applies to each axis separately.
-		const bool pow2_dX = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dX);
-		const bool pow2_dY = primclass == GS_TRIANGLE_CLASS ? (IsPow2(dX) && IsPow2(dY)) : IsPow2(dY);
-
-		const bool round_down_U = (U1 > U0) && !pow2_dX;
-		const bool round_down_V = (V1 > V0) && !pow2_dY;
+		const bool pow2_dX = IsPow2(abs_dX);
+		const bool pow2_dY = IsPow2(abs_dY);
 
 		// Only allow adjustment if:
-		// - The coordinates are half-texel aligned.
-		// - The denominator of dU/dX or dV/dY in lowest terms are small enough.
+		// - The coordinates are half-texel aligned, or dU/dX or dV/dY is an integer.
+		// - The denominator of dU/dX or dV/dY in lowest terms is small enough.
 		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447 or U0 = 1/16).
 		const bool aligned_XU = ((X0 | X1 | U0 | U1) & 7) == 0;
 		const bool aligned_YV = ((Y0 | Y1 | V0 | V1) & 7) == 0;
-		const int dX_lowest = dX / std::gcd(dX, dU);
-		const int dY_lowest = dY / std::gcd(dY, dV);
-		const bool allow_round_U = aligned_XU && dX_lowest < ROUND_UV_DENOMINATOR;
-		const bool allow_round_V = aligned_YV && dY_lowest < ROUND_UV_DENOMINATOR;
+		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
+		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
+		const bool allow_round_U = dU != 0 && aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR);
+		const bool allow_round_V = dV != 0 && aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR);
 
+		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
 		{
-			bool round_down_V2 = round_down_V;
+			u32 round_U; // Round flag for U.
+			u32 round_V; // Round flag for V.
+			int sX; // Stepping origin X (no error at these X).
+			int sY; // Stepping origin Y (no error at these Y).
 
-			// For triangles, bottom-right triangles have V rounded up instead of down.
-			if (primclass == GS_TRIANGLE_CLASS && j >= 3)
+			if constexpr (primclass == GS_TRIANGLE_CLASS)
 			{
-				round_down_V2 = round_down_V2 && diag_tl_to_br;
+				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
+				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
+				const bool bottom_right_triangle = ((j < 3 ? X0 : X1) == std::max(X0, X1)) &&
+												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1));
+
+				// Determine whether stepping direction of U, V is negative.
+				const bool negU = (dX < 0) != (dU < 0);
+				const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
+
+				// For triangles, both dX and dY must be powers of 2 for no error.
+				round_U = (negU || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = (negV || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+
+				// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
+				// so there's no error at the first vertex of the left edge.
+				sX = std::min(X0, X1);
+				sY = bottom_right_triangle ? std::max(Y0, Y1) : std::min(Y0, Y1);
+			}
+			else
+			{
+				// For sprites, treat each axis independently.
+				round_U = ((dU < 0) || pow2_dX) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = ((dV < 0) || pow2_dY) ? ROUND_UV_UP : ROUND_UV_DOWN;
+
+				// Hypothesis: The GS step in the direction specified by vertices when rasterizing
+				// sprites so there's no error at the X or Y of the first vertex.
+				sX = X0;
+				sY = Y0;
 			}
 
-			// Rounding settings (4 bits each for U, V).
-			u32 round_settings = (allow_round_U ? (round_down_U ? ROUND_UV_DOWN : ROUND_UV_UP) : 0) |
-			                     (allow_round_V ? (round_down_V2 ? ROUND_UV_DOWN : ROUND_UV_UP) : 0) << 4;
+			// Rounding settings (4 bits each for each U, V).
+			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			u32 prim_topleft = ((X0 >> 4) & 0xFFF) | (((Y0 >> 4) & 0xFFF) << 12); // 12 bits for each X0, Y0.
+			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
 			
 			// Save rounding info in unused Q bits.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
