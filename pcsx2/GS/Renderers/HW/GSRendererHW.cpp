@@ -8120,7 +8120,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (GetVertexUVRoundingInfo())
 		{
 			GL_INS("HW: Doing shader UV rounding.");
-			m_conf.vs.round_uv = true;
 			m_conf.ps.round_uv = true;
 		}
 	}

@@ -13,7 +13,6 @@
 #define VS_IIP 0
 #define VS_TME 1
 #define VS_FST 1
-#define VS_ROUND_UV 0
 #endif
 
 #ifndef GS_IIP

@@ -1717,7 +1717,6 @@ void GSDevice11::SetupVS(VSSelector sel, const GSHWDrawConfig::VSConstantBuffer*
 		sm.AddMacro("VS_FST", sel.fst);
 		sm.AddMacro("VS_IIP", sel.iip);
 		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-		sm.AddMacro("VS_ROUND_UV", static_cast<int>(sel.round_uv));
 
 		static constexpr const D3D11_INPUT_ELEMENT_DESC layout[] =
 			{
