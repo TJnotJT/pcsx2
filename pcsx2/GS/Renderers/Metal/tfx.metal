@@ -124,7 +124,6 @@ struct MainVSOut
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
-	uint4 rounduv [[flat, function_constant(ROUND_UV)]];
 	float point_size [[point_size, function_constant(VS_POINT_SIZE)]];
 };
 
@@ -135,7 +134,6 @@ struct MainPSIn
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
-	uint4 rounduv [[flat, function_constant(ROUND_UV)]];
 };
 
 struct MainPSOut
@@ -146,17 +144,6 @@ struct MainPSOut
 };
 
 // MARK: - Vertex functions
-
-static uint4 extract_round_uv_bits(float q)
-{
-	uint qi = as_type<uint>(q);
-	return uint4(
-		(qi >> 0) & 0xFFF,  // Prim left
-		(qi >> 12) & 0xFFF, // Prim top
-		(qi >> 24) & 0xF,   // Round U flags
-		(qi >> 28) & 0xF    // Round V flags
-	);
-}
 
 static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, constant GSMTLMainVSUniform& cb)
 {
@@ -204,9 +191,6 @@ static MainVSOut vs_main_run(thread const MainVSIn& v, constant GSMTLMainVSUnifo
 
 	if (VS_POINT_SIZE)
 		out.point_size = cb.point_size.x;
-
-	if (ROUND_UV)
-		out.rounduv = extract_round_uv_bits(v.q);
 	
 	return out;
 }
@@ -476,10 +460,11 @@ struct PSMain
 		if (ROUND_UV)
 		{
 			// Whether we are at the top or left of the prim.
-			int2 topleft = int2(int2(in.p.xy) == int2(in.rounduv.xy));
+			int2 topleft = int2(int2(in.p.xy) == int2(in.t.xy));
 
 			// Extract flags for whether to round U, V.
-			int2 round_flags = int2(in.rounduv.zw);
+			int round_flags_i = int(in.t.w);
+			int2 round_flags = int2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
 
 			// Being on the top or left pixels converts round down to round up.
 			int2 round_down = int2(round_flags == ROUND_UV_DOWN_MTL) & ~topleft;
