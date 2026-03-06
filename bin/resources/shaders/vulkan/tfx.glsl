@@ -28,7 +28,35 @@ layout(location = 0) out VSOutput
 	#else
 		flat vec4 c;
 	#endif
+
+	#if VS_ROUND_UV != 0
+		flat uvec4 rounduv;
+		flat uvec4 uvrange;
+	#endif
 } vsOut;
+
+uvec4 extract_round_uv_bits(float q)
+{
+	uint qi = floatBitsToUint(q);
+	return uvec4(
+		(qi >> 0) & 0xFFF,
+		(qi >> 12) & 0xFFF,
+		(qi >> 24) & 0xF,
+		(qi >> 28) & 0xF
+	);
+}
+
+uvec4 extract_uv_range_bits(vec2 st)
+{
+	uint si = floatBitsToUint(st.x);
+	uint ti = floatBitsToUint(st.y);
+	return uvec4(
+		(si >> 0) & 0xFFFF,
+		(ti >> 0) & 0xFFFF,
+		(si >> 16) & 0xFFFF,
+		(ti >> 16) & 0xFFFF
+	);
+}
 
 #if VS_EXPAND == 0
 
@@ -82,6 +110,11 @@ void main()
 		gl_PointSize = PointSize.x;
 	#endif
 
+	#if VS_ROUND_UV
+		vsOut.rounduv = extract_round_uv_bits(a_q);
+		vsOut.uvrange = extract_uv_range_bits(a_st);
+	#endif
+
 	vsOut.c = vec4(a_c);
 	vsOut.t.z = a_f.r;
 }
@@ -109,6 +142,10 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+#if VS_ROUND_UV
+	uvec4 rounduv;
+	uvec4 uvrange;
+#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -148,6 +185,11 @@ ProcessedVertex load_vertex(uint index)
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
+	#endif
+
+	#if VS_ROUND_UV
+		vtx.rounduv = extract_round_uv_bits(a_q);
+		vtx.uvrange = extract_uv_range_bits(a_st);
 	#endif
 
 	vtx.c = a_c;
@@ -217,6 +259,10 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
+#if VS_ROUND_UV
+	vsOut.rounduv = vtx.rounduv;
+	vsOut.uvrange = vtx.uvrange;
+#endif
 }
 
 #endif // VS_EXPAND
@@ -323,6 +369,7 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	mat4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	float ScaleRT;
 };
 
 layout(location = 0) in VSOutput
@@ -333,6 +380,10 @@ layout(location = 0) in VSOutput
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+	#if PS_ROUND_UV
+		flat uvec4 rounduv;
+		flat uvec4 uvrange;
 	#endif
 } vsIn;
 
@@ -508,11 +559,10 @@ vec4 round_uv()
 {
 #if PS_ROUND_UV
 	// Whether we are at the top or left of the prim.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.t.xy)));
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), int(ScaleRT) * ivec2(vsIn.rounduv.xy)));
 
 	// Extract flags for whether to round U, V.
-	int round_flags_i = int(vsIn.t.w);
-	ivec2 round_flags = ivec2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
@@ -520,7 +570,8 @@ vec4 round_uv()
 	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
-	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
+	uv = clamp(uv, vec2(vsIn.uvrange.xy), vec2(vsIn.uvrange.zw));
+	vec2 uvi = round(uv / 8.0f) * 8.0f; // Nearest half texel.
 	
 	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 

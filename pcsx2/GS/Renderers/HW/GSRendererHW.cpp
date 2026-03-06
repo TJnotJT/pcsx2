@@ -8121,13 +8121,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		{
 			GL_INS("HW: Doing shader UV rounding.");
 			m_conf.ps.round_uv = true;
-
-			const float upscale = rt ? rt->GetScale() : (ds ? ds->GetScale() : 1.0f);
-			for (u32 i = 0; i < m_index.tail; i++)
-			{
-				m_vertex.buff[m_index.buff[i]].ST.S *= upscale;
-				m_vertex.buff[m_index.buff[i]].ST.T *= upscale;
-			}
+			m_conf.vs.round_uv = true;
 		}
 	}
 

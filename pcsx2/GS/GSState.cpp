@@ -4464,6 +4464,38 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
 		const bool allow_round_U = dU != 0 && aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR);
 		const bool allow_round_V = dV != 0 && aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR);
+		
+		const bool int_scale_XU = (abs_dU % abs_dX) == 0;
+		const bool int_scale_YV = (abs_dV % abs_dY) == 0;
+		int scale_UX = dU / dX;
+		int scale_VY = dV / dY;
+		int min_X = std::min(X0, X1);
+		int max_X = std::max(X0, X1);
+		int min_Y = std::min(Y0, Y1);
+		int max_Y = std::max(Y0, Y1);
+		int min_U = (X0 == min_X) ? U0 : U1;
+		int max_U = (X0 == min_X) ? U1 : U0;
+		int min_V = (Y0 == min_Y) ? V0 : V1;
+		int max_V = (Y0 == min_Y) ? V1 : V0;
+
+		int frac_X = max_X - ((max_X - 1) & ~0xF);
+		int frac_Y = max_Y - ((max_Y - 1) & ~0xF);
+		if (int_scale_XU)
+		{
+			max_U -= frac_X * scale_UX;
+		}
+		if (int_scale_YV)
+		{
+			max_V -= frac_Y * scale_VY;
+		}
+		if (max_U < min_U)
+		{
+			std::swap(max_U, min_U);
+		}
+		if (max_V < min_V)
+		{
+			std::swap(max_V, min_V);
+		}
 
 		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
@@ -4508,20 +4540,12 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			// Rounding settings (4 bits each for each U, V).
 			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			if (GSIsHardwareRenderer())
-			{
-				// Save the rounding info in unused S, T, Q attributes.
-				vtx[i + j].RGBAQ.Q = static_cast<float>(round_settings);
-				vtx[i + j].ST.S = static_cast<float>(sX >> 4);
-				vtx[i + j].ST.T = static_cast<float>(sY >> 4);
-			}
-			else
-			{
-				// SW scanline renderer doesn't have as many free bits so pack everything into Q.
-				const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
+			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
 
-				vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
-			}
+			vtx[i + j].ST.U32[0] = ((min_U & 0xFFFF) << 0) | ((max_U & 0xFFFF) << 16);
+			vtx[i + j].ST.U32[1] = ((min_V & 0xFFFF) << 0) | ((max_V & 0xFFFF) << 16);
+
+			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
 		}
 	}
 
