@@ -4544,17 +4544,27 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			// Rounding settings (4 bits each for each U, V).
 			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
 			
-			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12);
-
 			if constexpr (!fst)
 			{
-				// For ST pre-divide by Q and save as UV.
-				vtx[i + j].U = GetU(vtx[i + j]);
-				vtx[i + j].V = GetV(vtx[i + j]);
+				// For ST, pre-divide by Q and save as UV. Sign bit will have to be extended later.
+				vtx[i + j].U = static_cast<u16>(GetU(vtx[i + j]) & 0xFFFF);
+				vtx[i + j].V = static_cast<u16>(GetV(vtx[i + j]) & 0xFFFF);
 			}
 
-			// Save rounding info in unused Q bits.
-			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
+			if (GSIsHardwareRenderer())
+			{
+				// Save rounding info in unused S, T, Q.
+				vtx[i + j].ST.S = static_cast<float>(sX >> 4);
+				vtx[i + j].ST.T = static_cast<float>(sY >> 4);
+				vtx[i + j].RGBAQ.Q = static_cast<float>(round_settings);
+			}
+			else
+			{
+				// SW scanline renderer doesn't have as many free bits so pack everything into Q.
+				const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
+
+				vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
+			}
 		}
 	}
 

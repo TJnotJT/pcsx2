@@ -30,6 +30,11 @@ layout(location = 0) out VSOutput
 	#endif
 } vsOut;
 
+vec2 extend_16_bit_sign(vec2 uv)
+{
+	return mix(uv, uv - vec2(0x10000), greaterThan(uv, vec2(0x7FFF)));
+}
+
 #if VS_EXPAND == 0
 
 layout(location = 0) in vec2 a_st;
@@ -56,8 +61,13 @@ void main()
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset;
-		vec2 st = a_st - TextureOffset;
+		#if VS_ROUND_UV == 0
+			vec2 uv = a_uv - TextureOffset;
+			vec2 st = a_st - TextureOffset;
+		#else
+			vec2 uv = extend_16_bit_sign(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			vec2 st = a_st; // ST bits contain prim top-left so don't offset.
+		#endif
 
 		// Integer nomalized
 		vsOut.ti.xy = uv * TextureScale;
@@ -520,13 +530,16 @@ vec4 round_uv()
 	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
-	vec2 uvi = round(vsIn.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
+	vec2 uvi = round(uv / 8.0f) * 8.0f; // Nearest half texel.
 	
-	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 
 	// Round only if close to a half texel.
 	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_down));
 	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_up));
+
+	// Round down to nearest 1/16 texel.
+	uv = floor(uv);
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
