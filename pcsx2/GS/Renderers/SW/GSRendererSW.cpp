@@ -244,6 +244,9 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 
 				if (round_uv)
 				{
+					// Extend the sign bit in case ST was converted to UV.
+					t = t.blend32(t - GSVector4(4096.0f, 4096.0f, 0.0f, 0.0f), t > GSVector4(2047.9375f));
+
 					// Get rounding data saved in Q.
 					t = t.insert32<3, 2>(stcq);
 				}
@@ -456,6 +459,7 @@ void GSRendererSW::Draw()
 	}
 
 	const u32 round_uv = static_cast<u32>(GetVertexUVRoundingInfo());
+	const u32 fst = PRIM->FST & ~round_uv; // UV rounding pre-divides ST by Q and saves as UVs.
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
@@ -473,7 +477,7 @@ void GSRendererSW::Draw()
 	// If you have both GS_SPRITE_CLASS && m_vt.m_eq.q, it will depends on the first part of the 'OR'
 	u32 q_div = !IsMipMapActive() && ((m_vt.m_eq.q && m_vt.m_min.t.z != 1.0f) || (!m_vt.m_eq.q && m_vt.m_primclass == GS_SPRITE_CLASS));
 
-	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][PRIM->FST][q_div][round_uv](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
+	GSVertexSW::s_cvb[m_vt.m_primclass][PRIM->TME][fst][q_div][round_uv](m_context, sd->vertex, m_vertex.buff, m_vertex.next);
 
 	std::memcpy(sd->index, m_index.buff, sizeof(u16) * m_index.tail);
 
@@ -486,12 +490,10 @@ void GSRendererSW::Draw()
 	sd->bbox = bbox;
 	sd->frame = g_perfmon.GetFrame();
 
-	if (!GetScanlineGlobalData(sd))
+	if (!GetScanlineGlobalData(sd, round_uv))
 	{
 		return;
 	}
-	
-	sd->global.sel.rounduv = !!round_uv;
 
 	if constexpr (LOG && false)
 	{
@@ -1039,7 +1041,7 @@ bool GSRendererSW::CheckSourcePages(SharedData* sd)
 	return false;
 }
 
-bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
+bool GSRendererSW::GetScanlineGlobalData(SharedData* data, bool round_uv)
 {
 	GSScanlineGlobalData& gd = data->global;
 
@@ -1143,8 +1145,9 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data)
 		{
 			gd.sel.tfx = context->TEX0.TFX;
 			gd.sel.tcc = context->TEX0.TCC;
-			gd.sel.fst = PRIM->FST;
+			gd.sel.fst = PRIM->FST & !round_uv;
 			gd.sel.ltf = m_vt.IsLinear();
+			gd.sel.rounduv = round_uv;
 
 			if (GSLocalMemory::m_psm[context->TEX0.PSM].pal > 0)
 			{

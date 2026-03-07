@@ -1280,7 +1280,7 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 		pshufhw(xym4, xym4, _MM_SHUFFLE(2, 2, 0, 0));
 		psrlw(xym4, 12);
 
-		if (m_sel.prim != GS_SPRITE_CLASS)
+		if (m_sel.prim != GS_SPRITE_CLASS || m_sel.rounduv)
 		{
 			// GSVector4i vf = v.xxzzlh().srl16(12);
 
