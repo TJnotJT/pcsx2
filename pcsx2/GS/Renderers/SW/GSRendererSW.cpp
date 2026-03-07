@@ -245,7 +245,9 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 				if (round_uv)
 				{
 					// Extend the sign bit in case ST was converted to UV.
-					t = t.blend32(t - GSVector4(4096.0f, 4096.0f, 0.0f, 0.0f), t > GSVector4(2047.9375f));
+					constexpr GSVector4 max_uv = GSVector4::cxpr(static_cast<float>(0x7FFF << (16 - 4)));
+					constexpr GSVector4 bias = GSVector4::cxpr(static_cast<float>(0x10000 << (16 - 4)));
+					t = t.blend32(t - bias, t > max_uv);
 
 					// Get rounding data saved in Q.
 					t = t.insert32<3, 2>(stcq);
@@ -459,7 +461,7 @@ void GSRendererSW::Draw()
 	}
 
 	const u32 round_uv = static_cast<u32>(GetVertexUVRoundingInfo());
-	const u32 fst = PRIM->FST & ~round_uv; // UV rounding pre-divides ST by Q and saves as UVs.
+	const u32 fst = PRIM->FST | round_uv; // UV rounding pre-divides ST by Q and saves as UVs.
 	
 	auto data = m_vertex_heap.make_shared<SharedData>().cast<GSRasterizerData>();
 	SharedData* sd = static_cast<SharedData*>(data.get());
@@ -1145,7 +1147,7 @@ bool GSRendererSW::GetScanlineGlobalData(SharedData* data, bool round_uv)
 		{
 			gd.sel.tfx = context->TEX0.TFX;
 			gd.sel.tcc = context->TEX0.TCC;
-			gd.sel.fst = PRIM->FST & !round_uv;
+			gd.sel.fst = PRIM->FST | round_uv;
 			gd.sel.ltf = m_vt.IsLinear();
 			gd.sel.rounduv = round_uv;
 
