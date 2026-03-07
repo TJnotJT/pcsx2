@@ -31,7 +31,7 @@ layout(location = 0) out VSOutput
 
 	#if VS_ROUND_UV != 0
 		flat uvec4 rounduv;
-		flat uvec4 uvrange;
+		flat ivec4 uvrange;
 	#endif
 } vsOut;
 
@@ -46,16 +46,20 @@ uvec4 extract_round_uv_bits(float q)
 	);
 }
 
-uvec4 extract_uv_range_bits(vec2 st)
+ivec4 extract_uv_range_bits(vec2 st)
 {
 	uint si = floatBitsToUint(st.x);
 	uint ti = floatBitsToUint(st.y);
-	return uvec4(
+	ivec4 uv_range = ivec4(
 		(si >> 0) & 0xFFFF,
 		(ti >> 0) & 0xFFFF,
 		(si >> 16) & 0xFFFF,
 		(ti >> 16) & 0xFFFF
 	);
+	
+	uv_range = mix(uv_range, uv_range - ivec4(0x10000), greaterThanEqual(uv_range, ivec4(0x8000)));
+
+	return uv_range;
 }
 
 #if VS_EXPAND == 0
@@ -98,6 +102,8 @@ void main()
 			vsOut.ti.zw = st / TextureScale;
 		#endif
 
+		vsOut.ti = mix(vsOut.ti, vsOut.ti - ivec4(0x10000), greaterThanEqual(vsOut.ti, ivec4(0x8000)));
+
 		// Float coords
 		vsOut.t.xy = st;
 		vsOut.t.w = a_q;
@@ -112,7 +118,11 @@ void main()
 
 	#if VS_ROUND_UV
 		vsOut.rounduv = extract_round_uv_bits(a_q);
-		vsOut.uvrange = extract_uv_range_bits(a_st);
+		#if VS_FST
+			vsOut.uvrange = extract_uv_range_bits(a_st);
+		#else
+			vsOut.uvrange = extract_uv_range_bits(a_uv);
+		#endif
 	#endif
 
 	vsOut.c = vec4(a_c);
@@ -144,7 +154,7 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_ROUND_UV
 	uvec4 rounduv;
-	uvec4 uvrange;
+	ivec4 uvrange;
 #endif
 };
 
@@ -180,6 +190,8 @@ ProcessedVertex load_vertex(uint index)
 			vtx.ti.zw = st / TextureScale;
 		#endif
 
+		vtx.ti = mix(vtx.ti, vtx.ti - ivec4(0x10000), greaterThanEqual(vtx.ti, ivec4(0x8000)));
+
 		vtx.t.xy = st;
 		vtx.t.w = a_q;
 	#else
@@ -189,7 +201,11 @@ ProcessedVertex load_vertex(uint index)
 
 	#if VS_ROUND_UV
 		vtx.rounduv = extract_round_uv_bits(a_q);
-		vtx.uvrange = extract_uv_range_bits(a_st);
+		#if VS_FST
+			vtx.uvrange = extract_uv_range_bits(a_st);
+		#else
+			vtx.uvrange = extract_uv_range_bits(a_uv);
+		#endif
 	#endif
 
 	vtx.c = a_c;
@@ -383,7 +399,7 @@ layout(location = 0) in VSOutput
 	#endif
 	#if PS_ROUND_UV
 		flat uvec4 rounduv;
-		flat uvec4 uvrange;
+		flat ivec4 uvrange;
 	#endif
 } vsIn;
 
@@ -1002,13 +1018,13 @@ vec4 fog(vec4 c, float f)
 
 vec4 ps_color()
 {
-#if PS_FST == 0
-	vec2 st = vsIn.t.xy / vsIn.t.w;
-	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
-#elif PS_ROUND_UV != 0
+#if PS_ROUND_UV != 0
 	vec4 ti_rounded = round_uv();
 	vec2 st = ti_rounded.xy;
 	vec2 st_int = ti_rounded.zw;
+#elif PS_FST == 0
+	vec2 st = vsIn.t.xy / vsIn.t.w;
+	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
 #else
 	vec2 st = vsIn.ti.xy;
 	vec2 st_int = vsIn.ti.zw;

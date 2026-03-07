@@ -4347,7 +4347,7 @@ bool GSState::SpriteDrawWithoutGaps()
 // Emulate UV rounding error when UVs fall exactly on texel boundaries (i.e. UVs being rounded down instead of up,
 // likely due to internal precision of GS). This is only implemented for sprites and axis-aligned triangles forming quads.
 // Return true if we determined that accurate rounding can be done.
-template<u32 primclass>
+template<u32 primclass, u32 fst>
 bool GSState::GetVertexUVRoundingInfoImpl()
 {
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
@@ -4368,14 +4368,15 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
 
-	// Only applies to UVs and point-sampled draws.
-	if (!(GSConfig.AccurateUVRounding && PRIM->TME && PRIM->FST && !m_vt.IsRealLinear()))
+	if (!(GSConfig.AccurateUVRounding && PRIM->TME))
 		return false;
 
 	// How many vertices for each quad.
 	constexpr u32 n = primclass == GS_TRIANGLE_CLASS ? 6 : 2;
 
 	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
+	const int tw = 1 << m_context->TEX0.TW;
+	const int th = 1 << m_context->TEX0.TH;
 
 	// Corners of right-angle corners for triangles forming quads.
 	std::vector<u32> tri_quad_corners;
@@ -4397,8 +4398,20 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			TriangleOrdering tri0, tri1;
 
 			// Check if vertex XYs and UVs form an axis-aligned quad.
-			if (!AreTrianglesQuad<1, 1>(vtx, idx0, idx1, &tri0, &tri1))
+			if (!AreTrianglesQuad<1, fst>(vtx, idx0, idx1, &tri0, &tri1))
 				return false;
+
+			if constexpr (fst == 0)
+			{
+				if (!(vtx[index[i + 0]].RGBAQ.Q == vtx[index[i + 1]].RGBAQ.Q &&
+					vtx[index[i + 0]].RGBAQ.Q == vtx[index[i + 2]].RGBAQ.Q &&
+					vtx[index[i + 0]].RGBAQ.Q == vtx[index[i + 3]].RGBAQ.Q &&
+					vtx[index[i + 0]].RGBAQ.Q == vtx[index[i + 4]].RGBAQ.Q &&
+					vtx[index[i + 0]].RGBAQ.Q == vtx[index[i + 5]].RGBAQ.Q))
+				{
+					return false;
+				}
+			}
 
 			// Save the right angle corners.
 			tri_quad_corners.push_back(i + 0 + tri0.b);
@@ -4431,14 +4444,28 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			v1 = vtx[i + 1];
 		}
 
+		const auto GetU = [&](const GSVertex& v) {
+			if constexpr (fst)
+				return v.U;
+			else
+				return static_cast<int>(16.0f * (v.ST.S / v.RGBAQ.Q) * tw);
+		};
+		
+		const auto GetV = [&](const GSVertex& v) {
+			if constexpr (fst)
+				return v.V;
+			else
+				return static_cast<int>(16.0f * (v.ST.T / v.RGBAQ.Q) * th);
+		};
+
 		const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
 		const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
 		const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
 		const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
-		const int U0 = static_cast<int>(v0.U);
-		const int V0 = static_cast<int>(v0.V);
-		const int U1 = static_cast<int>(v1.U);
-		const int V1 = static_cast<int>(v1.V);
+		const int U0 = GetU(v0);
+		const int V0 = GetV(v0);
+		const int U1 = GetU(v1);
+		const int V1 = GetV(v1);
 
 		const int dX = X1 - X0;
 		const int dY = Y1 - Y0;
@@ -4465,10 +4492,11 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool allow_round_U = dU != 0 && aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR);
 		const bool allow_round_V = dV != 0 && aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR);
 		
+		// TODO: Clean this up and fix variable names for consistency.
 		const bool int_scale_XU = (abs_dU % abs_dX) == 0;
 		const bool int_scale_YV = (abs_dV % abs_dY) == 0;
-		int scale_UX = dU / dX;
-		int scale_VY = dV / dY;
+		float scale_UX = static_cast<float>(dU) / static_cast<float>(dX);
+		float scale_VY = static_cast<float>(dV) / static_cast<float>(dY);
 		int min_X = std::min(X0, X1);
 		int max_X = std::max(X0, X1);
 		int min_Y = std::min(Y0, Y1);
@@ -4478,16 +4506,16 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		int min_V = (Y0 == min_Y) ? V0 : V1;
 		int max_V = (Y0 == min_Y) ? V1 : V0;
 
-		int frac_X = max_X - ((max_X - 1) & ~0xF);
-		int frac_Y = max_Y - ((max_Y - 1) & ~0xF);
-		if (int_scale_XU)
-		{
-			max_U -= frac_X * scale_UX;
-		}
-		if (int_scale_YV)
-		{
-			max_V -= frac_Y * scale_VY;
-		}
+		const int frac_Xmin = ((min_X + 0xF) & ~0xF) - min_X;
+		const int frac_Ymin = ((min_Y + 0xF) & ~0xF) - min_Y;
+		const int frac_Xmax = max_X - ((max_X - 1) & ~0xF);
+		const int frac_Ymax = max_Y - ((max_Y - 1) & ~0xF);
+
+		min_U += static_cast<int>(std::trunc(frac_Xmin * scale_UX));
+		min_V += static_cast<int>(std::trunc(frac_Ymin * scale_VY));
+		max_U -= static_cast<int>(std::trunc(frac_Xmax * scale_UX));
+		max_V -= static_cast<int>(std::trunc(frac_Ymax * scale_VY));
+
 		if (max_U < min_U)
 		{
 			std::swap(max_U, min_U);
@@ -4542,6 +4570,12 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			
 			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12); // 12 bits for each X, Y.
 
+			if constexpr (fst == 0)
+			{
+				vtx[i + j].U = GetU(vtx[i + j]);
+				vtx[i + j].V = GetV(vtx[i + j]);
+			}
+
 			vtx[i + j].ST.U32[0] = ((min_U & 0xFFFF) << 0) | ((max_U & 0xFFFF) << 16);
 			vtx[i + j].ST.U32[1] = ((min_V & 0xFFFF) << 0) | ((max_V & 0xFFFF) << 16);
 
@@ -4557,9 +4591,15 @@ bool GSState::GetVertexUVRoundingInfo()
 	switch (m_vt.m_primclass)
 	{
 		case GS_TRIANGLE_CLASS:
-			return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS>();
+			if (PRIM->FST)
+				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, 1>();
+			else
+				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, 0>();
 		case GS_SPRITE_CLASS:
-			return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS>();
+			if (PRIM->FST)
+				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, 1>();
+			else
+				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, 0>();
 		default:
 			return false;
 	}
