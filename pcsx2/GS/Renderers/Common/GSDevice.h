@@ -315,8 +315,8 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 2;
 				u8 round_uv : 1;
+				VSExpand expand : 2;
 				u8 _free : 1;
 			};
 			u8 key;
