@@ -1349,7 +1349,8 @@ std::string GSDeviceOGL::GetVSSource(VSSelector sel)
 	std::string macro = fmt::format("#define VS_FST {}\n", static_cast<u32>(sel.fst))
 		+ fmt::format("#define VS_IIP {}\n", static_cast<u32>(sel.iip))
 		+ fmt::format("#define VS_POINT_SIZE {}\n", static_cast<u32>(sel.point_size))
-	  + fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand));
+		+ fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand))
+		+ fmt::format("#define VS_ROUND_UV {}\n", static_cast<int>(sel.round_uv));
 
 	std::string src = GenGlslHeader("vs_main", GL_VERTEX_SHADER, macro);
 	src += m_shader_tfx_vgs;

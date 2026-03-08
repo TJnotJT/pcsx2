@@ -28,11 +28,26 @@ layout(location = 0) out VSOutput
 	#else
 		flat vec4 c;
 	#endif
+
+	#if VS_ROUND_UV != 0
+		flat uvec4 rounduv;
+	#endif
 } vsOut;
 
-vec2 extend_16_bit_sign(vec2 uv)
+vec2 sign_extend_16_bit(vec2 uv)
 {
 	return mix(uv, uv - vec2(0x10000), greaterThan(uv, vec2(0x7FFF)));
+}
+
+uvec4 extract_round_uv_bits(float q)
+{
+	uint qi = floatBitsToUint(q);
+	return uvec4(
+		(qi >> 0) & 0xFFF,
+		(qi >> 12) & 0xFFF,
+		(qi >> 24) & 0xF,
+		(qi >> 28) & 0xF
+	);
 }
 
 #if VS_EXPAND == 0
@@ -63,11 +78,11 @@ void main()
 	#if VS_TME
 		#if VS_ROUND_UV == 0
 			vec2 uv = a_uv - TextureOffset;
-			vec2 st = a_st - TextureOffset;
 		#else
-			vec2 uv = extend_16_bit_sign(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
-			vec2 st = a_st; // ST bits contain prim top-left so don't offset.
+			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
 		#endif
+		
+		vec2 st = a_st - TextureOffset;
 
 		// Integer nomalized
 		vsOut.ti.xy = uv * TextureScale;
@@ -83,9 +98,17 @@ void main()
 		// Float coords
 		vsOut.t.xy = st;
 		vsOut.t.w = a_q;
+
+		// Get UV rounding info saved in Q.
+		#if VS_ROUND_UV
+			vsOut.rounduv = extract_round_uv_bits(a_q);
+		#endif
 	#else
 		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vsOut.ti = vec4(0.0f);
+		#if VS_ROUND_UV
+			vsOut.rounduv = uvec4(0);
+		#endif
 	#endif
 
 	#if VS_POINT_SIZE
@@ -119,6 +142,9 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+#if VS_ROUND_UV
+	uvec4 rounduv;
+#endif
 };
 
 ProcessedVertex load_vertex(uint index)
@@ -143,7 +169,11 @@ ProcessedVertex load_vertex(uint index)
 	vtx.p.y = -vtx.p.y;
 
 	#if VS_TME
-		vec2 uv = a_uv - TextureOffset;
+		#if VS_ROUND_UV == 0
+			vec2 uv = a_uv - TextureOffset;
+		#else
+			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+		#endif
 		vec2 st = a_st - TextureOffset;
 		vtx.ti.xy = uv * TextureScale;
 
@@ -155,9 +185,17 @@ ProcessedVertex load_vertex(uint index)
 
 		vtx.t.xy = st;
 		vtx.t.w = a_q;
+	
+		// Get UV rounding info saved in Q.
+		#if VS_ROUND_UV
+			vtx.rounduv = extract_round_uv_bits(a_q);
+		#endif
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
+		#if VS_ROUND_UV
+			vtx.rounduv = uvec4(0);
+		#endif
 	#endif
 
 	vtx.c = a_c;
@@ -227,6 +265,9 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
+#if VS_ROUND_UV
+	vsOut.rounduv = vtx.rounduv;
+#endif
 }
 
 #endif // VS_EXPAND
@@ -343,6 +384,9 @@ layout(location = 0) in VSOutput
 		vec4 c;
 	#else
 		flat vec4 c;
+	#endif
+	#if PS_ROUND_UV != 0
+		flat uvec4 rounduv;
 	#endif
 } vsIn;
 
@@ -516,13 +560,12 @@ vec4 clamp_wrap_uv(vec4 uv)
 
 vec4 round_uv()
 {
-#if PS_ROUND_UV
-	// Whether we are at the top or left of the prim.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.t.xy)));
+#if PS_ROUND_UV != 0
+	// Check if we're at the prim top or left.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.rounduv.xy)));
 
 	// Extract flags for whether to round U, V.
-	int round_flags_i = int(vsIn.t.w);
-	ivec2 round_flags = ivec2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
@@ -532,14 +575,18 @@ vec4 round_uv()
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 	vec2 uvi = round(uv / 8.0f) * 8.0f; // Nearest half texel.
 	
-	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
-
 	// Round only if close to a half texel.
-	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_down));
-	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_up));
+	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+	round_down &= close;
+	round_up &= close;
 
-	// Round down to nearest 1/16 texel.
-	uv = floor(uv);
+	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+
+	#if PS_ROUND_UV == 2
+		// Round down to nearest 1/16 texel for bilinear.
+		uv = mix(uv, floor(uv), bvec2(round_down | round_up));
+	#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
