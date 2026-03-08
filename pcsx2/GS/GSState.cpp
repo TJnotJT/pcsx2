@@ -4514,7 +4514,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
 				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
 				const bool bottom_right_triangle = ((j < 3 ? X0 : X1) == std::max(X0, X1)) &&
-												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1));
+												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1)) &&
+				                                   !GSIsHardwareRenderer();
 
 				// Determine whether stepping direction of U, V is negative.
 				const bool negU = (dX < 0) != (dU < 0);

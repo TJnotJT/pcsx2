@@ -594,6 +594,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 texture_offset;
 		GSVector2 point_size;
 		GSVector2i max_depth;
+		GSVector2i xy_offset;
 		__fi VSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));

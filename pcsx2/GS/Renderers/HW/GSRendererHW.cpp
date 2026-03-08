@@ -8115,7 +8115,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
-	if (GetUpscaleMultiplier() == 1.0f && m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
+	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle && tex && tex->GetScale() == 1.0f)
 	{
 		if (GetVertexUVRoundingInfo())
 		{
@@ -8124,6 +8124,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			m_conf.vs.round_uv = true;
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
+			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
 		}
 	}
 
