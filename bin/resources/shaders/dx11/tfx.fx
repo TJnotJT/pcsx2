@@ -358,7 +358,7 @@ float4 round_uv(PS_INPUT input)
 
 	#if PS_ROUND_UV == 2
 		// Round down to nearest 1/16 texel for bilinear.
-		uv = bool2(round_down | round_up) ? floor(uv) : uv;
+		uv = bool2(round_down) ? floor(uv) : uv;
 	#endif
 
 	return float4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
