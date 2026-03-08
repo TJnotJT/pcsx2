@@ -14,7 +14,7 @@ constant uint SHUFFLE_READWRITE = 3;
 constant bool HAS_FBFETCH           [[function_constant(GSMTLConstantIndex_FRAMEBUFFER_FETCH)]];
 constant bool FST                   [[function_constant(GSMTLConstantIndex_FST)]];
 constant bool IIP                   [[function_constant(GSMTLConstantIndex_IIP)]];
-constant uint ROUND_UV              [[function_constant(GSMTLConstantIndex_ROUND_UV)]];
+constant bool ROUND_UV              [[function_constant(GSMTLConstantIndex_ROUND_UV)]];
 constant bool VS_POINT_SIZE         [[function_constant(GSMTLConstantIndex_VS_POINT_SIZE)]];
 constant uint VS_EXPAND_TYPE_RAW    [[function_constant(GSMTLConstantIndex_VS_EXPAND_TYPE)]];
 constant uint PS_AEM_FMT            [[function_constant(GSMTLConstantIndex_PS_AEM_FMT)]];
@@ -124,7 +124,7 @@ struct MainVSOut
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
-	uint4 rounduv [[flat, function_constant(ROUND_UV != 0)]];
+	uint4 rounduv [[flat, function_constant(ROUND_UV)]];
 	float point_size [[point_size, function_constant(VS_POINT_SIZE)]];
 };
 
@@ -135,7 +135,7 @@ struct MainPSIn
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
-	uint4 rounduv [[flat, function_constant(ROUND_UV != 0)]];
+	uint4 rounduv [[flat, function_constant(ROUND_UV)]];
 };
 
 struct MainPSOut
@@ -149,7 +149,7 @@ struct MainPSOut
 
 static float2 sign_extend_16_bit(float2 uv)
 {
-	return uv > float2(0x7FFF) ? uv - float2(0x10000) : uv;
+	return select(uv, uv - float(0x10000), uv > float(0x7FFF));
 }
 
 static uint4 extract_round_uv_bits(float q)
@@ -172,7 +172,7 @@ static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, const
 	}
 	else
 	{
-		uv = sign_extend_16_bit(v.uv) - cb.texture_offset; // Extend sign bit in case ST was converted to UV.
+		uv = sign_extend_16_bit(float2(v.uv)) - cb.texture_offset; // Extend sign bit in case ST was converted to UV.
 	}
 	float2 st = v.st - cb.texture_offset;
 
@@ -512,12 +512,6 @@ struct PSMain
 
 			uv = select(uv, uvi - ROUND_UV_THRESHOLD_MTL, bool2(round_down));
 			uv = select(uv, uvi + ROUND_UV_THRESHOLD_MTL, bool2(round_up));
-
-			if (ROUND_UV == 2)
-			{
-				// Round down to nearest 1/16 texel for bilinear.
-				uv = select(uv, floor(uv), bool2(round_down));
-			}
 
 			return float4(uv / 16.0f / cb.wh.xy, uv); // Return normalized and unnormalized coords.
 		}

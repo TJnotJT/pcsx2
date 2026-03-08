@@ -281,11 +281,6 @@ vec4 round_uv()
 	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
 
-	#if PS_ROUND_UV == 2
-		// Round down to nearest 1/16 texel for bilinear.
-		uv = mix(uv, floor(uv), bvec2(round_down));
-	#endif
-
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
 	return vec4(0.0f);
