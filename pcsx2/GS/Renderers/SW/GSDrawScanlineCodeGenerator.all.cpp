@@ -1280,7 +1280,7 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 		pshufhw(xym4, xym4, _MM_SHUFFLE(2, 2, 0, 0));
 		psrlw(xym4, 12);
 
-		if (m_sel.prim != GS_SPRITE_CLASS)
+		if (m_sel.prim != GS_SPRITE_CLASS || m_sel.rounduv)
 		{
 			// GSVector4i vf = v.xxzzlh().srl16(12);
 
@@ -1657,11 +1657,6 @@ void GSDrawScanlineCodeGenerator::SampleTextureLOD()
 	{
 		movdqa(xym2, _s);
 		movdqa(xym3, _t);
-	}
-
-	if (m_sel.rounduv)
-	{
-		RoundUV(xym2, xym3, xym0, xym1, xym4, xym5, xym6, xym7);
 	}
 
 	// xym2 = u

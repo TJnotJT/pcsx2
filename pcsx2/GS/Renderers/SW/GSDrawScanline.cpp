@@ -802,11 +802,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 						v = VectorI::cast(t);
 					}
 
-					if (sel.rounduv)
-					{
-						RoundUV(u, v, local);
-					}
-
 					if (!sel.lcm)
 					{
 						VectorF tmp = q.log2(3) * global.l + global.k; // (-log2(Q) * (1 << L) + K) * 0x10000
@@ -1162,7 +1157,7 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 					{
 						uf = u.xxzzlh().srl16<12>();
 
-						if (sel.prim != GS_SPRITE_CLASS)
+						if (sel.prim != GS_SPRITE_CLASS || sel.rounduv)
 						{
 							vf = v.xxzzlh().srl16<12>();
 						}

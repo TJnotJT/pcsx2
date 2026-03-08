@@ -487,7 +487,7 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
-	template<u32 primclass>
+	template<u32 primclass, bool fst>
 	bool GetVertexUVRoundingInfoImpl();
 	bool GetVertexUVRoundingInfo();
 };

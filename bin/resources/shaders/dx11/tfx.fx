@@ -13,6 +13,7 @@
 #define VS_IIP 0
 #define VS_TME 1
 #define VS_FST 1
+#define VS_ROUND_UV 0
 #endif
 
 #ifndef GS_IIP
@@ -109,6 +110,10 @@ struct VS_OUTPUT
 #else
 	nointerpolation float4 c : COLOR0;
 #endif
+
+#if VS_ROUND_UV != 0
+	nointerpolation uint4 rounduv : TEXCOORD3;
+#endif
 };
 
 struct PS_INPUT
@@ -120,6 +125,9 @@ struct PS_INPUT
 	float4 c : COLOR0;
 #else
 	nointerpolation float4 c : COLOR0;
+#endif
+#if PS_ROUND_UV != 0
+	nointerpolation uint4 rounduv : TEXCOORD3;
 #endif
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
@@ -326,12 +334,11 @@ float4 clamp_wrap_uv(float4 uv)
 float4 round_uv(PS_INPUT input)
 {
 #if PS_ROUND_UV
-	// Top-left X, Y of the prim saved in unused texture coords.
-	int2 topleft = int2(int2(input.p.xy) == int2(input.t.xy));
+	// Check if we're at the prim top or left.
+	int2 topleft = int2(int2(input.p.xy) == int2(input.rounduv.xy));
 
 	// Get flags for whether to round U, V.
-	int round_flags_i = int(input.t.w);
-	int2 round_flags = int2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
+	int2 round_flags = int2(input.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	int2 round_down = int2(round_flags == PS_ROUND_UV_DOWN) & ~topleft;
@@ -341,11 +348,18 @@ float4 round_uv(PS_INPUT input)
 	float2 uv = input.ti.zw; // Unnormalized UVs.
 	float2 uvi = round(input.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
 	
-	int2 close = int2(abs(uv - uvi) < PS_ROUND_UV_THRESHOLD);
-
 	// Round only if close to a half texel.
-	uv = bool2(close & round_down) ? uvi - PS_ROUND_UV_THRESHOLD : uv;
-	uv = bool2(close & round_up) ? uvi + PS_ROUND_UV_THRESHOLD : uv;
+	int2 close = int2(abs(uv - uvi) <= PS_ROUND_UV_THRESHOLD);
+	round_down &= close;
+	round_up &= close;
+
+	uv = bool2(round_down) ? uvi - PS_ROUND_UV_THRESHOLD : uv;
+	uv = bool2(round_up) ? uvi + PS_ROUND_UV_THRESHOLD : uv;
+
+	#if PS_ROUND_UV == 2
+		// Round down to nearest 1/16 texel for bilinear.
+		uv = bool2(round_down) ? floor(uv) : uv;
+	#endif
 
 	return float4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
@@ -1288,6 +1302,22 @@ cbuffer cb0
 	uint BaseVertex; // Only used in DX11.
 };
 
+float2 sign_extend_16_bit(float2 uv)
+{
+	return uv > float(0x7FFF) ? uv - float(0x10000) : uv;
+}
+
+uint4 extract_round_uv_bits(float q)
+{
+	uint qi = asuint(q);
+	return uint4(
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
+	);
+}
+
 VS_OUTPUT vs_main(VS_INPUT input)
 {
 	// Clamp to max depth, gs doesn't wrap
@@ -1307,7 +1337,11 @@ VS_OUTPUT vs_main(VS_INPUT input)
 
 	if(VS_TME)
 	{
-		float2 uv = input.uv - TextureOffset;
+		#if VS_ROUND_UV == 0
+			float2 uv = input.uv - TextureOffset;
+		#else
+			float2 uv = sign_extend_16_bit(input.uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+		#endif
 		float2 st = input.st - TextureOffset;
 
 		// Integer nomalized
@@ -1326,12 +1360,20 @@ VS_OUTPUT vs_main(VS_INPUT input)
 		// Float coords
 		output.t.xy = st;
 		output.t.w = input.q;
+
+		// Get UV rounding info saved in Q.
+		#if VS_ROUND_UV
+			output.rounduv = extract_round_uv_bits(input.q);
+		#endif
 	}
 	else
 	{
 		output.t.xy = 0;
 		output.t.w = 1.0f;
 		output.ti = 0;
+		#if VS_ROUND_UV
+			output.rounduv = 0;
+		#endif
 	}
 
 	output.c = input.c;

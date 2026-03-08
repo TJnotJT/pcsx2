@@ -70,6 +70,10 @@ in SHADER
 	#else
 		flat vec4 c;
 	#endif
+
+	#if PS_ROUND_UV != 0
+		flat uvec4 rounduv;
+	#endif
 } PSin;
 
 #define TARGET_0_QUALIFIER out
@@ -255,12 +259,11 @@ vec4 clamp_wrap_uv(vec4 uv)
 vec4 round_uv()
 {
 #if PS_ROUND_UV
-	// Top-left X, Y of the prim saved in unused texture coords.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.t_float.xy)));
+	// Check if we're at the prim top or left.
+	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(PSin.rounduv.xy)));
 
 	// Get flags for whether to round U, V.
-	int round_flags_i = int(PSin.t_float.w);
-	ivec2 round_flags = ivec2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
+	ivec2 round_flags = ivec2(PSin.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
@@ -270,11 +273,18 @@ vec4 round_uv()
 	vec2 uv = PSin.t_int.zw; // Unnormalized UVs.
 	vec2 uvi = round(PSin.t_int.zw / 8.0f) * 8.0f; // Nearest half texel.
 	
-	ivec2 close = ivec2(lessThan(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
-
 	// Round only if close to a half texel.
-	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_down));
-	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(close & round_up));
+	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+	round_down &= close;
+	round_up &= close;
+
+	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+
+	#if PS_ROUND_UV == 2
+		// Round down to nearest 1/16 texel for bilinear.
+		uv = mix(uv, floor(uv), bvec2(round_down));
+	#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else

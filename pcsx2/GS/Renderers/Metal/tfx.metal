@@ -14,7 +14,7 @@ constant uint SHUFFLE_READWRITE = 3;
 constant bool HAS_FBFETCH           [[function_constant(GSMTLConstantIndex_FRAMEBUFFER_FETCH)]];
 constant bool FST                   [[function_constant(GSMTLConstantIndex_FST)]];
 constant bool IIP                   [[function_constant(GSMTLConstantIndex_IIP)]];
-constant bool ROUND_UV              [[function_constant(GSMTLConstantIndex_ROUND_UV)]];
+constant uint ROUND_UV              [[function_constant(GSMTLConstantIndex_ROUND_UV)]];
 constant bool VS_POINT_SIZE         [[function_constant(GSMTLConstantIndex_VS_POINT_SIZE)]];
 constant uint VS_EXPAND_TYPE_RAW    [[function_constant(GSMTLConstantIndex_VS_EXPAND_TYPE)]];
 constant uint PS_AEM_FMT            [[function_constant(GSMTLConstantIndex_PS_AEM_FMT)]];
@@ -124,6 +124,7 @@ struct MainVSOut
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
+	uint4 rounduv [[flat, function_constant(ROUND_UV != 0)]];
 	float point_size [[point_size, function_constant(VS_POINT_SIZE)]];
 };
 
@@ -134,6 +135,7 @@ struct MainPSIn
 	float4 ti;
 	float4 c [[function_constant(IIP)]];
 	float4 fc [[flat, function_constant(NOT_IIP)]];
+	uint4 rounduv [[flat, function_constant(ROUND_UV != 0)]];
 };
 
 struct MainPSOut
@@ -145,9 +147,33 @@ struct MainPSOut
 
 // MARK: - Vertex functions
 
+static float2 sign_extend_16_bit(float2 uv)
+{
+	return uv > float2(0x7FFF) ? uv - float2(0x10000) : uv;
+}
+
+static uint4 extract_round_uv_bits(float q)
+{
+	uint qi = as_type<uint>(q);
+	return uint4(
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
+	);
+}
+
 static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, constant GSMTLMainVSUniform& cb)
 {
-	float2 uv = float2(v.uv) - cb.texture_offset;
+	float2 uv;
+	if (ROUND_UV == 0)
+	{
+		uv = float2(v.uv) - cb.texture_offset;
+	}
+	else
+	{
+		uv = sign_extend_16_bit(v.uv) - cb.texture_offset; // Extend sign bit in case ST was converted to UV.
+	}
 	float2 st = v.st - cb.texture_offset;
 
 	// Float coordinate
@@ -166,6 +192,12 @@ static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, const
 	{
 		// Some games uses float coordinate for post-processing effects
 		out.ti.zw = st / cb.texture_scale;
+	}
+
+	if (ROUND_UV != 0)
+	{
+		// Get UV rounding info saved in Q.
+		out.rounduv = extract_round_uv_bits(v.q);
 	}
 }
 
@@ -457,14 +489,13 @@ struct PSMain
 
 	float4 round_uv()
 	{
-		if (ROUND_UV)
+		if (ROUND_UV != 0)
 		{
-			// Whether we are at the top or left of the prim.
-			int2 topleft = int2(int2(in.p.xy) == int2(in.t.xy));
+			// Check if we're at the prim top or left.
+			int2 topleft = int2(int2(in.p.xy) == int2(in.rounduv.xy));
 
 			// Extract flags for whether to round U, V.
-			int round_flags_i = int(in.t.w);
-			int2 round_flags = int2((round_flags_i >> 0) & 0xF, (round_flags_i >> 4) & 0xF);
+			int2 round_flags = int2(in.rounduv.zw);
 
 			// Being on the top or left pixels converts round down to round up.
 			int2 round_down = int2(round_flags == ROUND_UV_DOWN_MTL) & ~topleft;
@@ -474,11 +505,19 @@ struct PSMain
 			float2 uv = in.ti.zw; // Unnormalized UVs.
 			float2 uvi = round(in.ti.zw / 8.0f) * 8.0f; // Nearest half texel.
 			
-			int2 close = int2(abs(uv - uvi) < ROUND_UV_THRESHOLD_MTL);
-
 			// Round only if close to a half texel.
-			uv = select(uv, uvi - ROUND_UV_THRESHOLD_MTL, bool2(close & round_down));
-			uv = select(uv, uvi + ROUND_UV_THRESHOLD_MTL, bool2(close & round_up));
+			int2 close = int2(abs(uv - uvi) < ROUND_UV_THRESHOLD_MTL);
+			round_down &= close;
+			round_up &= close;
+
+			uv = select(uv, uvi - ROUND_UV_THRESHOLD_MTL, bool2(round_down));
+			uv = select(uv, uvi + ROUND_UV_THRESHOLD_MTL, bool2(round_up));
+
+			if (ROUND_UV == 2)
+			{
+				// Round down to nearest 1/16 texel for bilinear.
+				uv = select(uv, floor(uv), bool2(round_down));
+			}
 
 			return float4(uv / 16.0f / cb.wh.xy, uv); // Return normalized and unnormalized coords.
 		}
@@ -835,7 +874,7 @@ struct PSMain
 			st = in.t.xy / in.t.w;
 			st_int = in.ti.zw / in.t.w;
 		}
-		else if (ROUND_UV)
+		else if (ROUND_UV != 0)
 		{
 			float4 ti_rounded = round_uv();
 			
