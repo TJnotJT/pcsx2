@@ -4557,6 +4557,24 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			// Save rounding info in unused Q.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
 		}
+
+		// FIXME: Clean this up.
+		if (GSIsHardwareRenderer() && primclass == GS_TRIANGLE_CLASS)
+		{
+			// Reorder the vertices so that the right angle comes first and the horizontal edge
+			// comes before the vertical edge.
+			for (int j = 0; j < 2; j++)
+			{
+				if (i + 3 * j != tri_quad_corners[2 * (i / n) + j])
+				{
+					std::swap(vtx[i + 3 * j], vtx[tri_quad_corners[2 * (i / n) + j]]);
+				}
+				if (vtx[i + 3 * j + 0].XYZ.Y != vtx[i + 3 * j + 1].XYZ.Y)
+				{
+					std::swap(vtx[i + 3 * j + 1], vtx[i + 3 * j + 2]);
+				}
+			}
+		}
 	}
 
 	return true;

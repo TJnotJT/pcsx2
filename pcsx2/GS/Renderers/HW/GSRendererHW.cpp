@@ -8125,6 +8125,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
+			// FIXME: Put this in SetupIA.
+			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+			{
+				m_conf.vs.expand = GSHWDrawConfig::VSExpand::Triangle;
+			}
 		}
 	}
 
