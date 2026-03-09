@@ -21,6 +21,8 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	uvec2 XYOffset;
 };
 
+const float ScaleRT = 2.0f;
+
 layout(location = 0) out VSOutput
 {
 	vec4 t;
@@ -161,15 +163,18 @@ struct ProcessedVertex
 #endif
 };
 
-vec4 round_tex_range(vec4 pos, vec4 tex)
+vec4 round_tex_range(inout vec4 pos, inout vec4 tex)
 {
-	if (pos.x > pos.z)
+	bool rev_x = pos.x > pos.z;
+	bool rev_y = pos.y > pos.w;
+
+	if (rev_x)
 	{
 		pos.xz = pos.zx;
 		tex.xz = tex.zx;
 	}
 
-	if (pos.y > pos.w)
+	if (rev_y)
 	{
 		pos.yw = pos.wy;
 		tex.yw = tex.wy;
@@ -177,7 +182,10 @@ vec4 round_tex_range(vec4 pos, vec4 tex)
 
 	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
 
-	vec4 grad = (tex.zwzw - tex.xyxy) / (pos.zwzw - pos.xyxy);
+	vec4 d_tex = tex.zwzw - tex.xyxy;
+	vec4 d_pos = pos.zwzw - pos.xyxy;
+
+	vec4 grad = d_tex / d_pos;
 
 	tex += grad * (pos_round - pos);
 
@@ -186,6 +194,50 @@ vec4 round_tex_range(vec4 pos, vec4 tex)
 	tex = vec4(ceil(tex.xy / 16.0f) * 16.0f, floor(tex.zw / 16.0f) * 16.0f) + vec4(8.0f);
 
 	return tex;
+}
+
+void round_pos_tex(inout vec4 pos, inout vec4 tex)
+{
+	bool rev_x = pos.x > pos.z;
+	bool rev_y = pos.y > pos.w;
+
+	if (rev_x)
+	{
+		pos.xz = pos.zx;
+		tex.xz = tex.zx;
+	}
+
+	if (rev_y)
+	{
+		pos.yw = pos.wy;
+		tex.yw = tex.wy;
+	}
+
+	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
+
+	pos_round.xy += 8.0f * (-1.0f + 1.0f / ScaleRT);
+	pos_round.zw += 8.0f * (1.0f + 1.0f / ScaleRT); 
+
+	vec4 d_tex = tex.zwzw - tex.xyxy;
+	vec4 d_pos = pos.zwzw - pos.xyxy;
+
+	vec4 grad = d_tex / d_pos;
+
+	tex += grad * (pos_round - pos);
+
+	pos = pos_round;
+
+	if (rev_x)
+	{
+		pos.xz = pos.zx;
+		tex.xz = tex.zx;
+	}
+
+	if (rev_y)
+	{
+		pos.yw = pos.wy;
+		tex.yw = tex.wy;
+	}
 }
 
 ProcessedVertex load_vertex(uint index)
@@ -294,13 +346,24 @@ void main()
 
 	ProcessedVertex lt = load_vertex(vid_lt);
 	ProcessedVertex rb = load_vertex(vid_rb);
-	vtx = rb;
 
 	#if VS_CLAMP_UV
 		vec4 pos = vec4(lt.pos_raw, rb.pos_raw);
 		vec4 tex = vec4(lt.ti.zw, rb.ti.zw);
 		uvrange = round_tex_range(pos, tex);
+
+		round_pos_tex(pos, tex);
+		
+		lt.p.xy = pos.xy * vec2(VertexScale.x, VertexScale.y) - vec2(1);// - vec2(VertexOffset.x, -VertexOffset.y);
+		rb.p.xy = pos.zw * vec2(VertexScale.x, VertexScale.y) - vec2(1);// - vec2(VertexOffset.x, -VertexOffset.y);
+
+		lt.ti.zw = tex.xy;
+		lt.ti.xy = lt.ti.zw * TextureScale;
+		rb.ti.zw = tex.zw;
+		rb.ti.xy = rb.ti.zw * TextureScale;
 	#endif
+
+	vtx = rb;
 
 	bool is_right = ((vid & 1u) != 0u);
 	vtx.p.x = is_right ? lt.p.x : vtx.p.x;
