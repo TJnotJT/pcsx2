@@ -763,8 +763,10 @@ vec4 round_uv()
 	round_down &= close;
 	round_up &= close;
 
+	#if PS_ROUND_UV == 1
 	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+	#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
