@@ -177,6 +177,17 @@ struct alignas(32) GSScanlineGlobalData // per batch variables, this is like a p
 		-1.04913055217340124191f,
 		2.28330284476918490682f,
 		1.0f};
+
+	// Constants for UV rounding.
+	alignas(16) const_offsets = {0, 1, 2, 3};
+	alignas(16) u32 const_round_up[4] = {ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP};
+	alignas(16) u32 const_round_down[4] = {ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN};
+	alignas(16) u32 const_quarter_texel[4] = {0x4000, 0x4000, 0x4000, 0x4000};
+	alignas(16) u32 const_half_texel_mask[4] = {~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1), ~(0x8000u - 1)};
+	alignas(16) u32 const_round_threshold[4] = {
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), // 0x1000 = 1/16 texel.
+		static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD), static_cast<u32>(0x1000 * ROUND_UV_THRESHOLD),
+	};
 #endif
 };
 
