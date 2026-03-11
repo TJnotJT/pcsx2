@@ -2322,7 +2322,7 @@ void GSRendererHW::RoundSpriteOffset()
 
 void GSRendererHW::Draw()
 {
-	/*GSConfig.UserHacks_AlignSpriteX = false;
+	GSConfig.UserHacks_AlignSpriteX = false;
 	GSConfig.UserHacks_MergePPSprite = false;
 	GSConfig.UserHacks_ForceEvenSpritePosition = false;
 	GSConfig.UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
@@ -2330,7 +2330,7 @@ void GSRendererHW::Draw()
 	GSConfig.UserHacks_RoundSprite = 0;
 	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
 	GSConfig.UserHacks_TCOffsetX = 0;
-	GSConfig.UserHacks_TCOffsetY = 0;*/
+	GSConfig.UserHacks_TCOffsetY = 0;
 
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
@@ -8136,6 +8136,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
+			m_conf.cb_vs.upscale = { rt->GetScale(), 0.0f };
 			// FIXME: Put this in SetupIA.
 			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
 			{

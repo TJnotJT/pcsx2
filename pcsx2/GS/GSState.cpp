@@ -4494,12 +4494,23 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		// - The coordinates are half-texel aligned.
 		// - The denominator of dU/dX or dV/dY in lowest terms is small enough.
 		// Otherwise it might mess up the actual value being interpolated (e.g. if dU/dX = 448/447 or U0 = 1/16).
+
+		const auto IsScaledAligned = [](int pos0, int pos1, int tex0, int tex1, int scale) {
+			const int pos0_round = (pos0 + 0xF) & ~0xF;
+			const int pos1_round = pos1 & ~0xF;
+			const int tex0_round = tex0 + (pos0_round - pos0) * scale;
+			const int tex1_round = tex1 + (pos1_round - pos1) * scale;
+			return ((tex0_round | tex1_round) & 0x7) == 0;
+		};
+
+		const bool scaled_aligned_U = ((dU % dX) == 0) && IsScaledAligned(X0, X1, U0, U1, dU / dX);
+		const bool scaled_aligned_V = ((dV % dY) == 0) && IsScaledAligned(Y0, Y1, V0, V1, dV / dY);
 		const bool aligned_XU = ((X0 | X1 | U0 | U1) & 7) == 0;
 		const bool aligned_YV = ((Y0 | Y1 | V0 | V1) & 7) == 0;
 		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
 		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
-		const bool allow_round_U = dU != 0 && aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR);
-		const bool allow_round_V = dV != 0 && aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR);
+		const bool allow_round_U = dU != 0 && ((aligned_XU && (dX_lowest < ROUND_UV_DENOMINATOR)) || scaled_aligned_U);
+		const bool allow_round_V = dV != 0 && ((aligned_YV && (dY_lowest < ROUND_UV_DENOMINATOR)) || scaled_aligned_V);
 
 		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)

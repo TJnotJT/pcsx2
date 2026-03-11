@@ -20,10 +20,8 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	uint MaxDepth;
 	uint pad_cb0;
 	uvec2 XYOffset;
+	float ScaleRT;
 };
-
-// FIXME: Add to vertex shader CB.
-const float ScaleRT = 2.0f;
 
 layout(location = 0) out VSOutput
 {

@@ -595,6 +595,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 point_size;
 		GSVector2i max_depth;
 		GSVector2i xy_offset;
+		GSVector2 upscale;
 		__fi VSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
