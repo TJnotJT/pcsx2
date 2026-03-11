@@ -39,6 +39,8 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	GSRasterizerData data;
 	GSScanlineGlobalData& gd = data.global;
 
+	const u32 round_uv = static_cast<u32>(hw.GetVertexUVRoundingInfo());
+
 	hw.m_sw_vertex_buffer.resize(((hw.m_vertex.next + 1) & ~1));
 
 	data.primclass = vt.m_primclass;
@@ -48,8 +50,6 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	data.index = hw.m_index.buff;
 	data.index_count = hw.m_index.tail;
 	data.scanmsk_value = env.SCANMSK.MSK;
-
-	const u32 round_uv = static_cast<u32>(hw.GetVertexUVRoundingInfo());
 
 	// Skip per pixel division if q is constant.
 	// Optimize the division by 1 with a nop. It also means that GS_SPRITE_CLASS must be processed when !vt.m_eq.q.
