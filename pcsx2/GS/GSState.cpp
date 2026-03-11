@@ -4453,28 +4453,34 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				v0.RGBAQ.Q = v1.RGBAQ.Q; // Use Q of second vertex for sprites.
 		}
 
-		const auto GetU = [&](const GSVertex& v) {
+		const auto GetUV = [&]<int uv>(const GSVertex& v) -> std::pair<int, bool> {
+			const u16 UV = (uv == 0) ? v.U : v.V;
+			const float ST = (uv == 0) ? v.ST.S : v.ST.T;
+			const int tsize = (uv == 0) ? tw : th;
+
 			if constexpr (fst)
-				return v.U;
+			{
+				return { UV, true };
+			}
 			else
-				return static_cast<int>(16.0f * (v.ST.S / v.RGBAQ.Q) * tw);
+			{
+				// Only valid if converts exactly to a UV.
+				const float UV_conv = 16.0f * (ST / v.RGBAQ.Q) * tsize;
+				return { static_cast<int>(UV_conv), std::fmod(UV_conv, 1.0f) == 0.0f };
+			}
 		};
 
-		const auto GetV = [&](const GSVertex& v) {
-			if constexpr (fst)
-				return v.V;
-			else
-				return static_cast<int>(16.0f * (v.ST.T / v.RGBAQ.Q) * th);
-		};
+		const auto GetU = [&](const GSVertex& v) { return GetUV.template operator()<0>(v); };
+		const auto GetV = [&](const GSVertex& v) { return GetUV.template operator()<1>(v); };
 
 		const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
 		const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
 		const int X1 = static_cast<int>(v1.XYZ.X) - xyof.x;
 		const int Y1 = static_cast<int>(v1.XYZ.Y) - xyof.y;
-		const int U0 = GetU(v0);
-		const int V0 = GetV(v0);
-		const int U1 = GetU(v1);
-		const int V1 = GetV(v1);
+		const auto [U0, valid_U0] = GetU(v0);
+		const auto [V0, valid_V0] = GetV(v0);
+		const auto [U1, valid_U1] = GetU(v1);
+		const auto [V1, valid_V1] = GetV(v1);
 
 		const int dX = X1 - X0;
 		const int dY = Y1 - Y0;
@@ -4491,7 +4497,7 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool pow2_dY = IsPow2(abs_dY);
 
 		// Check if the first/last pixel center correspond to texel boundaries.
-		const auto IsScaledAligned = [](int pos0, int pos1, int tex0, int tex1, int scale) {
+		const auto EndpointsAligned = [](int pos0, int pos1, int tex0, int tex1, int scale) {
 			const int pos0_round = (pos0 + 0xF) & ~0xF;
 			const int pos1_round = pos1 & ~0xF;
 			const int tex0_round = tex0 + (pos0_round - pos0) * scale;
@@ -4499,19 +4505,19 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			return ((tex0_round | tex1_round) & 0xF) == 0;
 		};
 
-		// First condition to allow rounding: dU/dX is an integer and pixel centers correspond to texel boundaries.
-		const bool scaled_aligned_U = ((dU % dX) == 0) && IsScaledAligned(X0, X1, U0, U1, dU / dX);
-		const bool scaled_aligned_V = ((dV % dY) == 0) && IsScaledAligned(Y0, Y1, V0, V1, dV / dY);
+		// First condition: dU/dX is an integer and pixel centers correspond to texel boundaries.
+		const bool scaled_aligned_U = ((dU % dX) == 0) && EndpointsAligned(X0, X1, U0, U1, dU / dX);
+		const bool scaled_aligned_V = ((dV % dY) == 0) && EndpointsAligned(Y0, Y1, V0, V1, dV / dY);
 
-		// Second condition allow rounding: denominator of dU/dX in lowest terms is not too large
-		// and all end points of pixels and texels aligned to a half.
+		// Second condition: denominator of dU/dX in lowest terms is not too large
+		// and all end points of pixels and texels are half-aligned.
 		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
 		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
 		const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest < ROUND_UV_DENOMINATOR);
 		const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest < ROUND_UV_DENOMINATOR);
 
-		const bool allow_round_U = (dU != 0) && (scaled_aligned_U || aligned_denom_XU);
-		const bool allow_round_V = (dV != 0) && (scaled_aligned_V || aligned_denom_YV);
+		const bool allow_round_U = (dU != 0) && (valid_U0 && valid_U1) && (scaled_aligned_U || aligned_denom_XU);
+		const bool allow_round_V = (dV != 0) && (valid_V0 && valid_V1) && (scaled_aligned_V || aligned_denom_YV);
 
 		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
@@ -4559,8 +4565,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			if constexpr (!fst)
 			{
 				// For ST, pre-divide by Q and save as UV. Sign bit will have to be extended later.
-				vtx[i + j].U = static_cast<u16>(GetU(vtx[i + j]) & 0xFFFF);
-				vtx[i + j].V = static_cast<u16>(GetV(vtx[i + j]) & 0xFFFF);
+				vtx[i + j].U = static_cast<u16>(std::get<0>(GetU(vtx[i + j])) & 0xFFFF);
+				vtx[i + j].V = static_cast<u16>(std::get<0>(GetV(vtx[i + j])) & 0xFFFF);
 			}
 
 			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12);
