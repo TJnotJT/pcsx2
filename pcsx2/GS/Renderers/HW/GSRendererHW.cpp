@@ -2322,6 +2322,16 @@ void GSRendererHW::RoundSpriteOffset()
 
 void GSRendererHW::Draw()
 {
+	GSConfig.UserHacks_AlignSpriteX = false;
+	GSConfig.UserHacks_MergePPSprite = false;
+	GSConfig.UserHacks_ForceEvenSpritePosition = false;
+	GSConfig.UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
+	GSConfig.UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;
+	GSConfig.UserHacks_RoundSprite = 0;
+	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
+	GSConfig.UserHacks_TCOffsetX = 0;
+	GSConfig.UserHacks_TCOffsetY = 0;
+
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
@@ -8115,15 +8125,23 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
-	if (GetUpscaleMultiplier() == 1.0f && m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
+	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
 	{
 		if (GetVertexUVRoundingInfo())
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
-			m_conf.ps.round_uv = true;
+			m_conf.ps.round_uv = tex->GetScale() == 1.0f ? 1 : 2;
+			// m_conf.ps.round_uv = 2;
 			m_conf.vs.round_uv = true;
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
+			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
+			m_conf.cb_vs.upscale = { rt->GetScale(), 0.0f };
+			// FIXME: Put this in SetupIA.
+			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+			{
+				m_conf.vs.expand = GSHWDrawConfig::VSExpand::Triangle;
+			}
 		}
 	}
 

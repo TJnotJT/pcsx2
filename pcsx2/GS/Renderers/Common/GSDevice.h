@@ -303,6 +303,7 @@ struct alignas(16) GSHWDrawConfig
 		Point,
 		Line,
 		Sprite,
+		Triangle,
 	};
 #pragma pack(push, 1)
 	struct VSSelector
@@ -316,8 +317,7 @@ struct alignas(16) GSHWDrawConfig
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				u8 round_uv : 1;
-				VSExpand expand : 2;
-				u8 _free : 1;
+				VSExpand expand : 3;
 			};
 			u8 key;
 		};
@@ -594,6 +594,8 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 texture_offset;
 		GSVector2 point_size;
 		GSVector2i max_depth;
+		GSVector2i xy_offset;
+		GSVector2 upscale;
 		__fi VSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
@@ -848,6 +850,8 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 		case GSHWDrawConfig::VSExpand::Sprite:
 			// Sprite expand does a 2-4 expansion, and relies on the low bit of the vertex ID to figure out if it's the first or second coordinate.
 			return 2;
+		case GSHWDrawConfig::VSExpand::Triangle:
+			return 3;
 		default:
 			return 1;
 	}
