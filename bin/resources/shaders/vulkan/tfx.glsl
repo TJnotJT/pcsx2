@@ -43,10 +43,10 @@ uvec4 extract_round_uv_bits(float q)
 {
 	uint qi = floatBitsToUint(q);
 	return uvec4(
-		(qi >> 0) & 0xFFF,
-		(qi >> 12) & 0xFFF,
-		(qi >> 24) & 0xF,
-		(qi >> 28) & 0xF
+		(qi >> 0) & 0xFFF,  // Prim left
+		(qi >> 12) & 0xFFF, // Prim top
+		(qi >> 24) & 0xF,   // Round U flags
+		(qi >> 28) & 0xF    // Round V flags
 	);
 }
 
