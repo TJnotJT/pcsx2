@@ -2579,7 +2579,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Sub(tmp2.V4S(), uv.V4S(), tmp1.V4S());
 		armAsm->Abs(tmp2.V4S(), tmp2.V4S());
 		armAsm->Ld1r(tmp5.V4S(), _global(const_round_threshold));
-		armAsm->Cmle(tmp2.V4S(), tmp2.V4S(), tmp5.V4S());
+		armAsm->Cmgt(tmp2.V4S(), tmp2.V4S(), tmp5.V4S());
+		armAsm->Mvn(tmp2.V4S(), tmp2.V4S());
 
 		// u = u.blend8(ui - threshold, close_u & round_down_u);
 		// u = u.blend8(ui + threshold, close_u & round_up_u);
