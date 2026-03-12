@@ -8130,9 +8130,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (GetVertexUVRoundingInfo())
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
-			m_conf.ps.round_uv = tex->GetScale() == 1.0f ? 1 : 2;
+			m_conf.ps.round_uv = GetUpscaleMultiplier() != 1.0f ? 2 : 1;
 			// m_conf.ps.round_uv = 2;
 			m_conf.vs.round_uv = true;
+			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt->GetScale() != 1.0f) && !m_vt.IsRealLinear();
+			m_conf.vs.align_uv = true;
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };

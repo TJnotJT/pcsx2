@@ -4706,6 +4706,8 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_IIP", sel.iip);
 	AddMacro(ss, "VS_POINT_SIZE", sel.point_size);
 	AddMacro(ss, "VS_ROUND_UV", static_cast<int>(sel.round_uv));
+	AddMacro(ss, "VS_CLAMP_UV", static_cast<int>(sel.clamp_uv));
+	AddMacro(ss, "VS_ALIGN_UV", static_cast<int>(sel.align_uv));
 	AddMacro(ss, "VS_EXPAND", static_cast<int>(sel.expand));
 	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
 	ss << m_tfx_source;
@@ -4784,6 +4786,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_NO_COLOR", sel.no_color);
 	AddMacro(ss, "PS_NO_COLOR1", sel.no_color1);
 	AddMacro(ss, "PS_ROUND_UV", sel.round_uv);
+	AddMacro(ss, "PS_CLAMP_UV", sel.clamp_uv);
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
