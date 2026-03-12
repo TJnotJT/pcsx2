@@ -8125,7 +8125,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
-	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
+	//if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
+	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle)
 	{
 		if (GetVertexUVRoundingInfo())
 		{
