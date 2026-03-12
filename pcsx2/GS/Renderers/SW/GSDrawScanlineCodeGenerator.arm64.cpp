@@ -2551,7 +2551,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		//                            ((round_setting_u == round_down_const) & at_left);
 		// const VectorI round_up_v = (round_setting_v == round_up_const);
 
-		armAsm->Ld1r(tmp4.V4S(), _global(const_m_round_up));
+		armAsm->Ld1r(tmp4.V4S(), _global(const_round_up));
 		armAsm->Cmeq(tmp4.V4S(), tmp4.V4S(), tmp2.V4S());
 		if (i == 0)
 		{
