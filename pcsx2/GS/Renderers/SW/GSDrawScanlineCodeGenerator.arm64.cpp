@@ -259,16 +259,16 @@ void GSDrawScanlineCodeGenerator::Init()
 		// const int flags_u = (bits >> 24) & 0xF;
 		// local.temp.round.flags_u = flags_u;
 
-		armAsm->Shr(_wscratch2, _wscratch, 24);
+		armAsm->Lsr(_wscratch2, _wscratch, 24);
 		armAsm->And(_wscratch2, _wscratch2, 0xF);
 		armAsm->Str(_wscratch2, _local(temp.round.flags_u));
 
 		// const int prim_top = (bits >> 12) & 0xFFF;
 		// int flags_v = (bits >> 28) & 0xF;
 
-		armAsm->Shr(_wscratch2, _wscratch, 12);
+		armAsm->Lsr(_wscratch2, _wscratch, 12);
 		armAsm->And(_wscratch2, _wscratch2, 0xFFF);
-		armAsm->Shr(_wscratch, _wscratch, 28);
+		armAsm->Lsr(_wscratch, _wscratch, 28);
 
 		static_assert((ROUND_UV_DOWN >> 1) == ROUND_UV_UP);
 		// if (prim_top == top)
@@ -278,12 +278,12 @@ void GSDrawScanlineCodeGenerator::Init()
 
 		Label end_if;
 		armAsm->Cmp(_wscratch2, _top);
-		armAsm->B(ne, end_if);
+		armAsm->B(ne, &end_if);
 		armAsm->And(_wscratch2, _wscratch, ROUND_UV_DOWN);
-		armAsm->Shr(_wscratch2, _wscratch2, 1);
-		armAsm->Bic(_wscratch, ROUND_UV_DOWN);
-		armAsm->Or(_wscratch, _wscratch, _wscratch2);
-		armAsm->Bind(end_if);
+		armAsm->Lsr(_wscratch2, _wscratch2, 1);
+		armAsm->Bic(_wscratch, _wscratch, ROUND_UV_DOWN);
+		armAsm->Orr(_wscratch, _wscratch, _wscratch2);
+		armAsm->Bind(&end_if);
 
 		// local.temp.round.flags_v = flags_v;
 
@@ -2544,7 +2544,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Ld1r(tmp3.V4S(), _global(const_round_down));
 		armAsm->Cmeq(tmp3.V4S(), tmp3.V4S(), tmp2.V4S());
 		if (i == 0)
-			armAsm->Bic(tmp3.V4S(), tmp1.V4S());
+			armAsm->Bic(tmp3.V4S(), tmp3.V4S(), tmp1.V4S());
 
 		// const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
 		// const VectorI round_up_u = (round_setting_u == round_up_const) |
@@ -2558,7 +2558,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 			armAsm->Ld1r(tmp5.V4S(), _global(const_round_down));
 			armAsm->Cmeq(tmp5.V4S(), tmp5.V4S(), tmp2.V4S());
 			armAsm->And(tmp5.V4S(), tmp5.V4S(), tmp1.V4S());
-			armAsm->Or(tmp4.V4S(), tmp4.V4S(), tmp5.V4S());
+			armAsm->Orr(tmp4.V4S(), tmp4.V4S(), tmp5.V4S());
 		}
 
 		// const VectorI quarter_texel = VectorI::load<true>(g_const.m_quarter_texel);
@@ -2578,7 +2578,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 
 		armAsm->Sub(tmp2.V4S(), uv.V4S(), tmp1.V4S());
 		armAsm->Abs(tmp2.V4S(), tmp2.V4S());
-		armAsm->Ld1r(tmp5.V4S(), _global(const_m_round_threshold));
+		armAsm->Ld1r(tmp5.V4S(), _global(const_round_threshold));
 		armAsm->Cmle(tmp2.V4S(), tmp2.V4S(), tmp5.V4S());
 
 		// u = u.blend8(ui - threshold, close_u & round_down_u);
@@ -2592,10 +2592,10 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Add(tmp6.V4S(), tmp1.V4S(), tmp5.V4S());
 		armAsm->And(tmp2.V4S(), tmp2.V4S(), tmp3.V4S());
 		armAsm->And(tmp6.V4S(), tmp6.V4S(), tmp4.V4S());
-		armAsm->Or(tmp3.V4S(), tmp3.V4S(), tmp4.V4S());
-		armAsm->Bic(uv.V4S(), tmp3.V4S());
-		armAsm->Or(uv.V4S(), uv.V4S(), tmp2);
-		armAsm->Or(uv.V4S(), uv.V4S(), tmp6);
+		armAsm->Orr(tmp3.V4S(), tmp3.V4S(), tmp4.V4S());
+		armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp2);
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp6);
 	}
 }
 
