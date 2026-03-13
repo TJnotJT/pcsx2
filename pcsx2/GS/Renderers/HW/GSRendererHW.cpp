@@ -8125,6 +8125,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
+	m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
+	m_conf.cb_vs.upscale = { rt ? rt->GetScale() : ds->GetScale(), 0.0f };
 	//if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
 	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle)
 	{
@@ -8132,14 +8134,12 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
 			m_conf.ps.round_uv = GetUpscaleMultiplier() != 1.0f ? 2 : 1;
-			// m_conf.ps.round_uv = 2;
 			m_conf.vs.round_uv = true;
 			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt->GetScale() != 1.0f) && !m_vt.IsRealLinear();
 			m_conf.vs.align_uv = true;
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
-			m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
-			m_conf.cb_vs.upscale = { rt->GetScale(), 0.0f };
+			
 			// FIXME: Put this in SetupIA.
 			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
 			{

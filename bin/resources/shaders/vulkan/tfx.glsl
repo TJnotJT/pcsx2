@@ -79,9 +79,8 @@ void main()
 	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
 
 	gl_Position = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-	gl_Position.xy = gl_Position.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
+	gl_Position.xy = (gl_Position.xy - vec2(XYOffset) - vec2(0.05f) + vec2(8.0f)) * vec2(VertexScale.xy) - vec2(1);
 	gl_Position.z *= exp2(-32.0f);		// integer->float depth
-	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
 		#if VS_ROUND_UV == 0
@@ -157,9 +156,7 @@ struct ProcessedVertex
 #if VS_ROUND_UV
 	uvec4 rounduv;
 #endif
-#if VS_CLAMP_UV || VS_ALIGN_UV
 	vec2 pos_raw;
-#endif
 };
 
 // FIXME: Clean this up.
@@ -226,19 +223,12 @@ void round_pos_tex(inout vec4 pos, inout vec4 tex)
 
 	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
 
-	// Removed to align to native texels origin.
-	//pos_round.xy += 8.0f * (-1.0f + 1.0f / ScaleRT);
-	//pos_round.zw += 8.0f + 8.0f * (1.0f + 1.0f / ScaleRT);
-
 	pos_round.xy += -8.0f;
 	pos_round.zw += 8.0f;
 
 	tex += grad * (pos_round - pos);
 
 	pos = pos_round;
-
-	pos.xy += 8.0f; // FIXME: Put this outside.
-	pos.zw += 8.0f; // FIXME: Put this outside.
 
 	if (rev_x)
 	{
@@ -270,10 +260,8 @@ ProcessedVertex load_vertex(uint index)
 
 	uint z = min(a_z, MaxDepth);
 	vtx.p = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-	vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
+	vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, VertexScale.y) - vec2(VertexOffset.x, VertexOffset.y);
 	vtx.p.z *= exp2(-32.0f);		// integer->float depth
-	vtx.p.y = -vtx.p.y;
-
 	#if VS_TME
 		#if VS_ROUND_UV == 0
 			vec2 uv = a_uv - TextureOffset;
@@ -297,9 +285,7 @@ ProcessedVertex load_vertex(uint index)
 			vtx.rounduv = extract_round_uv_bits(a_q);
 		#endif
 
-		#if VS_CLAMP_UV || VS_ALIGN_UV
-			vtx.pos_raw = round(vec2(a_p) - vec2(XYOffset));
-		#endif
+		vtx.pos_raw = round(vec2(a_p) - vec2(XYOffset));
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
@@ -325,6 +311,8 @@ void main()
 
 	vtx = load_vertex(vid >> 2);
 
+	vtx.p.xy = (vtx.pos_raw + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
+
 	vtx.p.x += ((vid & 1u) != 0u) ? PointSize.x : 0.0f; 
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
 
@@ -338,6 +326,8 @@ void main()
 	
 	vtx = load_vertex(vid_base);
 	ProcessedVertex other = load_vertex(vid_other);
+
+	vtx.p.xy = (vtx.pos_raw + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
 
 	vec2 line_vector = normalize(vtx.p.xy - other.p.xy);
 	vec2 line_normal = vec2(line_vector.y, -line_vector.x);
@@ -373,8 +363,8 @@ void main()
 		#if VS_ALIGN_UV
 			round_pos_tex(pos, tex);
 		
-			lt.p.xy = pos.xy * vec2(VertexScale.x, VertexScale.y) - vec2(1);// - vec2(VertexOffset.x, -VertexOffset.y);
-			rb.p.xy = pos.zw * vec2(VertexScale.x, VertexScale.y) - vec2(1);// - vec2(VertexOffset.x, -VertexOffset.y);
+			lt.p.xy = (pos.xy + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
+			rb.p.xy = (pos.zw + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -418,9 +408,9 @@ void main()
 		#if VS_ALIGN_UV
 			round_pos_tex(pos, tex);
 		
-			v0.p.xy = pos.xy * vec2(VertexScale.x, VertexScale.y) - vec2(1);
-			v1.p.xy = pos.zy * vec2(VertexScale.x, VertexScale.y) - vec2(1);
-			v2.p.xy = pos.xw * vec2(VertexScale.x, VertexScale.y) - vec2(1);
+			v0.p.xy = (pos.xy + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
+			v1.p.xy = (pos.zy + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
+			v2.p.xy = (pos.xw + vec2(8) - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;

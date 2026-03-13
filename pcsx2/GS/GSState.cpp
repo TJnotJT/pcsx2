@@ -4509,12 +4509,15 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool scaled_aligned_U = ((dU % dX) == 0) && EndpointsAligned(X0, X1, U0, U1, dU / dX);
 		const bool scaled_aligned_V = ((dV % dY) == 0) && EndpointsAligned(Y0, Y1, V0, V1, dV / dY);
 
+		// Maximum denominator to round. Only allow integer scaling with HW mode.
+		const int max_denominator = GSIsHardwareRenderer() ? 1 : ROUND_UV_DENOMINATOR;
+
 		// Second condition: denominator of dU/dX in lowest terms is not too large
 		// and all end points of pixels and texels are half-aligned.
 		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
 		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
-		const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest < ROUND_UV_DENOMINATOR);
-		const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest < ROUND_UV_DENOMINATOR);
+		const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest <= max_denominator);
+		const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest <= max_denominator);
 
 		const bool allow_round_U = (dU != 0) && (valid_U0 && valid_U1) && (scaled_aligned_U || aligned_denom_XU);
 		const bool allow_round_V = (dV != 0) && (valid_V0 && valid_V1) && (scaled_aligned_V || aligned_denom_YV);
