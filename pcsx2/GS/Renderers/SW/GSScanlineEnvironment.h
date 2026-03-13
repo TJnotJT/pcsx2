@@ -179,7 +179,7 @@ struct alignas(32) GSScanlineGlobalData // per batch variables, this is like a p
 		1.0f};
 
 	// Constants for UV rounding.
-	alignas(16) const_offsets = {0, 1, 2, 3};
+	alignas(16) u32 const_offsets[4] = {0, 1, 2, 3};
 	alignas(16) u32 const_round_up[4] = {ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP, ROUND_UV_UP};
 	alignas(16) u32 const_round_down[4] = {ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN};
 	alignas(16) u32 const_quarter_texel[4] = {0x4000, 0x4000, 0x4000, 0x4000};
