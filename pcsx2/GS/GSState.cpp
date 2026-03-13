@@ -4532,7 +4532,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
 				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
 				const bool bottom_right_triangle = ((j < 3 ? X0 : X1) == std::max(X0, X1)) &&
-												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1));
+												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1)) &&
+				                                   !GSIsHardwareRenderer();
 
 				// Determine whether stepping direction of U, V is negative.
 				const bool negU = (dX < 0) != (dU < 0);
@@ -4573,6 +4574,24 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 			// Save rounding info in unused Q.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
+		}
+
+		// FIXME: Clean this up.
+		if (GSIsHardwareRenderer() && primclass == GS_TRIANGLE_CLASS)
+		{
+			// Reorder the vertices so that the right angle comes first and the horizontal edge
+			// comes before the vertical edge.
+			for (int j = 0; j < 2; j++)
+			{
+				if (i + 3 * j != tri_quad_corners[2 * (i / n) + j])
+				{
+					std::swap(vtx[i + 3 * j], vtx[tri_quad_corners[2 * (i / n) + j]]);
+				}
+				if (vtx[i + 3 * j + 0].XYZ.Y != vtx[i + 3 * j + 1].XYZ.Y)
+				{
+					std::swap(vtx[i + 3 * j + 1], vtx[i + 3 * j + 2]);
+				}
+			}
 		}
 	}
 
