@@ -2595,8 +2595,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->And(tmp6.V4S(), tmp6.V4S(), tmp4.V4S());
 		armAsm->Orr(tmp3.V4S(), tmp3.V4S(), tmp4.V4S());
 		armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
-		armAsm->Orr(uv.V4S(), uv.V4S(), tmp2);
-		armAsm->Orr(uv.V4S(), uv.V4S(), tmp6);
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S());
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S());
 	}
 }
 
