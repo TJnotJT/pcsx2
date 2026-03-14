@@ -809,7 +809,7 @@ vec4 round_uv()
 		uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
 		uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
 		uv += 16.0f * vsIn.scale.xy * (native_xy - native_xy_closest) + + vec2(PS_ROUND_UV_THRESHOLD);
-	#else
+	#elif PS_ROUND_UV == 1
 		uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
 	#endif
