@@ -8133,9 +8133,15 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (GetVertexUVRoundingInfo())
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
-			m_conf.ps.round_uv = m_vt.IsRealLinear() ? 3 : (tex->GetScale() == 1.0f ? 1 : 2);
+			m_conf.ps.round_uv = m_vt.IsRealLinear() ? 3 : ((tex->GetScale() == 1.0f) && (rt->GetScale() != 1.0f) ? 2 : 1);
 			m_conf.vs.round_uv = true;
-			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (tex->GetScale() == 1.0f) && (rt->GetScale() != 1.0f);
+
+			// Heuristic: don't clamp on large sprites with upscaling because it might be a RT copy,
+			// which should use all pixels rather than clamping at sprite boundaries.
+			const bool fullscreen_draw =
+				(std::floor(m_vt.m_min.p.x) - 1.0f <= 0.0f && std::ceil(m_vt.m_max.p.x) + 1.0f >= static_cast<float>(rt->GetUnscaledWidth())) ||
+				(std::floor(m_vt.m_min.p.y) - 1.0f <= 0.0f && std::ceil(m_vt.m_max.p.y) + 1.0f >= static_cast<float>(rt->GetUnscaledHeight()));
+			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (tex->GetScale() == 1.0f || !fullscreen_draw) && (rt->GetScale() != 1.0f);
 			m_conf.vs.align_uv = true;
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;

@@ -4563,8 +4563,11 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				sY = Y0;
 			}
 
+			round_U |= (allow_round_U ? ROUND_UV_PER_PIXEL : 0);
+			round_V |= (allow_round_V ? ROUND_UV_PER_PIXEL : 0);
+
 			// Rounding settings (4 bits each for each U, V).
-			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
+			const u32 round_settings = round_U | (round_V << 4);
 			
 			if constexpr (!fst)
 			{

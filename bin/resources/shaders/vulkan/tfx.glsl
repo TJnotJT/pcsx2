@@ -189,7 +189,7 @@ vec4 round_tex_range(vec4 pos, vec4 tex, uvec4 round_info)
 	tex += grad * (pos_round - pos);
 
 	bvec4 at_topleft = equal(ivec4(pos_round) >> 4, ivec4(round_info.xyxy));
-	bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw, ivec4(PS_ROUND_UV_DOWN))) & ~ivec4(at_topleft));
+	bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw & uvec4(3), ivec4(PS_ROUND_UV_DOWN))) & ~ivec4(at_topleft));
 
 	tex = mix(tex, tex - 0.25f, round_down);
 
@@ -463,6 +463,7 @@ void main()
 	vsOut.c = vtx.c;
 #if VS_ROUND_UV
 	vsOut.rounduv = vtx.rounduv;
+	vsOut.rounduv.zw = mix(uvec2(0), vsOut.rounduv.zw & uvec2(3), bvec2(vsOut.rounduv.zw & uvec2(PS_ROUND_UV_PER_PIXEL)));
 	vsOut.scale = scale;
 #endif
 #if VS_CLAMP_UV
@@ -777,7 +778,7 @@ vec4 round_uv()
 	#endif
 
 	// Extract flags for whether to round U, V.
-	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw) & ivec2(3);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
