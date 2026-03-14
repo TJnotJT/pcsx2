@@ -762,11 +762,24 @@ void GSDrawScanlineCodeGenerator::SampleTexture()
 
 	if (m_sel.rounduv)
 	{
-		armAsm->Mov(v2, ureg);
-		armAsm->Mov(v3, vreg);
-		ureg = v2;
-		vreg = v3;
-		RoundUV(ureg, vreg, v0, v1, v5, v6, _vscratch, _vscratch2);
+		// armAsm->Mov(v2, ureg);
+		// armAsm->Mov(v3, vreg);
+		// ureg = v2;
+		// vreg = v3;
+		// RoundUV(ureg, vreg, v0, v1, v5, v6, _vscratch, _vscratch2);
+		armAsm->Eor(v0.V4S(), v0.V4S(), v0.V4S());
+		armAsm->Eor(v1.V4S(), v1.V4S(), v1.V4S());
+		armAsm->Eor(v5.V4S(), v5.V4S(), v5.V4S());
+		armAsm->Eor(v6.V4S(), v6.V4S(), v6.V4S());
+		armAsm->Eor(_vscratch.V4S(), _vscratch.V4S(), _vscratch.V4S());
+		armAsm->Eor(_vscratch2.V4S(), _vscratch2.V4S(), _vscratch2.V4S());
+
+		armAsm->Mvn(v0.V4S(), v0.V4S());
+		armAsm->Mvn(v1.V4S(), v1.V4S());
+		armAsm->Mvn(v5.V4S(), v5.V4S());
+		armAsm->Mvn(v6.V4S(), v6.V4S());
+		armAsm->Mvn(_vscratch.V4S(), _vscratch.V4S());
+		armAsm->Mvn(_vscratch2.V4S(), _vscratch2.V4S());
 	}
 
 	if (m_sel.ltf)
