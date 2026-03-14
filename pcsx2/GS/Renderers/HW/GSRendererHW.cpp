@@ -8133,7 +8133,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		if (GetVertexUVRoundingInfo())
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
-			m_conf.ps.round_uv = m_vt.IsRealLinear() ? 3 : ((tex->GetScale() == 1.0f) && (rt->GetScale() != 1.0f) ? 2 : 1);
+			// Note: the comment line breaks Psychonauts but fixes Vampire Fog. Need to find a middle ground.
+			//m_conf.ps.round_uv = m_vt.IsRealLinear() ? 3 : ((tex->GetScale() == 1.0f) && (rt->GetScale() != 1.0f) ? 2 : 1);
+			m_conf.ps.round_uv = m_vt.IsRealLinear() ? 3 : ((rt->GetScale() != 1.0f) ? 2 : 1);
 			m_conf.vs.round_uv = true;
 
 			// Heuristic: don't clamp on large sprites with upscaling because it might be a RT copy,
