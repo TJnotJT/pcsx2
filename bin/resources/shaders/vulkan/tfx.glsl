@@ -33,6 +33,7 @@ layout(location = 0) out VSOutput
 
 	#if VS_ROUND_UV != 0
 		flat uvec4 rounduv;
+		flat vec4 scale;
 	#endif
 
 	#if VS_CLAMP_UV != 0
@@ -155,6 +156,7 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_ROUND_UV
 	uvec4 rounduv;
+	vec4 scale;
 #endif
 	vec2 pos_raw;
 };
@@ -306,6 +308,7 @@ void main()
 	uint vid = uint(gl_VertexIndex);
 
 	vec4 uvrange = vec4(0);
+	vec4 scale;
 
 #if VS_EXPAND == 1 // Point
 
@@ -350,11 +353,18 @@ void main()
 	ProcessedVertex lt = load_vertex(vid_lt);
 	ProcessedVertex rb = load_vertex(vid_rb);
 
-	#if VS_CLAMP_UV || VS_ALIGN_UV
+	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
 		vec4 pos = vec4(lt.pos_raw, rb.pos_raw);
 		vec4 tex = vec4(lt.ti.zw, rb.ti.zw);
 
 		vsOut.pos_raw = pos / 16.0f;
+
+		#if VS_ROUND_UV
+			vec4 d_tex = tex.zwzw - tex.xyxy;
+			vec4 d_pos = pos.zwzw - pos.xyxy;
+
+			scale = d_tex / d_pos;
+		#endif
 	
 		#if VS_CLAMP_UV
 			uvrange = round_tex_range(pos, tex, lt.rounduv);
@@ -395,11 +405,19 @@ void main()
 	ProcessedVertex v1 = load_vertex(vid_1);
 	ProcessedVertex v2 = load_vertex(vid_2);
 
-	#if VS_CLAMP_UV || VS_ALIGN_UV
+
+	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
 		vec4 pos = vec4(v0.pos_raw, v1.pos_raw.x, v2.pos_raw.y);
 		vec4 tex = vec4(v0.ti.zw, v1.ti.z, v2.ti.w);
 
 		vsOut.pos_raw = pos / 16.0f;
+	
+		#if VS_ROUND_UV
+			vec4 d_tex = tex.zwzw - tex.xyxy;
+			vec4 d_pos = pos.zwzw - pos.xyxy;
+
+			scale = d_tex / d_pos;
+		#endif
 
 		#if VS_CLAMP_UV
 			uvrange = round_tex_range(pos, tex, v0.rounduv);
@@ -445,6 +463,7 @@ void main()
 	vsOut.c = vtx.c;
 #if VS_ROUND_UV
 	vsOut.rounduv = vtx.rounduv;
+	vsOut.scale = scale;
 #endif
 #if VS_CLAMP_UV
 	vsOut.uvrange = uvrange;
@@ -569,6 +588,7 @@ layout(location = 0) in VSOutput
 	#endif
 	#if PS_ROUND_UV != 0
 		flat uvec4 rounduv;
+		flat vec4 scale;
 	#endif
 	#if PS_CLAMP_UV
 		flat vec4 uvrange;
@@ -771,16 +791,24 @@ vec4 round_uv()
 			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
 	#endif
 
-	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest half texel.
+	#if PS_ROUND_UV == 2
+		vec2 native_xy_closest = vec2(pos) + 0.5f;
+		vec2 native_xy = gl_FragCoord.xy / ScaleRT;
+		vec2 native_uv = uv + 16.0f * vsIn.scale.xy * (native_xy_closest - native_xy);
+		uv = native_uv;
+	#endif
 	
-	// Round only if close to a half texel.
+	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
+	
+	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
 
 	#if PS_ROUND_UV == 2
-		uv = mix(uv, uvi - vec2(16.0f) + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+		uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
+		uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
+		//uv += 16.0f * vsIn.scale.xy * (native_xy - native_xy_closest) + + vec2(PS_ROUND_UV_THRESHOLD);
 	#else
 		uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
