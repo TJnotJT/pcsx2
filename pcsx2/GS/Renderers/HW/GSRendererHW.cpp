@@ -2322,6 +2322,16 @@ void GSRendererHW::RoundSpriteOffset()
 
 void GSRendererHW::Draw()
 {
+	GSConfig.UserHacks_AlignSpriteX = false;
+	GSConfig.UserHacks_MergePPSprite = false;
+	GSConfig.UserHacks_ForceEvenSpritePosition = false;
+	GSConfig.UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
+	GSConfig.UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;
+	GSConfig.UserHacks_RoundSprite = 0;
+	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
+	GSConfig.UserHacks_TCOffsetX = 0;
+	GSConfig.UserHacks_TCOffsetY = 0;
+
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
@@ -8115,15 +8125,76 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
-	if (GetUpscaleMultiplier() == 1.0f && m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle && !m_texture_shuffle)
+	m_conf.cb_vs.xy_offset = { (int)m_context->XYOFFSET.OFX, (int)m_context->XYOFFSET.OFY };
+	m_conf.cb_vs.upscale = { rt ? rt->GetScale() : ds->GetScale(), 0.0f };
+	if (m_conf.ps.tfx != TFX_NONE && !m_channel_shuffle)
 	{
-		if (GetVertexUVRoundingInfo())
+		if (GetVertexUVRoundingInfo(rt->GetScale() != 1.0))
 		{
 			GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
-			m_conf.ps.round_uv = true;
-			m_conf.vs.round_uv = true;
+			
+			const float rt_scale = rt->GetScale();
+			const float tex_scale = tex->GetScale();
+			const GSVector4 rt_size(0.0f, 0.0f, static_cast<float>(rt->GetUnscaledWidth()), static_cast<float>(rt->GetUnscaledHeight()));
+			const GSVector4 tex_size(0.0f, 0.0f, static_cast<float>(tex->GetUnscaledWidth()), static_cast<float>(tex->GetUnscaledHeight()));
+			const GSVector4 draw_bbox = m_vt.m_min.p.xyxy(m_vt.m_max.p);
+			const GSVector4 sample_bbox = m_vt.m_min.t.xyxy(m_vt.m_max.t);
+			const GSVector4 scale_x_2 = GSVector4(2.0f, 1.0f).xyxy();
+			const GSVector4 scale_y_2 = GSVector4(1.0f, 2.0f).xyxy();
+			const GSVector4 threshold(m_texture_shuffle ? 1.0f : 0.0f); // FIXME: Cleanup convert sprite texture shuffle.
+
+			const auto CloseEnough = [&](const GSVector4& a, const GSVector4& b) {
+				return ((a - b).abs() <= threshold).alltrue();
+			};
+
+			const bool rt_tex_match = (rt_scale == tex_scale) && (rt_size == tex_size).alltrue();
+
+			const bool one_to_one_straight =
+				rt_tex_match && CloseEnough(draw_bbox, rt_size) && CloseEnough(sample_bbox, tex_size);
+
+			const bool one_to_one_texture_shuffle =
+				m_texture_shuffle && rt_tex_match &&
+				(CloseEnough(draw_bbox, rt_size * scale_x_2) || CloseEnough(draw_bbox, rt_size * scale_y_2)) &&
+				(CloseEnough(sample_bbox, tex_size * scale_x_2) || CloseEnough(sample_bbox, tex_size * scale_y_2));
+
+			const bool one_to_one = one_to_one_straight || one_to_one_texture_shuffle;
+
+			// 0: No rounding, no clamping.
+			// 1: Full rounding, maybe clamping.
+			// 2: Full rounding with upscale adjustments, maybe clamping.
+			// 3: No rounding, maybe clamping.
+			m_conf.ps.round_uv = one_to_one ? 0 : ((m_vt.IsRealLinear() ? 3 : (rt->GetScale() == 1.0f ? 1 : 2)));
+			m_conf.vs.round_uv = !one_to_one;
+
+			// Get bounding box of the first quad.
+			int n = m_vt.m_primclass == GS_TRIANGLE_CLASS ? 6 : 2; // Alternative GS_SPRITE_CLASS.
+			GSVector4i bbox_i(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
+			for (int i = 0; i < n; i++)
+			{
+				bbox_i = bbox_i.runion(GSVector4i(m_vertex.buff[m_index.buff[i]].m[1]).upl16().xyxy());
+			}
+			bbox_i -= m_context->scissor.xyof.xyxy();
+			const GSVector4 bbox = GSVector4(bbox_i) / 16.0f;
+
+			// Heuristic: don't clamp on large sprites with upscaling because it might be a RT copy,
+			// which should use all pixels rather than clamping at primitive boundaries.
+			const bool fullscreen_draw =
+				(std::floor(bbox.x) - 1.0f <= 0.0f && std::ceil(bbox.z) + 1.0f >= static_cast<float>(rt->GetUnscaledWidth())) ||
+				(std::floor(bbox.y) - 1.0f <= 0.0f && std::ceil(bbox.w) + 1.0f >= static_cast<float>(rt->GetUnscaledHeight()));
+			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = !one_to_one && !fullscreen_draw && (rt->GetScale() != 1.0f);
+			if (m_conf.vs.round_uv && m_conf.vs.clamp_uv && m_vt.IsRealLinear())
+			{
+				m_conf.vs.clamp_uv = 2; // Bilinear clamping (less aggressive).
+			}
+			m_conf.vs.align_uv = one_to_one ? 2 : 1; // 1: full align, 2: no half pixel offset.
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
+
+			// FIXME: Put this in SetupIA.
+			if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+			{
+				m_conf.vs.expand = GSHWDrawConfig::VSExpand::Triangle;
+			}
 		}
 	}
 

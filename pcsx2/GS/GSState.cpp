@@ -4348,7 +4348,7 @@ bool GSState::SpriteDrawWithoutGaps()
 // likely due to internal precision of GS). This is only implemented for sprites and axis-aligned triangles forming quads.
 // Return true if we determined that accurate rounding can be done.
 template<u32 primclass, bool fst>
-bool GSState::GetVertexUVRoundingInfoImpl()
+bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 {
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
 	// at pixel centers:
@@ -4370,10 +4370,10 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 	// We need UVs to fit in 1:11:4 fixed point format for ST conversion.
 	const bool uv_too_large =
-		((m_vt.m_max.t.xyxy().abs() > GSVector4(static_cast<float>(0x7FFF) / 16.0f)) |
-	    (m_vt.m_min.t.xyxy().abs() < GSVector4(static_cast<float>(-0x8000) / 16.0f))).mask();
+		((m_vt.m_max.t.xyxy() > GSVector4(static_cast<float>(0x7FFF) / 16.0f)) |
+	    (m_vt.m_min.t.xyxy() < GSVector4(static_cast<float>(-0x8000) / 16.0f))).mask();
 
-	if (!(GSConfig.AccurateUVRounding && PRIM->TME && !IsMipMapActive() && !uv_too_large))
+	if (!(GSConfig.AccurateUVRounding && PRIM->TME && !uv_too_large))
 		return false;
 
 	// How many vertices for each quad.
@@ -4509,12 +4509,15 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool scaled_aligned_U = ((dU % dX) == 0) && EndpointsAligned(X0, X1, U0, U1, dU / dX);
 		const bool scaled_aligned_V = ((dV % dY) == 0) && EndpointsAligned(Y0, Y1, V0, V1, dV / dY);
 
+		// Maximum denominator to round. Only allow integer scaling with upscaling.
+		const int max_denominator = upscaling ? 1 : ROUND_UV_DENOMINATOR;
+
 		// Second condition: denominator of dU/dX in lowest terms is not too large
 		// and all end points of pixels and texels are half-aligned.
 		const int dX_lowest = abs_dX / std::gcd(std::max(abs_dX, 1), std::max(abs_dU, 1));
 		const int dY_lowest = abs_dY / std::gcd(std::max(abs_dY, 1), std::max(abs_dV, 1));
-		const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest < ROUND_UV_DENOMINATOR);
-		const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest < ROUND_UV_DENOMINATOR);
+		const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest <= max_denominator);
+		const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest <= max_denominator);
 
 		const bool allow_round_U = (dU != 0) && (valid_U0 && valid_U1) && (scaled_aligned_U || aligned_denom_XU);
 		const bool allow_round_V = (dV != 0) && (valid_V0 && valid_V1) && (scaled_aligned_V || aligned_denom_YV);
@@ -4532,7 +4535,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				// Hypothesis: The GS steps along the left edge when rasterizing triangles. For bottom-right
 				// triangles, the left edge goes from bottom to top, so it flips the direction of V stepping.
 				const bool bottom_right_triangle = ((j < 3 ? X0 : X1) == std::max(X0, X1)) &&
-												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1));
+												   ((j < 3 ? Y0 : Y1) == std::max(Y0, Y1)) &&
+				                                   !upscaling;
 
 				// Determine whether stepping direction of U, V is negative.
 				const bool negU = (dX < 0) != (dU < 0);
@@ -4559,8 +4563,11 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				sY = Y0;
 			}
 
+			round_U |= (allow_round_U ? ROUND_UV_PER_PIXEL : 0);
+			round_V |= (allow_round_V ? ROUND_UV_PER_PIXEL : 0);
+
 			// Rounding settings (4 bits each for each U, V).
-			const u32 round_settings = (allow_round_U ? round_U : 0) | ((allow_round_V ? round_V : 0) << 4);
+			const u32 round_settings = round_U | (round_V << 4);
 			
 			if constexpr (!fst)
 			{
@@ -4574,25 +4581,44 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			// Save rounding info in unused Q.
 			vtx[i + j].RGBAQ.U32[1] = prim_topleft | (round_settings << 24);
 		}
+
+		if (GSIsHardwareRenderer() && primclass == GS_TRIANGLE_CLASS)
+		{
+			// Reorder the vertices so that the right angle comes first and the horizontal edge
+			// comes before the vertical edge.
+			for (int j = 0; j < 2; j++)
+			{
+				const int idx_first = i + 3 * j;
+				const int idx_right_angle = tri_quad_corners[2 * (i / n) + j];
+				if (idx_first != idx_right_angle)
+				{
+					std::swap(vtx[idx_first], vtx[idx_right_angle]);
+				}
+				if (vtx[idx_first + 0].XYZ.Y != vtx[idx_first + 1].XYZ.Y)
+				{
+					std::swap(vtx[idx_first + 1], vtx[idx_first + 2]);
+				}
+			}
+		}
 	}
 
 	return true;
 }
 
-bool GSState::GetVertexUVRoundingInfo()
+bool GSState::GetVertexUVRoundingInfo(const bool upscaling)
 {
 	switch (m_vt.m_primclass)
 	{
 		case GS_TRIANGLE_CLASS:
 			if (PRIM->FST)
-				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, true>();
+				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, true>(upscaling);
 			else
-				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, false>();
+				return GetVertexUVRoundingInfoImpl<GS_TRIANGLE_CLASS, false>(upscaling);
 		case GS_SPRITE_CLASS:
 			if (PRIM->FST)
-				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, true>();
+				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, true>(upscaling);
 			else
-				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, false>();
+				return GetVertexUVRoundingInfoImpl<GS_SPRITE_CLASS, false>(upscaling);
 		default:
 			return false;
 	}
