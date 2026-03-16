@@ -61,7 +61,7 @@ uvec4 extract_round_uv_bits(float q)
 
 vec2 transform_raw_pos(vec2 raw)
 {
-	return (raw - vec2(0.05f) + vec2(8.0f)) * vec2(VertexScale.xy) - vec2(1.0f);
+	return (raw + vec2(8.0f - 0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
 }
 
 vec2 transform_raw_pos_no_hpo(vec2 raw)
@@ -799,7 +799,9 @@ vec4 round_uv()
 	#endif
 
 	// Extract flags for whether to round U, V.
+	bvec2 round_per_pixel = bvec2(vsIn.rounduv.zw & ivec2(PS_ROUND_UV_PER_PIXEL));
 	ivec2 round_flags = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_UP | PS_ROUND_UV_DOWN);
+	round_flags = mix(ivec2(0), round_flags, round_per_pixel);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
