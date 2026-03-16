@@ -8141,7 +8141,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const GSVector4 sample_bbox = m_vt.m_min.t.xyxy(m_vt.m_max.t);
 			const GSVector4 scale_x_2 = GSVector4(2.0f, 1.0f).xyxy();
 			const GSVector4 scale_y_2 = GSVector4(1.0f, 2.0f).xyxy();
-			const GSVector4 threshold(m_texture_shuffle ? 1.0f : 0.0f); // FIXME: Cleanup convert sprite texture shuffle.
+		const GSVector4 threshold(m_texture_shuffle ? 1.0f : 0.0f); // FIXME: Cleanup convert sprite texture shuffle to avoid arbitrary thresholds.
 
 			const auto CloseEnough = [&](const GSVector4& a, const GSVector4& b) {
 				return ((a - b).abs() <= threshold).alltrue();
