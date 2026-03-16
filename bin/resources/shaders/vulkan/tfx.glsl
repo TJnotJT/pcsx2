@@ -64,6 +64,11 @@ vec2 transform_raw_pos(vec2 raw)
 	return (raw - vec2(0.05f) + vec2(8.0f)) * vec2(VertexScale.xy) - vec2(1.0f);
 }
 
+vec2 transform_raw_pos_no_hpo(vec2 raw)
+{
+	return (raw - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
+}
+
 #if VS_EXPAND == 0
 
 layout(location = 0) in vec2 a_st;
@@ -377,10 +382,14 @@ void main()
 		#endif
 
 		#if VS_ALIGN_UV
-			sprite_align_and_round(pos, tex);
-		
-			lt.p.xy = transform_raw_pos(pos.xy);
-			rb.p.xy = transform_raw_pos(pos.zw);
+			#if VS_ALIGN_UV == 1
+				sprite_align_and_round(pos, tex);
+				lt.p.xy = transform_raw_pos(pos.xy);
+				rb.p.xy = transform_raw_pos(pos.zw);
+			#elif VS_ALIGN_UV == 2
+				lt.p.xy = transform_raw_pos_no_hpo(pos.xy);
+				rb.p.xy = transform_raw_pos_no_hpo(pos.zw);
+			#endif
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -429,11 +438,16 @@ void main()
 		#endif
 
 		#if VS_ALIGN_UV
-			sprite_align_and_round(pos, tex);
-		
-			v0.p.xy = transform_raw_pos(pos.xy);
-			v1.p.xy = transform_raw_pos(pos.zy);
-			v2.p.xy = transform_raw_pos(pos.xw);
+			#if VS_ALIGN_UV == 1
+				sprite_align_and_round(pos, tex);
+				v0.p.xy = transform_raw_pos(pos.xy);
+				v1.p.xy = transform_raw_pos(pos.zy);
+				v2.p.xy = transform_raw_pos(pos.xw);
+			#elif VS_ALIGN_UV == 2
+				v0.p.xy = transform_raw_pos_no_hpo(pos.xy);
+				v1.p.xy = transform_raw_pos_no_hpo(pos.zy);
+				v2.p.xy = transform_raw_pos_no_hpo(pos.xw);
+			#endif
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;

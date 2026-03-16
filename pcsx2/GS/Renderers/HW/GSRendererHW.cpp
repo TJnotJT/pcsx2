@@ -8141,18 +8141,23 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const GSVector4 sample_bbox = m_vt.m_min.t.xyxy(m_vt.m_max.t);
 			const GSVector4 scale_x_2 = GSVector4(2.0f, 1.0f).xyxy();
 			const GSVector4 scale_y_2 = GSVector4(1.0f, 2.0f).xyxy();
+			const GSVector4 threshold(m_texture_shuffle ? 1.0f : 0.0f); // FIXME: Cleanup convert sprite texture shuffle.
+
+			const auto CloseEnough = [&](const GSVector4& a, const GSVector4& b) {
+				return ((a - b).abs() <= threshold).alltrue();
+			};
 
 			const bool rt_tex_match = (rt_scale == tex_scale) && (rt_size == tex_size).alltrue();
 
 			const bool one_to_one_straight =
-				rt_tex_match && (draw_bbox == rt_size).alltrue() && (sample_bbox == tex_size).alltrue();
+				rt_tex_match && CloseEnough(draw_bbox, rt_size) && CloseEnough(sample_bbox, tex_size);
 
-			const bool ont_to_one_texture_shuffle =
+			const bool one_to_one_texture_shuffle =
 				m_texture_shuffle && rt_tex_match &&
-				((draw_bbox == rt_size * scale_x_2).alltrue() || (draw_bbox == rt_size * scale_y_2).alltrue()) &&
-				((sample_bbox == tex_size * scale_x_2).alltrue() || (sample_bbox == tex_size * scale_y_2).alltrue());
+				(CloseEnough(draw_bbox, rt_size * scale_x_2) || CloseEnough(draw_bbox, rt_size * scale_y_2)) &&
+				(CloseEnough(sample_bbox, tex_size * scale_x_2) || CloseEnough(sample_bbox, tex_size * scale_y_2));
 
-			const bool one_to_one = one_to_one_straight || ont_to_one_texture_shuffle;
+			const bool one_to_one = one_to_one_straight || one_to_one_texture_shuffle;
 
 			// 0: No rounding, no clamping.
 			// 1: Full rounding, maybe clamping.
@@ -8179,9 +8184,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = !one_to_one && !fullscreen_draw && (rt->GetScale() != 1.0f);
 			if (m_conf.vs.round_uv && m_conf.vs.clamp_uv && m_vt.IsRealLinear())
 			{
-				m_conf.vs.clamp_uv = 2; // Bilinear clamping (less aggrssive).
+				m_conf.vs.clamp_uv = 2; // Bilinear clamping (less aggressive).
 			}
-			m_conf.vs.align_uv = !one_to_one;
+			m_conf.vs.align_uv = one_to_one ? 2 : 1; // 1: full align, 2: no half pixel offset.
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 
