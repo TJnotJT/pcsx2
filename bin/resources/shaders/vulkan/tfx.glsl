@@ -16,6 +16,8 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	vec2 PointSize;
 	uint MaxDepth;
 	uint pad_cb0;
+	uvec2 XYOffset;
+	float ScaleRT;
 };
 
 layout(location = 0) out VSOutput
@@ -31,7 +33,14 @@ layout(location = 0) out VSOutput
 
 	#if VS_ROUND_UV != 0
 		flat uvec4 rounduv;
+		flat vec4 scale;
 	#endif
+
+	#if VS_CLAMP_UV != 0
+		flat vec4 uvrange;
+	#endif
+
+	vec4 pos_raw;
 } vsOut;
 
 vec2 sign_extend_16_bit(vec2 uv)
@@ -48,6 +57,16 @@ uvec4 extract_round_uv_bits(float q)
 		(qi >> 24) & 0xF,   // Round U flags
 		(qi >> 28) & 0xF    // Round V flags
 	);
+}
+
+vec2 transform_raw_pos(vec2 raw)
+{
+	return (raw + vec2(8.0f - 0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
+}
+
+vec2 transform_raw_pos_no_hpo(vec2 raw)
+{
+	return (raw - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
 }
 
 #if VS_EXPAND == 0
@@ -70,10 +89,8 @@ void main()
 	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
 	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
 
-	gl_Position = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-	gl_Position.xy = gl_Position.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
+	gl_Position = vec4(transform_raw_pos(vec2(a_p) - vec2(XYOffset)), float(z), 1.0f);
 	gl_Position.z *= exp2(-32.0f);		// integer->float depth
-	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
 		#if VS_ROUND_UV == 0
@@ -117,6 +134,10 @@ void main()
 
 	vsOut.c = vec4(a_c);
 	vsOut.t.z = a_f.r;
+
+	#if VS_CLAMP_UV
+		vsOut.uvrange = vec4(0);
+	#endif
 }
 
 #else // VS_EXPAND
@@ -144,8 +165,97 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_ROUND_UV
 	uvec4 rounduv;
+	vec4 scale;
 #endif
+	vec2 pos_raw;
 };
+
+// VS_CLAMP_UV == 1: Nearest sampling.
+// VS_CLAMP_UV == 2: Bilinear sampling (don't clamp as aggressively).
+vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
+{
+	bool rev_x = pos.x > pos.z;
+	bool rev_y = pos.y > pos.w;
+
+	if (rev_x)
+	{
+		pos.xz = pos.zx;
+		tex.xz = tex.zx;
+	}
+
+	if (rev_y)
+	{
+		pos.yw = pos.wy;
+		tex.yw = tex.wy;
+	}
+
+	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
+
+	vec4 d_tex = tex.zwzw - tex.xyxy;
+	vec4 d_pos = pos.zwzw - pos.xyxy;
+
+	vec4 grad = d_tex / d_pos;
+
+	tex += grad * (pos_round - pos);
+
+	#if VS_ROUND_UV && VS_CLAMP_UV == 1
+		// Nearest sampling, do round down as per rounding rules.
+		bvec4 at_topleft = equal(ivec4(pos_round) >> 4, ivec4(round_info.xyxy));
+		bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw & uvec4(PS_ROUND_UV_DOWN), uvec4(PS_ROUND_UV_DOWN))) & ~uvec4(at_topleft));
+
+		tex = mix(tex, tex - vec4(PS_ROUND_UV_THRESHOLD), round_down);
+	#endif
+
+	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
+
+	tex = vec4(floor(tex / 16.0f) * 16.0f + 8.0f);
+
+	return tex;
+}
+
+void sprite_align_and_round(inout vec4 pos, inout vec4 tex)
+{
+	bool rev_x = pos.x > pos.z;
+	bool rev_y = pos.y > pos.w;
+
+	if (rev_x)
+	{
+		pos.xz = pos.zx;
+		tex.xz = tex.zx;
+	}
+
+	if (rev_y)
+	{
+		pos.yw = pos.wy;
+		tex.yw = tex.wy;
+	}
+
+	vec4 d_tex = tex.zwzw - tex.xyxy;
+	vec4 d_pos = pos.zwzw - pos.xyxy;
+
+	vec4 grad = d_tex / d_pos;
+
+	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
+
+	pos_round.xy += -8.0f;
+	pos_round.zw += 8.0f;
+
+	tex += grad * (pos_round - pos);
+
+	pos = pos_round;
+
+	if (rev_x)
+	{
+		pos.xz = pos.zx;
+		tex.xz = tex.zx;
+	}
+
+	if (rev_y)
+	{
+		pos.yw = pos.wy;
+		tex.yw = tex.wy;
+	}
+}
 
 ProcessedVertex load_vertex(uint index)
 {
@@ -163,11 +273,9 @@ ProcessedVertex load_vertex(uint index)
 	ProcessedVertex vtx;
 
 	uint z = min(a_z, MaxDepth);
-	vtx.p = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-	vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
+	vtx.pos_raw = vec2(a_p) - vec2(XYOffset);
+	vtx.p = vec4(transform_raw_pos(vtx.pos_raw), float(z), 1.0f);
 	vtx.p.z *= exp2(-32.0f);		// integer->float depth
-	vtx.p.y = -vtx.p.y;
-
 	#if VS_TME
 		#if VS_ROUND_UV == 0
 			vec2 uv = a_uv - TextureOffset;
@@ -190,6 +298,7 @@ ProcessedVertex load_vertex(uint index)
 		#if VS_ROUND_UV
 			vtx.rounduv = extract_round_uv_bits(a_q);
 		#endif
+
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
@@ -209,9 +318,14 @@ void main()
 	ProcessedVertex vtx;
 	uint vid = uint(gl_VertexIndex);
 
+	vec4 uvrange = vec4(0);
+	vec4 scale;
+
 #if VS_EXPAND == 1 // Point
 
 	vtx = load_vertex(vid >> 2);
+
+	vtx.p.xy = transform_raw_pos(vtx.pos_raw);
 
 	vtx.p.x += ((vid & 1u) != 0u) ? PointSize.x : 0.0f; 
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
@@ -226,6 +340,8 @@ void main()
 	
 	vtx = load_vertex(vid_base);
 	ProcessedVertex other = load_vertex(vid_other);
+
+	vtx.p.xy = transform_raw_pos(vtx.pos_raw);
 
 	vec2 line_vector = normalize(vtx.p.xy - other.p.xy);
 	vec2 line_normal = vec2(line_vector.y, -line_vector.x);
@@ -247,6 +363,41 @@ void main()
 
 	ProcessedVertex lt = load_vertex(vid_lt);
 	ProcessedVertex rb = load_vertex(vid_rb);
+
+	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
+		vec4 pos = vec4(lt.pos_raw, rb.pos_raw);
+		vec4 tex = vec4(lt.ti.zw, rb.ti.zw);
+
+		vsOut.pos_raw = pos / 16.0f;
+
+		#if VS_ROUND_UV
+			vec4 d_tex = tex.zwzw - tex.xyxy;
+			vec4 d_pos = pos.zwzw - pos.xyxy;
+
+			scale = d_tex / d_pos;
+		#endif
+	
+		#if VS_CLAMP_UV
+			uvrange = sprite_clamp_uv_range(pos, tex, lt.rounduv);
+		#endif
+
+		#if VS_ALIGN_UV
+			#if VS_ALIGN_UV == 1
+				sprite_align_and_round(pos, tex);
+				lt.p.xy = transform_raw_pos(pos.xy);
+				rb.p.xy = transform_raw_pos(pos.zw);
+			#elif VS_ALIGN_UV == 2
+				lt.p.xy = transform_raw_pos_no_hpo(pos.xy);
+				rb.p.xy = transform_raw_pos_no_hpo(pos.zw);
+			#endif
+
+			lt.ti.zw = tex.xy;
+			lt.ti.xy = lt.ti.zw * TextureScale;
+			rb.ti.zw = tex.zw;
+			rb.ti.xy = rb.ti.zw * TextureScale;
+		#endif
+	#endif
+
 	vtx = rb;
 
 	bool is_right = ((vid & 1u) != 0u);
@@ -259,6 +410,70 @@ void main()
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
+#elif VS_EXPAND == 4 // Triangle
+	
+	uint vid_0 = 3 * (vid / 3);
+	uint vid_1 = vid_0 + 1;
+	uint vid_2 = vid_0 + 2;
+
+	ProcessedVertex v0 = load_vertex(vid_0);
+	ProcessedVertex v1 = load_vertex(vid_1);
+	ProcessedVertex v2 = load_vertex(vid_2);
+
+	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
+		vec4 pos = vec4(v0.pos_raw, v1.pos_raw.x, v2.pos_raw.y);
+		vec4 tex = vec4(v0.ti.zw, v1.ti.z, v2.ti.w);
+
+		vsOut.pos_raw = pos / 16.0f;
+	
+		#if VS_ROUND_UV
+			vec4 d_tex = tex.zwzw - tex.xyxy;
+			vec4 d_pos = pos.zwzw - pos.xyxy;
+
+			scale = d_tex / d_pos;
+		#endif
+
+		#if VS_CLAMP_UV
+			uvrange = sprite_clamp_uv_range(pos, tex, v0.rounduv);
+		#endif
+
+		#if VS_ALIGN_UV
+			#if VS_ALIGN_UV == 1
+				sprite_align_and_round(pos, tex);
+				v0.p.xy = transform_raw_pos(pos.xy);
+				v1.p.xy = transform_raw_pos(pos.zy);
+				v2.p.xy = transform_raw_pos(pos.xw);
+			#elif VS_ALIGN_UV == 2
+				v0.p.xy = transform_raw_pos_no_hpo(pos.xy);
+				v1.p.xy = transform_raw_pos_no_hpo(pos.zy);
+				v2.p.xy = transform_raw_pos_no_hpo(pos.xw);
+			#endif
+
+			v0.ti.zw = tex.xy;
+			v1.ti.zw = tex.zy;
+			v2.ti.zw = tex.xw;
+
+			v0.ti.xy = v0.ti.zw * TextureScale;
+			v1.ti.xy = v1.ti.zw * TextureScale;
+			v2.ti.xy = v2.ti.zw * TextureScale;
+		#endif
+	#endif
+
+	uint vid_mod = vid - vid_0;
+
+	if (vid_mod == 0)
+	{
+		vtx = v0;
+	}
+	else if (vid_mod == 1)
+	{
+		vtx = v1;
+	}
+	else
+	{
+		vtx = v2;
+	}
+
 #endif
 
 	gl_Position = vtx.p;
@@ -267,6 +482,10 @@ void main()
 	vsOut.c = vtx.c;
 #if VS_ROUND_UV
 	vsOut.rounduv = vtx.rounduv;
+	vsOut.scale = scale;
+#endif
+#if VS_CLAMP_UV
+	vsOut.uvrange = uvrange;
 #endif
 }
 
@@ -374,6 +593,8 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	mat4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
+	float ScaleRT;
+	float ScaleTex;
 };
 
 layout(location = 0) in VSOutput
@@ -387,7 +608,12 @@ layout(location = 0) in VSOutput
 	#endif
 	#if PS_ROUND_UV != 0
 		flat uvec4 rounduv;
+		flat vec4 scale;
 	#endif
+	#if PS_CLAMP_UV
+		flat vec4 uvrange;
+	#endif
+	vec4 pos_raw;
 } vsIn;
 
 #if !PS_NO_COLOR && !PS_NO_COLOR1
@@ -558,14 +784,25 @@ vec4 clamp_wrap_uv(vec4 uv)
 	return uv;
 }
 
+// PS_ROUND_UV == 1: Do rounding without an consideration for upscaling.
+// PS_ROUND_UV == 2: Try to account for upscaling differences.
+// PS_ROUND_UV == 3: No rounding, maybe just clamping.
 vec4 round_uv()
 {
 #if PS_ROUND_UV != 0
 	// Check if we're at the prim top or left.
-	ivec2 topleft = ivec2(equal(ivec2(gl_FragCoord.xy), ivec2(vsIn.rounduv.xy)));
+	#if PS_ROUND_UV == 2
+		ivec2 pos = ivec2(gl_FragCoord.xy) / int(ScaleRT);
+		ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy)));
+	#else
+		ivec2 pos = ivec2(gl_FragCoord.xy);
+		ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy) * int(ScaleRT)));
+	#endif
 
 	// Extract flags for whether to round U, V.
-	ivec2 round_flags = ivec2(vsIn.rounduv.zw);
+	bvec2 round_per_pixel = bvec2(vsIn.rounduv.zw & ivec2(PS_ROUND_UV_PER_PIXEL));
+	ivec2 round_flags = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_UP | PS_ROUND_UV_DOWN);
+	round_flags = mix(ivec2(0), round_flags, round_per_pixel);
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
@@ -573,15 +810,46 @@ vec4 round_uv()
 	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
-	vec2 uvi = round(uv / 8.0f) * 8.0f; // Nearest half texel.
+
+	#if PS_CLAMP_UV
+		if (!all(equal(vsIn.uvrange, vec4(0))))
+			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+	#endif
+
+	#if PS_ROUND_UV == 2
+		vec2 native_xy = vec2(pos) + 0.5f;
+		vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
+		vec2 upscale_offset = native_xy - upscale_xy;
+		vec2 native_uv = uv + 16.0f * vsIn.scale.xy * upscale_offset;
+		uv = native_uv;
+	#endif
 	
-	// Round only if close to a half texel.
+	#if PS_ROUND_UV == 2
+		vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
+	#else
+		vec2 uvi = round(uv / (16.0f / ScaleTex)) * (16.0f / ScaleTex); // Nearest texel.
+	#endif
+	
+	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
 
-	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+	#if PS_ROUND_UV == 2
+		// Land into the center of the texel we should sample from.
+		uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
+		uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
+		uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
+		uv += -16.0f * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+	#elif PS_ROUND_UV == 1
+		uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+	#endif
+
+	#if PS_CLAMP_UV
+		if (!all(equal(vsIn.uvrange, vec4(0))))
+			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+	#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
