@@ -4370,10 +4370,10 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 
 	// We need UVs to fit in 1:11:4 fixed point format for ST conversion.
 	const bool uv_too_large =
-		((m_vt.m_max.t.xyxy().abs() > GSVector4(static_cast<float>(0x7FFF) / 16.0f)) |
-	    (m_vt.m_min.t.xyxy().abs() < GSVector4(static_cast<float>(-0x8000) / 16.0f))).mask();
+		((m_vt.m_max.t.xyxy() > GSVector4(static_cast<float>(0x7FFF) / 16.0f)) |
+	    (m_vt.m_min.t.xyxy() < GSVector4(static_cast<float>(-0x8000) / 16.0f))).mask();
 
-	if (!(GSConfig.AccurateUVRounding && PRIM->TME && !IsMipMapActive() && !uv_too_large))
+	if (!(GSConfig.AccurateUVRounding && PRIM->TME && !uv_too_large))
 		return false;
 
 	// How many vertices for each quad.

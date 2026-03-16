@@ -188,10 +188,12 @@ vec4 round_tex_range(vec4 pos, vec4 tex, uvec4 round_info)
 
 	tex += grad * (pos_round - pos);
 
-	bvec4 at_topleft = equal(ivec4(pos_round) >> 4, ivec4(round_info.xyxy));
-	bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw & uvec4(3), ivec4(PS_ROUND_UV_DOWN))) & ~ivec4(at_topleft));
+	#if VS_ROUND_UV && VS_CLAMP_UV == 1
+		bvec4 at_topleft = equal(ivec4(pos_round) >> 4, ivec4(round_info.xyxy));
+		bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw & uvec4(3), ivec4(PS_ROUND_UV_DOWN))) & ~ivec4(at_topleft));
 
-	tex = mix(tex, tex - 0.25f, round_down);
+		tex = mix(tex, tex - 0.25f, round_down);
+	#endif
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
