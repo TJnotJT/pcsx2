@@ -8163,7 +8163,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			// 1: Full rounding, maybe clamping.
 			// 2: Full rounding with upscale adjustments, maybe clamping.
 			// 3: No rounding, maybe clamping.
-			m_conf.ps.round_uv = one_to_one ? 0 : ((m_vt.IsRealLinear() ? 3 : (rt->GetScale() == 1.0f ? 1 : 2)));
+		m_conf.ps.round_uv = one_to_one ? 0 : ((m_vt.IsRealLinear() ? 3 : (tex->GetScale() == 1.0f ? 2 : 1)));
 			m_conf.vs.round_uv = !one_to_one;
 
 			// Get bounding box of the first quad.
