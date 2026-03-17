@@ -8125,15 +8125,17 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Round UV handling.
+	const GSTextureCache::Target* target = rt ? rt : ds;
 	m_conf.cb_vs.xy_offset = { static_cast<int>(m_context->XYOFFSET.OFX), static_cast<int>(m_context->XYOFFSET.OFY) };
-	m_conf.cb_vs.upscale = { rt ? rt->GetScale() : ds->GetScale(), 0.0f };
+	m_conf.cb_vs.upscale = { target->GetScale(), 0.0f };
 	const bool tex_enabled = (m_conf.ps.tfx != TFX_NONE);
-	if (GetVertexUVRoundingInfo(tex_enabled, rt->GetScale() != 1.0))
+	if (GetVertexUVRoundingInfo(tex_enabled, target->GetScale() != 1.0))
 	{
 		GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
 		
-		const float rt_scale = rt->GetScale();
-		const GSVector4 rt_size(0.0f, 0.0f, static_cast<float>(rt->GetUnscaledWidth()), static_cast<float>(rt->GetUnscaledHeight()));
+		const float rt_scale = target->GetScale();
+		const GSVector4 rt_size(0.0f, 0.0f,
+			static_cast<float>(target->GetUnscaledWidth()), static_cast<float>(target->GetUnscaledHeight()));
 		const GSVector4 draw_bbox = m_vt.m_min.p.xyxy(m_vt.m_max.p);
 		const GSVector4 scale_x_2 = GSVector4(2.0f, 1.0f).xyxy();
 		const GSVector4 scale_y_2 = GSVector4(1.0f, 2.0f).xyxy();
@@ -8191,10 +8193,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 			// Heuristic: don't clamp on large sprites with upscaling because it might be a RT copy,
 			// which should use all pixels rather than clamping at primitive boundaries.
-			const bool fullscreen_draw =
-				(std::floor(bbox.x) - 1.0f <= 0.0f && std::ceil(bbox.z) + 1.0f >= static_cast<float>(rt->GetUnscaledWidth())) ||
-				(std::floor(bbox.y) - 1.0f <= 0.0f && std::ceil(bbox.w) + 1.0f >= static_cast<float>(rt->GetUnscaledHeight()));
-			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = !no_round_clamp && !fullscreen_draw && (rt->GetScale() != 1.0f);
+			const bool rt_copy = tex->m_from_target &&
+				(std::floor(bbox.x) - 1.0f <= 0.0f && std::ceil(bbox.z) + 1.0f >= static_cast<float>(target->GetUnscaledWidth())) ||
+				(std::floor(bbox.y) - 1.0f <= 0.0f && std::ceil(bbox.w) + 1.0f >= static_cast<float>(target->GetUnscaledHeight()));
+			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = !no_round_clamp && !rt_copy && (target->GetScale() != 1.0f);
 			if (m_conf.vs.round_uv && m_conf.vs.clamp_uv && m_vt.IsRealLinear())
 			{
 				m_conf.vs.clamp_uv = 2; // Bilinear clamping (less aggressive).
