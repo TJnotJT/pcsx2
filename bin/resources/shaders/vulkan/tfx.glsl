@@ -594,6 +594,7 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
 	float ScaleRT;
+	float ScaleTex;
 };
 
 layout(location = 0) in VSOutput
@@ -827,7 +828,11 @@ vec4 round_uv()
 		uvr = uv;
 	#endif
 	
-	vec2 uvi = round(uvr / 16.0f) * 16.0f; // Nearest texel.
+	#if PS_ROUND_UV == 2
+		vec2 uvi = round(uvr / 16.0f) * 16.0f; // Nearest texel.
+	#else
+		vec2 uvi = round(uvr / (16.0f / ScaleTex)) * (16.0f / ScaleTex); // Nearest texel.
+	#endif
 	
 	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uvr - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
@@ -838,7 +843,8 @@ vec4 round_uv()
 		// Land into the center of the texel we should sample from.
 		uvr = mix(uvr, uvi - vec2(8.0f), bvec2(round_down));
 		uvr = mix(uvr, uvi + vec2(8.0f), bvec2(round_up));
-		uvr += -16.0f * vsIn.scale.xy * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+		uvr = mix(uvr, floor(uvr / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
+		uvr += -16.0f * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
 	#elif PS_ROUND_UV == 1
 		uvr = mix(uvr, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 		uvr = mix(uvr, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
@@ -850,6 +856,7 @@ vec4 round_uv()
 	#endif
 
 	uv = mix(uv, uvr, bvec2(round_down | round_up));
+	uv = uvr; // FIXME: Remove uvr variable
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else

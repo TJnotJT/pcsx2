@@ -8127,7 +8127,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Round UV handling.
 	const GSTextureCache::Target* target = rt ? rt : ds;
 	m_conf.cb_vs.xy_offset = { static_cast<int>(m_context->XYOFFSET.OFX), static_cast<int>(m_context->XYOFFSET.OFY) };
-	m_conf.cb_vs.upscale = { target->GetScale(), 0.0f };
+	m_conf.cb_vs.upscale = { target->GetScale(), tex ? tex->GetScale() : 0.0f };
+	m_conf.cb_ps.ScaleFactor.w = tex ? tex->GetScale() : 0.0f;
 	const bool tex_enabled = (m_conf.ps.tfx != TFX_NONE);
 	if (GetVertexUVRoundingInfo(tex_enabled, target->GetScale() != 1.0))
 	{
