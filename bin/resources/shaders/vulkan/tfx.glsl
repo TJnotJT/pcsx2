@@ -815,35 +815,41 @@ vec4 round_uv()
 			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
 	#endif
 
+	vec2 uvr; // Rounded UVs.
+
 	#if PS_ROUND_UV == 2
 		vec2 native_xy = vec2(pos) + 0.5f;
 		vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
 		vec2 upscale_offset = native_xy - upscale_xy;
 		vec2 native_uv = uv + 16.0f * vsIn.scale.xy * upscale_offset;
-		uv = native_uv;
+		uvr = native_uv;
+	#else
+		uvr = uv;
 	#endif
 	
-	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
+	vec2 uvi = round(uvr / 16.0f) * 16.0f; // Nearest texel.
 	
 	// Round only if close to a texel boundary.
-	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+	ivec2 close = ivec2(lessThanEqual(abs(uvr - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
 
 	#if PS_ROUND_UV == 2
 		// Land into the center of the texel we should sample from.
-		uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
-		uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
-		uv -= 16.0f * vsIn.scale.xy * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+		uvr = mix(uvr, uvi - vec2(8.0f), bvec2(round_down));
+		uvr = mix(uvr, uvi + vec2(8.0f), bvec2(round_up));
+		uvr += -16.0f * vsIn.scale.xy * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
 	#elif PS_ROUND_UV == 1
-		uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+		uvr = mix(uvr, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+		uvr = mix(uvr, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
 	#endif
 
 	#if PS_CLAMP_UV
 		if (!all(equal(vsIn.uvrange, vec4(0))))
-			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+			uvr = clamp(uvr, vsIn.uvrange.xy, vsIn.uvrange.zw);
 	#endif
+
+	uv = mix(uv, uvr, bvec2(round_down | round_up));
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else

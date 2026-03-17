@@ -4524,8 +4524,8 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 			const bool aligned_denom_XU = (((X0 | X1 | U0 | U1) & 7) == 0) && (dX_lowest <= max_denominator);
 			const bool aligned_denom_YV = (((Y0 | Y1 | V0 | V1) & 7) == 0) && (dY_lowest <= max_denominator);
 
-			const bool allow_round_U = (dU != 0) && (valid_U0 && valid_U1) && (scaled_aligned_U || aligned_denom_XU);
-			const bool allow_round_V = (dV != 0) && (valid_V0 && valid_V1) && (scaled_aligned_V || aligned_denom_YV);
+			const bool allow_round_U = (valid_U0 && valid_U1) && (scaled_aligned_U || aligned_denom_XU);
+			const bool allow_round_V = (valid_V0 && valid_V1) && (scaled_aligned_V || aligned_denom_YV);
 
 			// Get rounding info for each vertex.
 			for (u32 j = 0; j < n; j++)
@@ -4548,8 +4548,8 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 					const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
 
 					// For triangles, both dX and dY must be powers of 2 for no error.
-					round_U = (negU || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-					round_V = (negV || (pow2_dX && pow2_dY)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+					round_U = (negU || (pow2_dX && pow2_dY) || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+					round_V = (negV || (pow2_dX && pow2_dY) || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 					// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
 					// so there's no error at the first vertex of the left edge.
@@ -4559,8 +4559,8 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				else
 				{
 					// For sprites, treat each axis independently.
-					round_U = ((dU < 0) || pow2_dX) ? ROUND_UV_UP : ROUND_UV_DOWN;
-					round_V = ((dV < 0) || pow2_dY) ? ROUND_UV_UP : ROUND_UV_DOWN;
+					round_U = ((dU < 0) || pow2_dX || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+					round_V = ((dV < 0) || pow2_dY || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 					// Hypothesis: The GS steps in the direction specified by vertices when rasterizing
 					// sprites so there's no error at the X or Y of the first vertex.
