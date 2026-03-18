@@ -491,6 +491,13 @@ enum class AchievementOverlayPosition : u8
 	MaxCount
 };
 
+enum class GSAccurateUVRoundingMode : u8
+{
+	Off,
+	On,
+	Native,
+};
+
 // --------------------------------------------------------------------------------------
 //  TraceLogsEE
 // --------------------------------------------------------------------------------------
@@ -789,7 +796,6 @@ struct Pcsx2Config
 					Mipmap : 1,
 					HWMipmap : 1,
 					HWAccurateAlphaTest: 1,
-					AccurateUVRounding : 1,
 					ManualUserHacks : 1,
 					UserHacks_AlignSpriteX : 1,
 					UserHacks_CPUFBConversion : 1,
@@ -867,6 +873,7 @@ struct Pcsx2Config
 		int SkipDrawStart = 0;
 		int SkipDrawEnd = 0;
 
+		GSAccurateUVRoundingMode AccurateUVRounding = GSAccurateUVRoundingMode::On;
 		GSHWAutoFlushLevel UserHacks_AutoFlush = GSHWAutoFlushLevel::Disabled;
 		GSHalfPixelOffset UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;
 		s8 UserHacks_RoundSprite = 0;
