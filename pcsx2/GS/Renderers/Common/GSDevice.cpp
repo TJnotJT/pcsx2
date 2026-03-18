@@ -672,6 +672,8 @@ void GSDevice::Recycle(GSTexture* t)
 {
 	if (!t)
 		return;
+	
+	t->ResetROVState();
 
 	t->SetLastFrameUsed(m_frame);
 
