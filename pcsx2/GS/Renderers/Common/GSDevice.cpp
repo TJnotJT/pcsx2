@@ -672,8 +672,14 @@ void GSDevice::Recycle(GSTexture* t)
 {
 	if (!t)
 		return;
+	
+	t->ResetROVState();
 
 	t->SetLastFrameUsed(m_frame);
+
+#ifdef PCSX2_DEVBUILD
+	t->SetDebugName("");
+#endif
 
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];
 	pool.push_front(t);
