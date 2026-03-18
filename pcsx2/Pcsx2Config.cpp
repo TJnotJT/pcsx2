@@ -754,6 +754,18 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWMipmap = true;
 	HWAccurateAlphaTest = false;
 	HWAA1 = false;
+	HWROV = false;
+	HWROVLogging = false;
+	HWROVHistoryTextures = 16;
+	HWROVHistoryDraws = 32;
+	HWROVMaxBarriers = 16;
+	HWROVHistoryWeightColor = 0.75f;
+	HWROVHistoryWeightDepth = 0.75f;
+	HWROVBarriersEnableColor = 2.0f;
+	HWROVBarriersEnableDepth = 4.0f;
+	HWROVBarriersDisableColor = 1.125f;
+	HWROVBarriersDisableDepth = 1.25f;
+	HWROVUseBarriersVK = 0;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -910,7 +922,8 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(OverrideTextureBarriers) &&
 		   OpEqu(DepthFeedbackMode) &&
 		   OpEqu(HWAA1) &&
-		   OpEqu(ExclusiveFullscreenControl);
+		   OpEqu(ExclusiveFullscreenControl) &&
+		   OpEqu(HWROV);
 }
 
 void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
@@ -1041,6 +1054,19 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
 	SettingsWrapBitBool(HWAccurateAlphaTest);
 	SettingsWrapBitBool(HWAA1);
+	SettingsWrapBitBool(HWROV);
+	SettingsWrapBitBool(HWROVLogging);
+	SettingsWrapEntry(HWROVHistoryDraws);
+	SettingsWrapEntry(HWROVHistoryTextures);
+	SettingsWrapEntry(HWROVMaxBarriers);
+	SettingsWrapEntry(HWROVHistoryWeightColor);
+	SettingsWrapEntry(HWROVHistoryWeightDepth);
+	SettingsWrapEntry(HWROVBarriersEnableColor);
+	SettingsWrapEntry(HWROVBarriersEnableDepth);
+	SettingsWrapEntry(HWROVBarriersDisableColor);
+	SettingsWrapEntry(HWROVBarriersDisableDepth);
+	SettingsWrapEntry(HWROVPreset);
+	SettingsWrapEntry(HWROVUseBarriersVK);
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
