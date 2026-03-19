@@ -2331,7 +2331,7 @@ void GSRendererHW::Draw()
 	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
 	GSConfig.UserHacks_TCOffsetX = 0;
 	GSConfig.UserHacks_TCOffsetY = 0;
-
+	
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
@@ -8484,7 +8484,16 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		if (tex_enabled)
 		{
-			const bool no_round_clamp = m_channel_shuffle; // one_to_one || m_channel_shuffle;
+			// Hackfix - make shuffle always round up since they usually use powers of 2.
+			if (m_channel_shuffle || m_texture_shuffle)
+			{
+				for (int i = 0; i < m_index.tail; i++)
+				{
+					m_vertex.buff[m_index.buff[i]].RGBAQ.U32[1] = (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[1] & 0xFFFFFF) | 0x55000000;
+				}
+			}
+
+			const bool no_round_clamp = false; // m_channel_shuffle; // one_to_one || m_channel_shuffle;
 
 			// 0: No rounding, no clamping.
 			// 1: Full rounding, maybe clamping. (FIXME: Remove this)
