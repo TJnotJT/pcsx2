@@ -94,7 +94,7 @@ void main()
 	gl_Position.z *= exp2(-32.0f);		// integer->float depth
 
 	#if VS_TME
-		#if VS_ROUND_UV == 0
+		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			vec2 uv = a_uv - TextureOffset;
 		#else
 			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
@@ -120,6 +120,9 @@ void main()
 		// Get UV rounding info saved in Q.
 		#if VS_ROUND_UV
 			vsOut.rounduv = extract_round_uv_bits(a_q);
+		#endif
+
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vsOut.t.w = 1.0f;
 		#endif
 	#else
@@ -138,7 +141,7 @@ void main()
 	vsOut.t.z = a_f.r;
 
 	#if VS_CLAMP_UV
-		vsOut.uvrange = vec4(0);
+		vsOut.uvrange = vec4(0.0f);
 	#endif
 }
 
@@ -294,7 +297,7 @@ ProcessedVertex load_vertex(uint index)
 	vtx.p = vec4(transform_raw_pos(vtx.pos_raw), float(z), 1.0f);
 	vtx.p.z *= exp2(-32.0f);		// integer->float depth
 	#if VS_TME
-		#if VS_ROUND_UV == 0
+		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			vec2 uv = a_uv - TextureOffset;
 		#else
 			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
@@ -314,9 +317,11 @@ ProcessedVertex load_vertex(uint index)
 		// Get UV rounding info saved in Q.
 		#if VS_ROUND_UV
 			vtx.rounduv = extract_round_uv_bits(a_q);
-			vtx.t.w = 1.0f;
 		#endif
 
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
+			vsOut.t.w = 1.0f;
+		#endif
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
