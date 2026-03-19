@@ -1462,6 +1462,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugMessengerCallback(VkDebugUtilsMessageSeverit
 	{
 		Console.Warning("VK: debug report: (%s) %s",
 			pCallbackData->pMessageIdName ? pCallbackData->pMessageIdName : "", pCallbackData->pMessage);
+		printf("");
 	}
 	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
 	{

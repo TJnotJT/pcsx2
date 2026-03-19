@@ -18,6 +18,7 @@ layout(std140, set = 0, binding = 0) uniform cb0
 	uint pad_cb0;
 	uvec2 XYOffset;
 	float ScaleRT;
+	float ScaleTex;
 };
 
 layout(location = 0) out VSOutput
@@ -166,7 +167,7 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_ROUND_UV
 	uvec4 rounduv;
-	vec4 scale;
+	vec4 scale; // FIXME: Rename this.
 #endif
 	vec2 pos_raw;
 };
@@ -190,7 +191,7 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 		tex.yw = tex.wy;
 	}
 
-	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1)) / 16.0f) * 16.0f);
+	vec4 pos_round = vec4(ceil(pos.xy / 16.0f) * 16.0f, floor((pos.zw - vec2(1.0f)) / 16.0f) * 16.0f);
 
 	vec4 d_tex = tex.zwzw - tex.xyxy;
 	vec4 d_pos = pos.zwzw - pos.xyxy;
@@ -199,17 +200,32 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 
 	tex += grad * (pos_round - pos);
 
-	#if VS_ROUND_UV && VS_CLAMP_UV == 1
-		// Nearest sampling, do round down as per rounding rules.
-		bvec4 at_topleft = equal(ivec4(pos_round) >> 4, ivec4(round_info.xyxy));
-		bvec4 round_down = bvec4(ivec4(equal(round_info.zwzw & uvec4(PS_ROUND_UV_DOWN), uvec4(PS_ROUND_UV_DOWN))) & ~uvec4(at_topleft));
+	#if VS_ROUND_UV != 0 && VS_CLAMP_UV == 1
+		// UV rounding + nearest sampling, use rounding rules.
 
-		tex = mix(tex, tex - vec4(PS_ROUND_UV_THRESHOLD), round_down);
+		uvec4 topleft = uvec4(equal(pos / 16.0f, vec4(round_info.xyxy)));
+		uvec4 round_flags = round_info.zwzw & uvec4(PS_ROUND_UV_DOWN | PS_ROUND_UV_UP);
+		uvec4 round_down = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) &  ~topleft;
+		uvec4 round_up = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_UP))) |
+		                 (uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) & topleft);
+
+		vec4 texi = round(tex / 16.0f) * 16.0f; // Nearest texel.
+
+		// Round only if close to a texel boundary.
+		uvec4 close = uvec4(lessThanEqual(abs(tex - texi), vec4(PS_ROUND_UV_THRESHOLD)));
+		round_down &= close;
+		round_up &= close;
+
+		tex = mix(tex, texi - vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_down));
+		tex = mix(tex, texi + vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_up));
 	#endif
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
-	tex = vec4(floor(tex / 16.0f) * 16.0f + 8.0f);
+	#if VS_CLAMP_UV == 1
+		// Place in nearest texel center for nearest.
+		tex = vec4(floor(tex / 16.0f) * 16.0f + 8.0f);
+	#endif
 
 	return tex;
 }
@@ -375,12 +391,13 @@ void main()
 		#if VS_ROUND_UV
 			vec4 d_tex = tex.zwzw - tex.xyxy;
 			vec4 d_pos = pos.zwzw - pos.xyxy;
-
 			scale = d_tex / d_pos;
 		#endif
 	
-		#if VS_CLAMP_UV
+		#if VS_CLAMP_UV && VS_ROUND_UV
 			uvrange = sprite_clamp_uv_range(pos, tex, lt.rounduv);
+		#elif VS_CLAMP_UV
+			uvrange = sprite_clamp_uv_range(pos, tex, uvec4(0));
 		#endif
 
 		#if VS_ALIGN_UV
@@ -431,12 +448,13 @@ void main()
 		#if VS_ROUND_UV
 			vec4 d_tex = tex.zwzw - tex.xyxy;
 			vec4 d_pos = pos.zwzw - pos.xyxy;
-
 			scale = d_tex / d_pos;
 		#endif
 
-		#if VS_CLAMP_UV
+		#if VS_CLAMP_UV && VS_ROUND_UV
 			uvrange = sprite_clamp_uv_range(pos, tex, v0.rounduv);
+		#elif VS_CLAMP_UV
+			uvrange = sprite_clamp_uv_range(pos, tex, uvec4(0));
 		#endif
 
 		#if VS_ALIGN_UV
@@ -645,7 +663,7 @@ layout(location = 0) in VSOutput
 		flat uvec4 rounduv;
 		flat vec4 scale;
 	#endif
-	#if PS_CLAMP_UV
+	#if PS_CLAMP_UV != 0
 		flat vec4 uvrange;
 	#endif
 	vec4 pos_raw;
@@ -838,75 +856,74 @@ vec4 clamp_wrap_uv(vec4 uv)
 
 // PS_ROUND_UV == 1: Do rounding without an consideration for upscaling.
 // PS_ROUND_UV == 2: Try to account for upscaling differences.
-// PS_ROUND_UV == 3: No rounding, maybe just clamping.
-vec4 round_uv()
+vec4 round_and_clamp_uv()
 {
-#if PS_ROUND_UV != 0
 	// Check if we're at the prim top or left.
-	#if PS_ROUND_UV == 2
-		ivec2 pos = ivec2(gl_FragCoord.xy) / int(ScaleRT);
-		ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy)));
-	#else
-		ivec2 pos = ivec2(gl_FragCoord.xy);
-		ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy) * int(ScaleRT)));
-	#endif
+#if PS_ROUND_UV == 2
+	ivec2 pos = ivec2(gl_FragCoord.xy) / int(ScaleRT);
+	ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy)));
+#elif PS_ROUND_UV == 1
+	ivec2 pos = ivec2(gl_FragCoord.xy);
+	ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy) * int(ScaleRT)));
+#endif
 
+#if PS_ROUND_UV != 0
 	// Extract flags for whether to round U, V.
-	bvec2 round_per_pixel = bvec2(vsIn.rounduv.zw & ivec2(PS_ROUND_UV_PER_PIXEL));
+	ivec2 round_per_pixel = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_PER_PIXEL);
 	ivec2 round_flags = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_UP | PS_ROUND_UV_DOWN);
-	round_flags = mix(ivec2(0), round_flags, round_per_pixel);
+	round_flags = mix(ivec2(0), round_flags, bvec2(round_per_pixel));
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
 	ivec2 round_up = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_UP))) |
 	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
+#endif
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 
-	#if PS_CLAMP_UV
-		if (!all(equal(vsIn.uvrange, vec4(0))))
-			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
-	#endif
+#if PS_CLAMP_UV
+	if (!all(equal(vsIn.uvrange, vec4(0))))
+		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+#endif
 
-	#if PS_ROUND_UV == 2
-		vec2 native_xy = vec2(pos) + 0.5f;
-		vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
-		vec2 upscale_offset = native_xy - upscale_xy;
-		vec2 native_uv = uv + 16.0f * vsIn.scale.xy * upscale_offset;
-		uv = native_uv;
-	#endif
+#if PS_ROUND_UV == 2
+	vec2 native_xy = vec2(pos) + 0.5f;
+	vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
+	vec2 upscale_offset = native_xy - upscale_xy;
+	vec2 native_uv = uv + 16.0f * vsIn.scale.xy * upscale_offset;
+	uv = native_uv;
+#endif
 	
-	#if PS_ROUND_UV == 2
-		vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
-	#else
-		vec2 uvi = round(uv / (16.0f / ScaleTex)) * (16.0f / ScaleTex); // Nearest texel.
-	#endif
+#if PS_ROUND_UV == 2
+	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
+#elif PS_ROUND_UV == 1
+	vec2 uvi = round(uv * ScaleTex / 16.0f) * (16.0f / ScaleTex); // Nearest texel.
+#endif
 	
+#if PS_ROUND_UV != 0
 	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
+#endif
 
-	#if PS_ROUND_UV == 2
-		// Land into the center of the texel we should sample from.
-		uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
-		uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
-		uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
-		uv += -16.0f * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
-	#elif PS_ROUND_UV == 1
-		uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-		uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
-	#endif
+#if PS_ROUND_UV == 2
+	// Land into the center of the texel we should sample from.
+	uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
+	uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
+	uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
+	uv += -16.0f * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+#elif PS_ROUND_UV == 1
+	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+#endif
 
-	#if PS_CLAMP_UV
-		if (!all(equal(vsIn.uvrange, vec4(0))))
-			uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
-	#endif
+#if PS_CLAMP_UV
+	if (!all(equal(vsIn.uvrange, vec4(0))))
+		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
-#else
-	return vec4(0.0f);
-#endif
 }
 
 mat4 sample_4c(vec4 uv)
@@ -1328,8 +1345,8 @@ vec4 ps_color()
 #if PS_FST == 0
 	vec2 st = vsIn.t.xy / vsIn.t.w;
 	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
-#elif PS_ROUND_UV != 0
-	vec4 ti_rounded = round_uv();
+#elif PS_ROUND_UV != 0 || PS_CLAMP_UV != 0
+	vec4 ti_rounded = round_and_clamp_uv();
 	vec2 st = ti_rounded.xy;
 	vec2 st_int = ti_rounded.zw;
 #else
