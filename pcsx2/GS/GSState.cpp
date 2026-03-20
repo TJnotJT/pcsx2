@@ -4557,17 +4557,8 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 					const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
 
 					// For triangles, both dX and dY must be powers of 2 for no error.
-					if (!upscaling)
-					{
-						round_U = (negU || (pow2_dX && pow2_dY) || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-						round_V = (negV || (pow2_dX && pow2_dY) || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-					}
-					else
-					{
-						// Hack fix - do similar to sprite rules instead - look nicer
-						round_U = (negU || pow2_dX || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-						round_V = (negV || pow2_dY || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-					}
+					round_U = (negU || (pow2_dX && pow2_dY) || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+					round_V = (negV || (pow2_dX && pow2_dY) || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 					// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
 					// so there's no error at the first vertex of the left edge.
