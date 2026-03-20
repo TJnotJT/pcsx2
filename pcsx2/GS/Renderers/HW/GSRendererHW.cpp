@@ -8503,11 +8503,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				((GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::NativeTextures && tex->GetScale() == 1.0f) ||
 				(GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::AllTextures));
 
-			const bool rounding = !no_round_clamp && !m_vt.IsRealLinear() &&
-				GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
+			const bool rounding = !no_round_clamp && GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
 
 			// FIXME: Remove round UV option 1.
-			m_conf.ps.round_uv = rounding ? (native_rounding ? 2 : 1) : 0;
+			m_conf.ps.round_uv = rounding ? (native_rounding ? (m_vt.IsRealLinear() ? 3 : 2) : 1) : 0;
 			m_conf.vs.round_uv = rounding;
 
 			// Get bounding box of the first quad.

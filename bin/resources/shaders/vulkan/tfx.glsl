@@ -203,30 +203,23 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 
 	tex += grad * (pos_round - pos);
 
-	#if VS_ROUND_UV != 0 && VS_CLAMP_UV == 1
-		// UV rounding + nearest sampling, use rounding rules.
-
+	#if VS_ROUND_UV != 0
 		uvec4 topleft = uvec4(equal(pos / 16.0f, vec4(round_info.xyxy)));
 		uvec4 round_flags = round_info.zwzw & uvec4(PS_ROUND_UV_DOWN | PS_ROUND_UV_UP);
 		uvec4 round_down = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) &  ~topleft;
 		uvec4 round_up = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_UP))) |
-		                 (uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) & topleft);
-
-		vec4 texi = round(tex / 16.0f) * 16.0f; // Nearest texel.
-
-		// Round only if close to a texel boundary.
-		uvec4 close = uvec4(lessThanEqual(abs(tex - texi), vec4(PS_ROUND_UV_THRESHOLD)));
-		round_down &= close;
-		round_up &= close;
-
-		tex = mix(tex, texi - vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_down));
-		tex = mix(tex, texi + vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_up));
+							(uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) & topleft);
+		tex = mix(tex, tex - vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_down));
+		tex = mix(tex, tex + vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_up));
 	#endif
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
-	#if VS_CLAMP_UV == 1
-		// Place in nearest texel center for nearest.
+	#if VS_CLAMP_UV == 2
+		// Truncate to 1/16 texel for bilinear.
+		tex = floor(tex) + vec4(PS_ROUND_UV_THRESHOLD);
+	#elif VS_CLAMP_UV == 1
+		// Place in texel center for nearest.
 		tex = vec4(floor(tex / 16.0f) * 16.0f + 8.0f);
 	#endif
 
@@ -864,7 +857,7 @@ vec4 clamp_wrap_uv(vec4 uv)
 vec4 round_and_clamp_uv()
 {
 	// Check if we're at the prim top or left.
-#if PS_ROUND_UV == 2
+#if PS_ROUND_UV == 2 || PS_ROUND_UV == 3
 	ivec2 pos = ivec2(gl_FragCoord.xy) / int(ScaleRT);
 	ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy)));
 #elif PS_ROUND_UV == 1
@@ -905,14 +898,19 @@ vec4 round_and_clamp_uv()
 	vec2 uvi = round(uv * ScaleTex / 16.0f) * (16.0f / ScaleTex); // Nearest texel.
 #endif
 	
-#if PS_ROUND_UV != 0
+#if PS_ROUND_UV == 2 || PS_ROUND_UV == 1
 	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
 #endif
 
-#if PS_ROUND_UV == 2
+#if PS_ROUND_UV == 3
+	// Bilinear
+	uv = mix(uv, uv - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
+	uv = mix(uv, uv + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+	uv = floor(uv) + vec2(PS_ROUND_UV_THRESHOLD);
+#elif PS_ROUND_UV == 2
 	// Land into the center of the texel we should sample from.
 	uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
