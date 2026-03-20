@@ -34,11 +34,6 @@ out SHADER
 
 const float exp_min32 = exp2(-32.0f);
 
-vec2 sign_extend_16_bit(vec2 uv)
-{
-	return mix(uv, uv - vec2(0x10000), greaterThan(uv, vec2(0x7FFF)));
-}
-
 uvec4 extract_round_uv_bits(float q)
 {
 	uint qi = floatBitsToUint(q);
@@ -65,7 +60,7 @@ void texture_coord()
 	#if VS_ROUND_UV == 0
 		vec2 uv = vec2(i_uv) - TextureOffset;
 	#else
-		vec2 uv = sign_extend_16_bit(vec2(i_uv)) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+		vec2 uv = i_st - TextureOffset;
 	#endif
 	vec2 st = i_st - TextureOffset;
 
@@ -166,7 +161,7 @@ ProcessedVertex load_vertex(uint index)
 	#if VS_ROUND_UV == 0
 		vec2 uv = vec2(i_uv) - TextureOffset;
 	#else
-		vec2 uv = sign_extend_16_bit(vec2(i_uv)) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+		vec2 uv = i_st - TextureOffset;
 	#endif
 	vec2 st = i_st - TextureOffset;
 
