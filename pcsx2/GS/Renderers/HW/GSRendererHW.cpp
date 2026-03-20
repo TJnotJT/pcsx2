@@ -8493,46 +8493,23 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				}
 			}
 
-			const bool no_round_clamp = false; // m_channel_shuffle; // one_to_one || m_channel_shuffle;
-
-			// 0: No rounding, no clamping.
-			// 1: Full rounding, maybe clamping. (FIXME: Remove this)
-			// 2: Full rounding with upscale adjustments, maybe clamping.
-			// 3: No rounding, maybe clamping.
 			const bool native_rounding =
 				((GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::NativeTextures && tex->GetScale() == 1.0f) ||
 				(GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::AllTextures));
 
-			const bool rounding = !no_round_clamp && GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
+			const bool rounding = GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
 
-			// FIXME: Remove round UV option 1.
-			m_conf.ps.round_uv = rounding ? (native_rounding ? (m_vt.IsRealLinear() ? 3 : 2) : 1) : 0;
+			m_conf.ps.round_uv = rounding ? (m_vt.IsRealLinear() ? 2 : 1) : 0;
 			m_conf.vs.round_uv = rounding;
 
-			// Get bounding box of the first quad.
-			int n = m_vt.m_primclass == GS_TRIANGLE_CLASS ? 6 : 2;
-			GSVector4i bbox_i(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
-			for (int i = 0; i < n; i++)
-			{
-				bbox_i = bbox_i.runion(GSVector4i(m_vertex.buff[m_index.buff[i]].m[1]).upl16().xyxy());
-			}
-			bbox_i -= m_context->scissor.xyof.xyxy();
-			const GSVector4 bbox = GSVector4(bbox_i) / 16.0f;
-
-			// Heuristic: don't clamp on large sprites with upscaling because it might be a RT copy,
-			// which should use all pixels rather than clamping at primitive boundaries.
-			const bool rt_copy = tex->m_from_target &&
-				(std::floor(bbox.x) - 1.0f <= 0.0f && std::ceil(bbox.z) + 1.0f >= rt_w) ||
-				(std::floor(bbox.y) - 1.0f <= 0.0f && std::ceil(bbox.w) + 1.0f >= rt_h);
-			
 			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv =
-				!no_round_clamp && (rt_scale != 1.0f) &&
-				GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp;
+				(rt_scale != 1.0f) && GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp;
 			
 			if (m_conf.vs.clamp_uv && m_vt.IsRealLinear())
 			{
-				m_conf.vs.clamp_uv = 2; // Bilinear clamping (less aggressive).
+				m_conf.vs.clamp_uv = 2; // Bilinear clamping.
 			}
+
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 
@@ -8544,10 +8521,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			}
 		}
 
-		// 1: full align, 2: no half pixel offset.
-		m_conf.vs.align_uv =
-			(GSConfig.SpriteAlign == GSSpriteAlignMode::Off) ? 0 :
-			(/*one_to_one*/ 0 ? 2 : 1);
+		m_conf.vs.align_uv = (GSConfig.SpriteAlign != GSSpriteAlignMode::Off);;
 
 		// FIXME: Put this in SetupIA.
 		if (m_vt.m_primclass == GS_TRIANGLE_CLASS)

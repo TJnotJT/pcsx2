@@ -847,20 +847,15 @@ vec4 clamp_wrap_uv(vec4 uv)
 	return uv;
 }
 
-// PS_ROUND_UV == 1: Do rounding without an consideration for upscaling.
-// PS_ROUND_UV == 2: Try to account for upscaling differences.
+// PS_ROUND_UV == 1: Nearest rounding.
+// PS_ROUND_UV == 2: Bilinear rounding.
 vec4 round_and_clamp_uv()
 {
-	// Check if we're at the prim top or left.
-#if PS_ROUND_UV == 2 || PS_ROUND_UV == 3
-	ivec2 pos = ivec2(gl_FragCoord.xy) / int(ScaleRT);
-	ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy)));
-#elif PS_ROUND_UV == 1
-	ivec2 pos = ivec2(gl_FragCoord.xy);
-	ivec2 topleft = ivec2(equal(pos, ivec2(vsIn.rounduv.xy) * int(ScaleRT)));
-#endif
-
 #if PS_ROUND_UV != 0
+	// Check if we're at the prim top or left.
+	ivec2 native_xy_i = ivec2(gl_FragCoord.xy) / int(ScaleRT);
+	ivec2 topleft = ivec2(equal(native_xy_i, ivec2(vsIn.rounduv.xy)));
+
 	// Extract flags for whether to round U, V.
 	ivec2 round_per_pixel = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_PER_PIXEL);
 	ivec2 round_flags = ivec2(vsIn.rounduv.zw) & ivec2(PS_ROUND_UV_UP | PS_ROUND_UV_DOWN);
@@ -874,28 +869,20 @@ vec4 round_and_clamp_uv()
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 
-#if PS_ROUND_UV == 2
+#if PS_ROUND_UV == 1
 	// Find the equivalent native UV.
-	vec2 native_xy = vec2(pos) + 0.5f;
+	vec2 native_xy = vec2(native_xy_i) + 0.5f;
 	vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
 	vec2 upscale_offset = upscale_xy - native_xy;
 	vec2 native_uv = uv - 16.0f * vsIn.scale.xy * upscale_offset;
 	uv = native_uv;
 #endif
-
-#if PS_CLAMP_UV
-	if (!all(equal(vsIn.uvrange, vec4(0))))
-		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
-#endif
 	
-	// Find the nearest UV boundary.
-#if PS_ROUND_UV == 2
+#if PS_ROUND_UV != 0
 	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
-#elif PS_ROUND_UV == 1
-	vec2 uvi = round(uv * ScaleTex / 16.0f) * (16.0f / ScaleTex); // Nearest texel.
 #endif
 	
-#if PS_ROUND_UV == 2 || PS_ROUND_UV == 1
+#if PS_ROUND_UV == 1
 	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
@@ -903,27 +890,23 @@ vec4 round_and_clamp_uv()
 	round_up &= close;
 #endif
 
-#if PS_ROUND_UV == 3
+#if PS_ROUND_UV == 2
 	// Bilinear
 	uv = mix(uv, uv - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 	uv = mix(uv, uv + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
 	uv = floor(uv) + vec2(PS_ROUND_UV_THRESHOLD);
-#elif PS_ROUND_UV == 2
-	// Land into the center of the texel we should sample from.
+#elif PS_ROUND_UV == 1
+	// Get the center of the texel we would sample from at native.
 	uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
 	uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
 	uv += 16.0f * sign(vsIn.scale.xy) * upscale_offset;
 	uv = mix(uv, uvi + vec2(8.0f / ScaleTex), bvec2(round_down_tl));
 	uv += vec2(PS_ROUND_UV_THRESHOLD);
-#elif PS_ROUND_UV == 1
-	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
 #endif
 
 #if PS_CLAMP_UV
-	if (!all(equal(vsIn.uvrange, vec4(0))))
-		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+	uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
 #endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
