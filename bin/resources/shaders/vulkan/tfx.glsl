@@ -216,11 +216,11 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
 	#if VS_CLAMP_UV == 2
-		// Truncate to 1/16 texel for bilinear.
+		// Bilinear: truncate to 1/16 texel;
 		tex = floor(tex) + vec4(PS_ROUND_UV_THRESHOLD);
 	#elif VS_CLAMP_UV == 1
-		// Place in texel center for nearest.
-		tex = vec4(floor(tex / 16.0f) * 16.0f + 8.0f);
+		// Nearest: place in texel center, accounting for upscaling.
+		tex = vec4(floor(tex / 16.0f) * 16.0f) + vec2(8.0f / ScaleTex, 16.0f - 8.0f / ScaleTex).xxyy;
 	#endif
 
 	return tex;
@@ -879,11 +879,6 @@ vec4 round_and_clamp_uv()
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
 
-#if PS_CLAMP_UV
-	if (!all(equal(vsIn.uvrange, vec4(0))))
-		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
-#endif
-
 #if PS_ROUND_UV == 2
 	// Find the equivalent native UV.
 	vec2 native_xy = vec2(pos) + 0.5f;
@@ -892,7 +887,7 @@ vec4 round_and_clamp_uv()
 	vec2 native_uv = uv - 16.0f * vsIn.scale.xy * upscale_offset;
 	uv = native_uv;
 #endif
-	
+
 #if PS_CLAMP_UV
 	if (!all(equal(vsIn.uvrange, vec4(0))))
 		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);

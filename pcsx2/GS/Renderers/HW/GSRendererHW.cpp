@@ -8526,7 +8526,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 				(std::floor(bbox.y) - 1.0f <= 0.0f && std::ceil(bbox.w) + 1.0f >= rt_h);
 			
 			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv =
-				!no_round_clamp && /*!rt_copy &&*/ (rt_scale != 1.0f) && (tex->GetScale() == 1.0f) &&
+				!no_round_clamp && (rt_scale != 1.0f) &&
 				GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp;
 			
 			if (m_conf.vs.clamp_uv && m_vt.IsRealLinear())
