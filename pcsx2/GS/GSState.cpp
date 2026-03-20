@@ -4354,7 +4354,9 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 {
 	if (GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::Off &&
 		(!GSIsHardwareRenderer() || GSConfig.SpriteAlign == GSSpriteAlignMode::Off))
+	{
 		return false;
+	}
 
 	// The following rules are suggested by hardware tests and applies to cases where UVs should fall exactly on a texel boundary
 	// at pixel centers:
