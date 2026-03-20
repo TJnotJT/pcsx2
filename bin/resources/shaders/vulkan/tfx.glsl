@@ -917,7 +917,7 @@ vec4 round_and_clamp_uv()
 	uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
 	uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
-	uv += -16.0f * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+	uv += -16.0f * sign(vsIn.scale.xy) * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
 #elif PS_ROUND_UV == 1
 	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
