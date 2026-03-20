@@ -240,17 +240,14 @@ void ConvertVertexBuffer(const GSDrawingContext* RESTRICT ctx, GSVertexSW* RESTR
 		{
 			if (fst)
 			{
-				t = GSVector4(xyzuvf.uph16() << (16 - 4));
-
 				if (round_uv)
 				{
-					// Extend the sign bit in case ST was converted to UV.
-					constexpr GSVector4 max_uv = GSVector4::cxpr(static_cast<float>(0x7FFF << (16 - 4)));
-					constexpr GSVector4 bias = GSVector4::cxpr(static_cast<float>(0x10000 << (16 - 4)));
-					t = t.blend32(t - bias, t > max_uv);
-
-					// Get rounding data saved in Q.
-					t = t.insert32<3, 2>(stcq);
+					t = stcq.xyww() * static_cast<float>(1 << (16 - 4));
+					t = t.insert32<3, 2>(stcq); // Get rounding data saved in Q.
+				}
+				else
+				{
+					t = GSVector4(xyzuvf.uph16() << (16 - 4));
 				}
 			}
 			else if (q_div)

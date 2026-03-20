@@ -4467,25 +4467,28 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 
 		if constexpr (tme)
 		{
+			const auto GetUV_f = [&]<int uv>(const GSVertex & v) {
+				const u16 UV = (uv == 0) ? v.U : v.V;
+				const float ST = (uv == 0) ? v.ST.S : v.ST.T;
+				const int tsize = (uv == 0) ? tw : th;
+				return fst ? static_cast<float>(UV) : 16.0f * (ST / v.RGBAQ.Q) * tsize;
+			};
+
 			const auto GetUV = [&]<int uv>(const GSVertex & v) -> std::pair<int, bool> {
 				const u16 UV = (uv == 0) ? v.U : v.V;
 				const float ST = (uv == 0) ? v.ST.S : v.ST.T;
 				const int tsize = (uv == 0) ? tw : th;
 
-				if constexpr (fst)
-				{
-					return { UV, true };
-				}
-				else
-				{
-					// Only valid if converts exactly to a UV.
-					const float UV_conv = 16.0f * (ST / v.RGBAQ.Q) * tsize;
-					return { static_cast<int>(UV_conv), std::fmod(UV_conv, 1.0f) == 0.0f };
-				}
+				const float UV_f = GetUV_f.template operator()<uv>(v);
+				
+				// Only valid if 1/16 texel aligned.
+				return { static_cast<int>(UV_f), std::fmod(UV_f, 1.0f) == 0.0f };
 			};
 
-		const auto GetU = [&](const GSVertex& v) { return GetUV.template operator()<0>(v); };
-		const auto GetV = [&](const GSVertex& v) { return GetUV.template operator()<1>(v); };
+			const auto GetU_f = [&](const GSVertex& v) { return GetUV_f.template operator()<0>(v); };
+			const auto GetV_f = [&](const GSVertex& v) { return GetUV_f.template operator()<1>(v); };
+			const auto GetU = [&](const GSVertex& v) { return GetUV.template operator()<0>(v); };
+			const auto GetV = [&](const GSVertex& v) { return GetUV.template operator()<1>(v); };
 
 			const int X0 = static_cast<int>(v0.XYZ.X) - xyof.x;
 			const int Y0 = static_cast<int>(v0.XYZ.Y) - xyof.y;
@@ -4592,12 +4595,8 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				// Rounding settings (4 bits each for each U, V).
 				const u32 round_settings = round_U | (round_V << 4);
 
-				if constexpr (!fst)
-				{
-					// For ST, pre-divide by Q and save as UV. Sign bit will have to be extended later.
-					vtx[i + j].U = static_cast<u16>(std::get<0>(GetU(vtx[i + j])) & 0xFFFF);
-					vtx[i + j].V = static_cast<u16>(std::get<0>(GetV(vtx[i + j])) & 0xFFFF);
-				}
+				vtx[i + j].ST.S = GetU_f(vtx[i + j]);
+				vtx[i + j].ST.T = GetV_f(vtx[i + j]);
 
 				const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12);
 

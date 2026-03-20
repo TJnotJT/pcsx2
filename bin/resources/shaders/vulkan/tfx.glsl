@@ -97,7 +97,7 @@ void main()
 		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			vec2 uv = a_uv - TextureOffset;
 		#else
-			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			vec2 uv = a_st - TextureOffset;
 		#endif
 		
 		vec2 st = a_st - TextureOffset;
@@ -209,8 +209,8 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 		uvec4 round_down = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) &  ~topleft;
 		uvec4 round_up = uvec4(equal(round_flags, uvec4(PS_ROUND_UV_UP))) |
 							(uvec4(equal(round_flags, uvec4(PS_ROUND_UV_DOWN))) & topleft);
-		tex = mix(tex, tex - vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_down));
-		tex = mix(tex, tex + vec4(PS_ROUND_UV_THRESHOLD), bvec4(round_up));
+		tex = mix(tex, tex - 1 / 32.0f, bvec4(round_down));
+		tex = mix(tex, tex + 1 / 32.0f, bvec4(round_up));
 	#endif
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
@@ -293,7 +293,7 @@ ProcessedVertex load_vertex(uint index)
 		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			vec2 uv = a_uv - TextureOffset;
 		#else
-			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			vec2 uv = a_st - TextureOffset;
 		#endif
 		vec2 st = a_st - TextureOffset;
 		vtx.ti.xy = uv * TextureScale;
@@ -873,8 +873,8 @@ vec4 round_and_clamp_uv()
 
 	// Being on the top or left pixels converts round down to round up.
 	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
-	ivec2 round_up = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_UP))) |
-	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
+	ivec2 round_down_tl = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft;
+	ivec2 round_up = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_UP)));
 #endif
 
 	vec2 uv = vsIn.ti.zw; // Unnormalized UVs.
@@ -885,13 +885,20 @@ vec4 round_and_clamp_uv()
 #endif
 
 #if PS_ROUND_UV == 2
+	// Find the equivalent native UV.
 	vec2 native_xy = vec2(pos) + 0.5f;
 	vec2 upscale_xy = gl_FragCoord.xy / ScaleRT;
-	vec2 upscale_offset = native_xy - upscale_xy;
-	vec2 native_uv = uv + 16.0f * vsIn.scale.xy * upscale_offset;
+	vec2 upscale_offset = upscale_xy - native_xy;
+	vec2 native_uv = uv - 16.0f * vsIn.scale.xy * upscale_offset;
 	uv = native_uv;
 #endif
 	
+#if PS_CLAMP_UV
+	if (!all(equal(vsIn.uvrange, vec4(0))))
+		uv = clamp(uv, vsIn.uvrange.xy, vsIn.uvrange.zw);
+#endif
+	
+	// Find the nearest UV boundary.
 #if PS_ROUND_UV == 2
 	vec2 uvi = round(uv / 16.0f) * 16.0f; // Nearest texel.
 #elif PS_ROUND_UV == 1
@@ -902,6 +909,7 @@ vec4 round_and_clamp_uv()
 	// Round only if close to a texel boundary.
 	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
 	round_down &= close;
+	round_down_tl &= close;
 	round_up &= close;
 #endif
 
@@ -915,7 +923,9 @@ vec4 round_and_clamp_uv()
 	uv = mix(uv, uvi - vec2(8.0f), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(8.0f), bvec2(round_up));
 	uv = mix(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bvec2(1 & ~(round_down | round_up)));
-	uv += -16.0f * sign(vsIn.scale.xy) * upscale_offset + vec2(PS_ROUND_UV_THRESHOLD);
+	uv += 16.0f * sign(vsIn.scale.xy) * upscale_offset;
+	uv = mix(uv, uvi + vec2(8.0f / ScaleTex), bvec2(round_down_tl));
+	uv += vec2(PS_ROUND_UV_THRESHOLD);
 #elif PS_ROUND_UV == 1
 	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
 	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
