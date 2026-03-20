@@ -1361,11 +1361,6 @@ cbuffer cb0
 	uint BaseVertex; // Only used in DX11.
 };
 
-float2 sign_extend_16_bit(float2 uv)
-{
-	return uv > float(0x7FFF) ? uv - float(0x10000) : uv;
-}
-
 uint4 extract_round_uv_bits(float q)
 {
 	uint qi = asuint(q);
@@ -1399,7 +1394,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 		#if VS_ROUND_UV == 0
 			float2 uv = input.uv - TextureOffset;
 		#else
-			float2 uv = sign_extend_16_bit(input.uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			float2 uv = input.st - TextureOffset;
 		#endif
 		float2 st = input.st - TextureOffset;
 

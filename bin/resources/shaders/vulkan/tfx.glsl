@@ -34,11 +34,6 @@ layout(location = 0) out VSOutput
 	#endif
 } vsOut;
 
-vec2 sign_extend_16_bit(vec2 uv)
-{
-	return mix(uv, uv - vec2(0x10000), greaterThan(uv, vec2(0x7FFF)));
-}
-
 uvec4 extract_round_uv_bits(float q)
 {
 	uint qi = floatBitsToUint(q);
@@ -79,7 +74,7 @@ void main()
 		#if VS_ROUND_UV == 0
 			vec2 uv = a_uv - TextureOffset;
 		#else
-			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			vec2 uv = a_st - TextureOffset;
 		#endif
 		
 		vec2 st = a_st - TextureOffset;
@@ -173,7 +168,7 @@ ProcessedVertex load_vertex(uint index)
 		#if VS_ROUND_UV == 0
 			vec2 uv = a_uv - TextureOffset;
 		#else
-			vec2 uv = sign_extend_16_bit(a_uv) - TextureOffset; // Extend sign bit in case ST was converted to UV.
+			vec2 uv = a_st - TextureOffset;
 		#endif
 		vec2 st = a_st - TextureOffset;
 		vtx.ti.xy = uv * TextureScale;

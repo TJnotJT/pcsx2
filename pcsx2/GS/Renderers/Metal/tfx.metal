@@ -147,11 +147,6 @@ struct MainPSOut
 
 // MARK: - Vertex functions
 
-static float2 sign_extend_16_bit(float2 uv)
-{
-	return select(uv, uv - float(0x10000), uv > float(0x7FFF));
-}
-
 static uint4 extract_round_uv_bits(float q)
 {
 	uint qi = as_type<uint>(q);
@@ -172,7 +167,7 @@ static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, const
 	}
 	else
 	{
-		uv = sign_extend_16_bit(float2(v.uv)) - cb.texture_offset; // Extend sign bit in case ST was converted to UV.
+		uv = v.st - cb.texture_offset;
 	}
 	float2 st = v.st - cb.texture_offset;
 
