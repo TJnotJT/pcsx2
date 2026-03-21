@@ -282,4 +282,7 @@ public:
 	/// Create a temporary color clone of depth for depth feedback (DX12 and GL only right now)
 	void StartDepthAsRTFeedback();
 	void CleanupDepthAsRTFeedback();
+
+	/// Handle UV rounding and sprite alignment/clamping.
+	void SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex);
 };
