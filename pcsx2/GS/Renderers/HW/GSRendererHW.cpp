@@ -1833,6 +1833,7 @@ void GSRendererHW::HandleManualDeswizzle()
 
 	GSVector4i tex_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.y);
 	ReplaceVerticesWithSprite(m_r, tex_rect, GSVector2i(1 << m_cached_ctx.TEX0.TW, 1 << m_cached_ctx.TEX0.TH), m_context->scissor.in);
+	m_manual_deswizzle = true;
 }
 
 void GSRendererHW::InvalidateVideoMem(const GIFRegBITBLTBUF& BITBLTBUF, const GSVector4i& r)
@@ -7727,6 +7728,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	bool DATE_PRIMID = false;
 	bool DATE_BARRIER = false;
 	bool DATE_one = false;
+	m_manual_deswizzle = false;
 
 	ResetStates();
 
@@ -8484,10 +8486,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		if (tex_enabled)
 		{
-			// Hackfix - make shuffle always round up since they usually use powers of 2.
-			if (m_channel_shuffle || m_texture_shuffle)
+			// Hackfix - make shuffle/deswizzle always round up since they usually use powers of 2.
+			if (m_channel_shuffle || m_texture_shuffle || m_manual_deswizzle)
 			{
-				for (int i = 0; i < m_index.tail; i++)
+				for (int i = 0; i < static_cast<int>(m_index.tail); i++)
 				{
 					m_vertex.buff[m_index.buff[i]].RGBAQ.U32[1] = (m_vertex.buff[m_index.buff[i]].RGBAQ.U32[1] & 0xFFFFFF) | 0x55000000;
 				}
