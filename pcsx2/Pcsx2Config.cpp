@@ -752,7 +752,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	Mipmap = true;
 	HWMipmap = true;
 	HWAccurateAlphaTest = false;
-	AccurateUVRounding = GSAccurateUVRoundingMode::NativeTextures;
+	AccurateUVRounding = GSAccurateUVRoundingMode::On;
 	SpriteAlign = GSSpriteAlignMode::AlignClamp;
 
 	ManualUserHacks = false;

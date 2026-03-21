@@ -154,15 +154,7 @@ struct VS_PROCESSED
 	float4 ti;
 	float4 c;
 	float2 pos_raw;
-
-#if VS_ROUND_UV != 0
 	uint4 rounduv;
-	float4 scaleuv;
-#endif
-
-#if VS_CLAMP_UV != 0
-	float4 clampuv;
-#endif
 };
 
 struct PS_INPUT
@@ -1443,12 +1435,7 @@ float2 transform_raw_pos(float2 raw)
 	return ((raw + 8.0f - 0.05f) * float2(VertexScale.xy) - 1.0f) * float2(1.0f, -1.0f);
 }
 
-float2 transform_raw_pos_no_hpo(float2 raw)
-{
-	return ((raw - 0.05f) * float2(VertexScale.xy) - 1.0f) * float2(1.0f, -1.0f);
-}
-
-#if VS_EXPAND == 0
+#if !VS_EXPAND
 VS_OUTPUT vs_main(VS_INPUT input)
 #else
 VS_PROCESSED vs_main(VS_INPUT input)
@@ -1477,7 +1464,7 @@ VS_PROCESSED vs_main(VS_INPUT input)
 
 	if(VS_TME)
 	{
-		#if VS_ROUND_UV == 0
+		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			float2 uv = input.uv - TextureOffset;
 		#else
 			float2 uv = input.st - TextureOffset;
@@ -1502,13 +1489,10 @@ VS_PROCESSED vs_main(VS_INPUT input)
 		output.t.w = input.q;
 
 		// Get UV rounding info saved in Q.
-		#if VS_ROUND_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV
 			output.rounduv = extract_round_uv_bits(input.q);
-			output.scaleuv = 0.0f;
-		#endif
-
-		#if VS_CLAMP_UV
-			output.clampuv = 0.0f;
+		#elif VS_EXPAND
+			output.rounduv = 0u;
 		#endif
 
 		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
@@ -1520,12 +1504,8 @@ VS_PROCESSED vs_main(VS_INPUT input)
 		output.t.xy = 0;
 		output.t.w = 1.0f;
 		output.ti = 0;
-		#if VS_ROUND_UV
-			output.rounduv = 0;
-			output.scaleuv = 0.0f;
-		#endif
-		#if VS_CLAMP_UV
-			output.clampuv = 0.0f;
+		#if VS_EXPAND
+			output.rounduv = 0u;
 		#endif
 	}
 
@@ -1576,15 +1556,14 @@ float4 sprite_clamp_uv_range(float4 pos, float4 tex, uint4 round_info)
 
 	tex += grad * (pos_round - pos);
 
-	#if VS_ROUND_UV != 0
-		uint4 topleft = uint4((pos / 16.0f) == float4(round_info.xyxy));
-		uint4 round_flags = round_info.zwzw & (ROUND_UV_DOWN | ROUND_UV_UP);
-		uint4 round_down = uint4(round_flags == ROUND_UV_DOWN) &  ~topleft;
-		uint4 round_up = uint4(round_flags == ROUND_UV_UP) |
-		                 (uint4(round_flags == ROUND_UV_DOWN) & topleft);
-		tex = bool4(round_down) ? tex - 1 / 32.0f : tex;
-		tex = bool4(round_up) ? tex + 1 / 32.0f : tex;
-	#endif
+	// Do rounding of the endpoints.
+	uint4 topleft = uint4((pos / 16.0f) == float4(round_info.xyxy));
+	uint4 round_flags = round_info.zwzw & (ROUND_UV_DOWN | ROUND_UV_UP);
+	uint4 round_down = uint4(round_flags == ROUND_UV_DOWN) &  ~topleft;
+	uint4 round_up = uint4(round_flags == ROUND_UV_UP) |
+	                 (uint4(round_flags == ROUND_UV_DOWN) & topleft);
+	tex = bool4(round_down) ? tex - 1 / 32.0f : tex;
+	tex = bool4(round_up) ? tex + 1 / 32.0f : tex;
 
 	tex = float4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
@@ -1673,13 +1652,13 @@ VS_OUTPUT get_output(VS_PROCESSED vp)
 	vo.ti = vp.ti;
 	vo.c = vp.c;
 	
-#if VS_ROUND_UV != 0
+#if VS_ROUND_UV
 	vo.rounduv = vp.rounduv;
-	vo.scaleuv = vp.scaleuv;
+	vo.scaleuv = 0.0f;
 #endif
 
-#if VS_CLAMP_UV != 0
-	vo.clampuv = vp.scaleuv;
+#if VS_CLAMP_UV
+	vo.clampuv = 0.0f;
 #endif
 
 	return vo;
@@ -1738,21 +1717,14 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 			float4 scaleuv = d_tex / d_pos;
 		#endif
 	
-		#if VS_CLAMP_UV && VS_ROUND_UV
+		#if VS_CLAMP_UV
 			float4 clampuv = sprite_clamp_uv_range(pos, tex, lt.rounduv);
-		#elif VS_CLAMP_UV
-			float4 clampuv = sprite_clamp_uv_range(pos, tex, uint4(0));
 		#endif
 
 		#if VS_ALIGN_UV
-			#if VS_ALIGN_UV == 1
-				sprite_align_and_round(pos, tex);
-				lt.p.xy = transform_raw_pos(pos.xy);
-				rb.p.xy = transform_raw_pos(pos.zw);
-			#elif VS_ALIGN_UV == 2
-				lt.p.xy = transform_raw_pos_no_hpo(pos.xy);
-				rb.p.xy = transform_raw_pos_no_hpo(pos.zw);
-			#endif
+			sprite_align_and_round(pos, tex);
+			lt.p.xy = transform_raw_pos(pos.xy);
+			rb.p.xy = transform_raw_pos(pos.zw);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -1803,23 +1775,15 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 			float4 scaleuv = d_tex / d_pos;
 		#endif
 
-		#if VS_CLAMP_UV && VS_ROUND_UV
+		#if VS_CLAMP_UV
 			float4 clampuv = sprite_clamp_uv_range(pos, tex, v0.rounduv);
-		#elif VS_CLAMP_UV
-			float4 clampuv = sprite_clamp_uv_range(pos, tex, ufloat4(0));
 		#endif
 
 		#if VS_ALIGN_UV
-			#if VS_ALIGN_UV == 1
-				sprite_align_and_round(pos, tex);
-				v0.p.xy = transform_raw_pos(pos.xy);
-				v1.p.xy = transform_raw_pos(pos.zy);
-				v2.p.xy = transform_raw_pos(pos.xw);
-			#elif VS_ALIGN_UV == 2
-				v0.p.xy = transform_raw_pos_no_hpo(pos.xy);
-				v1.p.xy = transform_raw_pos_no_hpo(pos.zy);
-				v2.p.xy = transform_raw_pos_no_hpo(pos.xw);
-			#endif
+			sprite_align_and_round(pos, tex);
+			v0.p.xy = transform_raw_pos(pos.xy);
+			v1.p.xy = transform_raw_pos(pos.zy);
+			v2.p.xy = transform_raw_pos(pos.xw);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;

@@ -494,8 +494,7 @@ enum class AchievementOverlayPosition : u8
 enum class GSAccurateUVRoundingMode : u8
 {
 	Off,
-	NativeTextures,
-	AllTextures,
+	On,
 };
 
 enum class GSSpriteAlignMode : u8
@@ -880,7 +879,7 @@ struct Pcsx2Config
 		int SkipDrawStart = 0;
 		int SkipDrawEnd = 0;
 
-		GSAccurateUVRoundingMode AccurateUVRounding = GSAccurateUVRoundingMode::NativeTextures;
+		GSAccurateUVRoundingMode AccurateUVRounding = GSAccurateUVRoundingMode::On;
 		GSSpriteAlignMode SpriteAlign = GSSpriteAlignMode::AlignClamp;
 		GSHWAutoFlushLevel UserHacks_AutoFlush = GSHWAutoFlushLevel::Disabled;
 		GSHalfPixelOffset UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;

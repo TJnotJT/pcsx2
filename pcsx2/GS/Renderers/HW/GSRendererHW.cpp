@@ -10036,7 +10036,7 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 			m_conf.ps.round_uv = rounding ? (m_vt.IsRealLinear() ? 2 : 1) : 0;
 			m_conf.vs.round_uv = rounding;
 
-			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt_scale != 1.0f) && aligning;
+			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt_scale != 1.0f) && clamping;
 
 			if (m_conf.vs.clamp_uv && m_vt.IsRealLinear())
 			{

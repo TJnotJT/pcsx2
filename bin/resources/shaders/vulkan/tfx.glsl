@@ -58,11 +58,6 @@ vec2 transform_raw_pos(vec2 raw)
 	return (raw + vec2(8.0f - 0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
 }
 
-vec2 transform_raw_pos_no_hpo(vec2 raw)
-{
-	return (raw - vec2(0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
-}
-
 #if VS_EXPAND == 0
 
 layout(location = 0) in vec2 a_st;
@@ -113,9 +108,6 @@ void main()
 		// Get UV rounding info saved in Q.
 		#if VS_ROUND_UV
 			vsOut.rounduv = extract_round_uv_bits(a_q);
-		#endif
-
-		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vsOut.t.w = 1.0f;
 		#endif
 	#else
@@ -161,11 +153,8 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
-#if VS_ROUND_UV
-	uvec4 rounduv;
-	vec4 scaleuv;
-#endif
 	vec2 pos_raw;
+	uvec4 rounduv;
 };
 
 // VS_CLAMP_UV == 1: Nearest sampling.
@@ -196,15 +185,14 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 
 	tex += grad * (pos_round - pos);
 
-	#if VS_ROUND_UV != 0
-		uvec4 topleft = uvec4(equal(pos / 16.0f, vec4(round_info.xyxy)));
-		uvec4 round_flags = round_info.zwzw & uvec4(ROUND_UV_DOWN | ROUND_UV_UP);
-		uvec4 round_down = uvec4(equal(round_flags, uvec4(ROUND_UV_DOWN))) &  ~topleft;
-		uvec4 round_up = uvec4(equal(round_flags, uvec4(ROUND_UV_UP))) |
-		                 (uvec4(equal(round_flags, uvec4(ROUND_UV_DOWN))) & topleft);
-		tex = mix(tex, tex - 1 / 32.0f, bvec4(round_down));
-		tex = mix(tex, tex + 1 / 32.0f, bvec4(round_up));
-	#endif
+	// Do rounding of the endpoints.
+	uvec4 topleft = uvec4(equal(pos / 16.0f, vec4(round_info.xyxy)));
+	uvec4 round_flags = round_info.zwzw & uvec4(ROUND_UV_DOWN | ROUND_UV_UP);
+	uvec4 round_down = uvec4(equal(round_flags, uvec4(ROUND_UV_DOWN))) &  ~topleft;
+	uvec4 round_up = uvec4(equal(round_flags, uvec4(ROUND_UV_UP))) |
+	                 (uvec4(equal(round_flags, uvec4(ROUND_UV_DOWN))) & topleft);
+	tex = mix(tex, tex - 1 / 32.0f, bvec4(round_down));
+	tex = mix(tex, tex + 1 / 32.0f, bvec4(round_up));
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
@@ -301,8 +289,10 @@ ProcessedVertex load_vertex(uint index)
 		vtx.t.w = a_q;
 	
 		// Get UV rounding info saved in Q.
-		#if VS_ROUND_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV
 			vtx.rounduv = extract_round_uv_bits(a_q);
+		#else
+			vtx.rounduv = uvec4(0);
 		#endif
 
 		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
@@ -311,9 +301,7 @@ ProcessedVertex load_vertex(uint index)
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
-		#if VS_ROUND_UV
-			vtx.rounduv = uvec4(0);
-		#endif
+		vtx.rounduv = uvec4(0);
 	#endif
 
 	vtx.c = a_c;
@@ -383,21 +371,14 @@ void main()
 			scaleuv = d_tex / d_pos;
 		#endif
 	
-		#if VS_CLAMP_UV && VS_ROUND_UV
+		#if VS_CLAMP_UV
 			clampuv = sprite_clamp_uv_range(pos, tex, lt.rounduv);
-		#elif VS_CLAMP_UV
-			clampuv = sprite_clamp_uv_range(pos, tex, uvec4(0));
 		#endif
 
 		#if VS_ALIGN_UV
-			#if VS_ALIGN_UV == 1
-				sprite_align_and_round(pos, tex);
-				lt.p.xy = transform_raw_pos(pos.xy);
-				rb.p.xy = transform_raw_pos(pos.zw);
-			#elif VS_ALIGN_UV == 2
-				lt.p.xy = transform_raw_pos_no_hpo(pos.xy);
-				rb.p.xy = transform_raw_pos_no_hpo(pos.zw);
-			#endif
+			sprite_align_and_round(pos, tex);
+			lt.p.xy = transform_raw_pos(pos.xy);
+			rb.p.xy = transform_raw_pos(pos.zw);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -438,23 +419,15 @@ void main()
 			scaleuv = d_tex / d_pos;
 		#endif
 
-		#if VS_CLAMP_UV && VS_ROUND_UV
+		#if VS_CLAMP_UV
 			clampuv = sprite_clamp_uv_range(pos, tex, v0.rounduv);
-		#elif VS_CLAMP_UV
-			clampuv = sprite_clamp_uv_range(pos, tex, uvec4(0));
 		#endif
 
 		#if VS_ALIGN_UV
-			#if VS_ALIGN_UV == 1
-				sprite_align_and_round(pos, tex);
-				v0.p.xy = transform_raw_pos(pos.xy);
-				v1.p.xy = transform_raw_pos(pos.zy);
-				v2.p.xy = transform_raw_pos(pos.xw);
-			#elif VS_ALIGN_UV == 2
-				v0.p.xy = transform_raw_pos_no_hpo(pos.xy);
-				v1.p.xy = transform_raw_pos_no_hpo(pos.zy);
-				v2.p.xy = transform_raw_pos_no_hpo(pos.xw);
-			#endif
+			sprite_align_and_round(pos, tex);
+			v0.p.xy = transform_raw_pos(pos.xy);
+			v1.p.xy = transform_raw_pos(pos.zy);
+			v2.p.xy = transform_raw_pos(pos.xw);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;
