@@ -26,7 +26,6 @@ u64 GSState::s_transfer_n = 0;
 
 static __fi bool IsAutoFlushEnabled()
 {
-	GSConfig.UserHacks_AutoFlush = GSHWAutoFlushLevel::Enabled;
 	return GSIsHardwareRenderer() ? (GSConfig.UserHacks_AutoFlush != GSHWAutoFlushLevel::Disabled) : GSConfig.AutoFlushSW;
 }
 
