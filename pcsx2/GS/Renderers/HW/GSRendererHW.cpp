@@ -2326,7 +2326,6 @@ void GSRendererHW::Draw()
 	GSConfig.UserHacks_AlignSpriteX = false;
 	GSConfig.UserHacks_MergePPSprite = false;
 	GSConfig.UserHacks_ForceEvenSpritePosition = false;
-	GSConfig.UserHacks_BilinearHack = GSBilinearDirtyMode::Automatic;
 	GSConfig.UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;
 	GSConfig.UserHacks_RoundSprite = 0;
 	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
