@@ -2587,6 +2587,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		// v = v.blend8(vi - threshold, close_v & round_down_v);
 		// v = v.blend8(vi + threshold, close_v & round_up_v);
 
+		armAsm->Mov(uv.V4S(), tmp1.V4S());
+
 		armAsm->And(tmp3.V4S(), tmp3.V4S(), tmp2.V4S());
 		armAsm->And(tmp4.V4S(), tmp4.V4S(), tmp2.V4S());
 		armAsm->Sub(tmp2.V4S(), tmp1.V4S(), tmp5.V4S());
@@ -2594,13 +2596,10 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->And(tmp2.V4S(), tmp2.V4S(), tmp3.V4S());
 		armAsm->And(tmp6.V4S(), tmp6.V4S(), tmp4.V4S());
 
-		if (!m_sel.ltf) // FIXME: Remove after testing!
-		{
-			armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
-			armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S());
-			armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S());
-			armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S());
-		}
+		//armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
+		//armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S());
+		//armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S());
+		//armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S());
 	}
 }
 
