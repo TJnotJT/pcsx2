@@ -2593,10 +2593,14 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Add(tmp6.V4S(), tmp1.V4S(), tmp5.V4S());
 		armAsm->And(tmp2.V4S(), tmp2.V4S(), tmp3.V4S());
 		armAsm->And(tmp6.V4S(), tmp6.V4S(), tmp4.V4S());
-		// armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S()); // FIXME: Uncomment after testing!
+
+		if (!m_sel.ltf) // FIXME: Remove after testing!
+		{
+			armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
+			armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S());
+			armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S());
+			armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S());
+		}
 	}
 }
 
