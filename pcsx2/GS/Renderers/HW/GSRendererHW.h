@@ -284,5 +284,6 @@ public:
 	void CleanupDepthAsRTFeedback();
 
 	/// Handle UV rounding and sprite alignment/clamping.
-	void SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex);
+	void SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex,
+		GSDevice::RecycledTexture& tex_copy);
 };

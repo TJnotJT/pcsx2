@@ -8437,7 +8437,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
-	SetupSpriteRoundClampAlign(rt, ds, tex);
+	SetupSpriteRoundClampAlign(rt, ds, tex, tex_copy);
 
 	HandleProvokingVertexFirst();
 
@@ -10000,7 +10000,8 @@ void GSRendererHW::CleanupDepthAsRTFeedback()
 	}
 }
 
-void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex)
+void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex,
+	GSDevice::RecycledTexture& tex_copy)
 {
 	const GSTextureCache::Target* target = rt ? rt : ds;
 	
@@ -10051,6 +10052,24 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 				m_conf.alpha_second_pass.ps.round_uv = m_conf.ps.round_uv;
 				m_conf.alpha_second_pass.ps.clamp_uv = m_conf.ps.clamp_uv;
 				m_conf.alpha_second_pass.ps.fst = m_conf.ps.fst;
+			}
+
+			if (tex_scale != 1.0 && m_vt.IsRealLinear() && !tex_copy && tex->m_texture->IsRenderTarget())
+			{
+				const int tex_w_native = tex->GetUnscaledWidth();
+				const int tex_h_native = tex->GetUnscaledHeight();
+				const float tex_w_native_f = static_cast<float>(tex_w_native);
+				const float tex_h_native_f = static_cast<float>(tex_h_native);
+				tex_copy.reset(g_gs_device->CreateRenderTarget(tex_w_native, tex_h_native, tex->m_texture->GetFormat(), true, true));
+				const GSVector4 src_rect(0.0f, 0.0f, 1.0f, 1.0f);
+				const GSVector4 dst_rect(0.0f, 0.0f, tex_w_native_f, tex_h_native_f);
+				g_gs_device->StretchRect(tex->m_texture, src_rect, tex_copy.get(), dst_rect, ShaderConvert::COPY, true);
+				m_conf.tex = tex_copy.get();
+				m_conf.cb_vs.upscale.y = 1.0f;
+				m_conf.cb_ps.ScaleFactor.w = 1.0f;
+				m_conf.cb_ps.HalfTexel = GSVector4(-0.5f / tex_w_native_f, -0.5f / tex_h_native_f,
+				                                    0.5f / tex_w_native_f,  0.5f / tex_h_native_f);
+				m_conf.cb_ps.WH = m_conf.cb_ps.WH.xyxy();
 			}
 		}
 
