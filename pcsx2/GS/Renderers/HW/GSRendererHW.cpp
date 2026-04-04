@@ -699,10 +699,14 @@ GSRendererHW::TextureShuffleResult GSRendererHW::DetectTextureShuffleImpl()
 	}
 
 	// Sometimes the game doesn't care about certain channels and draws
-	// wide quads that clobber them, so log those in case it helps debugging.
-	const bool quad_mixes_16pixel_groups =
+	// wide quads that clobber them, so disable such writes for non-recursive draws.
+	const bool disable_clobber_write = frame.Block() != tex0.TBP0;
+
+	// Determine if quads are wide enough and X, U are offset so that clobbering happens.
+	const bool quad_mixes_16_pixel_groups =
 		x_u_offset == 8 && x_pixels >= 16 && shuffle_type != TextureShuffleType::RegionRepeat16;
-	if (quad_mixes_16pixel_groups)
+
+	if (disable_clobber_write && quad_mixes_16_pixel_groups)
 	{
 		const auto RoundPage = [](int x) { return (x + 32) & ~63; };
 
@@ -727,8 +731,17 @@ GSRendererHW::TextureShuffleResult GSRendererHW::DetectTextureShuffleImpl()
 			g_clobber = !!(shuffle_channels & TextureShuffleChannels_WriteGreen);
 		}
 
-		GL_INS("Likely clobbered: R: %d, G: %d, B: %d, A: %d.",
+		GL_INS("Non-recursive draw, disable writes to clobbered channels: R: %d, G: %d, B: %d, A: %d.",
 			r_clobber, g_clobber, b_clobber, a_clobber);
+
+		if (r_clobber)
+			shuffle_channels &= ~TextureShuffleChannels_WriteRed;
+		if (g_clobber)
+			shuffle_channels &= ~TextureShuffleChannels_WriteGreen;
+		if (b_clobber)
+			shuffle_channels &= ~TextureShuffleChannels_WriteBlue;
+		if (a_clobber)
+			shuffle_channels &= ~TextureShuffleChannels_WriteAlpha;
 	}
 
 	// Log which channels are read/written.
@@ -889,7 +902,8 @@ void GSRendererHW::ConvertSpriteTextureShuffleImpl(GSTextureCache::Target* rt, G
 	const auto ShiftAlignRect = [&](const GSVector4& rf) {
 		GSVector4i ri;
 		
-		if (rf.z - rf.x > 7.0)
+		const float rf_w = rf.z - rf.x;
+		if (m_texture_shuffle_result.type != TextureShuffleType::TwoPixel || rf_w >= 8.0f)
 		{
 			// Snap to nearest column.
 			const GSVector4 rf_snapped = (rf / 8.0f).round<Round_NearestInt>() * 8.0f;
@@ -901,9 +915,9 @@ void GSRendererHW::ConvertSpriteTextureShuffleImpl(GSTextureCache::Target* rt, G
 		}
 		else
 		{
-			// Only round coords, since they may not be columns aligned for small shuffles
-			// like the Powerdrome 2 pixel shuffle.
-			ri = GSVector4i(rf.ceil().xyzw(rf.floor() + GSVector4(1.0f)));
+			// Powerdrome two pixel shuffle: rects are only 1 or 2 pixels so use a different
+			// heuristic to adjust the coords. Should not be used for other shuffles.
+			ri = GSVector4i(rf.floor()) + GSVector4i(0, 0, 1, 1);
 		}
 
 		const int w = ri.width();
@@ -967,6 +981,8 @@ void GSRendererHW::ConvertSpriteTextureShuffleImpl(GSTextureCache::Target* rt, G
 		m_r = rt->GetUnscaledRect();
 		tex_r = tex->GetUnscaledRect();
 		scissor_r = m_r;
+
+		GL_INS("GappedSwizzle (NFS Undercover): rewriting rects to use full area.");
 	}
 	else if (m_texture_shuffle_result.type == TextureShuffleType::Swizzle ||
 	    m_texture_shuffle_result.type == TextureShuffleType::SwizzleTex32)
@@ -1093,9 +1109,6 @@ void GSRendererHW::ConvertSpriteTextureShuffleImpl(GSTextureCache::Target* rt, G
 			half_u = false;
 		}
 	}
-
-	GSVector4i m_r_orig = m_r;
-	GSVector4i tex_r_orig = tex_r;
 
 	GL_INS("Halving: X: %d, Y: %d, U: %d, V: %d", half_x, half_y, half_u, half_v);
 
