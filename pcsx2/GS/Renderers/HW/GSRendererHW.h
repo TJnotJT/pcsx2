@@ -127,6 +127,7 @@ private:
 		SwizzleTex32,
 		TwoPixel,
 		GappedSwizzle,
+		HackShuffle,
 	};
 
 	// Enum for determining which channels to read/write in a texture shuffle.
@@ -243,8 +244,8 @@ private:
 	u32 GetEffectiveTextureShuffleFbmsk() const;
 	template<u32 primclass, bool fst>
 	TextureShuffleInfo DetectTextureShuffleImpl();
-	TextureShuffleInfo DetectTextureShuffle();
-	bool DetectTextureShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
+	void DetectTextureShuffle();
+	void DetectTextureShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	template<u32 primclass, bool fst>
 	void ConvertSpriteTextureShuffleImpl(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	void ConvertSpriteTextureShuffle(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
