@@ -2324,6 +2324,17 @@ void GSRendererHW::Draw()
 {
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
+	static bool dump_next_autoflush = false;
+	if (dump_next_autoflush || m_state_flush_reason == AUTOFLUSH)
+	{
+		DumpDrawInfo(true, true, false);
+		dump_next_autoflush = m_state_flush_reason == AUTOFLUSH;
+	}
+	else
+	{
+		dump_next_autoflush = false;
+	}
+
 	// We mess with this state as an optimization, so take a copy and use that instead.
 	const GSDrawingContext* context = m_context;
 	m_cached_ctx.TEX0 = context->TEX0;

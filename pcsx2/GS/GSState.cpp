@@ -25,7 +25,8 @@ u64 GSState::s_transfer_n = 0;
 
 static __fi bool IsAutoFlushEnabled()
 {
-	return GSIsHardwareRenderer() ? (GSConfig.UserHacks_AutoFlush != GSHWAutoFlushLevel::Disabled) : GSConfig.AutoFlushSW;
+	return true;
+	// return GSIsHardwareRenderer() ? (GSConfig.UserHacks_AutoFlush != GSHWAutoFlushLevel::Disabled) : GSConfig.AutoFlushSW;
 }
 
 constexpr int GSState::GetSaveStateSize(int version)
@@ -4542,7 +4543,7 @@ __forceinline bool GSState::EarlyDetectShuffle(u32 prim)
 
 __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 {
-	if (!PRIM->TME || (GSConfig.UserHacks_AutoFlush == GSHWAutoFlushLevel::SpritesOnly && prim != GS_SPRITE))
+	if (!PRIM->TME)
 		return false;
 
 	// Not using the same channels.
