@@ -1679,6 +1679,34 @@ void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextu
 	DrawStretchRect(sRect, dRect, dTex->GetSize());
 }
 
+void GSDeviceOGL::CopyRTAndDepth(GSTexture* sRt, GSTexture* sDepth, const GSVector4& sRect,
+	GSTexture* dRt, GSTexture* dDepth, const GSVector4& dRect, const GLProgram& ps)
+{
+	pxAssertRel(sRt && sDepth && dRt && dDepth, "All inputs/outputs must be non-null");
+
+	CommitClear(sRt, true);
+	CommitClear(sDepth, true);
+
+	GL_PUSH("CopyRTAndDepth from %d, %d to %d, %d",
+		static_cast<GSTextureOGL*>(sRt)->GetID(), static_cast<GSTextureOGL*>(sDepth)->GetID(),
+		static_cast<GSTextureOGL*>(dRt)->GetID(), static_cast<GSTextureOGL*>(dDepth)->GetID());
+	
+	OMSetRenderTargets(dRt, nullptr, dDepth);
+
+	ps.Bind();
+
+	OMSetDepthStencilState(m_convert.dss_write);
+
+	OMSetBlendState();
+	OMSetColorMaskState();
+
+	PSSetShaderResource(0, sRt);
+	PSSetShaderResource(1, sDepth);
+	PSSetSamplerState(m_convert.pt);
+
+	DrawStretchRect(sRect, dRect, dRt->GetSize());
+}
+
 void GSDeviceOGL::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, PresentShader shader, float shaderTime, bool linear)
 {
 	CommitClear(sTex, true);

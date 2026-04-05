@@ -276,6 +276,9 @@ protected:
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 		GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear) override;
 
+	void CopyRTAndDepth(GSTexture* rt, GSTexture* depth, const GSVector4& sRect,
+		GSTexture* dRt, GSTexture* dDepth, const GSVector4& dRect, const GLProgram& ps);
+
 public:
 	GSDeviceOGL();
 	virtual ~GSDeviceOGL();

@@ -72,6 +72,7 @@ const char* shaderName(ShaderConvert value)
 		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
 		case ShaderConvert::DEPTH_COPY:             return "ps_depth_copy";
 		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
+		case ShaderConvert::COPY_BOTH:              return "ps_copy_both";
 		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
 		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
 		case ShaderConvert::CLUT_4:                 return "ps_convert_clut_4";
