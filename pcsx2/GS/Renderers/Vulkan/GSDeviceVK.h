@@ -88,8 +88,8 @@ public:
 		VkAttachmentLoadOp depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD,
 		VkAttachmentStoreOp depth_store_op = VK_ATTACHMENT_STORE_OP_STORE,
 		VkAttachmentLoadOp stencil_load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-		VkAttachmentStoreOp stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE, bool color_feedback_loop = false,
-		bool depth_sampling = false);
+		VkAttachmentStoreOp stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+		u32 color_feedback_loop = 0, bool depth_sampling = false);
 
 	// Gets a non-clearing version of the specified render pass. Slow, don't call in hot path.
 	VkRenderPass GetRenderPassForRestarting(VkRenderPass pass);
@@ -171,7 +171,7 @@ private:
 			u32 depth_store_op : 1;
 			u32 stencil_load_op : 2;
 			u32 stencil_store_op : 1;
-			u32 color_feedback_loop : 1;
+			u32 color_feedback_loop : 2;
 			u32 depth_sampling : 1;
 		};
 
@@ -296,7 +296,28 @@ public:
 		FeedbackLoopFlag_ReadAndWriteRT = 1,
 		FeedbackLoopFlag_ReadDepth = 2,
 		FeedbackLoopFlag_ReadAndWriteDepth = 4,
+		FeedbackLoopFlag_ReadAndWriteRTAutoflush = 8,
 	};
+
+	static u32 GetRTFeedbackLoop(u32 fbl)
+	{
+		if (fbl & FeedbackLoopFlag_ReadAndWriteRTAutoflush)
+			return 2;
+		else if (fbl & FeedbackLoopFlag_ReadAndWriteRT)
+			return 1;
+		else
+			return 0;
+	}
+
+	static bool IsDepthFeedbackLoop(u32 fbl)
+	{
+		return (fbl & FeedbackLoopFlag_ReadAndWriteDepth) != 0;
+	}
+
+	static bool IsTestingAndSamplingDepth(u32 fbl)
+	{
+		return (fbl & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0;
+	}
 
 	struct alignas(8) PipelineSelector
 	{
@@ -310,7 +331,7 @@ public:
 				u32 rt : 1;
 				u32 ds : 1;
 				u32 line_width : 1;
-				u32 feedback_loop_flags : 3;
+				u32 feedback_loop_flags : 4;
 			};
 
 			u32 key;
@@ -327,9 +348,9 @@ public:
 
 		__fi PipelineSelector() { std::memset(this, 0, sizeof(*this)); }
 
-		__fi bool IsRTFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT) != 0); }
-		__fi bool IsDepthFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) != 0); }
-		__fi bool IsTestingAndSamplingDepth() const { return ((feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0); }
+		__fi u32 GetRTFeedbackLoop() const { return  GSDeviceVK::GetRTFeedbackLoop(feedback_loop_flags); }
+		__fi bool IsDepthFeedbackLoop() const { return GSDeviceVK::IsDepthFeedbackLoop(feedback_loop_flags); }
+		__fi bool IsTestingAndSamplingDepth() const { return GSDeviceVK::IsTestingAndSamplingDepth(feedback_loop_flags); }
 	};
 	static_assert(sizeof(PipelineSelector) == 24, "Pipeline selector is 24 bytes");
 
@@ -420,7 +441,7 @@ private:
 	VkRenderPass m_date_setup_render_pass = VK_NULL_HANDLE;
 	VkRenderPass m_swap_chain_render_pass = VK_NULL_HANDLE;
 
-	VkRenderPass m_tfx_render_pass[2][2][2][3][2][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
+	VkRenderPass m_tfx_render_pass[2][2][2][3][3][2][3][3] = {}; // [rt][ds][colclip][date][fbl][dsp][rt_op][ds_op]
 
 	VkDescriptorSetLayout m_cas_ds_layout = VK_NULL_HANDLE;
 	VkPipelineLayout m_cas_pipeline_layout = VK_NULL_HANDLE;
@@ -495,7 +516,7 @@ public:
 	/// Returns true if Vulkan is suitable as a default for the devices in the system.
 	static bool IsSuitableDefaultRenderer();
 
-	__fi VkRenderPass GetTFXRenderPass(bool rt, bool ds, bool colclip, bool stencil, bool fbl, bool dsp,
+	__fi VkRenderPass GetTFXRenderPass(bool rt, bool ds, bool colclip, bool stencil, u32 fbl, bool dsp,
 		VkAttachmentLoadOp rt_op, VkAttachmentLoadOp ds_op) const
 	{
 		return m_tfx_render_pass[rt][ds][colclip][stencil][fbl][dsp][rt_op][ds_op];
@@ -566,8 +587,7 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
-	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
-		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None);
+	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, u32 feedback_loop = 0);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
@@ -578,7 +598,7 @@ public:
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
-	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
+	VkDependencyFlags GetFeedbackBarrierDependencyFlags(bool autoflush) const;
 	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
 		bool one_barrier, bool full_barrier);
 
@@ -675,7 +695,7 @@ private:
 
 	// Which bindings/state has to be updated before the next draw.
 	u32 m_dirty_flags = 0;
-	FeedbackLoopFlag m_current_framebuffer_feedback_loop = FeedbackLoopFlag_None;
+	u32 m_current_framebuffer_feedback_loop = 0;
 	bool m_warned_slow_spin = false;
 
 	VkBuffer m_index_buffer = VK_NULL_HANDLE;

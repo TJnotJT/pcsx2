@@ -2324,15 +2324,18 @@ void GSRendererHW::Draw()
 {
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
-	static bool dump_next_autoflush = false;
-	if (dump_next_autoflush || m_state_flush_reason == AUTOFLUSH)
+	if (0)
 	{
-		DumpDrawInfo(true, true, false);
-		dump_next_autoflush = m_state_flush_reason == AUTOFLUSH;
-	}
-	else
-	{
-		dump_next_autoflush = false;
+		static bool dump_next_autoflush = false;
+		if (dump_next_autoflush || m_state_flush_reason == AUTOFLUSH)
+		{
+			DumpDrawInfo(true, true, false);
+			dump_next_autoflush = m_state_flush_reason == AUTOFLUSH;
+		}
+		else
+		{
+			dump_next_autoflush = false;
+		}
 	}
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
@@ -7122,6 +7125,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	const GSTextureCache::Target* src_target = nullptr;
 	if (!m_downscale_source || !tex->m_from_target)
 	{
+		// FIXME: Make a proper flag for autoflush()?
 		if (rt && m_conf.tex == m_conf.rt && !(m_channel_shuffle && tex && tex_diff != frame_diff))
 		{
 			// Can we read the framebuffer directly? (i.e. sample location matches up).
@@ -7515,7 +7519,7 @@ bool GSRendererHW::CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextu
 		const GSVector4 diff(m_vt.m_min.p.upld(m_vt.m_max.p) - m_vt.m_min.t.upld(m_vt.m_max.t));
 		if (m_cached_ctx.FRAME.FBMSK == 0x00FFFFFF && (diff.abs() < GSVector4(1.0f)).alltrue())
 		{
-			GL_CACHE("HW: Elabling tex-is-fb hack for Jak.");
+			GL_CACHE("HW: Enabling tex-is-fb hack for Jak.");
 			return true;
 		}
 
@@ -8470,6 +8474,47 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		ComputeDrawlistGetSize(rt->m_scale);
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	if (m_conf.tex && m_autoflush_list.size() > 0)
+	{
+		// FIXME: make the draw list computation within autoflush list?
+		m_conf.require_full_barrier = true;
+		m_conf.require_one_barrier = false;
+		m_conf.autoflush_list = &m_autoflush_list;
+		m_conf.autoflush_bbox = &m_autoflush_bbox;
+		m_conf.autoflush = true;
+
+		std::vector<size_t> drawlist;
+		if (!m_drawlist.empty())
+		{
+			for (int i = 0, j = 0; i < m_autoflush_list.size(); i++)
+			{
+				int prims = m_autoflush_list[i];
+				while (prims > 0)
+				{
+					if (m_drawlist[j] > prims)
+					{
+						drawlist.push_back(prims);
+						m_drawlist[j] -= prims;
+						prims = 0;
+					}
+					else
+					{
+						drawlist.push_back(m_drawlist[j]);
+						prims -= m_drawlist[j];
+						m_drawlist[j] = 0;
+						j++;
+					}
+				}
+			}
+			m_drawlist = std::move(drawlist);
+			m_conf.drawlist = &m_drawlist;
+		}
+		else
+		{
+			m_conf.drawlist = &m_autoflush_list;
+		}
 	}
 
 	HandleProvokingVertexFirst();

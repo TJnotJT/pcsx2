@@ -4486,11 +4486,70 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		if ((one_barrier || full_barrier) && feedback_depth)
 			PSSetShaderResource(4, draw_ds, false, true);
 		
-		if (full_barrier)
+		if (full_barrier && config.autoflush)
+		{
+			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
+			const u32 indices_per_prim = config.indices_per_prim;
+			const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
+
+			GL_PUSH("Split the draw");
+
+			for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
+			{
+				if (a > 0)
+				{
+					EndRenderPass();
+
+					CopyRect(config.rt, config.tex, (*config.autoflush_bbox)[a - 1],
+						(*config.autoflush_bbox)[a - 1].x, (*config.autoflush_bbox)[a - 1].y);
+
+					OMSetRenderTargets(config.rt, nullptr, config.ds, config.scissor);
+
+					BeginRenderPass(
+						D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE,
+						D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+						config.ds ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+						config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+						config.ds ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+						config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS);
+				}
+
+				int prims = (*config.autoflush_list)[a];
+
+				bool skip_first = a > 0;
+				bool first = true;
+
+				while (prims > 0)
+				{
+					const u32 count = (*config.drawlist)[n] * indices_per_prim;
+
+					if (!(skip_first && first))
+					{
+						if (feedback_rt)
+							FeedbackBarrier(draw_rt);
+						if (feedback_depth)
+							FeedbackBarrier(draw_ds);
+
+						g_perfmon.Put(GSPerfMon::Barriers, n_barriers);
+					}
+
+					if (BindDrawPipeline(pipe))
+						DrawIndexedPrimitive(p, count);
+
+					prims -= (*config.drawlist)[n];
+					p += count;
+					n++;
+				}
+			}
+
+			return;
+		}
+		else if (full_barrier)
 		{
 			pxAssert(config.drawlist && !config.drawlist->empty());
 			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
 			const u32 indices_per_prim = config.indices_per_prim;
+			const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list ? config.autoflush_list->size() : 0);
 
 			GL_PUSH("Split the draw");
 			g_perfmon.Put(GSPerfMon::Barriers, n_barriers * draw_list_size);

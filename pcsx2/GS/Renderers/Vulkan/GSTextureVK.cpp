@@ -761,7 +761,7 @@ VkFramebuffer GSTextureVK::GetFramebuffer(bool feedback_loop)
 	return GetLinkedFramebuffer(nullptr, feedback_loop, false);
 }
 
-VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool feedback_loop_color, bool feedback_loop_depth)
+VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, u32 feedback_loop_color, bool feedback_loop_depth)
 {
 	pxAssertRel(m_type != Type::Texture, "Texture is a render target");
 

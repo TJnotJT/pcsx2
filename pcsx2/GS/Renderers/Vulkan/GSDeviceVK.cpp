@@ -987,7 +987,7 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 
 VkRenderPass GSDeviceVK::GetRenderPass(VkFormat color_format, VkFormat depth_format, VkAttachmentLoadOp color_load_op,
 	VkAttachmentStoreOp color_store_op, VkAttachmentLoadOp depth_load_op, VkAttachmentStoreOp depth_store_op,
-	VkAttachmentLoadOp stencil_load_op, VkAttachmentStoreOp stencil_store_op, bool color_feedback_loop,
+	VkAttachmentLoadOp stencil_load_op, VkAttachmentStoreOp stencil_store_op, u32 color_feedback_loop,
 	bool depth_sampling)
 {
 	RenderPassCacheKey key = {};
@@ -1563,8 +1563,8 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 				subpass_dependency[num_subpass_dependencies].dstAccessMask =
 					UseFeedbackLoopLayout() ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
 				subpass_dependency[num_subpass_dependencies].dependencyFlags =
-					UseFeedbackLoopLayout() ? (VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT) :
-											  VK_DEPENDENCY_BY_REGION_BIT;
+					UseFeedbackLoopLayout() ? ((key.color_feedback_loop == 1 ? VK_DEPENDENCY_BY_REGION_BIT : 0) | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT) :
+					(key.color_feedback_loop == 1 ? VK_DEPENDENCY_BY_REGION_BIT : 0);
 				num_subpass_dependencies++;
 			}
 		}
@@ -3447,7 +3447,7 @@ void GSDeviceVK::IASetIndexBuffer(const void* index, size_t count)
 }
 
 void GSDeviceVK::OMSetRenderTargets(
-	GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, FeedbackLoopFlag feedback_loop)
+	GSTexture* rt, GSTexture* ds, const GSVector4i& scissor, u32 feedback_loop)
 {
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
@@ -3461,16 +3461,13 @@ void GSDeviceVK::OMSetRenderTargets(
 
 		if (vkRt)
 		{
-			m_current_framebuffer =
-				vkRt->GetLinkedFramebuffer(vkDs,
-					(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT) != 0,
-					(feedback_loop & (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth)) != 0);
+			m_current_framebuffer = vkRt->GetLinkedFramebuffer(
+				vkDs, GetRTFeedbackLoop(feedback_loop), IsDepthFeedbackLoop(feedback_loop));
 		}
 		else
 		{
-			pxAssert(!(feedback_loop & FeedbackLoopFlag_ReadAndWriteRT));
-			m_current_framebuffer = vkDs->GetLinkedFramebuffer(
-				nullptr, false, (feedback_loop & (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth)) != 0);
+			pxAssert(GetRTFeedbackLoop(feedback_loop) == 0);
+			m_current_framebuffer = vkDs->GetLinkedFramebuffer(nullptr, false, IsDepthFeedbackLoop(feedback_loop));
 		}
 	}
 	else if (InRenderPass())
@@ -3558,7 +3555,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	{
 		if (vkRt)
 		{
-			if (feedback_loop & FeedbackLoopFlag_ReadAndWriteRT)
+			if (GetRTFeedbackLoop(feedback_loop) != 0)
 			{
 				// NVIDIA drivers appear to return random garbage when sampling the RT via a feedback loop, if the load op for
 				// the render pass is CLEAR. Using vkCmdClearAttachments() doesn't work, so we have to clear the image instead.
@@ -3895,7 +3892,7 @@ bool GSDeviceVK::CreateRenderPasses()
 			{
 				for (u32 stencil = 0; stencil < 2; stencil++)
 				{
-					for (u32 fbl = 0; fbl < 2; fbl++)
+					for (u32 fbl = 0; fbl < 3; fbl++)
 					{
 						for (u32 dsp = 0; dsp < 2; dsp++)
 						{
@@ -4904,7 +4901,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	{
 		gpb.SetRenderPass(
 			GetTFXRenderPass(p.rt, p.ds, p.ps.colclip_hw, p.dss.date,
-				p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
+				p.GetRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
 				p.rt ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 				p.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 			0);
@@ -4982,7 +4979,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	// Tests have shown that it's faster to just enable rast order on the entire pass, rather than alternating
 	// between turning it on and off for different draws, and adding the required barrier between non-rast-order
 	// and rast-order draws.
-	if (m_features.framebuffer_fetch && p.IsRTFeedbackLoop())
+	if (m_features.framebuffer_fetch && p.GetRTFeedbackLoop())
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
 	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
@@ -5100,7 +5097,7 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartRenderPass(bool wait_for_completi
 	const GSVector4i scissor = m_scissor;
 	GSTexture* const current_rt = m_current_render_target;
 	GSTexture* const current_ds = m_current_depth_target;
-	const FeedbackLoopFlag current_feedback_loop = m_current_framebuffer_feedback_loop;
+	const PipelineSelector pipe = m_pipeline_selector; // FIXME: Make the feedback loop flags have the method internally.
 
 	EndRenderPass();
 	ExecuteCommandBuffer(GetWaitType(wait_for_completion, GSConfig.HWSpinCPUForReadbacks));
@@ -5108,7 +5105,7 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartRenderPass(bool wait_for_completi
 	if (render_pass != VK_NULL_HANDLE)
 	{
 		// rebind framebuffer
-		OMSetRenderTargets(current_rt, current_ds, scissor, current_feedback_loop);
+		OMSetRenderTargets(current_rt, current_ds, scissor, pipe.feedback_loop_flags);
 
 		// restart render pass
 		BeginRenderPass(GetRenderPassForRestarting(render_pass), render_pass_area);
@@ -5170,7 +5167,7 @@ void GSDeviceVK::InvalidateCachedState()
 	m_current_framebuffer = VK_NULL_HANDLE;
 	m_current_render_target = nullptr;
 	m_current_depth_target = nullptr;
-	m_current_framebuffer_feedback_loop = FeedbackLoopFlag_None;
+	m_current_framebuffer_feedback_loop = 0;
 
 	m_current_pipeline_layout = PipelineLayout::Undefined;
 	m_tfx_texture_descriptor_set = VK_NULL_HANDLE;
@@ -5760,7 +5757,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// If we don't have a barrier but the texture was drawn to last draw, end the pass to insert a barrier.
 	if (InRenderPass())
 	{
-		if ((!pipe.IsRTFeedbackLoop() && config.tex == m_current_render_target) ||
+		if ((!pipe.GetRTFeedbackLoop() && config.tex == m_current_render_target) ||
 			(!pipe.IsDepthFeedbackLoop() && config.tex == m_current_depth_target))
 			EndRenderPass();
 	}
@@ -5776,7 +5773,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			colclip_rt->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 
 			draw_rt = static_cast<GSTextureVK*>(config.rt);
-			OMSetRenderTargets(draw_rt, draw_ds, GSVector4i::loadh(rtsize), static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
+			OMSetRenderTargets(draw_rt, draw_ds, GSVector4i::loadh(rtsize), pipe.feedback_loop_flags);
 
 			// if this target was cleared and never drawn to, perform the clear as part of the resolve here.
 			if (draw_rt->GetState() == GSTexture::State::Cleared)
@@ -5787,7 +5784,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 				if (draw_ds)
 					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
 
-				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.GetRTFeedbackLoop(),
 										 pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_CLEAR,
 										 pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect(), cvs, cv_count);
@@ -5795,7 +5792,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			}
 			else
 			{
-				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.GetRTFeedbackLoop(),
 									pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_LOAD,
 									pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect());
@@ -5803,7 +5800,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 			const GSVector4 drawareaf = GSVector4(config.colclip_update_area);
 			const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
-			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.GetRTFeedbackLoop()]);
 			SetUtilityTexture(colclip_rt, m_point_sampler);
 			DrawStretchRect(sRect, drawareaf, rtsize);
 
@@ -5940,8 +5937,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("VK: Failed to allocate temp texture for RT copy.");
 	}
 
-	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
-	if (pipe.IsRTFeedbackLoop())
+	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, pipe.feedback_loop_flags);
+	if (pipe.GetRTFeedbackLoop())
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		PSSetShaderResource(TFX_TEXTURE_RT, draw_rt, false);
@@ -5957,7 +5954,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		const VkAttachmentLoadOp rt_op = GetLoadOpForTexture(draw_rt);
 		const VkAttachmentLoadOp ds_op = GetLoadOpForTexture(draw_ds);
 		const VkRenderPass rp = GetTFXRenderPass(pipe.rt, pipe.ds, pipe.ps.colclip_hw,
-			config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil, pipe.IsRTFeedbackLoop(),
+			config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil, pipe.GetRTFeedbackLoop(),
 			pipe.IsTestingAndSamplingDepth(), rt_op, ds_op);
 		const bool is_clearing_rt = (rt_op == VK_ATTACHMENT_LOAD_OP_CLEAR || ds_op == VK_ATTACHMENT_LOAD_OP_CLEAR);
 
@@ -6007,7 +6004,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		OMSetRenderTargets(draw_rt, draw_ds, GSVector4i::loadh(rtsize), static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
 		SetUtilityTexture(static_cast<GSTextureVK*>(config.rt), m_point_sampler);
-		SetPipeline(m_colclip_setup_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+		SetPipeline(m_colclip_setup_pipelines[pipe.ds][pipe.GetRTFeedbackLoop()]);
 
 		const GSVector4 drawareaf = GSVector4((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ? GSVector4i::loadh(rtsize) : config.drawarea);
 		const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
@@ -6023,7 +6020,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// now we can do the actual draw
 	if (BindDrawPipeline(pipe))
-		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
+		SendHWDraw(config, pipe.GetRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
 			config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
@@ -6059,7 +6056,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		pipe.bs = config.blend;
 		if (BindDrawPipeline(pipe))
 		{
-			SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
+			SendHWDraw(config, pipe.GetRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
 				config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
 		}
 	}
@@ -6095,7 +6092,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 				if (draw_ds)
 					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
 
-				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.GetRTFeedbackLoop(),
 										 pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_CLEAR,
 										 pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect(), cvs, cv_count);
@@ -6103,7 +6100,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			}
 			else
 			{
-				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.GetRTFeedbackLoop(),
 									pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_LOAD,
 									pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect());
@@ -6111,7 +6108,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 			const GSVector4 drawareaf = GSVector4(config.colclip_update_area);
 			const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
-			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.GetRTFeedbackLoop()]);
 			SetUtilityTexture(colclip_rt, m_point_sampler);
 			DrawStretchRect(sRect, drawareaf, rtsize);
 
@@ -6139,7 +6136,9 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
 	{
-		if (config.ps.IsFeedbackLoopRT())
+		if (config.autoflush)
+			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRTAutoflush;
+		else if (config.ps.IsFeedbackLoopRT())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 
 		if (config.ps.IsFeedbackLoopDepth())
@@ -6194,10 +6193,14 @@ VkImageMemoryBarrier GSDeviceVK::GetDepthStencilBufferFeedbackBarrier(GSTextureV
 		{VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0u, 1u, 0u, 1u}};
 }
 
-VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags() const
+VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags(bool autoflush) const
 {
-	return UseFeedbackLoopLayout() ? (VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT) :
-	                                 VK_DEPENDENCY_BY_REGION_BIT;
+	VkDependencyFlags flags{};
+	if (!autoflush)
+		flags |= VK_DEPENDENCY_BY_REGION_BIT;
+	if (UseFeedbackLoopLayout())
+		flags |= VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT;
+	return flags;
 }
 
 void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
@@ -6213,7 +6216,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 	if ((one_barrier || full_barrier) && !(m_pipeline_selector.ps.IsFeedbackLoopRT() || m_pipeline_selector.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("VK: Possible unnecessary barrier detected.");
 #endif
-	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
+	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags(config.autoflush);
 
 	std::array<VkImageMemoryBarrier, 2> barriers;
 	u32 n_barriers = 0;

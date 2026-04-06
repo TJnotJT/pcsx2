@@ -1883,6 +1883,9 @@ void GSState::Flush(GSFlushReason reason)
 
 		m_dirty_gs_regs = 0;
 		temp_draw_rect = GSVector4i::zero();
+		m_autoflush_list.clear();
+		m_autoflush_bbox.clear();
+		m_autoflush_tail = 0;
 	}
 
 	m_state_flush_reason = GSFlushReason::UNKNOWN;
@@ -2069,6 +2072,15 @@ void GSState::FlushPrim()
 			}
 
 			pxAssert((int)unused < GSUtil::GetVertexCount(PRIM->PRIM));
+		}
+
+		if (m_autoflush_tail > 0 && m_index.tail > m_autoflush_tail)
+		{
+			// FIXME: Make a helper functions for this (Update autoflush list or so).
+			const int n = GSUtil::GetVertexCount(PRIM->PRIM);
+			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
+			m_autoflush_bbox.push_back(temp_draw_rect);
+			m_autoflush_tail = m_index.tail;
 		}
 
 		// If the PSM format of Z is invalid, but it is masked (no write) and ZTST is set to ALWAYS pass (no test, just allow)
@@ -4685,6 +4697,23 @@ __forceinline void GSState::HandleAutoFlush()
 	if ((m_index.tail & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
 		return;
 
+	const auto DoFlush = [&]() {
+		if (m_context->TEX0.TBP0 == m_context->FRAME.Block() &&
+			(m_context->TEX0.PSM & ~1) == (m_context->FRAME.PSM & ~1))
+		{
+			constexpr int n = GSUtil::GetVertexCount(prim);
+			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
+			m_autoflush_bbox.push_back(temp_draw_rect);
+			m_autoflush_tail = m_index.tail;
+			temp_draw_rect = GSVector4i::zero();
+			m_texflush_flag = false;
+		}
+		else
+		{
+			Flush(GSFlushReason::AUTOFLUSH);
+		}
+	};
+
 	// To briefly explain what's going on here, what we are checking for is draws over a texture when the source and destination are themselves.
 	// Because one page of the texture gets buffered in the Texture Cache (the PS2's one) if any of those pixels are overwritten, you still read the old data.
 	// So we need to calculate if a page boundary is being crossed for the format it is in and if the same part of the texture being written and read inside the draw.
@@ -4884,7 +4913,7 @@ __forceinline void GSState::HandleAutoFlush()
 			return;
 		else if (m_texflush_flag)
 		{
-			Flush(GSFlushReason::AUTOFLUSH);
+			DoFlush();
 			return;
 		}
 
@@ -4905,7 +4934,7 @@ __forceinline void GSState::HandleAutoFlush()
 				GSVector4i old_draw_rect = GSVector4i::zero();
 				int current_draw_end = m_index.tail;
 
-				while (current_draw_end >= n)
+				while (current_draw_end >= m_autoflush_tail + n)
 				{
 					for (int i = current_draw_end - 1; i >= current_draw_end - n; i--)
 					{
@@ -4955,7 +4984,7 @@ __forceinline void GSState::HandleAutoFlush()
 					old_draw_rect = tex_rect.rintersect(old_draw_rect);
 					if (!old_draw_rect.rintersect(scissor).rempty())
 					{
-						Flush(GSFlushReason::AUTOFLUSH);
+						DoFlush();
 						return;
 					}
 
@@ -4982,10 +5011,10 @@ __forceinline void GSState::HandleAutoFlush()
 					area_out = GSVector4i(area_out.x / frame_psm.pgs.x, area_out.y / frame_psm.pgs.y, area_out.z / frame_psm.pgs.x, area_out.w / frame_psm.pgs.y);
 
 					if (!area_out.rintersect(tex_rect).rempty())
-						Flush(GSFlushReason::AUTOFLUSH);
+						DoFlush();
 				}
 				else // Formats are too different so just flush it.
-					Flush(GSFlushReason::AUTOFLUSH);
+					DoFlush();
 			}
 		}
 	}
@@ -5005,7 +5034,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 		return;
 	}
 
-	if (auto_flush && skip == 0 && m_index.tail > 0 && ((m_vertex.tail + 1) - m_vertex.head) >= n)
+	if (auto_flush && skip == 0 && m_index.tail > m_autoflush_tail && ((m_vertex.tail + 1) - m_vertex.head) >= n)
 	{
 		HandleAutoFlush<prim>();
 	}
@@ -5248,7 +5277,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 	// Update rectangle for the current draw. We can use the re-integer coordinates from min/max here.
 	const GSVector4i draw_min = pmin.zwzw();
 	const GSVector4i draw_max = pmax;
-	if (m_vertex.tail != n)
+	if (m_index.tail != m_autoflush_tail + n)
 		temp_draw_rect = temp_draw_rect.min_i32(draw_min).blend32<12>(temp_draw_rect.max_i32(draw_max));
 	else
 		temp_draw_rect = draw_min.blend32<12>(draw_max);

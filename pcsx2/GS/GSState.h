@@ -273,6 +273,10 @@ public:
 	static u64 s_last_transfer_draw_n;
 	static u64 s_transfer_n;
 
+	std::vector<size_t> m_autoflush_list;
+	std::vector<GSVector4i> m_autoflush_bbox;
+	u32 m_autoflush_tail = 0;
+
 	GSPerfMon m_perfmon_frame; // Track stat across a frame.
 	GSPerfMon m_perfmon_draw;  // Track stat across a draw.
 
