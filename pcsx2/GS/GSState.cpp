@@ -4834,11 +4834,11 @@ __forceinline void GSState::HandleAutoFlush()
 		if (m_context->TEX0.TBP0 == m_context->FRAME.Block() &&
 			(m_context->TEX0.PSM & ~1) == (m_context->FRAME.PSM & ~1))
 		{
-			if (s_n == 1047)
+			/*if (s_n == 1047)
 			{
 				static int i = 0;
 				Console.Warning("AUTOFLUSH PRIMS: %d: %d", i++, (int)(m_index.tail - m_autoflush_tail) / 3);
-			}
+			}*/
 			constexpr int n = GSUtil::GetVertexCount(prim);
 			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
 			m_autoflush_tail = m_index.tail;
