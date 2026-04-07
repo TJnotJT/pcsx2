@@ -5,6 +5,7 @@
 #include "GS/GSGL.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
+#include "GS/GSState.h"
 #include "GS/Renderers/DX11/D3D.h"
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
@@ -4473,10 +4474,10 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 	const int n_barriers = static_cast<int>(feedback_rt) + static_cast<int>(feedback_depth);
 
-	if (feedback_rt || feedback_depth)
+	if (feedback_rt || feedback_depth || config.autoflush)
 	{
 #ifdef PCSX2_DEVBUILD
-		if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
+		if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth() || config.autoflush)) [[unlikely]]
 			Console.Warning("D3D12: Possible unnecessary barrier detected.");
 #endif
 		if ((one_barrier || full_barrier) && feedback_rt)
@@ -4486,32 +4487,51 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		if ((one_barrier || full_barrier) && feedback_depth)
 			PSSetShaderResource(4, draw_ds, false, true);
 		
-		if (full_barrier && config.autoflush)
+		if (config.autoflush)
 		{
 			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
 			const u32 indices_per_prim = config.indices_per_prim;
 			const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
 
 			GL_PUSH("Split the draw");
+			
+			EndRenderPass();
 
 			for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
 			{
-				if (a > 0)
+				if (a >= 0)
 				{
-					EndRenderPass();
+					//GSVector4i bbox = (*config.autoflush_bbox)[a - 1];
+					//if (bbox.rempty())
+					//{
+					//	printf("");
+					//}
+					//bbox = (bbox + GSVector4i(-1, -1, 1, 1)).rintersect(config.drawarea);
 
-					CopyRect(config.rt, config.tex, (*config.autoflush_bbox)[a - 1],
-						(*config.autoflush_bbox)[a - 1].x, (*config.autoflush_bbox)[a - 1].y);
+					GL_INS("DRAW %lld", GSState::s_n - 1048 + 1637);
 
+					GSVector4i bbox = config.tex->GetRect();
+					CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+
+					if (0 && GSState::s_n <= 1300)
+					{
+						std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt0_03300_(03300)_C_32.png", GSState::s_n - 1048 + 1637);
+						config.rt->Save(s);
+						s = GSState::GetDrawDumpPath("%05lld_f00000_itex_tgt_03300(03300)_C_32_22_00_1ff_00_19f.png", GSState::s_n - 1048 + 1637);
+						config.tex->Save(s);
+						GSState::s_n++;
+					}
+
+					PSSetShaderResource(TEXTURE_TEXTURE, config.tex, true);
 					OMSetRenderTargets(config.rt, nullptr, config.ds, config.scissor);
 
-					BeginRenderPass(
+					/*BeginRenderPass(
 						D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE,
 						D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
 						config.ds ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 						config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 						config.ds ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-						config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS);
+						config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS);*/
 				}
 
 				int prims = (*config.autoflush_list)[a];
@@ -4539,6 +4559,12 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 					prims -= (*config.drawlist)[n];
 					p += count;
 					n++;
+				}
+
+				if (0 && GSState::s_n <= 1300)
+				{
+					std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt1_03300_(03300)_C_32.png", GSState::s_n - 1 - 1048 + 1637);
+					config.rt->Save(s);
 				}
 			}
 

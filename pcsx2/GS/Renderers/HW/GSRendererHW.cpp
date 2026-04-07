@@ -8479,8 +8479,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	if (m_conf.tex && m_autoflush_list.size() > 0)
 	{
 		// FIXME: make the draw list computation within autoflush list?
-		m_conf.require_full_barrier = true;
-		m_conf.require_one_barrier = false;
+		// m_conf.require_full_barrier = true;
+		// m_conf.require_one_barrier = false;
 		m_conf.autoflush_list = &m_autoflush_list;
 		m_conf.autoflush_bbox = &m_autoflush_bbox;
 		m_conf.autoflush = true;

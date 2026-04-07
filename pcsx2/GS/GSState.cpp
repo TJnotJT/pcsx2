@@ -2096,11 +2096,28 @@ void GSState::FlushPrim()
 		m_env.CTXT[PRIM->CTXT].UpdateScissor();
 		m_vt.Update(m_vertex.buff, m_index.buff, m_vertex.tail, m_index.tail, GSUtil::GetPrimClass(PRIM->PRIM));
 
+		bool flat_z = true;
+		const int n = GSUtil::GetVertexCount(PRIM->PRIM);
+		for (int i = 0; i < m_index.tail; i += n)
+		{
+			const u32 z = m_vertex.buff[m_index.buff[i]].XYZ.Z;
+			for (int j = 1; j < n; j++)
+			{
+				if (m_vertex.buff[m_index.buff[i + j]].XYZ.Z != z)
+				{
+					flat_z = false;
+					break;
+				}
+			}
+			if (!flat_z)
+				break;
+		}
+
 		// Texel coordinate rounding
 		// Helps Manhunt (lights shining through objects).
 		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
 		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
-		if (PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
+		if (0 && PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z || (m_autoflush_tail && flat_z)))
 		{
 			if (!PRIM->FST) // STQ's
 			{
@@ -4694,13 +4711,18 @@ template<u32 prim>
 __forceinline void GSState::HandleAutoFlush()
 {
 	// Kind of a cheat, making the assumption that 2 consecutive fan/strip triangles won't overlap each other (*should* be safe)
-	if ((m_index.tail & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
+	if (((m_index.tail - m_autoflush_tail) & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
 		return;
 
 	const auto DoFlush = [&]() {
 		if (m_context->TEX0.TBP0 == m_context->FRAME.Block() &&
 			(m_context->TEX0.PSM & ~1) == (m_context->FRAME.PSM & ~1))
 		{
+			if (s_n == 1047)
+			{
+				static int i = 0;
+				Console.Warning("AUTOFLUSH PRIMS: %d: %d", i++, (int)(m_index.tail - m_autoflush_tail) / 3);
+			}
 			constexpr int n = GSUtil::GetVertexCount(prim);
 			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
 			m_autoflush_bbox.push_back(temp_draw_rect);
