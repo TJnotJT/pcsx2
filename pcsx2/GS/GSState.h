@@ -273,10 +273,6 @@ public:
 	static u64 s_last_transfer_draw_n;
 	static u64 s_transfer_n;
 
-	std::vector<size_t> m_autoflush_list;
-	std::vector<GSVector4i> m_autoflush_bbox;
-	u32 m_autoflush_tail = 0;
-
 	GSPerfMon m_perfmon_frame; // Track stat across a frame.
 	GSPerfMon m_perfmon_draw;  // Track stat across a draw.
 
@@ -352,6 +348,12 @@ public:
 	PRIM_OVERLAP m_prim_overlap = PRIM_OVERLAP_UNKNOW;
 	std::vector<size_t> m_drawlist;
 	std::vector<GSVector4i> m_drawlist_bbox;
+
+	std::vector<size_t> m_autoflush_list;
+	std::vector<GSVector4i> m_autoflush_bbox;
+	u32 m_autoflush_tail = 0;
+
+	bool HasAutoflushDrawlist() { return m_autoflush_tail > 0; }
 
 	struct GSPCRTCRegs
 	{
@@ -487,6 +489,9 @@ public:
 	PRIM_OVERLAP GetPrimitiveOverlapDrawlistImpl(bool save_drawlist = false, bool save_bbox = false, float bbox_scale = 1.0f);
 	PRIM_OVERLAP GetPrimitiveOverlapDrawlist(bool save_drawlist = false, bool save_bbox = false, float bbox_scale = 1.0f);
 	PRIM_OVERLAP PrimitiveOverlap(bool save_drawlist = false);
+	template<u32 primclass, bool fst>
+	void ProcessAutoflushDrawlistImpl(float pos_scale, float tex_scale);
+	void ProcessAutoflushDrawlist(float pos_scale, float tex_scale);
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);

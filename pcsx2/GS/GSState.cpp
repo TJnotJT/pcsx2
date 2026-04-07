@@ -2079,7 +2079,6 @@ void GSState::FlushPrim()
 			// FIXME: Make a helper functions for this (Update autoflush list or so).
 			const int n = GSUtil::GetVertexCount(PRIM->PRIM);
 			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
-			m_autoflush_bbox.push_back(temp_draw_rect);
 			m_autoflush_tail = m_index.tail;
 		}
 
@@ -2096,28 +2095,11 @@ void GSState::FlushPrim()
 		m_env.CTXT[PRIM->CTXT].UpdateScissor();
 		m_vt.Update(m_vertex.buff, m_index.buff, m_vertex.tail, m_index.tail, GSUtil::GetPrimClass(PRIM->PRIM));
 
-		bool flat_z = true;
-		const int n = GSUtil::GetVertexCount(PRIM->PRIM);
-		for (int i = 0; i < m_index.tail; i += n)
-		{
-			const u32 z = m_vertex.buff[m_index.buff[i]].XYZ.Z;
-			for (int j = 1; j < n; j++)
-			{
-				if (m_vertex.buff[m_index.buff[i + j]].XYZ.Z != z)
-				{
-					flat_z = false;
-					break;
-				}
-			}
-			if (!flat_z)
-				break;
-		}
-
 		// Texel coordinate rounding
 		// Helps Manhunt (lights shining through objects).
 		// Can help with some alignment issues when upscaling too, and is for both Software and Hardware renderers.
 		// Sometimes hardware doesn't get affected, likely due to the difference in how GPU's handle textures (Persona minimap).
-		if (0 && PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z || (m_autoflush_tail && flat_z)))
+		if (0 && PRIM->TME && (GSUtil::GetPrimClass(PRIM->PRIM) == GS_PRIM_CLASS::GS_SPRITE_CLASS || m_vt.m_eq.z))
 		{
 			if (!PRIM->FST) // STQ's
 			{
@@ -4253,6 +4235,140 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap(bool save_drawlist)
 	return GetPrimitiveOverlapDrawlist(save_drawlist);
 }
 
+template<u32 primclass, bool fst>
+void GSState::ProcessAutoflushDrawlistImpl(float pos_scale, float tex_scale)
+{
+	GL_INS("Autoflush draw: processing list for %lld draws.", m_autoflush_list.size());
+
+	if (!m_drawlist.empty())
+	{
+		// Chop the barrier drawlist to fit within each autoflush draw.
+		std::vector<size_t> drawlist;
+		drawlist.reserve(m_drawlist.capacity());
+		for (size_t i = 0, j = 0; i < m_autoflush_list.size(); i++)
+		{
+			int prims = static_cast<int>(m_autoflush_list[i]);
+			while (prims > 0)
+			{
+				if (m_drawlist[j] > static_cast<size_t>(prims))
+				{
+					drawlist.push_back(prims);
+					m_drawlist[j] -= prims;
+					prims = 0;
+				}
+				else
+				{
+					drawlist.push_back(m_drawlist[j]);
+					prims -= m_drawlist[j];
+					m_drawlist[j] = 0;
+					j++;
+				}
+			}
+		}
+		m_drawlist = std::move(drawlist);
+	}
+	else
+	{
+		const size_t n_elems = m_autoflush_list.size();
+		m_drawlist.resize(n_elems);
+		std::memcpy(m_drawlist.data(), m_autoflush_list.data(), sizeof(m_autoflush_list[0]) * n_elems);
+	}
+
+	constexpr int n = GSUtil::GetClassVertexCount(primclass);
+	const float tw = static_cast<float>(1 << m_context->TEX0.TW);
+	const float th = static_cast<float>(1 << m_context->TEX0.TH);
+	const GSVector4 tex_size(tw, th, tw, th);
+
+	const GSVertex* RESTRICT verts = m_vertex.buff;
+	const u16* RESTRICT index = m_index.buff;
+
+	const auto ProcessBBox = [](GSVector4 bbox, float scale) {
+		bbox += GSVector4(-1.0f, -1.0f, 1.0f, 1.0f); // Expand 1 native pixel.
+		bbox *= scale; // Upscaling
+		bbox = bbox.floor().xyzw(bbox.ceil()); // Rounding.
+		return GSVector4i(bbox);
+	};
+
+	// Compute the texture bboxes.
+	for (size_t i = 0, idx = 0; i < m_autoflush_list.size(); i++)
+	{
+		GSVector4 bbox(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+		const size_t n_prims = m_autoflush_list[i];
+		for (size_t j = 0; j < n_prims; j++, idx += n)
+		{
+			for (size_t k = 0; k < n; k++)
+			{
+				const GSVertex& v = verts[index[idx + k]];
+				GSVector4 tex;
+				if constexpr (fst)
+				{
+					tex = GSVector4(GSVector4i(v.m[1]).uph16().xyxy()) / 16.0f;
+				}
+				else
+				{
+					float q = (primclass == GS_SPRITE_CLASS) ? verts[index[idx + 1]].RGBAQ.Q : v.RGBAQ.Q;
+					tex = GSVector4::cast(GSVector4i(v.m[0])).xyxy() / q * tex_size;
+				}
+				bbox = bbox.min(tex).xyzw(bbox.max(tex));
+			}
+		}
+
+		m_autoflush_bbox.push_back(ProcessBBox(bbox, tex_scale));
+	}
+
+	// Recompute the position bboxes if needed.
+	if (m_drawlist_bbox.size() > 0)
+	{
+		GL_INS("Autoflush draw: recomputing drawlist bboxes.");
+		m_drawlist_bbox.clear();
+
+		const GSVector4i xyof = m_context->scissor.xyof.xyxy();
+
+		for (size_t i = 0, idx = 0; i < m_drawlist.size(); i++)
+		{
+			GSVector4i bbox(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
+
+			const size_t n_prims = m_drawlist[i];
+			for (size_t j = 0; j < n_prims; j++, idx += n)
+			{
+				for (size_t k = 0; k < n; k++)
+				{
+					const GSVector4i xy = GSVector4i(verts[index[idx + k]].m[1]).upl16().xyxy();
+					bbox = bbox.runion(xy);
+				}
+			}
+
+			GSVector4 bbox_f = GSVector4(bbox - xyof) / 16.0f;
+			m_drawlist_bbox.push_back(ProcessBBox(bbox_f, pos_scale));
+		}
+	}
+}
+
+void GSState::ProcessAutoflushDrawlist(float pos_scale, float tex_scale)
+{
+	pxAssertRel(PRIM->TME, "Autoflush drawlist only valid with texture mapping.");
+
+	switch (m_vt.m_primclass)
+	{
+		case GS_SPRITE_CLASS:
+			if (PRIM->FST)
+				ProcessAutoflushDrawlistImpl<GS_SPRITE_CLASS, true>(pos_scale, tex_scale);
+			else
+				ProcessAutoflushDrawlistImpl<GS_SPRITE_CLASS, false>(pos_scale, tex_scale);
+			break;
+		case GS_TRIANGLE_CLASS:
+			if (PRIM->FST)
+				ProcessAutoflushDrawlistImpl<GS_TRIANGLE_CLASS, true>(pos_scale, tex_scale);
+			else
+				ProcessAutoflushDrawlistImpl<GS_TRIANGLE_CLASS, false>(pos_scale, tex_scale);
+			break;
+		default:
+			pxFail("Autoflush drawlist only for triangles/sprites.");
+			break;
+	}
+}
+
 bool GSState::SpriteDrawWithoutGaps()
 {
 	// Check that the height matches. Xenosaga 3 draws a letterbox around
@@ -4725,7 +4841,6 @@ __forceinline void GSState::HandleAutoFlush()
 			}
 			constexpr int n = GSUtil::GetVertexCount(prim);
 			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
-			m_autoflush_bbox.push_back(temp_draw_rect);
 			m_autoflush_tail = m_index.tail;
 			temp_draw_rect = GSVector4i::zero();
 			m_texflush_flag = false;
@@ -4955,8 +5070,9 @@ __forceinline void GSState::HandleAutoFlush()
 				const GSVector4i scissor = m_context->scissor.in;
 				GSVector4i old_draw_rect = GSVector4i::zero();
 				int current_draw_end = m_index.tail;
+				const int current_draw_start = static_cast<int>(m_autoflush_tail);
 
-				while (current_draw_end >= m_autoflush_tail + n)
+				while (current_draw_end >= current_draw_start + n)
 				{
 					for (int i = current_draw_end - 1; i >= current_draw_end - n; i--)
 					{

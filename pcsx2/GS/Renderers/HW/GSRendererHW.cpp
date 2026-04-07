@@ -7352,7 +7352,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		return;
 	}
 
-	if (m_downscale_source)
+	if (HasAutoflushDrawlist())
+	{
+		GL_CACHE("HW: Skipping RT copy since autoflush draw will handle it.");
+	}
+	else if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
 		if (src_target->m_texture->IsDepthStencil() || std::floor(src_target->GetScale()) != src_target->GetScale())
@@ -8476,45 +8480,14 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
-	if (m_conf.tex && m_autoflush_list.size() > 0)
+	if (m_conf.tex && HasAutoflushDrawlist())
 	{
-		// FIXME: make the draw list computation within autoflush list?
-		// m_conf.require_full_barrier = true;
-		// m_conf.require_one_barrier = false;
+		ProcessAutoflushDrawlist(rt->GetScale(), tex->GetScale());
+		m_conf.autoflush = true;
 		m_conf.autoflush_list = &m_autoflush_list;
 		m_conf.autoflush_bbox = &m_autoflush_bbox;
-		m_conf.autoflush = true;
-
-		std::vector<size_t> drawlist;
-		if (!m_drawlist.empty())
-		{
-			for (int i = 0, j = 0; i < m_autoflush_list.size(); i++)
-			{
-				int prims = m_autoflush_list[i];
-				while (prims > 0)
-				{
-					if (m_drawlist[j] > prims)
-					{
-						drawlist.push_back(prims);
-						m_drawlist[j] -= prims;
-						prims = 0;
-					}
-					else
-					{
-						drawlist.push_back(m_drawlist[j]);
-						prims -= m_drawlist[j];
-						m_drawlist[j] = 0;
-						j++;
-					}
-				}
-			}
-			m_drawlist = std::move(drawlist);
-			m_conf.drawlist = &m_drawlist;
-		}
-		else
-		{
-			m_conf.drawlist = &m_autoflush_list;
-		}
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
 	HandleProvokingVertexFirst();
