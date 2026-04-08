@@ -7352,9 +7352,9 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		return;
 	}
 
-	if (HasAutoflushDrawlist())
+	if (HasAutoFlushList())
 	{
-		GL_CACHE("HW: Skipping RT copy since autoflush draw will handle it.");
+		GL_CACHE("HW: Using autoflush list, skipping RT copy.");
 	}
 	else if (m_downscale_source)
 	{
@@ -8480,8 +8480,10 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
 
-	if (m_conf.tex && HasAutoflushDrawlist())
+	if (m_conf.tex && HasAutoFlushList())
 	{
+		GL_INS("HW: Using autoflush list for %lld draws %s barriers",
+			m_autoflush_list.size(), m_conf.require_full_barrier ? "with" : "without");
 		ProcessAutoflushDrawlist(rt->GetScale(), tex->GetScale());
 		m_conf.autoflush = true;
 		m_conf.autoflush_list = &m_autoflush_list;

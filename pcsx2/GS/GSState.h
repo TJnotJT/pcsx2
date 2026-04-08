@@ -165,12 +165,21 @@ protected:
 		u32 tail;
 	} m_draw_index = {};
 
+	__forceinline u32 NumQueuedIndices() const
+	{
+		return m_index.tail - m_autoflush_tail;
+	}
+
 	void UpdateContext();
 	void UpdateScissor();
 
 	void UpdateVertexKick();
 
 	void GrowVertexBuffer();
+	bool CanUseAutoFlushList() const;
+	bool HasAutoFlushList() const;
+	void ResetAutoFlushList();
+	void UpdateAutoFlushList();
 	bool IsAutoFlushDraw(u32 prim, int& tex_layer);
 	template<u32 prim> void HandleAutoFlush();
 	bool EarlyDetectShuffle(u32 prim);
@@ -352,8 +361,6 @@ public:
 	std::vector<size_t> m_autoflush_list;
 	std::vector<GSVector4i> m_autoflush_bbox;
 	u32 m_autoflush_tail = 0;
-
-	bool HasAutoflushDrawlist() { return m_autoflush_tail > 0; }
 
 	struct GSPCRTCRegs
 	{

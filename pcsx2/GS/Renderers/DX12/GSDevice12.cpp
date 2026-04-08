@@ -4493,49 +4493,39 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			const u32 indices_per_prim = config.indices_per_prim;
 			const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
 
-			GL_PUSH("Split the draw");
+			GL_PUSH("Split the draw (autoflush)");
+			g_perfmon.Put(GSPerfMon::Barriers, n_barriers * (draw_list_size - autoflush_list_size));
 			
 			EndRenderPass();
 
 			const GSVector4i tex_rect = config.tex->GetRect();
 
+			// a: autoflush drawlist position
+			// n: barrier drawlist position
+			// p: number of indices drawn
 			for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
 			{
 				const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 
-				GL_INS("DRAW %lld", GSState::s_n - 1048 + 1637);
-
 				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
-
-				if (0 && GSState::s_n <= 1300)
-				{
-					std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt0_03300_(03300)_C_32.png", GSState::s_n - 1048 + 1637);
-					config.rt->Save(s);
-					s = GSState::GetDrawDumpPath("%05lld_f00000_itex_tgt_03300(03300)_C_32_22_00_1ff_00_19f.png", GSState::s_n - 1048 + 1637);
-					config.tex->Save(s);
-					GSState::s_n++;
-				}
 
 				PSSetShaderResource(TEXTURE_TEXTURE, config.tex, true);
 				OMSetRenderTargets(config.rt, nullptr, config.ds, config.scissor);
 
-				int prims = (*config.autoflush_list)[a];
+				int prims = static_cast<int>((*config.autoflush_list)[a]);
 
-				bool skip_first = a > 0;
 				bool first = true;
-
 				while (prims > 0)
 				{
 					const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
-					if (!(skip_first && first))
+					// Skip the first barrier because the copy/transition should have covered it.
+					if (!first)
 					{
 						if (feedback_rt)
 							FeedbackBarrier(draw_rt);
 						if (feedback_depth)
 							FeedbackBarrier(draw_ds);
-
-						g_perfmon.Put(GSPerfMon::Barriers, n_barriers);
 					}
 
 					if (BindDrawPipeline(pipe))
@@ -4545,12 +4535,6 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 					p += count;
 					n++;
 					first = false;
-				}
-
-				if (0 && GSState::s_n <= 1300)
-				{
-					std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt1_03300_(03300)_C_32.png", GSState::s_n - 1 - 1048 + 1637);
-					config.rt->Save(s);
 				}
 			}
 
@@ -4566,6 +4550,8 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			GL_PUSH("Split the draw");
 			g_perfmon.Put(GSPerfMon::Barriers, n_barriers * draw_list_size);
 
+			// n: barrier drawlist position
+			// p: number of indices drawn
 			for (u32 n = 0, p = 0; n < draw_list_size; n++)
 			{
 				const u32 count = (*config.drawlist)[n] * indices_per_prim;

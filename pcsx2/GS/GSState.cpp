@@ -1883,9 +1883,7 @@ void GSState::Flush(GSFlushReason reason)
 
 		m_dirty_gs_regs = 0;
 		temp_draw_rect = GSVector4i::zero();
-		m_autoflush_list.clear();
-		m_autoflush_bbox.clear();
-		m_autoflush_tail = 0;
+		ResetAutoFlushList();
 	}
 
 	m_state_flush_reason = GSFlushReason::UNKNOWN;
@@ -2074,12 +2072,9 @@ void GSState::FlushPrim()
 			pxAssert((int)unused < GSUtil::GetVertexCount(PRIM->PRIM));
 		}
 
-		if (m_autoflush_tail > 0 && m_index.tail > m_autoflush_tail)
+		if (HasAutoFlushList())
 		{
-			// FIXME: Make a helper functions for this (Update autoflush list or so).
-			const int n = GSUtil::GetVertexCount(PRIM->PRIM);
-			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
-			m_autoflush_tail = m_index.tail;
+			UpdateAutoFlushList();
 		}
 
 		// If the PSM format of Z is invalid, but it is masked (no write) and ZTST is set to ALWAYS pass (no test, just allow)
@@ -4238,8 +4233,6 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap(bool save_drawlist)
 template<u32 primclass, bool fst>
 void GSState::ProcessAutoflushDrawlistImpl(float pos_scale, float tex_scale)
 {
-	GL_INS("Autoflush draw: processing list for %lld draws.", m_autoflush_list.size());
-
 	if (!m_drawlist.empty())
 	{
 		// Chop the barrier drawlist to fit within each autoflush draw.
@@ -4320,7 +4313,6 @@ void GSState::ProcessAutoflushDrawlistImpl(float pos_scale, float tex_scale)
 	// Recompute the position bboxes if needed.
 	if (m_drawlist_bbox.size() > 0)
 	{
-		GL_INS("Autoflush draw: recomputing drawlist bboxes.");
 		m_drawlist_bbox.clear();
 
 		const GSVector4i xyof = m_context->scissor.xyof.xyxy();
@@ -4686,6 +4678,39 @@ __forceinline bool GSState::EarlyDetectShuffle(u32 prim)
 	return false;
 }
 
+__forceinline bool GSState::HasAutoFlushList() const
+{
+	return m_autoflush_tail > 0;
+}
+
+__forceinline bool GSState::CanUseAutoFlushList() const
+{
+	// Can combine if recursive color draw and source/RT are basically the same
+	// format (aside from 24/32 bit difference).
+	return m_context->TEX0.TBP0 == m_context->FRAME.Block() &&
+		(m_context->TEX0.PSM & ~1) == (m_context->FRAME.PSM & ~1) &&
+		GSIsHardwareRenderer();
+}
+
+__forceinline void GSState::ResetAutoFlushList()
+{
+	m_autoflush_list.clear();
+	m_autoflush_bbox.clear();
+	m_autoflush_tail = 0;
+}
+
+__forceinline void GSState::UpdateAutoFlushList()
+{
+	if (NumQueuedIndices() > 0)
+	{
+		const int n = GSUtil::GetVertexCount(PRIM->PRIM);
+		m_autoflush_list.push_back(NumQueuedIndices() / n);
+		m_autoflush_tail = m_index.tail;
+		temp_draw_rect = GSVector4i::zero(); // Reset draw rect since it's used for autoflush overlap.
+		m_texflush_flag = false; // Reset TEXFLUSH since this is equivalent to starting a new draw.
+	}
+}
+
 __forceinline bool GSState::IsAutoFlushDraw(u32 prim, int& tex_layer)
 {
 	if (!PRIM->TME)
@@ -4823,27 +4848,19 @@ __forceinline void GSState::CheckCLUTValidity(u32 prim)
 	}
 }
 
+
+
 template<u32 prim>
 __forceinline void GSState::HandleAutoFlush()
 {
 	// Kind of a cheat, making the assumption that 2 consecutive fan/strip triangles won't overlap each other (*should* be safe)
-	if (((m_index.tail - m_autoflush_tail) & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
+	if ((NumQueuedIndices() & 1) && (prim == GS_TRIANGLESTRIP || prim == GS_TRIANGLEFAN) && !m_texflush_flag)
 		return;
 
 	const auto DoFlush = [&]() {
-		if (m_context->TEX0.TBP0 == m_context->FRAME.Block() &&
-			(m_context->TEX0.PSM & ~1) == (m_context->FRAME.PSM & ~1))
+		if (CanUseAutoFlushList())
 		{
-			/*if (s_n == 1047)
-			{
-				static int i = 0;
-				Console.Warning("AUTOFLUSH PRIMS: %d: %d", i++, (int)(m_index.tail - m_autoflush_tail) / 3);
-			}*/
-			constexpr int n = GSUtil::GetVertexCount(prim);
-			m_autoflush_list.push_back((m_index.tail - m_autoflush_tail) / n);
-			m_autoflush_tail = m_index.tail;
-			temp_draw_rect = GSVector4i::zero();
-			m_texflush_flag = false;
+			UpdateAutoFlushList();
 		}
 		else
 		{
@@ -5172,7 +5189,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 		return;
 	}
 
-	if (auto_flush && skip == 0 && m_index.tail > m_autoflush_tail && ((m_vertex.tail + 1) - m_vertex.head) >= n)
+	if (auto_flush && skip == 0 && NumQueuedIndices() > 0 && ((m_vertex.tail + 1) - m_vertex.head) >= n)
 	{
 		HandleAutoFlush<prim>();
 	}
@@ -5415,7 +5432,7 @@ __forceinline void GSState::VertexKick(u32 skip)
 	// Update rectangle for the current draw. We can use the re-integer coordinates from min/max here.
 	const GSVector4i draw_min = pmin.zwzw();
 	const GSVector4i draw_max = pmax;
-	if (m_index.tail != m_autoflush_tail + n)
+	if (NumQueuedIndices() > n)
 		temp_draw_rect = temp_draw_rect.min_i32(draw_min).blend32<12>(temp_draw_rect.max_i32(draw_max));
 	else
 		temp_draw_rect = draw_min.blend32<12>(draw_max);

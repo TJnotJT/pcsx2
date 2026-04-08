@@ -6253,46 +6253,33 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		const u32 indices_per_prim = config.indices_per_prim;
 		const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
 
-		GL_PUSH("Split the draw");
-
+		GL_PUSH("Split the draw (autoflush)");
 
 		const GSVector4i tex_rect = config.tex->GetRect();
 
-		const VkRenderPass render_pass = m_current_render_pass;
+		const VkRenderPass render_pass = GetRenderPassForRestarting(m_current_render_pass);
 
 		for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
 		{
 			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 
-			GL_INS("DRAW %lld", GSState::s_n - 1048 + 1637);
-
 			EndRenderPass();
 			CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
-
-			if (0 && GSState::s_n <= 1300)
-			{
-				std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt0_03300_(03300)_C_32.png", GSState::s_n - 1048 + 1637);
-				config.rt->Save(s);
-				s = GSState::GetDrawDumpPath("%05lld_f00000_itex_tgt_03300(03300)_C_32_22_00_1ff_00_19f.png", GSState::s_n - 1048 + 1637);
-				config.tex->Save(s);
-				GSState::s_n++;
-			}
 
 			PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, true);
 			OMSetRenderTargets(config.rt, config.ds, config.scissor, m_current_framebuffer_feedback_loop);
 
 			BeginRenderPass(render_pass, config.drawarea);
 
-			int prims = (*config.autoflush_list)[a];
+			int prims = static_cast<int>((*config.autoflush_list)[a]);
 
-			bool skip_first = a > 0;
 			bool first = true;
-
 			while (prims > 0)
 			{
 				const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
-				if (!(skip_first && first))
+				// Skip the first barrier because the copy/transition should have covered it.
+				if (!first)
 				{
 					IssueBarriers();
 				}
@@ -6304,12 +6291,6 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 				p += count;
 				n++;
 				first = false;
-			}
-
-			if (0 && GSState::s_n <= 1300)
-			{
-				std::string s = GSState::GetDrawDumpPath("%05lld_f00000_rt1_03300_(03300)_C_32.png", GSState::s_n - 1 - 1048 + 1637);
-				config.rt->Save(s);
 			}
 		}
 
