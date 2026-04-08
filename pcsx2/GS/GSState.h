@@ -165,12 +165,21 @@ protected:
 		u32 tail;
 	} m_draw_index = {};
 
+	__forceinline u32 NumQueuedIndices() const
+	{
+		return m_index.tail - m_autoflush_tail;
+	}
+
 	void UpdateContext();
 	void UpdateScissor();
 
 	void UpdateVertexKick();
 
 	void GrowVertexBuffer();
+	bool CanUseAutoFlushList() const;
+	bool HasAutoFlushList() const;
+	void ResetAutoFlushList();
+	void UpdateAutoFlushList();
 	bool IsAutoFlushDraw(u32 prim, int& tex_layer);
 	template<u32 prim> void HandleAutoFlush();
 	bool EarlyDetectShuffle(u32 prim);
@@ -376,6 +385,10 @@ public:
 	std::vector<size_t> m_drawlist;
 	std::vector<GSVector4i> m_drawlist_bbox;
 
+	std::vector<size_t> m_autoflush_list;
+	std::vector<GSVector4i> m_autoflush_bbox;
+	u32 m_autoflush_tail = 0;
+
 	struct GSPCRTCRegs
 	{
 		struct PCRTCDisplay
@@ -510,6 +523,9 @@ public:
 	PRIM_OVERLAP GetPrimitiveOverlapDrawlistImpl(bool save_drawlist = false, bool save_bbox = false, float bbox_scale = 1.0f);
 	PRIM_OVERLAP GetPrimitiveOverlapDrawlist(bool save_drawlist = false, bool save_bbox = false, float bbox_scale = 1.0f);
 	PRIM_OVERLAP PrimitiveOverlap(bool save_drawlist = false);
+	template<u32 primclass, bool fst>
+	void ProcessAutoflushDrawlistImpl(float pos_scale, float tex_scale);
+	void ProcessAutoflushDrawlist(float pos_scale, float tex_scale);
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);

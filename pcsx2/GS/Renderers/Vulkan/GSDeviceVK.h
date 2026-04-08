@@ -93,6 +93,9 @@ public:
 
 	// Gets a non-clearing version of the specified render pass. Slow, don't call in hot path.
 	VkRenderPass GetRenderPassForRestarting(VkRenderPass pass);
+	
+	// Gets a loading version of the specified render pass. Slow, don't call in hot path.
+	VkRenderPass GetRenderPassForAutoFlushing(VkRenderPass pass, bool rt, bool ds, bool stencil);
 
 	// These command buffers are allocated per-frame. They are valid until the command buffer
 	// is submitted, after that you should call these functions again.
