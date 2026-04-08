@@ -4501,7 +4501,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 			for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
 			{
-				const GSVector4i bbox = tex_rect;// (*config.autoflush_bbox)[a].rintersect(tex_rect);
+				const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 
 				GL_INS("DRAW %lld", GSState::s_n - 1048 + 1637);
 
