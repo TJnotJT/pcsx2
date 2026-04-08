@@ -1038,6 +1038,32 @@ VkRenderPass GSDeviceVK::GetRenderPassForRestarting(VkRenderPass pass)
 	return pass;
 }
 
+VkRenderPass GSDeviceVK::GetRenderPassForAutoFlushing(VkRenderPass pass, bool rt, bool ds, bool stencil)
+{
+	for (const auto& it : m_render_pass_cache)
+	{
+		if (it.second != pass)
+			continue;
+
+		RenderPassCacheKey modified_key;
+		modified_key.key = it.first;
+		modified_key.color_load_op = rt ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		modified_key.depth_load_op = ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		modified_key.stencil_load_op = stencil ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+
+		if (modified_key.key == it.first)
+			return pass;
+
+		auto fit = m_render_pass_cache.find(modified_key.key);
+		if (fit != m_render_pass_cache.end())
+			return fit->second;
+
+		return CreateCachedRenderPass(modified_key);
+	}
+
+	return pass;
+}
+
 VkCommandBuffer GSDeviceVK::GetCurrentInitCommandBuffer()
 {
 	FrameResources& res = m_frame_resources[m_current_frame];
@@ -6243,7 +6269,58 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		}
 	};
 
-	if (full_barrier)
+	if (config.autoflush)
+	{
+		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
+		const u32 indices_per_prim = config.indices_per_prim;
+		const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
+
+		GL_PUSH("Split the draw (autoflush)");
+
+		const GSVector4i tex_rect = config.tex->GetRect();
+
+		// FIXME: Do this in a faster way.
+		const VkRenderPass render_pass = GetRenderPassForAutoFlushing(m_current_render_pass, config.rt, config.ds,
+		                                                              config.ds && m_features.stencil_buffer);
+
+		for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
+		{
+			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
+
+			EndRenderPass();
+			CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+
+			PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, true);
+			OMSetRenderTargets(config.rt, config.ds, config.scissor, m_current_framebuffer_feedback_loop);
+
+			BeginRenderPass(render_pass, config.drawarea);
+
+			int prims = static_cast<int>((*config.autoflush_list)[a]);
+
+			bool first = true;
+			while (prims > 0)
+			{
+				const u32 count = (*config.drawlist)[n] * indices_per_prim;
+
+				// Skip the first barrier because the copy/transition should have covered it.
+				if (!first)
+				{
+					IssueBarriers();
+				}
+
+				if (BindDrawPipeline(m_pipeline_selector))
+					DrawIndexedPrimitive(p, count);
+
+				prims -= (*config.drawlist)[n];
+				p += count;
+				n++;
+				first = false;
+			}
+		}
+
+		return;
+	}
+	else if (full_barrier)
 	{
 		pxAssert(config.drawlist && !config.drawlist->empty());
 

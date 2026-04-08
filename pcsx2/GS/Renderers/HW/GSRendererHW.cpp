@@ -2328,6 +2328,20 @@ void GSRendererHW::Draw()
 {
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
+	if (0)
+	{
+		static bool dump_next_autoflush = false;
+		if (dump_next_autoflush || m_state_flush_reason == AUTOFLUSH)
+		{
+			DumpDrawInfo(true, true, false);
+			dump_next_autoflush = m_state_flush_reason == AUTOFLUSH;
+		}
+		else
+		{
+			dump_next_autoflush = false;
+		}
+	}
+
 	// We mess with this state as an optimization, so take a copy and use that instead.
 	const GSDrawingContext* context = m_context;
 	m_cached_ctx.TEX0 = context->TEX0;
@@ -5719,7 +5733,7 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	m_conf.vs.iip = !IsFlatShaded();
 }
 
-void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
+void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -5762,6 +5776,18 @@ void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
 	if (m_conf.require_full_barrier && (g_gs_device->Features().texture_barrier || g_gs_device->Features().multidraw_fb_copy))
 	{
 		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	if (m_conf.tex && HasAutoFlushList())
+	{
+		GL_INS("HW: Using autoflush list for %lld draws %s barriers",
+			m_autoflush_list.size(), m_conf.require_full_barrier ? "with" : "without");
+		ProcessAutoflushDrawlist(rt->GetScale(), tex->GetScale());
+		m_conf.autoflush = true;
+		m_conf.autoflush_list = &m_autoflush_list;
+		m_conf.autoflush_bbox = &m_autoflush_bbox;
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
@@ -7678,7 +7704,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		return;
 	}
 
-	if (m_downscale_source)
+	if (HasAutoFlushList())
+	{
+		GL_CACHE("HW: Using autoflush list, skipping RT copy.");
+	}
+	else if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
 		if (src_target->m_texture->IsDepthStencil() || std::floor(src_target->GetScale()) != src_target->GetScale())
@@ -7845,7 +7875,7 @@ bool GSRendererHW::CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextu
 		const GSVector4 diff(m_vt.m_min.p.upld(m_vt.m_max.p) - m_vt.m_min.t.upld(m_vt.m_max.t));
 		if (m_cached_ctx.FRAME.FBMSK == 0x00FFFFFF && (diff.abs() < GSVector4(1.0f)).alltrue())
 		{
-			GL_CACHE("HW: Elabling tex-is-fb hack for Jak.");
+			GL_CACHE("HW: Enabling tex-is-fb hack for Jak.");
 			return true;
 		}
 
@@ -8479,7 +8509,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
-	DetermineBarriers(rt);
+	DetermineBarriers(rt, tex);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
