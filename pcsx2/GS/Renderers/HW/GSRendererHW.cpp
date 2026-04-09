@@ -7269,8 +7269,9 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			bilinear &= m_vt.IsLinear();
 		}
 
-		// Depth format
-		if (tex->m_texture->IsDepthStencil())
+		// Depth format. With autoflush, the source copy is switched to color so
+		// we must check that instead.
+		if (src_copy ? src_copy->IsDepthStencil() : tex->m_texture->IsDepthStencil())
 		{
 			// Require a float conversion if the texure is a depth format
 			m_conf.ps.depth_fmt = (psm.bpp == 16) ? 2 : 1;
@@ -7523,6 +7524,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		{
 			src_target = tex->m_from_target;
 		}
+		else if (HasAutoFlushList() && tex->m_texture->IsDepthStencil())
+		{
+			// The autoflush list needs a color source so that it can use GPU copies for updates.
+			src_target = rt;
+		}
 		else
 		{
 			// No match.
@@ -7692,7 +7698,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 
 	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
 		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
-
+	
 	src_copy.reset(src_target->m_texture->IsDepthStencil() ?
 	                   g_gs_device->CreateDepthStencil(scaled_copy_size.x, scaled_copy_size.y, src_target->m_texture->GetFormat(), false) :
 	                   g_gs_device->CreateRenderTarget(scaled_copy_size.x, scaled_copy_size.y, src_target->m_texture->GetFormat(), true, true));
