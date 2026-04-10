@@ -6548,17 +6548,18 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 			break;
 	}
 
-	if (features.framebuffer_fetch)
+	const auto ForceSWBlend = [&]() {
+		sw_blending = true;
+		color_dest_blend = false;
+		accumulation_blend = false;
+		blend_mix = false;
+	};
+
+	if (features.framebuffer_fetch && (one_barrier || m_conf.require_full_barrier))
 	{
 		// If we have fbfetch, use software blending when we need the fb value for anything else.
 		// This saves outputting the second color when it's not needed.
-		if (one_barrier || m_conf.require_full_barrier)
-		{
-			sw_blending = true;
-			color_dest_blend = false;
-			accumulation_blend = false;
-			blend_mix = false;
-		}
+		ForceSWBlend();
 	}
 
 	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::FEEDBACK &&
@@ -6566,10 +6567,13 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 	{
 		// If we are doing feedback alpha test with a second RT we must use SW blending to avoid
 		// mixing dual source blending with multiple render targets.
-		sw_blending = true;
-		color_dest_blend = false;
-		accumulation_blend = false;
-		blend_mix = false;
+		ForceSWBlend();
+	}
+
+	if (HasAutoFlushList() && COLCLAMP.CLAMP == 0)
+	{
+		// The autoflush list isn't compatible with HDR HW colclip, so use SW blending.
+		ForceSWBlend();
 	}
 
 	// Color clip
@@ -6615,7 +6619,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 			blend_mix          = false;
 			m_conf.colclip_mode = (has_colclip_texture && !NextDrawColClip()) ? GSHWDrawConfig::ColClipMode::ResolveOnly : GSHWDrawConfig::ColClipMode::NoModify;
 		}
-		else if (accumulation_blend)
+		else if (accumulation_blend && !HasAutoFlushList())
 		{
 			// A fast algo that requires 2 passes
 			GL_INS("HW: COLCLIP ACCU HW mode ENABLED");
@@ -6624,7 +6628,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 
 			m_conf.colclip_mode = has_colclip_texture ? (NextDrawColClip() ? GSHWDrawConfig::ColClipMode::NoModify : GSHWDrawConfig::ColClipMode::ResolveOnly) : (NextDrawColClip() ? GSHWDrawConfig::ColClipMode::ConvertOnly : GSHWDrawConfig::ColClipMode::ConvertAndResolve);
 		}
-		else if (sw_blending)
+		else if (sw_blending || HasAutoFlushList())
 		{
 			// A slow algo that could requires several passes (barely used)
 			GL_INS("HW: COLCLIP SW mode ENABLED");
