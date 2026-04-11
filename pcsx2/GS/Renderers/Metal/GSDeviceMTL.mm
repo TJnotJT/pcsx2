@@ -2344,8 +2344,69 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder>
 		return;
 	}
 
+	if (config.autoflush)
+	{
+		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
+		const u32 indices_per_prim = config.indices_per_prim;
+		const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
 
-	if (full_barrier)
+		[enc pushDebugGroup:[NSString stringWithFormat:@"Full barrier split draw (%d primitives in %zu autoflush groups, %zu barrier groups) (autoflush groups)",
+			config.nindices / config.indices_per_prim, autoflush_list_size, draw_list_size]];
+
+		GSTexture* stencil = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne ||
+		                     config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil) ?
+		                     config.ds : nullptr;
+
+		const GSVector4i tex_rect = config.tex->GetRect();
+
+		// a: autoflush drawlist position
+		// n: barrier drawlist position
+		// p: number of indices drawn
+		for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
+		{
+			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
+
+			if (!bbox.rempty())
+			{
+				EndRenderPass();
+
+				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+
+				MRESetTexture(config.tex, GSMTLTextureIndexTex);
+				BeginRenderPass(@"RenderHW", config.rt, MTLLoadActionLoad, config.ds, MTLLoadActionLoad, stencil, MTLLoadActionLoad);
+			}
+
+			int prims = static_cast<int>((*config.autoflush_list)[a]);
+
+			bool first = true;
+			while (prims > 0)
+			{
+				const u32 count = (*config.drawlist)[n] * indices_per_prim;
+
+				// Skip the first barrier because the copy/transition should have covered it.
+				if (!first)
+				{
+					textureBarrier(enc);
+					g_perfmon.Put(GSPerfMon::Barriers, 1);
+				}
+
+			[enc drawIndexedPrimitives:topology
+			                indexCount:count
+			                 indexType:MTLIndexTypeUInt16
+			               indexBuffer:buffer
+			         indexBufferOffset:off + p * sizeof(*config.indices)];
+
+				prims -= (*config.drawlist)[n];
+				p += count;
+				n++;
+				first = false;
+			}
+		}
+
+		[enc popDebugGroup];
+		return;
+	}
+	else if (full_barrier)
 	{
 		pxAssert(config.drawlist && !config.drawlist->empty());
 
