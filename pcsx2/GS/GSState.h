@@ -177,7 +177,7 @@ protected:
 
 	void GrowVertexBuffer();
 	bool CanUseAutoFlushList() const;
-	bool HasAutoFlushList() const;
+	__forceinline bool HasAutoFlushList() const { return m_autoflush_tail > 0; }
 	void ResetAutoFlushList();
 	void UpdateAutoFlushList();
 	bool IsAutoFlushDraw(u32 prim, int& tex_layer);
