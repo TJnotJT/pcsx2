@@ -4503,10 +4503,13 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			{
 				const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 
-				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+				if (!bbox.rempty())
+				{
+					CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
 
-				PSSetShaderResource(TEXTURE_TEXTURE, config.tex, true);
-				OMSetRenderTargets(config.rt, nullptr, config.ds, config.scissor);
+					PSSetShaderResource(TEXTURE_TEXTURE, config.tex, true);
+					OMSetRenderTargets(config.rt, nullptr, config.ds, config.scissor);
+				}
 
 				int prims = static_cast<int>((*config.autoflush_list)[a]);
 

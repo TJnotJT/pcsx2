@@ -3,6 +3,7 @@
 
 #include "GSRendererHW.h"
 
+#include "GS/GSGL.h"
 #include "GS/GSUtil.h"
 #include "GS/Renderers/SW/GSTextureCacheSW.h"
 #include "GS/Renderers/SW/GSRasterizer.h"
@@ -568,6 +569,7 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 
 bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, bool add_ee_transfer)
 {
+	GL_INS("HW: SWPrimRender draw %lld", GSState::s_n);
 	if (hw.HasAutoFlushList())
 	{
 		// The SW renderer does not handle the autoflush list, so we need to flush here.
@@ -575,7 +577,7 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 		for (size_t i = 0, start = 0; i < hw.m_autoflush_list.size(); i++)
 		{
 			const u32 count = hw.m_autoflush_list[i] * n;
-			if (!SwPrimRender(hw, true, false, start, count))
+			if (!SwPrimRender(hw, invalidate_tc, add_ee_transfer, start, count))
 			{
 				return false;
 			}
@@ -585,6 +587,6 @@ bool GSRendererHWFunctions::SwPrimRender(GSRendererHW& hw, bool invalidate_tc, b
 	}
 	else
 	{
-		return SwPrimRender(hw, true, false, 0, hw.m_index.tail);
+		return SwPrimRender(hw, invalidate_tc, add_ee_transfer, 0, hw.m_index.tail);
 	}
 }

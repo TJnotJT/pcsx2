@@ -6287,11 +6287,15 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		{
 			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 
-			EndRenderPass();
-			CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+			// We only need to do copies until the last draw.
+			if (!bbox.rempty())
+			{
+				EndRenderPass();
+				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
 
-			PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, true);
-			OMSetRenderTargets(config.rt, config.ds, config.scissor, m_current_framebuffer_feedback_loop);
+				PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, true);
+				OMSetRenderTargets(config.rt, config.ds, config.scissor, m_current_framebuffer_feedback_loop);
+			}
 
 			BeginRenderPass(render_pass, config.drawarea);
 
