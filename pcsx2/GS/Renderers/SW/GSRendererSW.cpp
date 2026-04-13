@@ -27,7 +27,7 @@ GSRendererSW::GSRendererSW(int threads)
 	m_nativeres = true; // ignore ini, sw is always native
 
 	m_tc = std::make_unique<GSTextureCacheSW>();
-	m_rl = GSRasterizerList::Create(threads);
+	m_rl = GSRasterizerList::Create(0); // FORCE synchronous for debugging
 
 	m_output = (u8*)_aligned_malloc(1024 * 1024 * sizeof(u32), VECTOR_ALIGNMENT);
 
@@ -1043,6 +1043,22 @@ bool GSRendererSW::CheckSourcePages(SharedData* sd)
 bool GSRendererSW::GetScanlineGlobalData(SharedData* data, bool round_uv)
 {
 	GSScanlineGlobalData& gd = data->global;
+
+	if (g_reg_dump_counter.size() == 0)
+	{
+		g_reg_dump_counter.resize(1);
+		g_reg_dump_counter[0] = 0;
+	}
+
+	if (g_reg_dump_data.size() == 0)
+	{
+		g_reg_dump_data.resize(16 * 1024 * 1024);
+		for (u8& x : g_reg_dump_data)
+			x = 0;
+	}
+
+	gd.m_reg_dump_counter = g_reg_dump_counter.data();
+	gd.m_reg_dump_data = g_reg_dump_data.data();
 
 	const GSDrawingEnvironment& env = *m_draw_env;
 	const GSDrawingContext* context = m_context;
