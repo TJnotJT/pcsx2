@@ -2513,6 +2513,26 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 	const VRegister& tmp3, const VRegister& tmp4,
 	const VRegister& tmp5, const VRegister& tmp6)
 {
+	#define PUSH_REG(reg) \
+	do { \
+		armAsm->Ldr(_xscratch2, _global(m_reg_dump_counter)); \
+		armAsm->Ldr(_xscratch, MemOperand(_xscratch2)); \
+		Label end_label; \
+		armAsm->Mov(_xscratch2, 16 * 1024 * 1024); \
+		armAsm->Sub(_xscratch2, _xscratch2, 16); \
+		armAsm->Cmp(_xscratch, _xscratch2); \
+		armAsm->B(gt, &end_label); \
+		armAsm->Ldr(_xscratch2, _global(m_reg_dump_data)); \
+		armAsm->Add(_xscratch2, _xscratch2, _xscratch); \
+		armAsm->Str(reg, MemOperand(_xscratch2)); \
+		armAsm->Ldr(_xscratch2, _global(m_reg_dump_counter)); \
+		armAsm->Add(_xscratch, _xscratch, 16); \
+		armAsm->Str(_xscratch, MemOperand(_xscratch2)); \
+		armAsm->Bind(&end_label); \
+		armAsm->Mov(_xscratch, 0); \
+		armAsm->Mov(_xscratch2, 0); \
+	} while (0) 
+
 	for (int i = 0; i < 2; i++)
 	{
 		// i == 0: U rounding.
@@ -2526,16 +2546,23 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 			armAsm->Ldr(tmp2.V4S(), _global(const_offsets));
 			armAsm->Add(tmp1.V4S(), tmp1.V4S(), tmp2.V4S());
 
+			PUSH_REG(tmp1);
+
 			// const VectorI at_left = VectorI(local.temp.round.prim_left) == curr_x;
 
 			armAsm->Ld1r(tmp2.V4S(), _local(temp.round.prim_left));
 			armAsm->Cmeq(tmp1.V4S(), tmp1.V4S(), tmp2.V4S());
+
+			PUSH_REG(tmp2);
+			PUSH_REG(tmp1);
 		}
 
 		// const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
 		// const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
 
 		armAsm->Ld1r(tmp2.V4S(), i == 0 ? _local(temp.round.flags_u) : _local(temp.round.flags_v));
+
+		PUSH_REG(tmp2);
 
 		// const VectorI round_down_const = VectorI::load<true>(g_const.m_round_down);
 		// const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
@@ -2545,6 +2572,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Cmeq(tmp3.V4S(), tmp3.V4S(), tmp2.V4S());
 		if (i == 0)
 			armAsm->Bic(tmp3.V4S(), tmp3.V4S(), tmp1.V4S());
+
+		PUSH_REG(tmp3);
 
 		// const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
 		// const VectorI round_up_u = (round_setting_u == round_up_const) |
@@ -2561,16 +2590,23 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 			armAsm->Orr(tmp4.V4S(), tmp4.V4S(), tmp5.V4S());
 		}
 
+		PUSH_REG(tmp4);
+
 		// const VectorI quarter_texel = VectorI::load<true>(g_const.m_quarter_texel);
 		// const VectorI half_texel_mask = VectorI::load<true>(g_const.m_half_texel_mask);
 		// VectorI ui = (u + quarter_texel) & half_texel_mask;
 		// VectorI vi = (v + quarter_texel) & half_texel_mask;
 
 		const VRegister& uv = i == 0 ? u : v;
+
+		PUSH_REG(uv);
+
 		armAsm->Ld1r(tmp1.V4S(), _global(const_quarter_texel));
 		armAsm->Ld1r(tmp5.V4S(), _global(const_half_texel_mask));
 		armAsm->Add(tmp1.V4S(), tmp1.V4S(), uv.V4S());
 		armAsm->And(tmp1.V4S(), tmp1.V4S(), tmp5.V4S());
+
+		PUSH_REG(tmp1);
 
 		// const VectorI threshold = VectorI::load<true>(g_const.m_round_threshold);
 		// VectorI close_u = (u - ui).abs32() <= threshold;
@@ -2581,6 +2617,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Ld1r(tmp5.V4S(), _global(const_round_threshold));
 		armAsm->Cmgt(tmp2.V4S(), tmp2.V4S(), tmp5.V4S());
 		armAsm->Mvn(tmp2.V4S(), tmp2.V4S());
+
+		PUSH_REG(tmp2);
 
 		// u = u.blend8(ui - threshold, close_u & round_down_u);
 		// u = u.blend8(ui + threshold, close_u & round_up_u);
@@ -2593,10 +2631,18 @@ void GSDrawScanlineCodeGenerator::RoundUV(
 		armAsm->Add(tmp6.V4S(), tmp1.V4S(), tmp5.V4S());
 		armAsm->And(tmp2.V4S(), tmp2.V4S(), tmp3.V4S());
 		armAsm->And(tmp6.V4S(), tmp6.V4S(), tmp4.V4S());
-		// armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S()); // FIXME: Uncomment after testing!
-		// armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S()); // FIXME: Uncomment after testing!
+
+		PUSH_REG(tmp3);
+		PUSH_REG(tmp4);
+		PUSH_REG(tmp2);
+		PUSH_REG(tmp6);
+
+		armAsm->Bic(uv.V4S(), uv.V4S(), tmp3.V4S());
+		armAsm->Bic(uv.V4S(), uv.V4S(), tmp4.V4S());
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp2.V4S());
+		armAsm->Orr(uv.V4S(), uv.V4S(), tmp6.V4S());
+
+		PUSH_REG(uv);
 	}
 }
 

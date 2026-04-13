@@ -3459,6 +3459,25 @@ void GSDrawScanlineCodeGenerator::ReadTexelImpl(const Xmm& dst, const Xmm& addr,
 void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm& tmp1,
 	const XYm& tmp2, const XYm& tmp3, const XYm& tmp4, const XYm& tmp5, const XYm& tmp6)
 {
+#define PUSH_REG(reg) \
+	do { \
+		mov(rdx, _rip_global(m_reg_dump_counter)); \
+		mov(rax, ptr[rdx]); \
+		Label end_label; \
+		cmp(rax, 16 * 1024 * 1024 - 16); \
+		jle("@f"); \
+		jmp(end_label); \
+		L("@@"); \
+		mov(rdx, _rip_global(m_reg_dump_data)); \
+		movaps(ptr[rax + rdx], reg); \
+		mov(rdx, _rip_global(m_reg_dump_counter)); \
+		add(rax, 16); \
+		mov(qword[rdx], rax); \
+		L(end_label); \
+		mov(rax, 0); \
+		mov(rdx, 0); \
+	} while (0) 
+
 	for (int i = 0; i < 2; i++)
 	{
 		// i == 0: U rounding.
@@ -3471,16 +3490,24 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 			broadcastss(tmp1, _rip_local(temp.round.left));
 			paddd(tmp1, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_offsets)]);
 
+			PUSH_REG(tmp1);
+
 			// const VectorI at_left = VectorI(local.temp.round.prim_left) == curr_x;
 
 			broadcastss(tmp2, _rip_local(temp.round.prim_left));
 			pcmpeqd(tmp1, tmp2);
+			
+			PUSH_REG(tmp2);
+
+			PUSH_REG(tmp1);
 		}
 
 		// const VectorI round_setting_u = VectorI(local.temp.round.flags_u);
 		// const VectorI round_setting_v = VectorI(local.temp.round.flags_v);
 
 		broadcastss(tmp2, i == 0 ? _rip_local(temp.round.flags_u) : _rip_local(temp.round.flags_v));
+
+		PUSH_REG(tmp2);
 
 		// const VectorI round_down_const = VectorI::load<true>(g_const.m_round_down);
 		// const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
@@ -3494,6 +3521,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 			movaps(tmp3, tmp1);
 			pandn(tmp3, tmp4);
 		}
+		PUSH_REG(tmp3);
 
 		// const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
 		// const VectorI round_up_u = (round_setting_u == round_up_const) |
@@ -3509,6 +3537,7 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 			pand(tmp5, tmp1);
 			por(tmp4, tmp5);
 		}
+		PUSH_REG(tmp4);
 
 		// const VectorI quarter_texel = VectorI::load<true>(g_const.m_quarter_texel);
 		// const VectorI half_texel_mask = VectorI::load<true>(g_const.m_half_texel_mask);
@@ -3516,9 +3545,14 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		// VectorI vi = (v + quarter_texel) & half_texel_mask;
 
 		const XYm& uv = i == 0 ? u : v;
+
+		PUSH_REG(uv);
+
 		movaps(tmp1, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_quarter_texel)]);
 		paddd(tmp1, uv);
 		pand(tmp1, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_half_texel_mask)]);
+		
+		PUSH_REG(tmp1);
 
 		// const VectorI threshold = VectorI::load<true>(g_const.m_round_threshold);
 		// VectorI close_u = (u - ui).abs32() <= threshold;
@@ -3531,6 +3565,8 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		pcmpgtd(tmp2, tmp5);
 		pcmpeqd(tmp6, tmp6);
 		pxor(tmp2, tmp6);
+
+		PUSH_REG(tmp2);
 
 		// u = u.blend8(ui - threshold, close_u & round_down_u);
 		// u = u.blend8(ui + threshold, close_u & round_up_u);
@@ -3545,10 +3581,18 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		paddd(tmp6, tmp5);
 		pand(tmp2, tmp3);
 		pand(tmp6, tmp4);
+
+		PUSH_REG(tmp3);
+		PUSH_REG(tmp4);
+		PUSH_REG(tmp2);
+		PUSH_REG(tmp6);
+
 		por(tmp3, tmp4);
 		pandn(tmp3, uv);
 		por(tmp3, tmp2);
 		por(tmp3, tmp6);
 		movaps(uv, tmp3);
+
+		PUSH_REG(uv);
 	}
 }
