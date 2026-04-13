@@ -1385,6 +1385,16 @@ void GSRasterizer::Flush(const GSVertexSW* vertex, const u16* index, const GSVer
 
 	int count = m_edge.count;
 
+	static bool dumped = false;
+	if (g_reg_dump_counter[0] >= 16 * 1024 * 1024 && !dumped)
+	{
+		Console.Warning("DUMPING REG DATA TO 'reg_dump'");
+		FILE* f = fopen("reg_dump", "wb");
+		fwrite(g_reg_dump_data.data(), 16, 1024 * 1024, f);
+		fclose(f);
+		dumped = true;
+	}
+
 	if (count > 0)
 	{
 		m_setup_prim(vertex, index, dscan, m_local);

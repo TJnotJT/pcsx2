@@ -17,6 +17,8 @@
 // Lack of a better home
 constexpr GSScanlineConstantData256B g_const_256b;
 constexpr GSScanlineConstantData128B g_const_128b;
+std::vector<u8> g_reg_dump_data;
+std::vector<u64> g_reg_dump_counter;
 #endif
 
 MULTI_ISA_UNSHARED_IMPL;
