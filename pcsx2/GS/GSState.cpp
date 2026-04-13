@@ -476,8 +476,12 @@ void GSState::PushBuffer()
 
 		m_vertex->tail = 0;
 
+		while (m_vertex->maxcount <= copy_amt)
+			GrowVertexBuffer();
+
 		if (copy_amt)
 			memcpy(m_vertex->buff, &m_vertex_buffers[m_current_buffer_idx].buff[base], sizeof(GSVertex) * copy_amt);
+
 
 		m_vertex->head = 0;
 		m_vertex->next = 0;
@@ -512,8 +516,8 @@ void GSState::PushBuffer()
 
 bool GSState::CanBufferNewDraw()
 {
-	if (!GSConfig.UserHacks_DrawBuffering)
-		return false;
+	//if (!GSConfig.UserHacks_DrawBuffering)
+		//return false;
 
 	GSDrawingContext& cur_context = m_env.CTXT[m_env.PRIM.CTXT];
 	GSDrawingContext& base_context = m_env_buffers[0].m_env.CTXT[m_env_buffers[0].m_env.PRIM.CTXT];
@@ -595,20 +599,20 @@ bool GSState::CanBufferNewDraw()
 
 			if (i != m_current_buffer_idx)
 			{
-				if (i != ((m_current_buffer_idx + 1) % m_used_buffers_idx))
-				{
-					if (i == 1 && !m_env_buffers[i].draw_rect.eq(m_env_buffers[0].draw_rect))
-					{
-						FlushWrite();
+				//if (i != ((m_current_buffer_idx + 1) % m_used_buffers_idx))
+				//{
+				//	if (i == 1 && !m_env_buffers[i].draw_rect.eq(m_env_buffers[0].draw_rect))
+				//	{
+				//		FlushWrite();
 
-						FlushBuffers(true, false);
-						ResetDrawBufferIdx();
-						i = -1;
-						continue;
-					}
-					else
-						return false;
-				}
+				//		FlushBuffers(true, false);
+				//		ResetDrawBufferIdx();
+				//		i = -1;
+				//		continue;
+				//	}
+				//	else
+				//		return false;
+				//}
 
 				/*if (i != (m_current_buffer_idx + 1) && i != 0)
 					return false;*/
@@ -616,8 +620,14 @@ bool GSState::CanBufferNewDraw()
 				//DevCon.Warning("Matching buffered draw detected in index %d, using", i);
 				m_index = &m_index_buffers[i];
 				m_vertex = &m_vertex_buffers[i];
+				
 
 				const u32 copy_amt = m_vertex_buffers[m_current_buffer_idx].tail - m_vertex_buffers[m_current_buffer_idx].head;
+				
+				while (m_index->buff[m_index->tail - 1] + 1 + copy_amt >= m_vertex->maxcount)
+				{
+					GrowVertexBuffer();
+				}
 
 				m_recent_buffer_switch = m_vertex->tail == m_vertex->head;
 				m_vertex->tail = m_index->buff[m_index->tail - 1] + 1;
@@ -671,6 +681,9 @@ bool GSState::CanBufferNewDraw()
 	// If we didn't find an existing one and we have no room, we need to flush.
 	if (m_used_buffers_idx >= MAX_DRAW_BUFFERS)
 		return false;
+
+	PushBuffer();
+	return true;
 
 	if (m_env.PRIM.PRIM != m_env_buffers[0].m_env.PRIM.PRIM || GSUtil::GetPrimClass(m_env.PRIM.PRIM) != GS_TRIANGLE_CLASS) return false;
 
@@ -1676,9 +1689,11 @@ void GSState::ApplyTEX0(GIFRegTEX0& TEX0)
 		{
 			GSDrawingEnvironment& buffered_env = m_env_buffers[b].m_env;
 			if ((buffered_env.PRIM.TME && (buffered_env.CTXT[buffered_env.PRIM.CTXT].TEX0.PSM & 0x7) >= 3) || (m_mem.m_clut.IsInvalid() & 2))
-				Flush(GSFlushReason::CLUTCHANGE);
+			{
+				CheckFlushes();
+			}
 		}
-		FlushWrite();
+		//FlushWrite();
 		// Abort any channel shuffle skipping, since this is likely part of a new shuffle.
 		// Test case: Tomb Raider series. This is gated by the CBP actually changing, because
 		// Urban Chaos writes to the memory backing the CLUT in the middle of a shuffle, and
