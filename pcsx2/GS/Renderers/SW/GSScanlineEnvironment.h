@@ -159,6 +159,9 @@ struct alignas(32) GSScanlineGlobalData // per batch variables, this is like a p
 
 #endif
 
+	u8* m_reg_dump_data;
+	u64* m_reg_dump_counter;
+
 #ifdef ARCH_ARM64
 	// Mini version of constant data for ARM64, we don't need all of it
 	alignas(16) u32 const_test_128b[8][4] = {
@@ -371,3 +374,6 @@ struct alignas(64) GSScanlineConstantData128B
 
 extern const GSScanlineConstantData256B g_const_256b;
 extern const GSScanlineConstantData128B g_const_128b;
+
+extern std::vector<u64> g_reg_dump_counter;
+extern std::vector<u8> g_reg_dump_data;
