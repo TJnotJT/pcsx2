@@ -5809,6 +5809,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
+		pxAssertRel(!config.autoflush, "DATE PrimID is not compatible with autoflush");
 		// If we have a colclip in progress, we need to use the colclip texture, but we can't check this later as there's a chicken/egg problem with the pipe setup.
 		GSTexture* backup_rt = config.rt;
 
@@ -5917,6 +5918,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// Switch to colclip target for colclip hw rendering
 	if (pipe.ps.colclip_hw)
 	{
+		pxAssertRel(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;
@@ -6322,7 +6324,74 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		}
 	};
 
-	if (full_barrier)
+	if (config.autoflush)
+	{
+		const u32 indices_per_prim = config.indices_per_prim;
+		const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
+
+		GL_PUSH("Split the draw (autoflush)");
+
+		const GSVector4i tex_rect = config.tex->GetRect();
+
+		const PipelineSelector& pipe = m_pipeline_selector;
+		GSTextureVK* rt = static_cast<GSTextureVK*>(config.rt);
+		GSTextureVK* ds = static_cast<GSTextureVK*>(config.ds);
+
+		pxAssert(!rt || rt->GetState() == GSTexture::State::Dirty);
+		pxAssert(!ds || ds->GetState() == GSTexture::State::Dirty);
+
+		// RT and DS should have already been set to dirty, the load ops should be
+		// either LOAD if non-null or DONT_CARE if null.
+		const VkRenderPass render_pass = GetTFXRenderPass(pipe.rt, pipe.ds, pipe.ps.colclip_hw,
+			config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil, pipe.IsRTFeedbackLoop(),
+			pipe.IsTestingAndSamplingDepth(), GetLoadOpForTexture(rt), GetLoadOpForTexture(ds));
+
+		// a: autoflush drawlist position
+		// n: barrier drawlist position
+		// p: number of indices drawn
+		for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
+		{
+			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
+			const bool copy = !bbox.rempty();
+
+			if (copy)
+			{
+				EndRenderPass();
+				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+
+				PSSetShaderResource(TFX_TEXTURE_TEXTURE, config.tex, true);
+				OMSetRenderTargets(config.rt, config.ds, config.scissor, m_current_framebuffer_feedback_loop);
+				
+				BeginRenderPass(render_pass, config.drawarea);
+			}
+
+			int prims = static_cast<int>((*config.autoflush_list)[a]);
+
+			bool first = true;
+			while (prims > 0)
+			{
+				const u32 count = (*config.drawlist)[n] * indices_per_prim;
+
+				// Skip the first barrier if copy/transition has covered it.
+				if (!first || !copy)
+				{
+					IssueBarriers();
+					g_perfmon.Put(GSPerfMon::Barriers, n_barriers);
+				}
+
+				if (BindDrawPipeline(m_pipeline_selector))
+					DrawIndexedPrimitive(p, count);
+
+				prims -= (*config.drawlist)[n];
+				p += count;
+				n++;
+				first = false;
+			}
+		}
+
+		return;
+	}
+	else if (full_barrier)
 	{
 		pxAssert(config.drawlist && !config.drawlist->empty());
 

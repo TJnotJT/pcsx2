@@ -2815,6 +2815,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	if (config.ps.colclip_hw)
 	{
+		pxAssertRel(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;
@@ -2838,6 +2839,8 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	const bool multidraw_fb_copy = m_features.multidraw_fb_copy && (config.require_one_barrier || config.require_full_barrier);
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
+		pxAssertRel(!config.autoflush, "DATE PrimID is not compatible with autoflush");
+
 		primid_texture = CreateRenderTarget(rtsize.x, rtsize.y, GSTexture::Format::PrimID, false);
 		if (!primid_texture)
 		{
@@ -3021,7 +3024,7 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 	GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
 	const bool one_barrier, const bool full_barrier)
 {
-	if (draw_rt_clone || draw_ds_clone)
+	if (draw_rt_clone || draw_ds_clone || config.autoflush)
 	{
 #ifdef PCSX2_DEVBUILD
 		if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
@@ -3046,7 +3049,53 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 
 		const GSVector4i rtsize(0, 0, (draw_rt ? draw_rt : draw_ds)->GetWidth(), (draw_rt ? draw_rt : draw_ds)->GetHeight());
 
-		if (full_barrier)
+		if (config.autoflush)
+		{
+			const u32 indices_per_prim = config.indices_per_prim;
+			const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
+
+			GL_PUSH("Split the draw (autoflush)");
+
+			const GSVector4i tex_rect = config.tex->GetRect();
+
+			// a: autoflush drawlist position
+			// n: barrier drawlist position
+			// p: number of indices drawn
+			for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
+			{
+				const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
+
+				if (!bbox.rempty())
+				{
+					CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
+
+					PSSetShaderResource(0, config.tex);
+					OMSetRenderTargets(config.rt, config.ds, &config.scissor);
+				}
+
+				int prims = static_cast<int>((*config.autoflush_list)[a]);
+
+				while (prims > 0)
+				{
+					const u32 count = (*config.drawlist)[n] * indices_per_prim;
+
+					if (draw_rt_clone || draw_ds_clone)
+					{
+						const GSVector4i original_bbox = (*config.drawlist_bbox)[n].rintersect(config.drawarea);
+						CopyAndBind(ProcessCopyArea(rtsize, original_bbox));
+					}
+
+					DrawIndexedPrimitive(p, count);
+
+					prims -= (*config.drawlist)[n];
+					p += count;
+					n++;
+				}
+			}
+
+			return;
+		}
+		else if (full_barrier)
 		{
 			const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
 			const u32 indices_per_prim = config.indices_per_prim;
