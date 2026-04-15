@@ -3539,7 +3539,8 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 	if (dst_end_block < dst->m_TEX0.TBP0)
 		dst_end_block += GS_MAX_BLOCKS;
 
-	// Check all old targets to determine what modifications must be made.
+	// Check all old targets to determine if we can load from them.
+	// May remove old targets than can be incorporated into the new one.
 	if (psm_s.depth == 0)
 	{
 		// New target is a color format.
@@ -3551,47 +3552,59 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 				auto j = i;
 				Target* old_dst = *j;
 
-				// Don't want modify the target we're preloading here.
+				// Don't modify the target we're preloading here.
 				if (dst == old_dst)
 				{
 					i++;
 					continue;
 				}
 
-				// Check to make sure there is sufficient compatibility/overlap between the old target and the new target
-				// to warrant modifying the old target.
+				// Make sure there's sufficient compatibility/overlap between the old target and the new target
+				// to warrant loading from the old target.
 				if (old_dst->m_TEX0.PSM != dst->m_TEX0.PSM ||
 					!old_dst->Overlaps(dst->m_TEX0.TBP0, dst->m_TEX0.TBW, dst->m_TEX0.PSM, dst_valid))
 				{
 					i++;
 					continue;
 				}
-				
-				// Make sure roughly that the first row of pages of the old target fit within the buffer width
-				// of the new target.
+
 				const int page_diff = std::abs(static_cast<int>(old_dst->m_TEX0.TBP0 - dst->m_TEX0.TBP0)) >> 5;
-				const int page_left = page_diff % dst->m_TEX0.TBW;
-				const int page_right = page_left + old_dst->m_TEX0.TBW;
-				const bool old_width_fits_in_new_width = page_right <= dst->m_TEX0.TBW;
-				if (!old_width_fits_in_new_width)
-				{
-					i++;
-					continue;
-				}
-
-				const u32 buffer_width = std::max(1U, dst->m_TEX0.TBW);
+				const u32 new_buffer_width = std::max(1U, dst->m_TEX0.TBW);
 				const u32 old_buffer_width = std::max(1U, old_dst->m_TEX0.TBW);
+				const u32 new_pages_wide = new_buffer_width * 64 / psm_s.pgs.x;
+				const u32 old_pages_wide = old_buffer_width * 64 / psm_s.pgs.x; // Same PSM for old at this point.
 
-				if (buffer_width != old_buffer_width)
+				// Handle cases where the buffer widths don't match.
+				if (new_buffer_width != old_buffer_width)
 				{
 					i++;
+
+					// Probably best we don't poke the beast if it's being used as the current source.
+					if (src && src->m_target_direct && src->m_from_target == old_dst)
+						continue;
+
+					// Check if the new target points to the left edge of the old target,
+					// in which case we can resize the old target.
+					if (dst->m_TEX0.TBP0 > old_dst->m_TEX0.TBP0)
+					{
+						const int block_diff = dst->m_TEX0.TBP0 - old_dst->m_TEX0.TBP0;
+						if ((block_diff % (32 * old_pages_wide)) == 0) // Check for left alignment.
+						{
+							const int new_height = block_diff / (32 * old_pages_wide) * psm_s.pgs.y;
+							old_dst->m_valid = old_dst->m_valid.rintersect(GSVector4i(0, 0, old_dst->GetUnscaledWidth(), new_height));
+							if (old_dst->m_valid.rempty())
+							{
+								InvalidateSourcesFromTarget(old_dst);
+								i = list.erase(j);
+								delete old_dst;
+							}
+						}
+						continue;
+					}
+
 					// Check if this got messed with at some point, if it did just nuke it.
 					if (!preserve_target && old_dst->m_age > 0)
 					{
-						// Probably best we don't poke the beast if it's being used as the current source.
-						if (src && src->m_target_direct && src->m_from_target == old_dst)
-							continue;
-
 						InvalidateSourcesFromTarget(old_dst);
 						i = list.erase(j);
 						delete old_dst;
@@ -3602,7 +3615,7 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 
 				// If the two targets are misaligned, it's likely a relocation, so we can just kill the old target.
 				// Kill targets that are overlapping new targets, but ignore the copy if the old target is dirty because we favour GS memory.
-				if (((page_diff % buffer_width) != 0) && !old_dst->m_dirty.empty())
+				if (((page_diff % new_buffer_width) != 0) && !old_dst->m_dirty.empty())
 				{
 					InvalidateSourcesFromTarget(old_dst);
 					i = list.erase(j);
@@ -3618,7 +3631,7 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 				{
 					GSVector4i new_valid = old_dst->m_valid;
 					new_valid.w /= 2;
-					if (preserve_target && old_dst->m_scale == dst->m_scale && dst->m_type == old_dst->m_type && !old_dst->m_drawn_since_read.rintersect(new_valid).eq(old_dst->m_drawn_since_read))
+					if (preserve_target && old_dst->m_scale == dst->m_scale && dst->m_type == old_dst->m_type && !new_valid.rcontains(old_dst->m_drawn_since_read))
 					{
 						// Clamp the copy inside the source and destination.
 						const GSVector4i copy_rect = GSVector4i(GSVector4((new_valid + GSVector4i(0, new_valid.w).xyxy()).rintersect(old_dst->m_drawn_since_read).rintersect(GSVector4i(0, 0, dst->m_unscaled_size.x, new_valid.w + dst->m_unscaled_size.y))) * dst->m_scale);
@@ -3628,8 +3641,8 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 
 						if (!old_dst->m_dirty.empty())
 						{
-							const GSVector4i t_dirty = old_dst->m_dirty.GetTotalRect(old_dst->m_TEX0, old_dst->m_unscaled_size);
-							if (copy_rect.rintersect(t_dirty).eq(copy_rect))
+							const GSVector4i old_dirty = old_dst->m_dirty.GetTotalRect(old_dst->m_TEX0, old_dst->m_unscaled_size);
+							if (copy_rect.rintersect(old_dirty).eq(copy_rect))
 							{
 								copy_target = false;
 								// This might do nothing, but no point in copying from the target if this area is completel dirty.
@@ -3668,18 +3681,18 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 				// The new texture is behind it but engulfs the whole thing, shrink the new target so it grows in the HW Draw resize.
 				if (dst->m_TEX0.TBP0 < old_dst->m_TEX0.TBP0 && dst_end_block > old_dst->m_TEX0.TBP0)
 				{
-					const int rt_pages = ((old_dst->UnwrappedEndBlock() + 1) - old_dst->m_TEX0.TBP0) >> 5;
-					const int overlapping_pages = std::min(rt_pages, static_cast<int>(dst_end_block - old_dst->m_TEX0.TBP0) >> 5);
-					const int overlapping_pages_height = ((overlapping_pages + (buffer_width - 1)) / buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.y;
+					const int old_pages = ((old_dst->UnwrappedEndBlock() + 1) - old_dst->m_TEX0.TBP0) >> 5;
+					const int overlapping_pages = std::min(old_pages, static_cast<int>(dst_end_block - old_dst->m_TEX0.TBP0) >> 5);
+					const int overlapping_pages_height = ((overlapping_pages + (new_buffer_width - 1)) / new_buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.y;
 
-					if (overlapping_pages_height == 0 || (overlapping_pages % buffer_width))
+					if (overlapping_pages_height == 0 || (overlapping_pages % new_buffer_width))
 					{
 						// No overlap top copy or the widths don't match.
 						i++;
 						continue;
 					}
 
-					const int dst_offset_height = ((page_diff / buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.y);
+					const int dst_offset_height = ((page_diff / new_buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.y);
 					const int texture_height = (dst->m_TEX0.TBW == old_dst->m_TEX0.TBW) ? (dst_offset_height + old_dst->m_valid.w) : (dst_offset_height + overlapping_pages_height);
 
 					if (texture_height > dst->m_unscaled_size.y && !dst->ResizeTexture(dst->m_unscaled_size.x, texture_height, true))
@@ -3690,7 +3703,7 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 						continue;
 					}
 
-					const int dst_offset_width = (page_diff % buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.x;
+					const int dst_offset_width = (page_diff % new_buffer_width) * GSLocalMemory::m_psm[old_dst->m_TEX0.PSM].pgs.x;
 					const int dst_offset_scaled_width = dst_offset_width * dst->m_scale;
 					const int dst_offset_scaled_height = dst_offset_height * dst->m_scale;
 					const GSVector4i dst_rect_scale = GSVector4i(old_dst->m_valid.x, dst_offset_height, old_dst->m_valid.z, texture_height);
