@@ -5956,9 +5956,10 @@ void GSRendererHW::EmulateDATESelectMethod(DATEOptions& date_options, GSTextureC
 			m_conf.require_full_barrier = true;
 			date_options.barrier = true;
 		}
-		else if (features.feedback_loops() && m_conf.require_full_barrier)
+		else if ((features.feedback_loops() && m_conf.require_full_barrier) || HasAutoFlushList())
 		{
 			// Full barrier is enabled (likely sw fbmask), we need to use date barrier.
+			// If autoflush list is used, we cannot use DATE primid.
 			GL_PERF("DATE: Accurate with alpha %d-%d", GetAlphaMinMax().min, GetAlphaMinMax().max);
 			m_conf.require_full_barrier = true;
 			date_options.barrier = true;
@@ -6161,7 +6162,7 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	m_conf.vs.iip = !IsFlatShaded();
 }
 
-void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
+void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -6202,6 +6203,18 @@ void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
 	if (m_conf.require_full_barrier && features.feedback_loops())
 	{
 		ComputeDrawlistGetSize(rt->m_scale);
+		m_conf.drawlist = &m_drawlist;
+		m_conf.drawlist_bbox = &m_drawlist_bbox;
+	}
+
+	if (m_conf.tex && HasAutoFlushList())
+	{
+		GL_INS("HW: Using autoflush list for %lld draws %s barriers",
+			m_autoflush_list.size(), m_conf.require_full_barrier ? "with" : "without");
+		ProcessAutoflushDrawlist(rt->GetScale(), tex->GetScale());
+		m_conf.autoflush = true;
+		m_conf.autoflush_list = &m_autoflush_list;
+		m_conf.autoflush_bbox = &m_autoflush_bbox;
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
@@ -6963,6 +6976,9 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 		// mixing dual source blending with multiple render targets.
 		(m_conf.ps.IsFeedbackLoopDepth() && !features.depth_feedback) ||
 		
+		// The autoflush list isn't compatible with HW colclip, so use SW blending.
+		(HasAutoFlushList() && COLCLAMP.CLAMP == 0) ||
+
 		// Force SW blending with barriers.
 		GSConfig.UseDebugBlend;
 	
@@ -7674,8 +7690,9 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			bilinear &= m_vt.IsLinear();
 		}
 
-		// Depth format
-		if (tex->m_texture->IsDepthStencil())
+		// Depth format. With autoflush, the source copy is switched to color so
+		// we must check that instead.
+		if (src_copy ? src_copy->IsDepthStencil() : tex->m_texture->IsDepthStencil())
 		{
 			// Require a float conversion if the texure is a depth format
 			m_conf.ps.depth_fmt = (psm.bpp == 16) ? 2 : 1;
@@ -8016,6 +8033,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 
 			src_target = tex->m_from_target;
 		}
+		else if (HasAutoFlushList() && tex->m_texture->IsDepthStencil())
+		{
+			// The autoflush list needs a color source so that it can use GPU copies for updates.
+			src_target = rt;
+		}
 		else
 		{
 			// No match.
@@ -8194,7 +8216,11 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		return;
 	}
 
-	if (m_downscale_source)
+	if (HasAutoFlushList())
+	{
+		GL_CACHE("HW: Using autoflush list, skipping RT copy.");
+	}
+	else if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
 		if (src_target->m_texture->IsDepthStencil() || std::floor(src_target->GetScale()) != src_target->GetScale())
@@ -8361,7 +8387,7 @@ bool GSRendererHW::CanUseTexIsFB(const GSTextureCache::Target* rt, const GSTextu
 		const GSVector4 diff(m_vt.m_min.p.upld(m_vt.m_max.p) - m_vt.m_min.t.upld(m_vt.m_max.t));
 		if (m_cached_ctx.FRAME.FBMSK == 0x00FFFFFF && (diff.abs() < GSVector4(1.0f)).alltrue())
 		{
-			GL_CACHE("HW: Elabling tex-is-fb hack for Jak.");
+			GL_CACHE("HW: Enabling tex-is-fb hack for Jak.");
 			return true;
 		}
 
@@ -9027,7 +9053,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
-	DetermineBarriers(rt);
+	DetermineBarriers(rt, tex);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
