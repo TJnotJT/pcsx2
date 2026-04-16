@@ -197,6 +197,34 @@ private:
 		}
 	};
 
+	enum ChannelShuffleChannel
+	{
+		ChannelRed = 0,
+		ChannelGreen = 1,
+		ChannelBlue = 2,
+		ChannelAlpha = 2,
+	};
+
+	struct ChannelShuffleMap
+	{
+		ChannelShuffleChannel write_red = ChannelRed;
+		ChannelShuffleChannel write_green = ChannelGreen;
+		ChannelShuffleChannel write_blue = ChannelBlue;
+		ChannelShuffleChannel write_alpha = ChannelAlpha;
+
+		void Swap_RG_and_BA()
+		{
+			std::swap(write_red, write_blue);
+			std::swap(write_green, write_alpha);
+		};
+
+		void Swap_RB_and_GA()
+		{
+			std::swap(write_red, write_green);
+			std::swap(write_blue, write_alpha);
+		};
+	};
+
 	bool HasEEUpload(GSVector4i r);
 	CLUTDrawTestResult PossibleCLUTDraw();
 	CLUTDrawTestResult PossibleCLUTDrawAggressive();
@@ -251,6 +279,14 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 
+	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout);
+
+	// Channel shuffle functions.
+	bool SkipSplitChannelShuffleDraw();
+
+	template<bool fst>
+	bool DetectChannelShuffle();
+
 	// Texture shuffle functions.
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
 	void FixSplitTextureShuffleState();
@@ -301,6 +337,7 @@ private:
 	u32 m_split_texture_shuffle_start_TBP = 0;
 	u32 m_split_texture_shuffle_fbw = 0;
 
+	u32 m_num_skipped_channel_shuffle_draws = 0;
 	u32 m_last_channel_shuffle_fbmsk = 0;
 	u32 m_last_channel_shuffle_fbp = 0;
 	u32 m_last_channel_shuffle_tbp = 0;
