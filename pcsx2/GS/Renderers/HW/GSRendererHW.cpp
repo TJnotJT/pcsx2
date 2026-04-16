@@ -15,6 +15,8 @@
 using PS_ATST  = GSShader::PS_ATST;
 using PS_AFAIL = GSShader::PS_AFAIL;
 
+bool NEW_SHUFFLE = true;
+
 GSRendererHW::GSRendererHW()
 	: GSRenderer()
 {
@@ -325,6 +327,34 @@ void GSRendererHW::ExpandLineIndices()
 	}
 }
 
+// Utility function to get quads that are used for shuffle detection.
+bool GSRendererHW::GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout)
+{
+	GSVertex v0, v1;
+	if (!GetQuadCorners(verts, index, v0, v1))
+		return false;
+
+	GSVector4 xy, uv;
+	GetQuadBBoxWindow(v0, v1, xy, uv);
+
+	GetQuadRasterizedPoints(xy, uv);
+
+	const GSVector4i exclusive(0, 0, 1, 1);
+	xyout = GSVector4i(xy) + exclusive;
+
+	// Swap order UV coords so that they are top-left and bottom-right before applying
+	// exclusive bias, and then swap back.
+	const int uvswap = (uv.xyxy() > uv.zwzw()).mask();
+	uvout = GSVector4i(uv.floor());
+	uvout = uvout.xyxy().runion(uvout.zwzw()) + exclusive;
+	if (uvswap & 1)
+		uvout = uvout.zyxw();
+	if (uvswap & 2)
+		uvout = uvout.xwzy();
+
+	return true;
+};
+
 template<u32 primclass, bool fst>
 GSRendererHW::TextureShuffleInfo GSRendererHW::DetectTextureShuffleImpl()
 {
@@ -352,29 +382,7 @@ GSRendererHW::TextureShuffleInfo GSRendererHW::DetectTextureShuffleImpl()
 	}
 
 	const auto GetQuadXYUV = [&](u32 i, GSVector4i& xyout, GSVector4i& uvout) {
-		GSVertex v0, v1;
-		if (!GetQuadCorners(verts, index + verts_per_quad * i, v0, v1))
-			return false;
-
-		GSVector4 xy, uv;
-		GetQuadBBoxWindow(v0, v1, xy, uv);
-
-		GetQuadRasterizedPoints(xy, uv);
-
-		const GSVector4i exclusive(0, 0, 1, 1);
-		xyout = GSVector4i(xy) + exclusive;
-
-		// Swap order UV coords so that they are top-left and bottom-right before applying
-		// exclusive bias, and then swap back.
-		const int uvswap = (uv.xyxy() > uv.zwzw()).mask();
-		uvout = GSVector4i(uv.floor());
-		uvout = uvout.xyxy().runion(uvout.zwzw()) + exclusive;
-		if (uvswap & 1)
-			uvout = uvout.zyxw();
-		if (uvswap & 2)
-			uvout = uvout.xwzy();
-		
-		return true;
+		return GetShuffleQuadXYUV(verts, index + verts_per_quad * i, xyout, uvout);
 	};
 
 	const auto Is8PixelReversal = [](const GSVector4i& xy, const GSVector4i& uv) {
@@ -1525,7 +1533,8 @@ GSVector2i GSRendererHW::GetValidSize(const GSTextureCache::Source* tex, const b
 	}
 
 	// If it's a channel shuffle, it'll likely be just a single page, so assume full screen.
-	if (m_channel_shuffle || (tex && IsPageCopy()))
+	bool channel_shuffle = NEW_SHUFFLE ? m_channel_shuffle_2 : m_channel_shuffle;
+	if (channel_shuffle || (tex && IsPageCopy()))
 	{
 		const int page_x = frame_psm.pgs.x - 1;
 		const int page_y = frame_psm.pgs.y - 1;
@@ -1616,6 +1625,9 @@ bool GSRendererHW::NextDrawColClip() const
 
 bool GSRendererHW::IsPossibleChannelShuffle() const
 {
+	if (NEW_SHUFFLE)
+		return m_channel_shuffle_2.draw_is_a_shuffle;
+
 	if (!PRIM->TME || m_cached_ctx.TEX0.PSM != PSMT8 || // 8-bit texture draw
 		m_vt.m_primclass != GS_SPRITE_CLASS || // draw_sprite_tex
 		(m_vertex->tail <= 2 && (((m_vt.m_max.p - m_vt.m_min.p) <= GSVector4(8.0f)).mask() & 0x3) == 0x3)) // Powerdrome does a tiny shuffle on a couple of pixels, can't reliably translate this.
@@ -1892,6 +1904,605 @@ void GSRendererHW::FixSplitTextureShuffleState()
 		m_vt.m_max.t.x = m_r.z;
 		m_vt.m_max.t.y = m_r.w;
 	}
+}
+
+// Implementation function that does not mutate internal state.
+template<bool fst>
+GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
+{
+	const GIFRegFRAME& frame = m_context->FRAME;
+	const GIFRegTEX0& tex0 = m_context->TEX0;
+	const GIFRegZBUF& zbuf = m_context->ZBUF;
+	const GIFRegCLAMP& clamp = m_context->CLAMP;
+	const GSLocalMemory::psm_t& frame_psm = GSLocalMemory::m_psm[frame.PSM];
+	const GSLocalMemory::psm_t& tex_psm = GSLocalMemory::m_psm[tex0.PSM];
+	const GSLocalMemory::psm_t& zbuf_psm = GSLocalMemory::m_psm[zbuf.PSM];
+
+	if (!(PRIM->TME && tex0.PSM == PSMT8 && m_vt.m_primclass == GS_SPRITE_CLASS &&
+		frame_psm.bpp == 32))
+	{
+		return ChannelShuffleInfo();
+	}
+
+	// Channel and texture shuffle are mutually exclusive.
+	if (m_texture_shuffle)
+	{
+		return ChannelShuffleInfo();
+	}
+
+	const GSVertex* RESTRICT verts = m_vertex->buff;
+	const u16* RESTRICT index = m_index->buff;
+	const int num_quads = static_cast<int>(m_index->tail) / 2;
+
+	const auto GetQuadXYUV = [&](int i, GSVector4i& xyout, GSVector4i& uvout) {
+		return (i < num_quads) && GetShuffleQuadXYUV(verts, index + 2 * i, xyout, uvout);
+	};
+
+	GL_PUSH("HW: Channel shuffle detection");
+
+	int curr_quad = 0;
+
+	const auto GetFullQuadXYUV = [&](GSVector4i& xyout, GSVector4i& uvout) {
+		if (!GetQuadXYUV(curr_quad++, xyout, uvout))
+			return false;
+
+		// Combine small 4 pixel wide sprites into a single 8 pixel wide sprite.
+		if (xyout.width() == 4)
+		{
+			GSVector4i xy = GSVector4i::zero();
+			GSVector4i uv = GSVector4i::zero();
+			if (!GetQuadXYUV(curr_quad++, xy, uv))
+				return false;
+
+			// Must all be 4 pixels wide.
+			if (!(uvout.width() == 4 && xy.width() == 4 && uv.width() == 4))
+				return false;
+
+			// Check Y and V ranges are identical so quads can be combined.
+			if (!xy.ywyw().eq(xyout.ywyw()) && uv.ywyz().eq(uvout.ywyw()))
+				return false;
+
+			// Combine
+			xyout = xyout.runion(xy);
+			uvout = uvout.runion(uv);
+		}
+		
+		return true;
+	};
+
+	GSVector4i xy0 = GSVector4i::zero(), xy1 = GSVector4i::zero();
+	GSVector4i uv0 = GSVector4i::zero(), uv1 = GSVector4i::zero();
+
+	// Get the quads for channel inference.
+	bool matched_sizes = false;
+	const int total_tries = (num_quads > 1) ? 2 : 1; // Only need multiple tries if there are multiple quads.
+	for (int tries = 0; tries < total_tries && curr_quad < num_quads; tries++)
+	{
+		if (!GetFullQuadXYUV(xy0, uv0))
+		{
+			GL_INS("HW: Not a shuffle (quad not found).");
+			return ChannelShuffleInfo();
+		}
+
+		if (num_quads > 1)
+		{
+			const int second_quad = curr_quad;
+
+			if (!GetFullQuadXYUV(xy1, uv1))
+			{
+				GL_INS("HW: Not a shuffle (second quad not found).");
+				return ChannelShuffleInfo();
+			}
+
+			if ((xy0.rsize().eq(xy1.rsize()) && uv0.rsize().eq(uv1.rsize())))
+			{
+				matched_sizes = true;
+				break;
+			}
+
+			// Fall through, we didn't match sizes, so advance to the second quad.
+			curr_quad = second_quad;
+		}
+	}
+
+	if (num_quads > 1 && !matched_sizes)
+	{
+		GL_INS("HW: Not a shuffle (quads different sizes).");
+		return ChannelShuffleInfo();
+	}
+
+	GL_INS("HW: Detecting based on quad (1): pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+		xy0.x, xy0.y, xy0.z, xy0.w, uv0.x, uv0.y, uv0.z, uv0.w);
+	if (num_quads > 1)
+	{
+		GL_INS("HW: Detecting based on quad (2): pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+			xy0.x, xy0.y, xy0.z, xy0.w, uv0.x, uv0.y, uv0.z, uv0.w);
+	}
+
+	const auto ApplyRegionRepeat = [&](GSVector4i uv) {
+		for (int i = 0; i < 2; i++) // Process U then V.
+		{
+			const u32 WM = (i == 0) ? clamp.WMS : clamp.WMT;
+			const u32 MSK = (i == 0) ? clamp.MINU : clamp.MINV;
+			const u32 FIX = (i == 0) ? clamp.MAXU : clamp.MAXV;
+			int coord0 = (i == 0) ? uv.x : uv.y;
+			int coord1 = (i == 0) ? uv.z : uv.w;
+
+			if (WM == CLAMP_REGION_REPEAT)
+			{
+				// Special case where U, V are shifted and region repeat is used.
+				// The wrapping here is not strictly accurate, but allows the inference to work.
+				if (((coord1 - coord0) == 8) && ((coord0 % 8) == 4) && ((coord1 % 8) == 4))
+				{
+					if (FIX & 8)
+					{
+						coord0 += 4;
+						coord1 += 4;
+					}
+					else
+					{
+						coord0 -= 4;
+						coord1 -= 4;
+					}
+				}
+				else
+				{
+					coord0 = (coord0 & MSK) | FIX;
+					coord1 = (((coord1 - 1) & MSK) | FIX) + 1; // +/- 1 because exclusive.
+				}
+			}
+
+			if (i == 0)
+			{
+				uv.x = coord0;
+				uv.z = coord1;
+			}
+			else
+			{
+				uv.y = coord0;
+				uv.w = coord1;
+			}
+		}
+		uv = uv.xyxy().runion(uv.zwzw()); // Sort increasing in case the order got flipped.
+		return uv;
+	};
+
+	// Get the region repeated version since channel shuffles use it to select
+	// the right channels.
+	const GSVector4i uv0_clamp = ApplyRegionRepeat(uv0);
+	const GSVector4i uv1_clamp = ApplyRegionRepeat(uv1);
+
+	// Check for 8 pixel alignment in X, U and 2 pixel alignment in Y, V.
+	const auto IsAligned = [&](const GSVector4i& v) {
+		return (v & GSVector4i(7, 1, 7, 1)).eq(GSVector4i(0));
+	};
+
+	if (!(IsAligned(xy0) && (IsAligned(uv0) || IsAligned(uv0_clamp))))
+	{
+		GL_INS("HW: Not a shuffle (first quad not (8, 2) aligned).");
+		return ChannelShuffleInfo();
+	}
+
+	if (num_quads > 1)
+	{
+		if (!(IsAligned(xy1) && (IsAligned(uv1) || IsAligned(uv1_clamp))))
+		{
+			GL_INS("HW: Not a shuffle (second quad not (8, 2) aligned).");
+			return ChannelShuffleInfo();
+		}
+	}
+
+	const int x_pixels = xy0.width();
+	const int y_pixels = xy0.height();
+	const int u_pixels = std::abs(uv0.width());
+	const int v_pixels = std::abs(uv0_clamp.height());
+
+	if (x_pixels != u_pixels)
+	{
+		GL_INS("HW: Not a shuffle (X pixels != U pixels)");
+		return ChannelShuffleInfo();
+	}
+
+	// Depth shuffles do depth swizzling and shuffling together.
+	// The coordinates are not as regular so we need to handle them separately.
+	const bool shuffle_depth_16 =
+		frame.Block() != zbuf.Block() && zbuf.Block() == tex0.TBP0 && zbuf_psm.bpp == 16;
+
+	const bool v_region_repeat = (clamp.WMT == CLAMP_REGION_REPEAT);
+
+	// If the Y and V size are the same they must be 2 or 4 pixels.
+	// For larger sizes, V usually has twice the scale of Y,
+	// otherwise it should be using region repeat to select the correct rows.
+	if (!((y_pixels == 2 && v_pixels == 2) ||
+		(y_pixels == 4 && v_pixels == 4) ||
+		(y_pixels == v_pixels && v_region_repeat) ||
+		(2 * y_pixels == v_pixels) ||
+		(2 * y_pixels - 2 == v_pixels && v_region_repeat) ||
+		shuffle_depth_16))
+	{
+		GL_INS("Not a shuffle (Y / V scaling not correct)");
+		return ChannelShuffleInfo();
+	}
+
+	ChannelShuffleInfo info;
+
+	// FIXME: Maybe move this earlier.
+	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
+	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
+
+	GL_INS("HW: Detecting based on full bboxes: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+		full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
+		full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
+
+	if (!shuffle_depth_16)
+	{
+		// Early exit heuristics that are needed to avoid HLEing certain shuffles.
+		// Harry Potter and the Chamber of Secrets needs to exit here for shadow draws.
+		// WRC 4 needs to not exit here; it does a tall, single page wide shuffle that we HLE.
+		const bool single_page_x = full_xy_bbox.width() <= 64;
+		const bool single_page_y = full_xy_bbox.height() <= 64;
+		const bool page_aligned = GSLocalMemory::IsPageAligned(frame.PSM, full_xy_bbox);
+		if (!((single_page_x && single_page_y) || (single_page_x && page_aligned)))
+		{
+			GL_INS("HW: Not a shuffle (wrong size/page alignment).");
+			return ChannelShuffleInfo();
+		}
+	}
+
+	// FIXME: Comment is useless, improve it.
+	// If the source is 32 bits, the horizontal scaling should differ by a factor of 2.
+	// If the source is 16 bits, the horizontal scaling should usually be the same, unless TBW is modified.
+	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !shuffle_depth_16;
+	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
+
+	// Exactly one must be true.
+	if (info.possible_32_bit_source == info.possible_16_bit_source)
+	{
+		GL_INS("HW: Not a shuffle (incorrect scaling in X).");
+		return ChannelShuffleInfo();
+	}
+
+	GL_INS("HW: Real %d bit source for shuffle.", info.possible_32_bit_source ? 32 : 16);
+
+	// Make sure the next quad is spaced correctly.
+	if (num_quads > 1)
+	{
+		const int dx = std::abs(xy1.x - xy0.x);
+		const int dy = std::abs(xy1.y - xy0.y);
+		const int du = std::abs(uv1.x - uv0.x);
+		const int dv = std::abs(uv1.y - uv0.y);
+
+		// Usually X, U spacing differs by a factor of 2 if the shuffling a 32 bpp source,
+		// but could be identical if shuffling a 16 bit source (e.g. Urban Chaos smoke).
+		if (!((info.possible_32_bit_source && (2 * dx == du)) ||
+			(info.possible_16_bit_source && (dx == du)) ||
+			shuffle_depth_16))
+		{
+			GL_INS("Not a shuffle (X, U quad spacing incorrect)");
+			return ChannelShuffleInfo();
+		}
+
+		// The Y, V spacing must always be 0 or differ by a factor of 1, 2 depending of whether
+		// the source is really 16 bits.
+		if (!((dy == 0 && dv == 0) || (2 * dy == dv) || shuffle_depth_16))
+		{
+			GL_INS("Not a shuffle (Y, V quad spacing incorrect)");
+			return ChannelShuffleInfo();
+		}
+	}
+
+	// If we get this far, we consider the draw a shuffle, whether or not we HLE it.
+	info.draw_is_a_shuffle = true;
+
+	// Bellow are heuristics for specific HLE to use. 
+
+	// Special handling for GSC_IRem hack. The coordinates appear as it the
+	// source is 16 bits, because the the data has already been deswizzled from 32 bits.
+	// However, the state has been fixed up so that the source is 32 bits.
+	// The address checks are because the game uses a few small scratch buffers to do the shuffling.
+	if (full_xy_bbox.rsize().eq(GSVector4i(0, 0, 64, 30)) && full_uv_bbox.rsize().eq(GSVector4i(0, 0, 64, 60)) &&
+		x_pixels == 64 && u_pixels == 64 && y_pixels == 2 && v_pixels == 2 &&
+		(xy0.x == 0) && (uv0.x % 64) == 0 &&
+		num_quads == 8 && clamp.WMS != CLAMP_REGION_REPEAT && clamp.WMT != CLAMP_REGION_REPEAT &&
+		(frame.Block() == tex0.TBP0 + 0x40 || frame.Block() == tex0.TBP0 + 0x60))
+	{
+		GL_INS("HW: GSC_IRem CRC hack detected.");
+		if ((uv0.y & 2) == 0)
+		{
+			GL_INS("HW: Fetch R.");
+			info.channel = ChannelFetch_RED;
+		}
+		else
+		{
+			GL_INS("HW: Fetch G.");
+			info.channel = ChannelFetch_GREEN;
+		}
+		info.possible_32_bit_source = true;
+		info.possible_16_bit_source = false;
+		return info;
+	}
+
+	// Handle two special cases of shuffling a 16 bit depth buffer.
+	if (shuffle_depth_16)
+	{
+		// So far 2 games hit this code path: Urban Chaos and Tales of Abyss.
+		// UC: will copy depth to green channel.
+		// ToA: will copy depth to alpha channel.
+		if ((frame.FBMSK & 0x00FF0000) == 0x00FF0000)
+		{
+			// Green channel is masked
+			GL_INS("HW: HLE Shuffle Tales Of Abyss. Fetch RGB.");
+			info.channel = ChannelFetch_RGB;
+			info.tales_of_abyss_hle = true;
+		}
+		else
+		{
+			GL_INS("HW: HLE Shuffle Urban Chaos. Fetch RGB.");
+			info.channel = ChannelFetch_RGB;
+			info.urban_chaos_hle = true;
+		}
+
+		return info;
+	}
+
+	// Handle another special case that HLEs a shuffle and optimizes out a FBMSK.
+	if ((clamp.WMS == 3 && !(clamp.MINU & 0x8)) &&
+		((clamp.WMT == CLAMP_REGION_REPEAT && (clamp.MAXV & 0x2)) || (fst && (verts[0].V & 32))) &&
+		((frame.FBMSK & 0x00FFFFFF) == 0x00FFFFFF))
+	{
+		// Typically used in Terminator 3.
+		const int blue_mask = frame.FBMSK >> 24;
+		int blue_shift = -1;
+
+		// Note: potentially we could also check the value of the CLUT.
+		switch (blue_mask)
+		{
+			case 0xFF: pxAssert(0);    break;
+			case 0xFE: blue_shift = 1; break;
+			case 0xFC: blue_shift = 2; break;
+			case 0xF8: blue_shift = 3; break;
+			case 0xF0: blue_shift = 4; break;
+			case 0xE0: blue_shift = 5; break;
+			case 0xC0: blue_shift = 6; break;
+			case 0x80: blue_shift = 7; break;
+			default:                   break;
+		}
+
+		// Only use the HLE if the mask matches, otherwise fall through to general case.
+		if (blue_shift >= 0)
+		{
+			const int green_mask = ~blue_mask & 0xFF;
+			const int green_shift = 8 - blue_shift;
+
+			GL_INS("HW: Green/Blue channel (%d, %d)", blue_shift, green_shift);
+
+			info.green_blue_hle = true;
+			info.channel = ChannelFetch_GXBY;
+			info.green_blue_hle_data = GSVector4i(blue_mask, blue_shift, green_mask, green_shift);
+
+			return info;
+		}
+	}
+
+	// General case: infer channels based on coordinates after region clamping.
+	int u0 = uv0_clamp.x & 8;
+	int v0 = uv0_clamp.y & 2;
+
+	pxAssert(u0 == 0 || u0 == 8);
+	pxAssert(v0 == 0 || v0 == 2);
+
+	// Based on how pixels map to bits in PSMT8 column layout.
+	if (u0 == 0)
+	{
+		if (v0 == 0)
+		{
+			info.channel = ChannelFetch_RED;
+			GL_INS("HW: Fetch R.");
+		}
+		else if (v0 == 2)
+		{
+			info.channel = ChannelFetch_GREEN;
+			GL_INS("HW: Fetch G.");
+		}
+	}
+	else if (u0 == 8)
+	{
+		if (v0 == 0)
+		{
+			info.channel = ChannelFetch_BLUE;
+			GL_INS("HW: Fetch B.");
+		}
+		else if (v0 == 2)
+		{
+			info.channel = ChannelFetch_ALPHA;
+			GL_INS("HW: Fetch A.");
+		}
+	}
+
+	// Handle special cases that doesn't work reliably with HLE channel shuffle or might not
+	// not really be a shuffle.
+	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle && !IsPageCopy() &&
+		num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT && frame.Block() != tex0.TBP0)
+	{
+		// Only Blood Will Tell seems to hit this path.
+		GL_INS("HW: Blood Will Tell special case. Cancel HLE.");
+		info.channel = ChannelFetch_NONE;
+	}
+	
+	return info;
+}
+
+void GSRendererHW::DetectChannelShuffle()
+{
+	m_channel_shuffle_2 = ChannelShuffleInfo();
+
+	if (PRIM->TME && m_vt.m_primclass == GS_SPRITE_CLASS)
+	{
+		if (PRIM->FST)
+		{
+			m_channel_shuffle_2 = DetectChannelShuffle<true>();
+		}
+		else
+		{
+			m_channel_shuffle_2 = DetectChannelShuffle<false>();
+		}
+	}
+}
+
+// Quick check for use in a CRC hack.
+bool GSRendererHW::DetectChannelShuffleFast()
+{
+	GSVector4i xy = GSVector4i::zero();
+	GSVector4i uv = GSVector4i::zero();
+
+	return PRIM->TME && m_context->TEX0.PSM == PSMT8 &&
+		m_vt.m_primclass == GS_SPRITE_CLASS &&
+		GetShuffleQuadXYUV(m_vertex->buff, m_index->buff, xy, uv) &&
+		(xy.width() == 8 || xy.height() == 2);
+}
+
+void GSRendererHW::DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
+{
+	if (m_channel_shuffle_2)
+	{
+		if (m_channel_shuffle_2.possible_16_bit_source)
+		{
+			if (!(tex && tex->m_from_target && GSLocalMemory::m_psm[tex->m_from_target_TEX0.PSM].bpp == 16))
+			{
+				GL_INS("HW: DetectChannelShuffle (2): Not a shuffle (expected real 16 bit source)");
+				m_channel_shuffle_2.Disable();
+			}
+		}
+		else if (!(tex && tex->m_from_target && GSLocalMemory::m_psm[tex->m_from_target_TEX0.PSM].bpp == 32))
+		{
+			GL_INS("HW: DetectChannelShuffle (2): Not a shuffle (expected real 32 bit source)");
+			m_channel_shuffle_2.Disable();
+		}
+	}
+}
+
+// Check for a split channel shuffle and fix up the state if needed.
+bool GSRendererHW::SkipSplitChannelShuffleDraw()
+{
+	if (NEW_SHUFFLE)
+	{
+		if (!m_channel_shuffle_2)
+		{
+			m_last_channel_shuffle_fbp = 0xffff;
+			m_last_channel_shuffle_tbp = 0xffff;
+			m_last_channel_shuffle_end_block = 0xffff;
+			return false;
+		}
+	}
+	else
+	{
+		if (!m_channel_shuffle)
+		{
+			m_last_channel_shuffle_fbp = 0xffff;
+			m_last_channel_shuffle_tbp = 0xffff;
+			m_last_channel_shuffle_end_block = 0xffff;
+			return false;
+		}
+	}
+
+	// NFSU2 does consecutive channel shuffles with blending, reducing the alpha channel over time.
+	// Fortunately, it seems to change the FBMSK along the way, so this check alone is sufficient.
+	// Tomb Raider: Underworld does similar, except with R, G, B in separate palettes, therefore
+	// we need to split on those too.
+	const bool is_hle_skip = m_conf.ps.urban_chaos_hle || m_conf.ps.tales_of_abyss_hle;
+	const u32 max_skip = ((m_channel_shuffle_finish || !m_channel_shuffle_width) ? std::max(m_context->FRAME.FBW, 1U) : m_channel_shuffle_width) << 5;
+	const bool shuffle_detect = IsPossibleChannelShuffle() && m_last_channel_shuffle_fbmsk == m_context->FRAME.FBMSK &&
+		m_last_channel_shuffle_fbp <= m_context->FRAME.Block() && (m_last_channel_shuffle_fbp + max_skip) >= m_context->FRAME.Block() &&
+		m_last_channel_shuffle_end_block > m_context->FRAME.Block() && m_last_channel_shuffle_tbp <= m_context->TEX0.TBP0
+		&& (m_last_channel_shuffle_tbp + max_skip) >= m_context->TEX0.TBP0;
+
+	const bool shuffle_detect_loose = IsPossibleChannelShuffle() && m_last_channel_shuffle_fbmsk == m_context->FRAME.FBMSK &&
+		m_last_channel_shuffle_fbp <= m_context->FRAME.Block() &&
+		m_last_channel_shuffle_end_block > m_context->FRAME.Block() && m_last_channel_shuffle_tbp <= m_context->TEX0.TBP0;
+
+	m_channel_shuffle = !m_channel_shuffle_finish && ((!is_hle_skip && shuffle_detect) || (is_hle_skip && shuffle_detect_loose));
+
+	if (m_channel_shuffle)
+	{
+		// Tombraider does vertical strips 2 pages at a time, then puts them horizontally, it's a mess, so let it do the full screen shuffle.
+		m_full_screen_shuffle |= !IsPageCopy() && NextDrawMatchesShuffle();
+		// These HLE's skip several channel shuffles in a row which change blends etc. Let's not break the flow, it gets upset.
+		if (!m_conf.ps.urban_chaos_hle && !m_conf.ps.tales_of_abyss_hle)
+		{
+			m_last_channel_shuffle_fbp = m_context->FRAME.Block();
+			m_last_channel_shuffle_tbp = m_context->TEX0.TBP0;
+		}
+
+		m_num_skipped_channel_shuffle_draws++;
+		return true;
+	}
+
+	// Final draw of the shuffle.
+	if (m_channel_shuffle_width)
+	{
+		if (m_last_rt)
+		{
+			//DevCon.Warning("Skipped %d draw %lld was abort %d", m_num_skipped_channel_shuffle_draws, s_n, (int)m_channel_shuffle_abort);
+			// Some games like Tomb raider abort early, we're never going to know the real height, and the system doesn't work right for partials.
+			// But it's good enough for games like Hitman Blood Money which only shuffle part of the screen
+			const int width = std::max(static_cast<int>(m_last_rt->m_TEX0.TBW) * 64, 64);
+			const int shuffle_height = (((m_num_skipped_channel_shuffle_draws + 1 + (std::max(1, (width / 64) - 1))) * 64) / width) * 32;
+			const int shuffle_width = std::min((m_num_skipped_channel_shuffle_draws + 1) * 64, static_cast<u32>(width));
+			GSVector4i valid_area = GSVector4i::loadh(GSVector2i(shuffle_width, shuffle_height));
+			const int offset = (((m_last_channel_shuffle_fbp + 0x20) - m_last_rt->m_TEX0.TBP0) >> 5) - (m_num_skipped_channel_shuffle_draws + 1);
+
+			if (offset)
+			{
+				int vertical_offset = (offset / std::max(1U, m_channel_shuffle_width)) * 32;
+				valid_area.y += vertical_offset;
+				valid_area.w += vertical_offset;
+			}
+
+			if (!m_full_screen_shuffle)
+			{
+				m_conf.scissor.w = m_conf.scissor.y + shuffle_height * m_conf.cb_ps.ScaleFactor.z;
+				if (shuffle_width)
+					m_conf.scissor.z = m_conf.scissor.x + (shuffle_width * m_conf.cb_ps.ScaleFactor.z);
+				else
+					m_conf.scissor.z = std::min(m_conf.scissor.z, static_cast<int>((m_channel_shuffle_width * 64) * m_conf.cb_ps.ScaleFactor.z));
+			}
+
+			m_last_rt->UpdateValidity(valid_area);
+
+			g_gs_device->RenderHW(m_conf);
+
+			if (GSConfig.DumpGSData)
+			{
+				if (GSConfig.ShouldDump(s_n - 1, g_perfmon.GetFrame()))
+				{
+					if (m_last_rt && GSConfig.SaveRT)
+					{
+						const u64 frame = g_perfmon.GetFrame();
+
+						std::string s = GetDrawDumpPath("%05lld_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n - 1, frame, m_last_channel_shuffle_fbp, m_last_rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
+
+						m_last_rt->m_texture->Save(s);
+					}
+				}
+			}
+			g_texture_cache->InvalidateTemporarySource();
+			CleanupDraw(false);
+		}
+	}
+
+	if (!shuffle_detect)
+	{
+		m_last_channel_shuffle_fbp = 0xffff;
+		m_last_channel_shuffle_tbp = 0xffff;
+		m_last_channel_shuffle_end_block = 0xffff;
+	}
+
+	if (m_num_skipped_channel_shuffle_draws > 0)
+		GL_INS("HW: Skipped %d channel shuffle draws ending at %lld", m_num_skipped_channel_shuffle_draws, s_n);
+
+	m_num_skipped_channel_shuffle_draws = 0;
+
+	return false;
 }
 
 u32 GSRendererHW::Convert32BitTo16BitMask(u32 m)
@@ -2745,8 +3356,6 @@ void GSRendererHW::RoundSpriteOffset()
 
 void GSRendererHW::Draw()
 {
-	static u32 num_skipped_channel_shuffle_draws = 0;
-
 	// We mess with this state as an optimization, so take a copy and use that instead.
 	const GSDrawingContext* context = m_context;
 	m_cached_ctx.TEX0 = context->TEX0;
@@ -2755,6 +3364,11 @@ void GSRendererHW::Draw()
 	m_cached_ctx.TEST = context->TEST;
 	m_cached_ctx.FRAME = context->FRAME;
 	m_cached_ctx.ZBUF = context->ZBUF;
+
+	if (PRIM->AA1 && (m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS))
+	{
+		Console.Warning("USING_AA1 %lld");
+	}
 
 	if (IsBadFrame())
 	{
@@ -2768,110 +3382,10 @@ void GSRendererHW::Draw()
 		m_vt.m_max.c.rgba32() == 0 && m_draw_env->PRIM.PRIM == GS_POINTLIST && m_env.PRIM.PRIM != GS_POINTLIST)
 		return;
 
-	// Channel shuffles repeat lots of draws. Get out early if we can.
-	if (m_channel_shuffle)
+	// Split channel shuffles repeats lots of draws. Get out early if we can.
+	if (SkipSplitChannelShuffleDraw())
 	{
-		// NFSU2 does consecutive channel shuffles with blending, reducing the alpha channel over time.
-		// Fortunately, it seems to change the FBMSK along the way, so this check alone is sufficient.
-		// Tomb Raider: Underworld does similar, except with R, G, B in separate palettes, therefore
-		// we need to split on those too.
-		const bool is_hle_skip = m_conf.ps.urban_chaos_hle || m_conf.ps.tales_of_abyss_hle;
-		const u32 max_skip = ((m_channel_shuffle_finish || !m_channel_shuffle_width) ? std::max(m_context->FRAME.FBW, 1U) : m_channel_shuffle_width) << 5;
-		const bool shuffle_detect = IsPossibleChannelShuffle() && m_last_channel_shuffle_fbmsk == m_context->FRAME.FBMSK &&
-		                            m_last_channel_shuffle_fbp <= m_context->FRAME.Block() && (m_last_channel_shuffle_fbp + max_skip) >= m_context->FRAME.Block() && 
-									m_last_channel_shuffle_end_block > m_context->FRAME.Block() && m_last_channel_shuffle_tbp <= m_context->TEX0.TBP0
-									&& (m_last_channel_shuffle_tbp + max_skip) >= m_context->TEX0.TBP0;
-
-		const bool shuffle_detect_loose = IsPossibleChannelShuffle() && m_last_channel_shuffle_fbmsk == m_context->FRAME.FBMSK &&
-		                            m_last_channel_shuffle_fbp <= m_context->FRAME.Block() &&
-		                            m_last_channel_shuffle_end_block > m_context->FRAME.Block() && m_last_channel_shuffle_tbp <= m_context->TEX0.TBP0;
-
-		m_channel_shuffle = !m_channel_shuffle_finish && ((!is_hle_skip && shuffle_detect) || (is_hle_skip && shuffle_detect_loose));
-
-		if (m_channel_shuffle)
-		{
-			// Tombraider does vertical strips 2 pages at a time, then puts them horizontally, it's a mess, so let it do the full screen shuffle.
-			m_full_screen_shuffle |= !IsPageCopy() && NextDrawMatchesShuffle();
-			// These HLE's skip several channel shuffles in a row which change blends etc. Let's not break the flow, it gets upset.
-			if (!m_conf.ps.urban_chaos_hle && !m_conf.ps.tales_of_abyss_hle)
-			{
-				m_last_channel_shuffle_fbp = m_context->FRAME.Block();
-				m_last_channel_shuffle_tbp = m_context->TEX0.TBP0;
-			}
-
-			num_skipped_channel_shuffle_draws++;
-			return;
-		}
-
-		if (m_channel_shuffle_width)
-		{
-			if (m_last_rt)
-			{
-				//DevCon.Warning("Skipped %d draw %lld was abort %d", num_skipped_channel_shuffle_draws, s_n, (int)m_channel_shuffle_abort);
-				// Some games like Tomb raider abort early, we're never going to know the real height, and the system doesn't work right for partials.
-				// But it's good enough for games like Hitman Blood Money which only shuffle part of the screen
-				const int width = std::max(static_cast<int>(m_last_rt->m_TEX0.TBW) * 64, 64);
-				const int shuffle_height = (((num_skipped_channel_shuffle_draws + 1 + (std::max(1, (width / 64) - 1))) * 64) / width) * 32;
-				const int shuffle_width = std::min((num_skipped_channel_shuffle_draws + 1) * 64, static_cast<u32>(width));
-				GSVector4i valid_area = GSVector4i::loadh(GSVector2i(shuffle_width, shuffle_height));
-				const int offset = (((m_last_channel_shuffle_fbp + 0x20) - m_last_rt->m_TEX0.TBP0) >> 5) - (num_skipped_channel_shuffle_draws + 1);
-
-				if (offset)
-				{
-					int vertical_offset = (offset / std::max(1U, m_channel_shuffle_width)) * 32;
-					valid_area.y += vertical_offset;
-					valid_area.w += vertical_offset;
-				}
-
-				if (!m_full_screen_shuffle)
-				{
-					m_conf.scissor.w = m_conf.scissor.y + shuffle_height * m_conf.cb_ps.ScaleFactor.z;
-					if (shuffle_width)
-						m_conf.scissor.z = m_conf.scissor.x + (shuffle_width * m_conf.cb_ps.ScaleFactor.z);
-					else
-						m_conf.scissor.z = std::min(m_conf.scissor.z, static_cast<int>((m_channel_shuffle_width * 64) * m_conf.cb_ps.ScaleFactor.z));
-				}
-
-				m_last_rt->UpdateValidity(valid_area);
-
-				g_gs_device->RenderHW(m_conf);
-
-				if (GSConfig.DumpGSData)
-				{
-					if (GSConfig.ShouldDump(s_n - 1, g_perfmon.GetFrame()))
-					{
-						if (m_last_rt && GSConfig.SaveRT)
-						{
-							const u64 frame = g_perfmon.GetFrame();
-
-							std::string s = GetDrawDumpPath("%05lld_f%05lld_rt1_%05x_(%05x)_%s.bmp", s_n - 1, frame, m_last_channel_shuffle_fbp, m_last_rt->m_TEX0.TBP0, GSUtil::GetPSMName(m_cached_ctx.FRAME.PSM));
-
-							m_last_rt->m_texture->Save(s);
-						}
-					}
-				}
-				g_texture_cache->InvalidateTemporarySource();
-				CleanupDraw(false);
-			}
-		}
-
-		if (!shuffle_detect)
-		{
-			m_last_channel_shuffle_fbp = 0xffff;
-			m_last_channel_shuffle_tbp = 0xffff;
-			m_last_channel_shuffle_end_block = 0xffff;
-		}
-#ifdef ENABLE_OGL_DEBUG
-		if (num_skipped_channel_shuffle_draws > 0)
-			GL_CACHE("HW: Skipped %d channel shuffle draws ending at %lld", num_skipped_channel_shuffle_draws, s_n);
-#endif
-		num_skipped_channel_shuffle_draws = 0;
-	}
-	else
-	{
-		m_last_channel_shuffle_fbp = 0xffff;
-		m_last_channel_shuffle_tbp = 0xffff;
-		m_last_channel_shuffle_end_block = 0xffff;
+		return;
 	}
 
 	m_last_rt = nullptr;
@@ -2887,6 +3401,9 @@ void GSRendererHW::Draw()
 
 	// First pass texture shuffle detection using context/vertices.
 	DetectTextureShuffle();
+
+	// First pass channel shuffle detection using context/vertices.
+	DetectChannelShuffle();
 
 	// When the format is 24bit (Z or C), DATE ceases to function.
 	// It was believed that in 24bit mode all pixels pass because alpha doesn't exist
@@ -3590,6 +4107,8 @@ void GSRendererHW::Draw()
 		}
 	}
 
+
+
 	// Urban Reign trolls by scissoring a draw to a target at 0x0-0x117F to 378x449 which ends up the size being rounded up to 640x480
 	// causing the buffer to expand to around 0x1400, which makes a later framebuffer at 0x1180 to fail to be created correctly.
 	// We can cheese this by checking if the Z is masked and the resultant colour is going to be black anyway.
@@ -3882,6 +4401,9 @@ void GSRendererHW::Draw()
 			}
 		}
 	}
+
+	// Second pass channel shuffle detect once we have the RT and source texture.
+	DetectChannelShuffleSecondPass(rt, src);
 
 	if (!no_rt)
 	{
@@ -5103,6 +5625,14 @@ void GSRendererHW::Draw()
 	//
 	const GSVector4i real_rect = m_r;
 
+	bool large_width_shuffle = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).width() > 64;
+	if (m_channel_shuffle_2 != m_channel_shuffle && !large_width_shuffle)
+	{
+		if (!NEW_SHUFFLE)
+			DumpDrawInfo(true, true, false);
+		Console.Warning("BAD_CHANNEL_SHUFFLE %lld (real=%d, new=%d)", s_n, m_channel_shuffle, (bool)m_channel_shuffle_2);
+	}
+
 	if (!skip_draw)
 		DrawPrims(rt, ds, src, tmm);
 
@@ -6308,6 +6838,11 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 
 bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 {
+	if (NEW_SHUFFLE)
+	{
+		return m_channel_shuffle_2;
+	}
+
 	// We have to do the second test early here, because it might be a different source.
 	const bool shuffle = m_channel_shuffle || IsPossibleChannelShuffle();
 
@@ -6316,8 +6851,178 @@ bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 	return m_channel_shuffle;
 }
 
+__ri void GSRendererHW::EmulateChannelShuffle2(GSTextureCache::Target* src, GSTextureCache::Target* rt)
+{
+	if (!m_channel_shuffle_2)
+		return;
+
+	pxAssert(PRIM->TME && PRIM->FST && m_vt.m_primclass == GS_SPRITE_CLASS);
+
+	// FIXME: Make a helper class for this.
+
+	const GSVector4i xyof = m_context->scissor.xyof.xyxy();
+	const bool bilinear = m_vt.IsRealLinear();
+
+	// Copy the attributes from the provoking vertex.
+	GSVertex v_default = m_vertex->buff[m_index->buff[1]];
+
+	const auto SetTexCoords = [&](float u, float v, GSVertex& vtx_out) {
+		vtx_out.U = static_cast<u32>(u * 16.0f);
+		vtx_out.V = static_cast<u32>(v * 16.0f);
+	};
+
+	const auto SetPosCoords = [&](float x, float y, GSVertex& vtx_out) {
+		vtx_out.XYZ.X = xyof.x + static_cast<u32>(x * 16.0f);
+		vtx_out.XYZ.Y = xyof.y + static_cast<u32>(y * 16.0f);
+	};
+
+	const auto WriteQuad = [&](const GSVector4i& xyi, const GSVector4i& uvi, GSVertex*& vout, u16*& iout) {
+		GSVector4 xy(xyi);
+		GSVector4 uv(uvi);
+
+		if (bilinear)
+		{
+			// Translate to texel center for bilinear.
+			GL_INS("HW: Translate to texel center for bilinear.");
+			uv += GSVector4(0.5f) / rt->GetScale();
+		}
+
+		vout[0] = v_default;
+		vout[1] = v_default;
+
+		SetPosCoords(xy.x, xy.y, vout[0]);
+		SetPosCoords(xy.z, xy.w, vout[1]);
+
+		SetTexCoords(uv.x, uv.y, vout[0]);
+		SetTexCoords(uv.z, uv.w, vout[1]);
+
+		iout[0] = 0;
+		iout[1] = 1;
+
+		vout += 2;
+		iout += 2;
+	};
+
+
+	// Late cancel of HLE channel shuffle. It might still be a complicated shuffle,
+	// but we take the slow path and swizzle the source to PSMT8.
+	if (!m_channel_shuffle_2.green_blue_hle &&
+		!m_channel_shuffle_2.tales_of_abyss_hle &&
+		!m_channel_shuffle_2.urban_chaos_hle &&
+		m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == CLAMP_REGION_REPEAT)
+	{
+		GL_INS("HW: Late channel shuffle cancel.");
+		m_channel_shuffle_2.Disable();
+		return;
+	}
+	
+	if (m_channel_shuffle_2.green_blue_hle)
+	{
+		m_cached_ctx.FRAME.FBMSK = 0x00FFFFFF; // Fixup FBMSK to avoid barriers.
+		m_conf.cb_ps.ChannelShuffle = m_channel_shuffle_2.green_blue_hle_data;
+	}
+
+	m_conf.ps.channel = m_channel_shuffle_2.channel == ChannelFetch_RGB ? ChannelFetch_NONE:
+	                    m_channel_shuffle_2.channel;
+	m_conf.ps.tales_of_abyss_hle = m_channel_shuffle_2.tales_of_abyss_hle;
+	m_conf.ps.urban_chaos_hle = m_channel_shuffle_2.urban_chaos_hle;
+
+	m_conf.tex = src->m_texture;
+
+	// FIXME: Remove this hack.
+	//if (m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == 3)
+	//{
+	//	m_channel_shuffle_2.Disable();
+	//	return;
+	//}
+
+	const GSLocalMemory::psm_t frame_psm = GSLocalMemory::m_psm[m_context->FRAME.PSM];
+	m_full_screen_shuffle = (m_r.height() > frame_psm.pgs.y) || (m_r.width() > frame_psm.pgs.x) || GSConfig.UserHacks_TextureInsideRt == GSTextureInRtMode::Disabled;
+	m_channel_shuffle_src_valid = src->m_valid;
+	if (GSConfig.UserHacks_TextureInsideRt == GSTextureInRtMode::Disabled || ((src->m_TEX0.TBW == rt->m_TEX0.TBW) && (!m_in_target_draw && IsPageCopy())) || m_conf.ps.urban_chaos_hle || m_conf.ps.tales_of_abyss_hle)
+	{
+		m_r = GSVector4i(0, 0, 1024, 1024);
+		// FIXME: Duplicated code.
+		GSVertex* vout = m_vertex->buff;
+		u16* iout = m_index->buff;
+		WriteQuad(m_r, m_r, vout, iout);
+		m_index->tail = iout - m_index->buff;
+		m_vertex->head = m_vertex->tail = m_vertex->next = vout - m_vertex->buff;
+		
+		// We need to count the pages that get shuffled to, some games (like Hitman Blood Money dialogue blur effects) only do half the screen.
+		if (!m_full_screen_shuffle && !m_conf.ps.urban_chaos_hle && !m_conf.ps.tales_of_abyss_hle && src)
+		{
+			// We've probably gotten a fake number, so just reset it, it'll be updated again later.
+			if (rt->m_last_draw >= s_n)
+				rt->ResizeValidity(GSVector4i::zero());
+
+			m_channel_shuffle_width = src->m_TEX0.TBW;
+		}
+
+		m_channel_shuffle_finish = false;
+	}
+	else
+	{
+		const u32 frame_page_offset = std::max(static_cast<int>(((m_r.x / frame_psm.pgs.x) + (m_r.y / frame_psm.pgs.y) * rt->m_TEX0.TBW)), 0);
+		m_r = GSVector4i(m_r.x & ~(frame_psm.pgs.x - 1), m_r.y & ~(frame_psm.pgs.y - 1), (m_r.z + (frame_psm.pgs.x - 1)) & ~(frame_psm.pgs.x - 1), (m_r.w + (frame_psm.pgs.y - 1)) & ~(frame_psm.pgs.y - 1));
+
+		// This is for offsetting the texture, however if the texture has a region clamp, we don't want to move it.
+		// A good two test games for this is Ghost in the Shell (no region clamp) and Tekken 5 (offset clamp on shadows)
+		if (rt && rt->m_TEX0.TBP0 == m_cached_ctx.FRAME.Block())
+		{
+			const bool req_offset = (m_cached_ctx.CLAMP.WMS != 3 || (m_cached_ctx.CLAMP.MAXU & ~0xF) == 0) &&
+				(m_cached_ctx.CLAMP.WMT != 3 || (m_cached_ctx.CLAMP.MAXV & ~0x3) == 0);
+			//DevCon.Warning("HW: Draw %lld offset %d", s_n, frame_page_offset);
+			// Offset the frame but clear the draw offset
+			if (req_offset)
+				m_cached_ctx.FRAME.FBP += frame_page_offset;
+		}
+
+		m_in_target_draw |= frame_page_offset > 0;
+		
+		// FIXME: Duplicated code.
+		GSVertex* vout = m_vertex->buff;
+		u16* iout = m_index->buff;
+		WriteQuad(m_r, m_r, vout, iout);
+		m_index->tail = iout - m_index->buff;
+		m_vertex->head = m_vertex->tail = m_vertex->next = vout - m_vertex->buff;
+
+		// If we're doing per page copying, then set the valid 1 frame ahead if we're continuing, as this will save the target lookup making a new target for the new row.
+		const u32 frame_offset = m_cached_ctx.FRAME.Block() + (IsPageCopy() ? 0x20 : 0);
+		GSVector4i new_valid = rt->m_valid;
+		int offset_height = static_cast<int>((((frame_offset - rt->m_TEX0.TBP0) >> 5) / rt->m_TEX0.TBW) * frame_psm.pgs.y) + frame_psm.pgs.y;
+
+		const int get_next_ctx = (m_state_flush_reason == CONTEXTCHANGE) ? m_env.PRIM.CTXT : m_backed_up_ctx;
+		const GSDrawingContext& next_ctx = m_env.CTXT[get_next_ctx];
+		const u32 safe_TBW = std::max(rt->m_TEX0.TBW, 1U);
+		// This is an annoying case where the draw is offset to draw on the right hand side of a texture (Hitman Blood Money pause screen).
+		if (m_state_flush_reason == GSFlushReason::CONTEXTCHANGE && !IsPageCopy() && NextDrawMatchesShuffle() && next_ctx.FRAME.FBP > m_cached_ctx.FRAME.FBP && (next_ctx.FRAME.FBP < (m_cached_ctx.FRAME.FBP + safe_TBW)) &&
+			(next_ctx.FRAME.FBP - m_cached_ctx.FRAME.FBP) < safe_TBW && (next_ctx.FRAME.FBP % safe_TBW) != ((m_cached_ctx.FRAME.FBP % safe_TBW) + 1))
+		{
+			offset_height += frame_psm.pgs.y;
+		}
+
+		new_valid.w = std::max(new_valid.w, offset_height);
+		rt->UpdateValidity(new_valid, true);
+
+		m_channel_shuffle_finish = true;
+	}
+
+	m_primitive_covers_without_gaps = NoGapsType::FullCover;
+	m_conf.cb_ps.ChannelShuffleOffset = GSVector2(0, 0);
+}
+
+bool shuffled_vetoed = false;
+
 __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt)
 {
+	if (NEW_SHUFFLE)
+	{
+		if (!test_only)
+			EmulateChannelShuffle2(src, rt);
+		return m_channel_shuffle_2.channel;
+	}
+
 	if (src && (src->m_texture->GetType() == GSTexture::Type::DepthStencil) && !src->m_32_bits_fmt)
 	{
 		// So far 2 games hit this code path. Urban Chaos and Tales of Abyss
@@ -6343,6 +7048,7 @@ __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool t
 	}
 	else if (m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == 3)
 	{
+		shuffled_vetoed = true;
 		// Blood will tell. I think it is channel effect too but again
 		// implemented in a different way. I don't want to add more CRC stuff. So
 		// let's disable channel when the signature is different
@@ -7401,7 +8107,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const TextureMinMaxResult& tmm, GSDevice::RecycledTexture& src_copy)
 {
 	// don't overwrite the texture when using channel shuffle, but keep the palette
-	if (!m_channel_shuffle)
+	if (NEW_SHUFFLE ? !m_channel_shuffle_2 : !m_channel_shuffle)
 	{
 		m_conf.cb_ps.ChannelShuffleOffset = GSVector2(0, 0);
 		m_conf.tex = tex->m_texture;
@@ -8652,8 +9358,32 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Warning it must be done at the begining because it will change the
 	// vertex list (it will interact with PrimitiveOverlap and accurate
 	// blending)
-	if (m_channel_shuffle && tex && tex->m_from_target)
-		EmulateChannelShuffle(tex->m_from_target, false, rt);
+	shuffled_vetoed = false;
+	if (!NEW_SHUFFLE)
+	{
+		if (m_channel_shuffle && tex && tex->m_from_target)
+			EmulateChannelShuffle(tex->m_from_target, false, rt);
+	}
+	else
+	{
+		if (m_channel_shuffle_2 && tex && tex->m_from_target)
+			EmulateChannelShuffle2(tex->m_from_target, rt);
+	}
+
+	bool large_width_shuffle = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).width() > 64;
+
+	if (shuffled_vetoed)
+	{
+		Console.Warning("SHUFFLE_VETOED %lld", s_n);
+	}
+
+	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && /*!shuffled_vetoed && !large_width_shuffle &&*/
+			m_channel_shuffle_2.channel != ChannelFetch_RGB) ||
+		m_channel_shuffle_2.urban_chaos_hle != m_conf.ps.urban_chaos_hle ||
+		m_channel_shuffle_2.tales_of_abyss_hle != m_conf.ps.tales_of_abyss_hle)
+	{
+		Console.Warning("BAD_CHANNEL_SHUFFLE_CONFIG %lld", s_n);
+	}
 
 	// Upscaling hack to avoid various line/grid issues
 	MergeSprite(tex);

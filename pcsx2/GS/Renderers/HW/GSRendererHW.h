@@ -197,6 +197,34 @@ private:
 		}
 	};
 
+
+	struct ChannelShuffleInfo
+	{
+		u32 channel = ChannelFetch_NONE;
+		bool urban_chaos_hle = false;
+		bool tales_of_abyss_hle = false;
+		bool green_blue_hle = false;
+		GSVector4i green_blue_hle_data = GSVector4i::zero();
+		bool possible_32_bit_source = false;
+		bool possible_16_bit_source = false;
+		
+		// Whether the draw is a shuffle, regard of whether we use HLE or a manual swizzle.
+		bool draw_is_a_shuffle = false;
+
+		// Returns true if we're going to HLE the shuffle.
+		operator bool() const
+		{
+			return channel != ChannelFetch_NONE;
+		}
+
+		void Disable()
+		{
+			channel = ChannelFetch_NONE;
+		}
+	};
+
+	ChannelShuffleInfo m_channel_shuffle_2;
+
 	bool HasEEUpload(GSVector4i r);
 	CLUTDrawTestResult PossibleCLUTDraw();
 	CLUTDrawTestResult PossibleCLUTDrawAggressive();
@@ -212,6 +240,7 @@ private:
 	void HandleProvokingVertexFirst();
 	void SetupIA(float target_scale, float sx, float sy, bool req_vert_backup);
 	void EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
+	void EmulateChannelShuffle2(GSTextureCache::Target* src, GSTextureCache::Target* rt = nullptr);
 	u32 EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
 	void EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptions& date_options, GSTextureCache::Target* rt,
 		bool can_scale_rt_alpha, bool& new_rt_alpha_scale);
@@ -250,6 +279,17 @@ private:
 	bool IsPossibleChannelShuffle() const;
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
+
+	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout);
+
+	// Channel shuffle functions.
+	bool SkipSplitChannelShuffleDraw();
+
+	template<bool fst>
+	ChannelShuffleInfo DetectChannelShuffle();
+	void DetectChannelShuffle();
+	bool DetectChannelShuffleFast(); // For use in CRC hacks.
+	void DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
 	// Texture shuffle functions.
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
@@ -301,6 +341,7 @@ private:
 	u32 m_split_texture_shuffle_start_TBP = 0;
 	u32 m_split_texture_shuffle_fbw = 0;
 
+	u32 m_num_skipped_channel_shuffle_draws = 0;
 	u32 m_last_channel_shuffle_fbmsk = 0;
 	u32 m_last_channel_shuffle_fbp = 0;
 	u32 m_last_channel_shuffle_tbp = 0;

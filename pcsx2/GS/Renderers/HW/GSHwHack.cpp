@@ -686,6 +686,8 @@ bool GSHwHack::GSC_NFSUndercover(GSRendererHW& r, int& skip)
 	}
 }
 
+extern bool NEW_SHUFFLE;
+
 bool GSHwHack::GSC_PolyphonyDigitalGames(GSRendererHW& r, int& skip)
 {
 	// These games appear to grab red and write it to a new page-sized render target, then
@@ -703,7 +705,9 @@ bool GSHwHack::GSC_PolyphonyDigitalGames(GSRendererHW& r, int& skip)
 	static bool shuffle_hle_active = false;
 	static u32 shuffle_fbmsk = 0;
 
-	const bool is_cs = r.IsPossibleChannelShuffle();
+	bool is_cs_new = r.DetectChannelShuffleFast();
+
+	const bool is_cs = NEW_SHUFFLE ? is_cs_new : r.IsPossibleChannelShuffle();
 	if (shuffle_hle_active && is_cs)
 	{
 		if (RFBMSK == shuffle_fbmsk)
