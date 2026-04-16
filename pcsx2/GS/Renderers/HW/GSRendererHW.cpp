@@ -1926,73 +1926,87 @@ bool GSRendererHW::DetectChannelShuffle()
 	const u32 num_quads = m_index.tail / 2;
 
 	const auto GetQuadXYUV = [&](u32 i, GSVector4i& xyout, GSVector4i& uvout) {
-		return GetShuffleQuadXYUV(verts, index + 2 * i, xyout, uvout);
+		return (i < num_quads) && GetShuffleQuadXYUV(verts, index + 2 * i, xyout, uvout);
 	};
 
-	const auto Is4PixelReversal = [](const GSVector4i& xy, const GSVector4i& uv){
-		return xy.width() == 4 && uv.width() == 4 &&
-			std::abs((xy.x & ~15) - (uv.x & ~15)) == 4;
-	};
+	//const auto Is4PixelReversal = [](const GSVector4i& xy, const GSVector4i& uv){
+	//	return xy.width() == 4 && uv.width() == 4 &&
+	//		std::abs((xy.x & ~15) - (uv.x & ~15)) == 4;
+	//};
 
 	GL_PUSH("HW: Channel shuffle detection");
+
+	int curr_quad = 0;
+
+	const auto GetFullQuadXYUV = [&](GSVector4i& xyout, GSVector4i& uvout) {
+		if (!GetQuadXYUV(curr_quad++, xyout, uvout))
+			return false;
+
+		// Combine small 4 pixel wide sprites into a single 8 pixel wide sprite.
+		if (xyout.width() == 4)
+		{
+			GSVector4i xy = GSVector4i::zero();
+			GSVector4i uv = GSVector4i::zero();
+			if (!GetQuadXYUV(curr_quad++, xy, uv))
+				return false;
+
+			// Must all be 4 pixels wide.
+			if (!(uvout.width() == 4 && xy.width() == 4 && uv.width() == 4))
+				return false;
+
+			// Check Y and V ranges are identical so quads can be combined.
+			if (!xy.ywyw().eq(xyout.ywyw()) && uv.ywyz().eq(uvout.ywyw()))
+				return false;
+
+			// Combine
+			xyout = xyout.runion(xy);
+			uvout = uvout.runion(uv);
+		}
+		
+		return true;
+	};
 
 	GSVector4i xy0 = GSVector4i::zero(), xy1 = GSVector4i::zero();
 	GSVector4i uv0 = GSVector4i::zero(), uv1 = GSVector4i::zero();
 
-	bool found_quad0 = false, found_quad1 = false;
-
-	int curr_quad = 0;
-
-	for (int tries = 0; tries < 2 && curr_quad < num_quads; tries++)
+	if (!GetFullQuadXYUV(xy0, uv0))
 	{
-		if (!GetQuadXYUV(curr_quad++, xy0, uv0))
-		{
-			GL_INS("Not a shuffle (no quad)");
-			return false;
-		}
-
-		if (Is4PixelReversal(xy0, uv0))
-			continue;
-
-		found_quad0 = true;
-		break;
-	}
-	
-	if (!found_quad0)
-	{
-		GL_INS("Not a shuffle (first quad not found)");
+		GL_INS("HW: Not a shuffle (quad not found).");
 	}
 
-	// FIXME: Duplicated code.
-	if (curr_quad < num_quads)
+	if (num_quads > 1 && !GetFullQuadXYUV(xy1, uv1))
 	{
-		for (int tries = 0; tries < 2 && curr_quad < num_quads; tries++)
-		{
-			if (!GetQuadXYUV(curr_quad++, xy1, uv1))
-			{
-				GL_INS("Not a shuffle (no quad)");
-				return false;
-			}
-
-			if (Is4PixelReversal(xy1, uv1))
-				continue;
-
-			found_quad1 = true;
-			break;
-		}
-
-		if (!found_quad1)
-		{
-			GL_INS("Not a shuffle (second quad not found)");
-		}
+		GL_INS("HW: Not a shuffle (second quad not found).");
 	}
 
-	GL_INS("Detecting based on quad: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+	GL_INS("HW: Detecting based on quad (1): pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
 		xy0.x, xy0.y, xy0.z, xy0.w, uv0.x, uv0.y, uv0.z, uv0.w);
-	if (found_quad1)
+	if (num_quads > 1)
 	{
-		GL_INS("Detecting based on quad: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+		GL_INS("HW: Detecting based on quad (2): pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
 			xy0.x, xy0.y, xy0.z, xy0.w, uv0.x, uv0.y, uv0.z, uv0.w);
+	}
+
+	if (num_quads > 1 && !(xy0.rsize().eq(xy1.rsize()) && uv0.rsize().eq(uv1.rsize())))
+	{
+		GL_INS("HW: Not a shuffle (quads different sizes).");
+	}
+
+	// Check for 8 pixel alignment in X, U and 2 pixel alignment in Y, V.
+	const auto IsAligned = [&](const GSVector4i& v) {
+		return (v & GSVector4i(7, 1, 7, 1)).mask() == 0;
+		};
+	if (!(IsAligned(xy0) && IsAligned(uv0)))
+	{
+		GL_INS("HW: Not a shuffle (first quad not (8, 2) aligned).");
+	}
+
+	if (num_quads > 1)
+	{
+		if (!(IsAligned(xy1) && IsAligned(uv1)))
+		{
+			GL_INS("HW: Not a shuffle (second quad not (8, 2) aligned).");
+		}
 	}
 
 	const int x_pixels = xy0.width();
@@ -2002,7 +2016,7 @@ bool GSRendererHW::DetectChannelShuffle()
 
 	if (x_pixels != u_pixels)
 	{
-		GL_INS("Not a shuffle (X pixels != U pixels)");
+		GL_INS("HW: Not a shuffle (X pixels != U pixels)");
 		return false;
 	}
 
@@ -2014,20 +2028,23 @@ bool GSRendererHW::DetectChannelShuffle()
 		return false;
 	}
 
-	// Check to make sure that the next quad is spaced correctly.
+	// Make sure the next quad is spaced correctly.
 	if (num_quads > 1)
 	{
 		const int dx = std::abs(xy1.x - xy0.x);
 		const int dy = std::abs(xy1.y - xy0.y);
-		const int du = std::abs((uv1.x & ~3) - (uv0.x & ~3));
-		const int dv = std::abs((uv1.y & ~3) - (uv0.y & ~3));
+		const int du = std::abs(uv1.x - uv0.x);
+		const int dv = std::abs(uv1.y - uv0.y);
 
-		if (!((dx == 0 && du == 0) || (2 * dx == du)))
+		// Usually X, U spacing differs by a factor of 2 if the shuffling a 32 bpp source,
+		// but could be identical if shuffling a 16 bit source (e.g. Urban Chaos smoke).
+		if (!((dx == du) || (2 * dx == du)))
 		{
 			GL_INS("Not a shuffle (X, U quad spacing incorrect)");
 			return false;
 		}
 
+		// The Y, V spacing must always be 0 or differ by a factor of 2.
 		if (!((dy == 0 && dv == 0) || (2 * dy == dv)))
 		{
 			GL_INS("Not a shuffle (Y, V quad spacing incorrect)");
@@ -2039,23 +2056,32 @@ bool GSRendererHW::DetectChannelShuffle()
 	const int x_u_offset = std::abs(xy0.x - uv0.x) % 16;
 	const int y_v_offset = std::abs(xy0.y - uv0.y) % 4;
 
+	pxAssert(x_u_offset == 0 || x_u_offset == 8);
+	pxAssert(y_v_offset == 0 || y_v_offset == 2);
 
-	const u32 fbmsk = frame.FBMSK;
-	u32 r_mask = (fbmsk >> 0) & 0xFF;
-	u32 g_mask = (fbmsk >> 8) & 0xFF;
-	u32 b_mask = (fbmsk >> 16) & 0xFF;
-	u32 a_mask = (fbmsk >> 24) & 0xFF;
-	
-	ChannelShuffleMap shuffle_map;
+	u32 channel = 0;
 
-	if (x_u_offset == 8)
+	if (x_u_offset == 0)
 	{
-		shuffle_map.Swap_RG_and_BA();
+		if (y_v_offset == 0)
+		{
+			channel = ChannelFetch_RED;
+		}
+		else
+		{
+			channel = ChannelFetch_GREEN;
+		}
 	}
-
-	if (y_v_offset == 0)
+	else
 	{
-		shuffle_map.Swap_RB_and_GA();
+		if (y_v_offset == 0)
+		{
+			channel = ChannelFetch_BLUE;
+		}
+		else
+		{
+			channel = ChannelFetch_ALPHA;
+		}
 	}
 	
 	return true;
