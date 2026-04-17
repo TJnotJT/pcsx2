@@ -197,33 +197,27 @@ private:
 		}
 	};
 
-	enum ChannelShuffleChannel
+
+	struct ChannelShuffleInfo
 	{
-		ChannelRed = 0,
-		ChannelGreen = 1,
-		ChannelBlue = 2,
-		ChannelAlpha = 2,
+		u32 channel = ChannelFetch_NONE;
+		bool urban_chaos_hle = false;
+		bool tales_of_abyss_hle = false;
+		bool green_blue_hle = false;
+		GSVector4i green_blue_hle_data = GSVector4i::zero();
+
+		operator bool() const
+		{
+			return channel != ChannelFetch_NONE;
+		}
+
+		void Disable()
+		{
+			channel = ChannelFetch_NONE;
+		}
 	};
 
-	struct ChannelShuffleMap
-	{
-		ChannelShuffleChannel write_red = ChannelRed;
-		ChannelShuffleChannel write_green = ChannelGreen;
-		ChannelShuffleChannel write_blue = ChannelBlue;
-		ChannelShuffleChannel write_alpha = ChannelAlpha;
-
-		void Swap_RG_and_BA()
-		{
-			std::swap(write_red, write_blue);
-			std::swap(write_green, write_alpha);
-		};
-
-		void Swap_RB_and_GA()
-		{
-			std::swap(write_red, write_green);
-			std::swap(write_blue, write_alpha);
-		};
-	};
+	ChannelShuffleInfo m_channel_shuffle_2;
 
 	bool HasEEUpload(GSVector4i r);
 	CLUTDrawTestResult PossibleCLUTDraw();
@@ -285,7 +279,8 @@ private:
 	bool SkipSplitChannelShuffleDraw();
 
 	template<bool fst>
-	bool DetectChannelShuffle();
+	ChannelShuffleInfo DetectChannelShuffle();
+	void DetectChannelShuffle();
 
 	// Texture shuffle functions.
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
