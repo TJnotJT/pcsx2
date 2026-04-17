@@ -1932,11 +1932,6 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		return (i < num_quads) && GetShuffleQuadXYUV(verts, index + 2 * i, xyout, uvout);
 	};
 
-	//const auto Is4PixelReversal = [](const GSVector4i& xy, const GSVector4i& uv){
-	//	return xy.width() == 4 && uv.width() == 4 &&
-	//		std::abs((xy.x & ~15) - (uv.x & ~15)) == 4;
-	//};
-
 	GL_PUSH("HW: Channel shuffle detection");
 
 	int curr_quad = 0;
@@ -2018,10 +2013,26 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		}
 	}
 
+	const auto ApplyRegionClamp = [&](GSVector4i uv) {
+		if (clamp.WMS == CLAMP_REGION_REPEAT)
+		{
+			uv.x = (uv.x & clamp.MINU) | clamp.MAXU;
+			uv.z = (((uv.z - 1) & clamp.MINU) | clamp.MAXU) + 1;
+		}
+		if (clamp.WMT == CLAMP_REGION_REPEAT)
+		{
+			uv.y = (uv.y & clamp.MINV) | clamp.MAXV;
+			uv.w = (((uv.w - 1) & clamp.MINV) | clamp.MAXV) + 1;
+		}
+		return uv;
+	};
+
+	const GSVector4i uv0_clamp = ApplyRegionClamp(uv0);
+
 	const int x_pixels = xy0.width();
 	const int y_pixels = xy0.height();
 	const int u_pixels = std::abs(uv0.width());
-	const int v_pixels = std::abs(uv0.height());
+	const int v_pixels = std::abs(uv0_clamp.height());
 
 	if (x_pixels != u_pixels)
 	{
@@ -2029,11 +2040,33 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		return ChannelShuffleInfo();
 	}
 
-	if (!(y_pixels == v_pixels || 2 * y_pixels == v_pixels ||
-		3 * y_pixels == v_pixels || 4 * y_pixels == v_pixels ||
-		3 * y_pixels == 2 * v_pixels))
+	const bool v_region_repeat = (clamp.WMT == CLAMP_REGION_REPEAT);
+
+	// If the Y and V size are the same they must be 2 pixels.
+	// For larger sizes, V must have usually have twice the scale of Y,
+	// otherwise it should be using region repeat to select the correct rows.
+	if (!((y_pixels == 2 && v_pixels == 2) ||
+		(y_pixels == v_pixels && v_region_repeat) ||
+		(2 * y_pixels == v_pixels) ||
+		(2 * y_pixels - 2 == v_pixels && v_region_repeat)))
 	{
 		GL_INS("Not a shuffle (Y / V scaling not correct)");
+		return ChannelShuffleInfo();
+	}
+
+	ChannelShuffleInfo info;
+
+	// If the source is 32 bits, the vertical scaling should be identical.
+	// For 32 bit sources, the V scaling should be larger than Y.
+	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
+	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
+	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width());
+	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width());
+
+	// Exactly one must be true.
+	if (info.possible_32_bit_source == info.possible_16_bit_source)
+	{
+		GL_INS("HW: Not a shuffle (incorrect scaling in X).");
 		return ChannelShuffleInfo();
 	}
 
@@ -2047,13 +2080,15 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 		// Usually X, U spacing differs by a factor of 2 if the shuffling a 32 bpp source,
 		// but could be identical if shuffling a 16 bit source (e.g. Urban Chaos smoke).
-		if (!((dx == du) || (2 * dx == du)))
+		if (!((info.possible_32_bit_source && (2 * dx == du)) ||
+			(info.possible_16_bit_source && (dx == du))))
 		{
 			GL_INS("Not a shuffle (X, U quad spacing incorrect)");
 			return ChannelShuffleInfo();
 		}
 
-		// The Y, V spacing must always be 0 or differ by a factor of 2.
+		// The Y, V spacing must always be 0 or differ by a factor of 1, 2 depending of whether
+		// the source is really 16 bits.
 		if (!((dy == 0 && dv == 0) || (2 * dy == dv)))
 		{
 			GL_INS("Not a shuffle (Y, V quad spacing incorrect)");
@@ -2062,7 +2097,6 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	}
 
 	// Infer channels being shuffled.
-	ChannelShuffleInfo info;
 
 	// Handle two special cases of shuffling a 16 bit depth buffer.
 	if (frame.Block() != zbuf.Block() && zbuf.Block() == tex0.TBP0 && zbuf_psm.bpp == 16)
@@ -2129,8 +2163,6 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	}
 
 	// The general case: infer channels based on coordinates and CLAMP mode.
-	//const int x0 = xy0.x;
-	//const int y0 = xy0.y;
 	int u0 = uv0.x & 8;
 	int v0 = uv0.y & 2;
 
@@ -2159,12 +2191,6 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 			v0 = 0;
 		}
 	}
-
-	/*const int x_u_offset = std::abs(x0 - u0) % 16;
-	const int y_v_offset = std::abs(x0 - v0) % 4;
-
-	pxAssert(x_u_offset == 0 || x_u_offset == 8);
-	pxAssert(y_v_offset == 0 || y_v_offset == 2);*/
 
 	pxAssert(u0 == 0 || u0 == 8);
 	pxAssert(v0 == 0 || v0 == 2);
@@ -2203,7 +2229,11 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 void GSRendererHW::DetectChannelShuffle()
 {
 	if (!(PRIM->TME && m_vt.m_primclass == GS_SPRITE_CLASS))
+	{
+		// Early exit to prevent expensive checks.
+		m_channel_shuffle_2 = ChannelShuffleInfo();
 		return;
+	}
 
 	if (PRIM->FST)
 	{
@@ -2212,6 +2242,26 @@ void GSRendererHW::DetectChannelShuffle()
 	else
 	{
 		m_channel_shuffle_2 = DetectChannelShuffle<false>();
+	}
+}
+
+void GSRendererHW::DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
+{
+	if (m_channel_shuffle_2)
+	{
+		if (m_channel_shuffle_2.possible_16_bit_source)
+		{
+			if (!(tex && tex->m_from_target && GSLocalMemory::m_psm[tex->m_from_target_TEX0.PSM].bpp == 16))
+			{
+				GL_INS("HW: DetectChannelShuffle (2): Not a shuffle (expected real 16 bit source)");
+				m_channel_shuffle_2.Disable();
+			}
+		}
+		else if (!(tex && tex->m_from_target && GSLocalMemory::m_psm[tex->m_from_target_TEX0.PSM].bpp == 32))
+		{
+			GL_INS("HW: DetectChannelShuffle (2): Not a shuffle (expected real 32 bit source)");
+			m_channel_shuffle_2.Disable();
+		}
 	}
 }
 
@@ -3923,6 +3973,8 @@ void GSRendererHW::Draw()
 		}
 	}
 
+
+
 	// Urban Reign trolls by scissoring a draw to a target at 0x0-0x117F to 378x449 which ends up the size being rounded up to 640x480
 	// causing the buffer to expand to around 0x1400, which makes a later framebuffer at 0x1180 to fail to be created correctly.
 	// We can cheese this by checking if the Z is masked and the resultant colour is going to be black anyway.
@@ -4215,6 +4267,9 @@ void GSRendererHW::Draw()
 			}
 		}
 	}
+
+	// Second pass channel shuffle detect once we have the RT and source texture.
+	DetectChannelShuffleSecondPass(rt, src);
 
 	if (!no_rt)
 	{
@@ -5438,7 +5493,8 @@ void GSRendererHW::Draw()
 
 	if (m_channel_shuffle_2 != m_channel_shuffle)
 	{
-		Console.Warning("BAD_CHANNEL_SHUFFLE %lld", s_n);
+		DumpDrawInfo(true, true, false);
+		Console.Warning("BAD_CHANNEL_SHUFFLE %lld (real=%d, new=%d)", s_n, m_channel_shuffle, (bool)m_channel_shuffle_2);
 	}
 
 	if (!skip_draw)
@@ -6654,6 +6710,8 @@ bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 	return m_channel_shuffle;
 }
 
+bool shuffled_vetoed = false;
+
 __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt)
 {
 	if (src && (src->m_texture->GetType() == GSTexture::Type::DepthStencil) && !src->m_32_bits_fmt)
@@ -6681,6 +6739,7 @@ __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool t
 	}
 	else if (m_index.tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == 3)
 	{
+		shuffled_vetoed = true;
 		// Blood will tell. I think it is channel effect too but again
 		// implemented in a different way. I don't want to add more CRC stuff. So
 		// let's disable channel when the signature is different
@@ -8990,10 +9049,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Warning it must be done at the begining because it will change the
 	// vertex list (it will interact with PrimitiveOverlap and accurate
 	// blending)
+	shuffled_vetoed = false;
 	if (m_channel_shuffle && tex && tex->m_from_target)
 		EmulateChannelShuffle(tex->m_from_target, false, rt);
 
-	if (m_channel_shuffle_2.channel != m_conf.ps.channel ||
+	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && !shuffled_vetoed) ||
 		m_channel_shuffle_2.urban_chaos_hle != m_conf.ps.urban_chaos_hle ||
 		m_channel_shuffle_2.tales_of_abyss_hle != m_conf.ps.tales_of_abyss_hle)
 	{

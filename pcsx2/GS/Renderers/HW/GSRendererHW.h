@@ -205,6 +205,8 @@ private:
 		bool tales_of_abyss_hle = false;
 		bool green_blue_hle = false;
 		GSVector4i green_blue_hle_data = GSVector4i::zero();
+		bool possible_32_bit_source = false;
+		bool possible_16_bit_source = false;
 
 		operator bool() const
 		{
@@ -281,6 +283,7 @@ private:
 	template<bool fst>
 	ChannelShuffleInfo DetectChannelShuffle();
 	void DetectChannelShuffle();
+	void DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
 	// Texture shuffle functions.
 	bool IsSplitTextureShuffle(GIFRegTEX0& rt_TEX0, GSVector4i& valid_area);
