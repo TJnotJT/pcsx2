@@ -1624,6 +1624,9 @@ bool GSRendererHW::NextDrawColClip() const
 
 bool GSRendererHW::IsPossibleChannelShuffle() const
 {
+	if (NEW_SHUFFLE)
+		return m_channel_shuffle_2;
+
 	if (!PRIM->TME || m_cached_ctx.TEX0.PSM != PSMT8 || // 8-bit texture draw
 		m_vt.m_primclass != GS_SPRITE_CLASS || // draw_sprite_tex
 		(m_vertex->tail <= 2 && (((m_vt.m_max.p - m_vt.m_min.p) <= GSVector4(8.0f)).mask() & 0x3) == 0x3)) // Powerdrome does a tiny shuffle on a couple of pixels, can't reliably translate this.
@@ -5486,7 +5489,8 @@ void GSRendererHW::Draw()
 	bool large_width_shuffle = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).width() > 64;
 	if (m_channel_shuffle_2 != m_channel_shuffle && !large_width_shuffle)
 	{
-		DumpDrawInfo(true, true, false);
+		if (!NEW_SHUFFLE)
+			DumpDrawInfo(true, true, false);
 		Console.Warning("BAD_CHANNEL_SHUFFLE %lld (real=%d, new=%d)", s_n, m_channel_shuffle, (bool)m_channel_shuffle_2);
 	}
 
@@ -6839,6 +6843,13 @@ bool shuffled_vetoed = false;
 
 __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt)
 {
+	if (NEW_SHUFFLE)
+	{
+		if (!test_only)
+			EmulateChannelShuffle2(src, rt);
+		return m_channel_shuffle_2.channel;
+	}
+
 	if (src && (src->m_texture->GetType() == GSTexture::Type::DepthStencil) && !src->m_32_bits_fmt)
 	{
 		// So far 2 games hit this code path. Urban Chaos and Tales of Abyss
