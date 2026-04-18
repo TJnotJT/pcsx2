@@ -1340,6 +1340,14 @@ GSTextureCache::Source* GSTextureCache::LookupSource(const bool is_color, const 
 		return nullptr;
 	}
 
+	// Invalid values show up in dumps but it's unclear if it's a core issue or a bug in the games.
+	// Abort the draw to prevent the lookup from corrupting the TC.
+	if (!GSUtil::IsValidPSM(static_cast<int>(TEX0.PSM)) && TEX0.TBW > 32)
+	{
+		GL_CACHE("TC: Invalid TEX0 (TBW=%d, PSM=%x), aborting draw.", TEX0.TBW, TEX0.PSM);
+		return nullptr;
+	}
+
 	const GSVector2i compare_lod(lod ? *lod : GSVector2i(0, 0));
 	Source* src = nullptr;
 
