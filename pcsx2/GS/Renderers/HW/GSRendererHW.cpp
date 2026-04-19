@@ -2148,6 +2148,32 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 	// Infer channels being shuffled.
 
+	// Special handling for GSC_IRem hack. The coordinates appear as it the
+	// source is 16 bits, because the the data has already been deswizzled from 32 bits.
+	// However, the state has been fixed up so that the source is 32 bits.
+	// The address checks are because the game uses a few small scratch buffers to do the shuffling.
+	if (full_xy_bbox.rsize().eq(GSVector4i(0, 0, 64, 30)) && full_uv_bbox.rsize().eq(GSVector4i(0, 0, 64, 60)) &&
+		x_pixels == 64 && u_pixels == 64 && y_pixels == 2 && v_pixels == 2 &&
+		(xy0.x == 0) && (uv0.x % 64) == 0 &&
+		num_quads == 8 && clamp.WMS != CLAMP_REGION_REPEAT && clamp.WMT != CLAMP_REGION_REPEAT &&
+		frame.Block() == tex0.TBP0 + 0x40 || frame.Block() == tex0.TBP0 + 0x60)
+	{
+		GL_INS("HW: GSC_IRem CRC hack detected.");
+		if ((uv0.y & 2) == 0)
+		{
+			GL_INS("HW: Fetch R.");
+			info.channel = ChannelFetch_RED;
+		}
+		else
+		{
+			GL_INS("HW: Fetch G.");
+			info.channel = ChannelFetch_GREEN;
+		}
+		info.possible_32_bit_source = true;
+		info.possible_16_bit_source = false;
+		return info;
+	}
+
 	// Handle two special cases of shuffling a 16 bit depth buffer.
 	if (shuffle_depth_16)
 	{
@@ -2157,13 +2183,13 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		if ((frame.FBMSK & 0x00FF0000) == 0x00FF0000)
 		{
 			// Green channel is masked
-			GL_INS("HW: HLE Shuffle Tales Of Abyss");
+			GL_INS("HW: HLE Shuffle Tales Of Abyss. Fetch RGB.");
 			info.channel = ChannelFetch_RGB;
 			info.tales_of_abyss_hle = true;
 		}
 		else
 		{
-			GL_INS("HW: HLE Shuffle Urban Chaos");
+			GL_INS("HW: HLE Shuffle Urban Chaos. Fetch RGB.");
 			info.channel = ChannelFetch_RGB;
 			info.urban_chaos_hle = true;
 		}
@@ -2223,10 +2249,12 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		if (v0 == 0)
 		{
 			info.channel = ChannelFetch_RED;
+			GL_INS("HW: Fetch R.");
 		}
 		else if (v0 == 2)
 		{
 			info.channel = ChannelFetch_GREEN;
+			GL_INS("HW: Fetch G.");
 		}
 	}
 	else if (u0 == 8)
@@ -2234,10 +2262,12 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		if (v0 == 0)
 		{
 			info.channel = ChannelFetch_BLUE;
+			GL_INS("HW: Fetch B.");
 		}
 		else if (v0 == 2)
 		{
 			info.channel = ChannelFetch_ALPHA;
+			GL_INS("HW: Fetch A.");
 		}
 	}
 	
