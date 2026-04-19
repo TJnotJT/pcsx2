@@ -5869,9 +5869,10 @@ void GSRendererHW::EmulateDATESelectMethod(DATEOptions& date_options, GSTextureC
 			m_conf.require_full_barrier = true;
 			date_options.barrier = true;
 		}
-		else if ((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier)
+		else if (((features.texture_barrier || features.multidraw_fb_copy) && m_conf.require_full_barrier) || HasAutoFlushList())
 		{
 			// Full barrier is enabled (likely sw fbmask), we need to use date barrier.
+			// If autoflush list is used, we cannot use DATE primid.
 			GL_PERF("DATE: Accurate with alpha %d-%d", GetAlphaMinMax().min, GetAlphaMinMax().max);
 			m_conf.require_full_barrier = true;
 			date_options.barrier = true;

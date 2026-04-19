@@ -2708,6 +2708,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	if (config.ps.colclip_hw)
 	{
+		pxAssert(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;
@@ -2731,6 +2732,8 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	const bool multidraw_fb_copy = m_features.multidraw_fb_copy && (config.require_one_barrier || config.require_full_barrier);
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
+		pxAssert(!config.autoflush, "DATE PrimID is not compatible with autoflush");
+
 		primid_texture = CreateRenderTarget(rtsize.x, rtsize.y, GSTexture::Format::PrimID, false);
 		if (!primid_texture)
 		{

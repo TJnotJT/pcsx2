@@ -4220,6 +4220,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
+		pxAssert(!config.autoflush, "DATE PrimID is not compatible with autoflush");
 		GSTexture* backup_rt = config.rt;
 		config.rt = draw_rt;
 		date_image = SetupPrimitiveTrackingDATE(config, pipe);
@@ -4234,6 +4235,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	// Switch to colclip target for colclip hw rendering
 	if (pipe.ps.colclip_hw)
 	{
+		pxAssert(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;

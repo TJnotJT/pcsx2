@@ -2121,6 +2121,53 @@ static bool usesStencil(GSHWDrawConfig::DestinationAlphaMode dstalpha)
 	}
 }
 
+static bool configFullBarrier(GSHWDrawConfig& config, DrawPass pass)
+{
+	switch (pass)
+	{
+		case DrawPass::Main:        return config.require_full_barrier;
+		case DrawPass::AlphaSecond: return config.alpha_second_pass.require_full_barrier;
+		default:                    return false;
+	}
+}
+
+static bool configOneBarrier(GSHWDrawConfig& config, DrawPass pass)
+{
+	switch (pass)
+	{
+		case DrawPass::Main:        return config.require_one_barrier;
+		case DrawPass::AlphaSecond: return config.alpha_second_pass.require_one_barrier;
+		default:                    return false;
+	}
+}
+
+static bool configPSSelector(GSHWDrawConfig& config, DrawPass pass)
+{
+	switch (pass)
+	{
+		case DrawPass::AlphaSecond: return config.alpha_second_pass.ps;
+		default:                    return config.ps;
+	}
+}
+
+static bool configColorMask(GSHWDrawConfig& config, DrawPass pass)
+{
+	switch (pass)
+	{
+		case DrawPass::AlphaSecond: return config.alpha_second_pass.colormask;
+		default:                    return config.colormask;
+	}
+}
+
+static bool configDepth(GSHWDrawConfig& config, DrawPass pass)
+{
+	switch (pass)
+	{
+		case DrawPass::AlphaSecond: return config.alpha_second_pass.depth;
+		default:                    return config.depth;
+	}
+}
+
 void GSDeviceMTL::MREInitHWDraw(GSHWDrawConfig& config, const Map& verts)
 {
 	MRESetScissor(config.scissor);
@@ -2130,6 +2177,32 @@ void GSDeviceMTL::MREInitHWDraw(GSHWDrawConfig& config, const Map& verts)
 	MRESetCB(config.cb_vs);
 	MRESetCB(config.cb_ps);
 	MRESetVertices(verts.gpu_buffer, verts.gpu_offset);
+}
+
+void GSDeviceMTL::RestartRenderPassForAutoflush(GSHWDrawConfig& config, const Map& verts, DrawPass pass)
+{
+	// Does not handle colclip HW and DATE PrimID, as those pipeline combinations are not compatible with autoflush.
+
+	GSTexture* rt = config.rt;
+	GSTexture* ds = config.ds;
+	GSTexture* stencil = usesStencil(config.destination_alpha) ? config.ds : nullptr;
+
+	const bool full_barrier = configFullBarrier(config, pass);
+	const bool one_barrier = configOneBarrier(config, pass);
+
+	BeginRenderPass(@"Autoflush", rt, MTLLoadActionLoad, ds, MTLLoadActionLoad, stencil, MTLLoadActionLoad);
+
+	if (usesStencil(config.destination_alpha))
+		[mtlenc setStencilReferenceValue:1];
+
+	MREInitHWDraw(config, verts);
+	if (one_barrier || full_barrier)
+		MRESetTexture(rt, GSMTLTextureIndexRenderTarget);
+	if (config.blend.constant_enable)
+		MRESetBlendColor(config.blend.constant);
+	
+	MRESetHWPipelineState(config.vs, configPSSelector(config, pass), config.blend, configColorMask(config, pass));
+	MRESetDSS(configDepth(config, pass));
 }
 
 void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
@@ -2183,6 +2256,8 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	
 	if (config.ps.colclip_hw)
 	{
+		pxAssert(!config.autoflush, "Colclip HW is not compatible with autoflush");
+
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;
@@ -2225,6 +2300,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 			break; // No setup
 		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking:
 		{
+			pxAssert(!config.autoflush, "DATE PrimID is not compatible with autoflush");
 			FlushClears(rt);
 			GSVector2i size = rt->GetSize();
 			primid_tex = CreateRenderTarget(size.x, size.y, GSTexture::Format::PrimID);
@@ -2241,7 +2317,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 			pxAssert(config.require_full_barrier == false && config.drawlist == nullptr);
 			MRESetHWPipelineState(config.vs, config.ps, {}, {});
 			MREInitHWDraw(config, allocation);
-			SendHWDraw(config, allocation, m_current_render.encoder, index_buffer, index_buffer_offset, false, false);
+			SendHWDraw(config, allocation, index_buffer, index_buffer_offset, DrawPass::PrimIDInitPass);
 			config.ps.date = 3;
 			break;
 		}
@@ -2288,7 +2364,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	MRESetHWPipelineState(config.vs, config.ps, config.blend, config.colormask);
 	MRESetDSS(config.depth);
 
-	SendHWDraw(config, allocation, mtlenc, index_buffer, index_buffer_offset, config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(config, allocation, index_buffer, index_buffer_offset, DrawPass::Main);
 
 	if (config.alpha_second_pass.enable)
 	{
@@ -2299,7 +2375,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		}
 		MRESetHWPipelineState(config.vs, config.alpha_second_pass.ps, config.blend, config.alpha_second_pass.colormask);
 		MRESetDSS(config.alpha_second_pass.depth);
-		SendHWDraw(config, allocation, mtlenc, index_buffer, index_buffer_offset, config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(config, allocation, index_buffer, index_buffer_offset, DrawPass::AlphaSecond);
 	}
 
 	if (colclip_rt)
@@ -2321,7 +2397,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		Recycle(primid_tex);
 }}
 
-void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off, bool one_barrier, bool full_barrier)
+void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLBuffer> index, size_t off, DrawPass pass)
 {
 	MTLPrimitiveType topology;
 	switch (config.topology)
@@ -2336,7 +2412,7 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 		[enc drawIndexedPrimitives:topology
 		                indexCount:config.nindices
 		                 indexType:MTLIndexTypeUInt16
-		               indexBuffer:buffer
+		               indexBuffer:index
 		         indexBufferOffset:off];
 
 		g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -2344,13 +2420,18 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 		return;
 	}
 
+	const bool full_barrier = configFullBarrier(config, pass);
+	const bool one_barrier = configOneBarrier(config, pass);
+
+	id<MTLRenderCommandEncoder> enc = m_current_render.encoder;
+
 	if (config.autoflush)
 	{
 		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
 		const u32 indices_per_prim = config.indices_per_prim;
 		const u32 autoflush_list_size = static_cast<u32>(config.autoflush_list->size());
 
-		[enc pushDebugGroup:[NSString stringWithFormat:@"Full barrier split draw (%d primitives in %zu autoflush groups, %zu barrier groups)",
+		[enc insertDebugSignpost:[NSString stringWithFormat:@"Full barrier split draw (%d primitives in %zu autoflush groups, %zu barrier groups)",
 			config.nindices / config.indices_per_prim, autoflush_list_size, draw_list_size]];
 
 		GSTexture* stencil = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne ||
@@ -2364,6 +2445,8 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 		// p: number of indices drawn
 		for (u32 a = 0, n = 0, p = 0; a < autoflush_list_size; a++)
 		{
+			[enc insertDebugSignpost:[NSString stringWithFormat:@"Autoflush pass %zu, draw %zu, prim %zu", a, n, p / indices_per_prim]];
+
 			const GSVector4i bbox = (*config.autoflush_bbox)[a].rintersect(tex_rect);
 			const bool do_copy = !bbox.rempty();
 
@@ -2373,8 +2456,9 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 
 				CopyRect(config.rt, config.tex, bbox, bbox.x, bbox.y);
 
-				BeginRenderPass(@"RenderHW Autoflush", config.rt, MTLLoadActionLoad, config.ds, MTLLoadActionLoad, stencil, MTLLoadActionLoad);
-				MREInitHWDraw(config, verts);
+				RestartRenderPassForAutoflush(config, verts, pass);
+				
+				enc = m_current_render.encoder;
 			}
 
 			int prims = static_cast<int>((*config.autoflush_list)[a]);
@@ -2391,11 +2475,11 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 					g_perfmon.Put(GSPerfMon::Barriers, 1);
 				}
 
-			[enc drawIndexedPrimitives:topology
-			                indexCount:count
-			                 indexType:MTLIndexTypeUInt16
-			               indexBuffer:buffer
-			         indexBufferOffset:off + p * sizeof(*config.indices)];
+				[enc drawIndexedPrimitives:topology
+				                indexCount:count
+				                 indexType:MTLIndexTypeUInt16
+				               indexBuffer:index
+				         indexBufferOffset:off + p * sizeof(*config.indices)];
 
 				prims -= (*config.drawlist)[n];
 				p += count;
@@ -2404,7 +2488,6 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 			}
 		}
 
-		[enc popDebugGroup];
 		return;
 	}
 	else if (full_barrier)
@@ -2426,7 +2509,6 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 			config.nindices / config.indices_per_prim, config.drawlist->size(), message.c_str()]];
 #endif
 
-
 		g_perfmon.Put(GSPerfMon::DrawCalls, config.drawlist->size());
 		g_perfmon.Put(GSPerfMon::Barriers, config.drawlist->size());
 
@@ -2440,7 +2522,7 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 			[enc drawIndexedPrimitives:topology
 			                indexCount:count
 			                 indexType:MTLIndexTypeUInt16
-			               indexBuffer:buffer
+			               indexBuffer:index
 			         indexBufferOffset:off + p * sizeof(*config.indices)];
 			p += count;
 		}
@@ -2458,7 +2540,7 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRen
 	[enc drawIndexedPrimitives:topology
 	                indexCount:config.nindices
 	                 indexType:MTLIndexTypeUInt16
-	               indexBuffer:buffer
+	               indexBuffer:index
 	         indexBufferOffset:off];
 
 	g_perfmon.Put(GSPerfMon::DrawCalls, 1);

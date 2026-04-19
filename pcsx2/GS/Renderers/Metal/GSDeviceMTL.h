@@ -212,6 +212,13 @@ public:
 
 	using PSSelector = GSHWDrawConfig::PSSelector;
 
+	enum class DrawPass
+	{
+		Main,
+		AlphaSecond,
+		PrimIDInit,
+	};
+
 	// MARK: Permanent resources
 	std::shared_ptr<std::pair<std::mutex, GSDeviceMTL*>> m_backref;
 	GSMTLDevice m_dev;
@@ -432,10 +439,10 @@ public:
 
 	// MARK: Render HW
 
+	void RestartRenderPassForAutoflush(GSHWDrawConfig& config, const Map& verts, DrawPass pass);
 	void SetupDestinationAlpha(GSTexture* rt, GSTexture* ds, const GSVector4i& r, SetDATM datm);
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer,
-		size_t off, bool one_barrier, bool full_barrier);
+	void SendHWDraw(GSHWDrawConfig& config, const Map& verts, id<MTLBuffer> index, size_t off, DrawPass pass);
 
 	// MARK: Debug
 

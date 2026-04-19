@@ -5734,6 +5734,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 	{
+		pxAssert(!config.autoflush, "DATE PrimID is not compatible with autoflush");
 		// If we have a colclip in progress, we need to use the colclip texture, but we can't check this later as there's a chicken/egg problem with the pipe setup.
 		GSTexture* backup_rt = config.rt;
 
@@ -5842,6 +5843,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// Switch to colclip target for colclip hw rendering
 	if (pipe.ps.colclip_hw)
 	{
+		pxAssert(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;

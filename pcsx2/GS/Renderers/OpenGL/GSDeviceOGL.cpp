@@ -2666,6 +2666,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	if (config.ps.colclip_hw)
 	{
+		pxAssert(!config.autoflush, "Colclip HW is not compatible with autoflush");
 		if (!colclip_rt)
 		{
 			config.colclip_update_area = config.drawarea;
@@ -2697,6 +2698,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		case GSHWDrawConfig::DestinationAlphaMode::Full:
 			break; // No setup
 		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking:
+			pxAssert(!config.autoflush, "DATE PrimID is not compatible with autoflush");
 			primid_texture = InitPrimDateTexture(colclip_rt ? colclip_rt : config.rt, config.drawarea, config.datm);
 			if (!primid_texture)
 			{
