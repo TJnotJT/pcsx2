@@ -2064,6 +2064,11 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		return ChannelShuffleInfo();
 	}
 
+	// Depth shuffles do depth swizzling and shuffling together.
+	// The coordinates are not as regular so we need to handle them separately.
+	const bool shuffle_depth_16 =
+		frame.Block() != zbuf.Block() && zbuf.Block() == tex0.TBP0 && zbuf_psm.bpp == 16;
+
 	const bool v_region_repeat = (clamp.WMT == CLAMP_REGION_REPEAT);
 
 	// If the Y and V size are the same they must be 2 or 4 pixels.
@@ -2073,7 +2078,8 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		(y_pixels == 4 && v_pixels == 4) ||
 		(y_pixels == v_pixels && v_region_repeat) ||
 		(2 * y_pixels == v_pixels) ||
-		(2 * y_pixels - 2 == v_pixels && v_region_repeat)))
+		(2 * y_pixels - 2 == v_pixels && v_region_repeat) ||
+		shuffle_depth_16))
 	{
 		GL_INS("Not a shuffle (Y / V scaling not correct)");
 		return ChannelShuffleInfo();
@@ -2086,7 +2092,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
 	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width());
-	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width());
+	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
 
 	// Exactly one must be true.
 	if (info.possible_32_bit_source == info.possible_16_bit_source)
@@ -2106,7 +2112,8 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		// Usually X, U spacing differs by a factor of 2 if the shuffling a 32 bpp source,
 		// but could be identical if shuffling a 16 bit source (e.g. Urban Chaos smoke).
 		if (!((info.possible_32_bit_source && (2 * dx == du)) ||
-			(info.possible_16_bit_source && (dx == du))))
+			(info.possible_16_bit_source && (dx == du)) ||
+			shuffle_depth_16))
 		{
 			GL_INS("Not a shuffle (X, U quad spacing incorrect)");
 			return ChannelShuffleInfo();
@@ -2114,7 +2121,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 		// The Y, V spacing must always be 0 or differ by a factor of 1, 2 depending of whether
 		// the source is really 16 bits.
-		if (!((dy == 0 && dv == 0) || (2 * dy == dv)))
+		if (!((dy == 0 && dv == 0) || (2 * dy == dv) || shuffle_depth_16))
 		{
 			GL_INS("Not a shuffle (Y, V quad spacing incorrect)");
 			return ChannelShuffleInfo();
@@ -2124,7 +2131,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// Infer channels being shuffled.
 
 	// Handle two special cases of shuffling a 16 bit depth buffer.
-	if (frame.Block() != zbuf.Block() && zbuf.Block() == tex0.TBP0 && zbuf_psm.bpp == 16)
+	if (shuffle_depth_16)
 	{
 		// So far 2 games hit this code path: Urban Chaos and Tales of Abyss.
 		// UC: will copy depth to green channel.
@@ -6759,7 +6766,11 @@ __ri void GSRendererHW::EmulateChannelShuffle2(GSTextureCache::Target* src, GSTe
 		iout += 2;
 	};
 
-	m_conf.ps.channel = m_channel_shuffle_2.channel;
+	// ChannelFetch_RBG is encoded in the ToA and Urban Chaos HLE flags.
+	m_conf.ps.channel = m_channel_shuffle_2.channel == ChannelFetch_RGB ? ChannelFetch_NONE:
+	                    m_channel_shuffle_2.channel;
+	m_conf.ps.tales_of_abyss_hle = m_channel_shuffle_2.tales_of_abyss_hle;
+	m_conf.ps.urban_chaos_hle = m_channel_shuffle_2.urban_chaos_hle;
 
 	m_conf.tex = src->m_texture;
 
@@ -9199,7 +9210,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	bool large_width_shuffle = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).width() > 64;
 
-	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && !shuffled_vetoed && !large_width_shuffle) ||
+	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && !shuffled_vetoed && !large_width_shuffle &&
+			m_channel_shuffle_2.channel != ChannelFetch_RGB) ||
 		m_channel_shuffle_2.urban_chaos_hle != m_conf.ps.urban_chaos_hle ||
 		m_channel_shuffle_2.tales_of_abyss_hle != m_conf.ps.tales_of_abyss_hle)
 	{
