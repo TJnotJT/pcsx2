@@ -2017,27 +2017,21 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 			xy0.x, xy0.y, xy0.z, xy0.w, uv0.x, uv0.y, uv0.z, uv0.w);
 	}
 
-	// Check for 8 pixel alignment in X, U and 2 pixel alignment in Y, V.
-	const auto IsAligned = [&](const GSVector4i& v) {
-		return (v & GSVector4i(7, 1, 7, 1)).mask() == 0;
-	};
-
-	if (!(IsAligned(xy0) && IsAligned(uv0)))
-	{
-		GL_INS("HW: Not a shuffle (first quad not (8, 2) aligned).");
-		return ChannelShuffleInfo();
-	}
-
-	if (num_quads > 1)
-	{
-		if (!(IsAligned(xy1) && IsAligned(uv1)))
+	const auto ApplyRegionRepeat = [&](GSVector4i uv) {
+		// Special case where U, V are shifted and region repeat is used.
+		// The returned value is not strictly accurate, but allows the inference to work.
+		// Only used by Blood Will Tell.
+		if (clamp.WMS == CLAMP_REGION_REPEAT && clamp.WMT == CLAMP_REGION_REPEAT)
 		{
-			GL_INS("HW: Not a shuffle (second quad not (8, 2) aligned).");
-			return ChannelShuffleInfo();
+			if (uv.rsize().eq(GSVector4i(0, 0, 8, 8)) && (uv & GSVector4i(7)).eq(GSVector4i(4)))
+			{
+				return uv - GSVector4i(4);
+			}
+			if (uv.rsize().eq(GSVector4i(0, 0, 8, 2)) && (uv.xzxz() & GSVector4i(7)).eq(GSVector4i(4)))
+			{
+				return uv - GSVector4i(4, 0, 4, 0);
+			}
 		}
-	}
-
-	const auto ApplyRegionClamp = [&](GSVector4i uv) {
 		if (clamp.WMS == CLAMP_REGION_REPEAT)
 		{
 			uv.x = (uv.x & clamp.MINU) | clamp.MAXU;
@@ -2048,10 +2042,34 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 			uv.y = (uv.y & clamp.MINV) | clamp.MAXV;
 			uv.w = (((uv.w - 1) & clamp.MINV) | clamp.MAXV) + 1;
 		}
+		uv = uv.xyxy().runion(uv.zwzw()); // Sort increasing incase the order got flipped.
 		return uv;
 	};
 
-	const GSVector4i uv0_clamp = ApplyRegionClamp(uv0);
+	// Get the region repeated version since channel shuffles use it to select
+	// the right channels.
+	const GSVector4i uv0_clamp = ApplyRegionRepeat(uv0);
+	const GSVector4i uv1_clamp = ApplyRegionRepeat(uv1);
+
+	// Check for 8 pixel alignment in X, U and 2 pixel alignment in Y, V.
+	const auto IsAligned = [&](const GSVector4i& v) {
+		return (v & GSVector4i(7, 1, 7, 1)).eq(GSVector4i(0));
+	};
+
+	if (!(IsAligned(xy0) && (IsAligned(uv0) || IsAligned(uv0_clamp))))
+	{
+		GL_INS("HW: Not a shuffle (first quad not (8, 2) aligned).");
+		return ChannelShuffleInfo();
+	}
+
+	if (num_quads > 1)
+	{
+		if (!(IsAligned(xy1) && (IsAligned(uv1) || IsAligned(uv1_clamp))))
+		{
+			GL_INS("HW: Not a shuffle (second quad not (8, 2) aligned).");
+			return ChannelShuffleInfo();
+		}
+	}
 
 	const int x_pixels = xy0.width();
 	const int y_pixels = xy0.height();
@@ -2091,7 +2109,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// For 32 bit sources, the V scaling should be larger than Y.
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
-	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width());
+	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !shuffle_depth_16;
 	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
 
 	// Exactly one must be true.
@@ -2159,7 +2177,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		((frame.FBMSK & 0x00FFFFFF) == 0x00FFFFFF))
 	{
 		// Typically used in Terminator 3.
-		const int blue_mask = m_cached_ctx.FRAME.FBMSK >> 24;
+		const int blue_mask = frame.FBMSK >> 24;
 		int blue_shift = -1;
 
 		// Note: potentially we could also check the value of the CLUT.
@@ -2186,9 +2204,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 			info.green_blue_hle = true;
 			info.channel = ChannelFetch_GXBY;
-
 			info.green_blue_hle_data = GSVector4i(blue_mask, blue_shift, green_mask, green_shift);
-			m_cached_ctx.FRAME.FBMSK = 0x00FFFFFF; // Fixup FBMSK to avoid barriers.
 
 			return info;
 		}
@@ -6766,13 +6782,26 @@ __ri void GSRendererHW::EmulateChannelShuffle2(GSTextureCache::Target* src, GSTe
 		iout += 2;
 	};
 
-	// ChannelFetch_RBG is encoded in the ToA and Urban Chaos HLE flags.
+	
+	if (m_channel_shuffle_2.green_blue_hle)
+	{
+		m_cached_ctx.FRAME.FBMSK = 0x00FFFFFF; // Fixup FBMSK to avoid barriers.
+		m_conf.cb_ps.ChannelShuffle = m_channel_shuffle_2.green_blue_hle_data;
+	}
+
 	m_conf.ps.channel = m_channel_shuffle_2.channel == ChannelFetch_RGB ? ChannelFetch_NONE:
 	                    m_channel_shuffle_2.channel;
 	m_conf.ps.tales_of_abyss_hle = m_channel_shuffle_2.tales_of_abyss_hle;
 	m_conf.ps.urban_chaos_hle = m_channel_shuffle_2.urban_chaos_hle;
 
 	m_conf.tex = src->m_texture;
+
+	// FIXME: Remove this hack.
+	//if (m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == 3)
+	//{
+	//	m_channel_shuffle_2.Disable();
+	//	return;
+	//}
 
 	const GSLocalMemory::psm_t frame_psm = GSLocalMemory::m_psm[m_context->FRAME.PSM];
 	m_full_screen_shuffle = (m_r.height() > frame_psm.pgs.y) || (m_r.width() > frame_psm.pgs.x) || GSConfig.UserHacks_TextureInsideRt == GSTextureInRtMode::Disabled;
