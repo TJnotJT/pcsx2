@@ -15,7 +15,7 @@
 using PS_ATST  = GSShader::PS_ATST;
 using PS_AFAIL = GSShader::PS_AFAIL;
 
-const bool NEW_SHUFFLE = true;
+bool NEW_SHUFFLE = true;
 
 GSRendererHW::GSRendererHW()
 	: GSRenderer()
@@ -1905,6 +1905,7 @@ void GSRendererHW::FixSplitTextureShuffleState()
 	}
 }
 
+// Implementation function that does not mutate internal state.
 template<bool fst>
 GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 {
@@ -2018,31 +2019,50 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	}
 
 	const auto ApplyRegionRepeat = [&](GSVector4i uv) {
-		// Special case where U, V are shifted and region repeat is used.
-		// The returned value is not strictly accurate, but allows the inference to work.
-		// Only used by Blood Will Tell.
-		if (clamp.WMS == CLAMP_REGION_REPEAT && clamp.WMT == CLAMP_REGION_REPEAT)
+		for (int i = 0; i < 2; i++) // Process U then V.
 		{
-			if (uv.rsize().eq(GSVector4i(0, 0, 8, 8)) && (uv & GSVector4i(7)).eq(GSVector4i(4)))
+			const u32 WM = (i == 0) ? clamp.WMS : clamp.WMT;
+			const u32 MSK = (i == 0) ? clamp.MINU : clamp.MINV;
+			const u32 FIX = (i == 0) ? clamp.MAXU : clamp.MAXV;
+			int coord0 = (i == 0) ? uv.x : uv.y;
+			int coord1 = (i == 0) ? uv.z : uv.w;
+
+			if (WM == CLAMP_REGION_REPEAT)
 			{
-				return uv - GSVector4i(4);
+				// Special case where U, V are shifted and region repeat is used.
+				// The wrapping here is not strictly accurate, but allows the inference to work.
+				if (((coord1 - coord0) == 8) && ((coord0 % 8) == 4) && ((coord1 % 8) == 4))
+				{
+					if (FIX & 8)
+					{
+						coord0 += 4;
+						coord1 += 4;
+					}
+					else
+					{
+						coord0 -= 4;
+						coord1 -= 4;
+					}
+				}
+				else
+				{
+					coord0 = (coord0 & MSK) | FIX;
+					coord1 = (((coord1 - 1) & MSK) | FIX) + 1; // +/- 1 because exclusive.
+				}
 			}
-			if (uv.rsize().eq(GSVector4i(0, 0, 8, 2)) && (uv.xzxz() & GSVector4i(7)).eq(GSVector4i(4)))
+
+			if (i == 0)
 			{
-				return uv - GSVector4i(4, 0, 4, 0);
+				uv.x = coord0;
+				uv.z = coord1;
+			}
+			else
+			{
+				uv.y = coord0;
+				uv.w = coord1;
 			}
 		}
-		if (clamp.WMS == CLAMP_REGION_REPEAT)
-		{
-			uv.x = (uv.x & clamp.MINU) | clamp.MAXU;
-			uv.z = (((uv.z - 1) & clamp.MINU) | clamp.MAXU) + 1;
-		}
-		if (clamp.WMT == CLAMP_REGION_REPEAT)
-		{
-			uv.y = (uv.y & clamp.MINV) | clamp.MAXV;
-			uv.w = (((uv.w - 1) & clamp.MINV) | clamp.MAXV) + 1;
-		}
-		uv = uv.xyxy().runion(uv.zwzw()); // Sort increasing incase the order got flipped.
+		uv = uv.xyxy().runion(uv.zwzw()); // Sort increasing in case the order got flipped.
 		return uv;
 	};
 
@@ -2276,21 +2296,31 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 void GSRendererHW::DetectChannelShuffle()
 {
-	if (!(PRIM->TME && m_vt.m_primclass == GS_SPRITE_CLASS))
-	{
-		// Early exit to prevent expensive checks.
-		m_channel_shuffle_2 = ChannelShuffleInfo();
-		return;
-	}
+	m_channel_shuffle_2 = ChannelShuffleInfo();
 
-	if (PRIM->FST)
+	if (PRIM->TME && m_vt.m_primclass == GS_SPRITE_CLASS)
 	{
-		m_channel_shuffle_2 = DetectChannelShuffle<true>();
+		if (PRIM->FST)
+		{
+			m_channel_shuffle_2 = DetectChannelShuffle<true>();
+		}
+		else
+		{
+			m_channel_shuffle_2 = DetectChannelShuffle<false>();
+		}
 	}
-	else
-	{
-		m_channel_shuffle_2 = DetectChannelShuffle<false>();
-	}
+}
+
+// Quick check for use in a CRC hack.
+bool GSRendererHW::DetectChannelShuffleFast()
+{
+	GSVector4i xy = GSVector4i::zero();
+	GSVector4i uv = GSVector4i::zero();
+
+	return PRIM->TME && m_context->TEX0.PSM == PSMT8 &&
+		m_vt.m_primclass == GS_SPRITE_CLASS &&
+		GetShuffleQuadXYUV(m_vertex->buff, m_index->buff, xy, uv) &&
+		(xy.width() == 8 || xy.height() == 2);
 }
 
 void GSRendererHW::DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
@@ -2316,12 +2346,25 @@ void GSRendererHW::DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GS
 // Check for a split channel shuffle and fix up the state if needed.
 bool GSRendererHW::SkipSplitChannelShuffleDraw()
 {
-	if (!m_channel_shuffle)
+	if (NEW_SHUFFLE)
 	{
-		m_last_channel_shuffle_fbp = 0xffff;
-		m_last_channel_shuffle_tbp = 0xffff;
-		m_last_channel_shuffle_end_block = 0xffff;
-		return false;
+		if (!m_channel_shuffle_2)
+		{
+			m_last_channel_shuffle_fbp = 0xffff;
+			m_last_channel_shuffle_tbp = 0xffff;
+			m_last_channel_shuffle_end_block = 0xffff;
+			return false;
+		}
+	}
+	else
+	{
+		if (!m_channel_shuffle)
+		{
+			m_last_channel_shuffle_fbp = 0xffff;
+			m_last_channel_shuffle_tbp = 0xffff;
+			m_last_channel_shuffle_end_block = 0xffff;
+			return false;
+		}
 	}
 
 	// NFSU2 does consecutive channel shuffles with blending, reducing the alpha channel over time.

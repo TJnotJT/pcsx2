@@ -284,6 +284,7 @@ private:
 	template<bool fst>
 	ChannelShuffleInfo DetectChannelShuffle();
 	void DetectChannelShuffle();
+	bool DetectChannelShuffleFast(); // For use in CRC hacks.
 	void DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
 	// Texture shuffle functions.
