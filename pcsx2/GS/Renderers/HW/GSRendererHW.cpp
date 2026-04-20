@@ -2129,9 +2129,17 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// For 32 bit sources, the V scaling should be larger than Y.
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
+	// FIXME: Might have to change this back.
 	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16 ||
 	                              (frame.FBW * 2 == tex0.TBW);
 	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !info.possible_16_bit_source;
+
+	if (full_xy_bbox.width() > 64)
+	{
+		Console.Warning("WIDE_SHUFFLE %lld {%d, %d, %d, %d}, {%d, %d, %d, %d}", s_n,
+			full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
+			full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
+	}
 
 	// Exactly one must be true.
 	if (info.possible_32_bit_source == info.possible_16_bit_source)
