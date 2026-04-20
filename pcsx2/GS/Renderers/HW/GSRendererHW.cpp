@@ -2297,6 +2297,14 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 			GL_INS("HW: Fetch A.");
 		}
 	}
+
+	// FIXME: Clean this up. Hackfix for blood will tell.
+	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle &&
+		num_quads <= 32 && !IsPageCopy() && clamp.WMT == CLAMP_REGION_REPEAT)
+	{
+		GL_INS("HW: Blood will Tell special case. Cancel shuffle.");
+		return ChannelShuffleInfo();
+	}
 	
 	return info;
 }
@@ -3333,6 +3341,11 @@ void GSRendererHW::Draw()
 	m_cached_ctx.TEST = context->TEST;
 	m_cached_ctx.FRAME = context->FRAME;
 	m_cached_ctx.ZBUF = context->ZBUF;
+
+	if (PRIM->AA1 && (m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS))
+	{
+		Console.Warning("USING_AA1 %lld");
+	}
 
 	if (IsBadFrame())
 	{
@@ -6865,15 +6878,15 @@ __ri void GSRendererHW::EmulateChannelShuffle2(GSTextureCache::Target* src, GSTe
 
 	// Late cancel of HLE channel shuffle. It might still be a complicated shuffle,
 	// but we take the slow path and swizzle the source to PSMT8.
-	//if (!m_channel_shuffle_2.green_blue_hle &&
-	//	!m_channel_shuffle_2.tales_of_abyss_hle &&
-	//	!m_channel_shuffle_2.urban_chaos_hle &&
-	//	m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == CLAMP_REGION_REPEAT)
-	//{
-	//	GL_INS("HW: Late channel shuffle cancel.");
-	//	m_channel_shuffle_2.Disable();
-	//	return;
-	//}
+	if (!m_channel_shuffle_2.green_blue_hle &&
+		!m_channel_shuffle_2.tales_of_abyss_hle &&
+		!m_channel_shuffle_2.urban_chaos_hle &&
+		m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == CLAMP_REGION_REPEAT)
+	{
+		GL_INS("HW: Late channel shuffle cancel.");
+		m_channel_shuffle_2.Disable();
+		return;
+	}
 	
 	if (m_channel_shuffle_2.green_blue_hle)
 	{
@@ -9330,6 +9343,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	bool large_width_shuffle = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).width() > 64;
+
+	if (shuffled_vetoed)
+	{
+		Console.Warning("SHUFFLE_VETOED %lld", s_n);
+	}
 
 	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && !shuffled_vetoed && !large_width_shuffle &&
 			m_channel_shuffle_2.channel != ChannelFetch_RGB) ||
