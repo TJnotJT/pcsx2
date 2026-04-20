@@ -2129,8 +2129,9 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// For 32 bit sources, the V scaling should be larger than Y.
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
-	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !shuffle_depth_16;
-	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
+	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16 ||
+	                              (frame.FBW * 2 == tex0.TBW);
+	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !info.possible_16_bit_source;
 
 	// Exactly one must be true.
 	if (info.possible_32_bit_source == info.possible_16_bit_source)
@@ -2176,7 +2177,7 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		x_pixels == 64 && u_pixels == 64 && y_pixels == 2 && v_pixels == 2 &&
 		(xy0.x == 0) && (uv0.x % 64) == 0 &&
 		num_quads == 8 && clamp.WMS != CLAMP_REGION_REPEAT && clamp.WMT != CLAMP_REGION_REPEAT &&
-		frame.Block() == tex0.TBP0 + 0x40 || frame.Block() == tex0.TBP0 + 0x60)
+		(frame.Block() == tex0.TBP0 + 0x40 || frame.Block() == tex0.TBP0 + 0x60))
 	{
 		GL_INS("HW: GSC_IRem CRC hack detected.");
 		if ((uv0.y & 2) == 0)
@@ -6855,6 +6856,18 @@ __ri void GSRendererHW::EmulateChannelShuffle2(GSTextureCache::Target* src, GSTe
 		iout += 2;
 	};
 
+
+	// Late cancel of HLE channel shuffle. It might still be a complicated shuffle,
+	// but we take the slow path and swizzle the source to PSMT8.
+	//if (!m_channel_shuffle_2.green_blue_hle &&
+	//	!m_channel_shuffle_2.tales_of_abyss_hle &&
+	//	!m_channel_shuffle_2.urban_chaos_hle &&
+	//	m_index->tail <= 64 && !IsPageCopy() && m_cached_ctx.CLAMP.WMT == CLAMP_REGION_REPEAT)
+	//{
+	//	GL_INS("HW: Late channel shuffle cancel.");
+	//	m_channel_shuffle_2.Disable();
+	//	return;
+	//}
 	
 	if (m_channel_shuffle_2.green_blue_hle)
 	{
