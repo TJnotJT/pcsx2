@@ -2298,12 +2298,24 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		}
 	}
 
-	// FIXME: Clean this up. Hackfix for blood will tell.
-	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle &&
-		num_quads <= 32 && !IsPageCopy() && clamp.WMT == CLAMP_REGION_REPEAT)
+	// Handle special cases that don't work reliably with HLE channel shuffle or might not
+	// not really be a shuffle. Even if the source is 32 bit being reinterpreted as 8 bit,
+	// it will be manually swizzled before sampling.
+	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle && !IsPageCopy())
 	{
-		GL_INS("HW: Blood will Tell special case. Cancel shuffle.");
-		return ChannelShuffleInfo();
+		if (num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT)
+		{
+			// Only Blood Will Tell seems to hit this path.
+			GL_INS("HW: Blood Will Tell special case. Cancel HLE.");
+			return ChannelShuffleInfo();
+		}
+
+		if (full_xy_bbox.width() > 64)
+		{
+			// Harry Potter and the Chamber of Secrets hits this path.
+			GL_INS("HW: Wide draw special case. Cancel HLE.");
+			return ChannelShuffleInfo();
+		}
 	}
 	
 	return info;
@@ -9349,7 +9361,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		Console.Warning("SHUFFLE_VETOED %lld", s_n);
 	}
 
-	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && !shuffled_vetoed && !large_width_shuffle &&
+	if ((m_channel_shuffle_2.channel != m_conf.ps.channel && /*!shuffled_vetoed && !large_width_shuffle &&*/
 			m_channel_shuffle_2.channel != ChannelFetch_RGB) ||
 		m_channel_shuffle_2.urban_chaos_hle != m_conf.ps.urban_chaos_hle ||
 		m_channel_shuffle_2.tales_of_abyss_hle != m_conf.ps.tales_of_abyss_hle)
