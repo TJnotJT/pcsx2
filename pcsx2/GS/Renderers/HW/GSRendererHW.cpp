@@ -2136,12 +2136,15 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 	if (!shuffle_depth_16)
 	{
-		// Make sure the draw either fits within one page or is page width aligned.
-		const bool single_page_shuffle = GSVector4i(0, 0, 64, 64).rcontains(full_xy_bbox.rsize());
-		const bool page_width_aligned = (full_xy_bbox.width() & 64) == 0;
-		if (!(single_page_shuffle || page_width_aligned))
+		// Early exit heuristics that are needed to avoid HLEing certain shuffles.
+		// Harry Potter and the Chamber of Secrets needs to exit here for shadow draws.
+		// WRC 4 needs to not exit here; it does a tall, single page wide shuffle that we HLE.
+		const bool single_page_x = full_xy_bbox.width() <= 64;
+		const bool single_page_y = full_xy_bbox.height() <= 64;
+		const bool page_aligned = GSLocalMemory::IsPageAligned(frame.PSM, full_xy_bbox);
+		if (!((single_page_x && single_page_y) || (single_page_x && page_aligned)))
 		{
-			GL_INS("HW: Not a shuffle (not single page or page width aligned).");
+			GL_INS("HW: Not a shuffle (wrong size/page alignment).");
 			return ChannelShuffleInfo();
 		}
 	}
