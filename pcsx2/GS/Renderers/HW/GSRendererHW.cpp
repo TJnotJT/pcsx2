@@ -1625,7 +1625,7 @@ bool GSRendererHW::NextDrawColClip() const
 bool GSRendererHW::IsPossibleChannelShuffle() const
 {
 	if (NEW_SHUFFLE)
-		return m_channel_shuffle_2;
+		return m_channel_shuffle_2.draw_is_a_shuffle;
 
 	if (!PRIM->TME || m_cached_ctx.TEX0.PSM != PSMT8 || // 8-bit texture draw
 		m_vt.m_primclass != GS_SPRITE_CLASS || // draw_sprite_tex
@@ -2129,6 +2129,11 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// For 32 bit sources, the V scaling should be larger than Y.
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
+
+	GL_INS("HW: Inference based on full bboxes: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+		full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
+		full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
+
 	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !shuffle_depth_16;
 	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
 
@@ -2143,6 +2148,16 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	if (info.possible_32_bit_source == info.possible_16_bit_source)
 	{
 		GL_INS("HW: Not a shuffle (incorrect scaling in X).");
+		return ChannelShuffleInfo();
+	}
+
+	GL_INS("HW: Real %d bit source for shuffle.", info.possible_32_bit_source ? 32 : 16);
+
+	// Make sure the draw either fits within one page or is page aligned.
+	if (!(GSVector4i(0, 0, 64, 64).rcontains(full_xy_bbox.rsize()) ||
+		GSLocalMemory::IsPageAligned(frame.PSM, full_xy_bbox)))
+	{
+		GL_INS("HW: Not a shuffle (incorrect XY size/alignment).");
 		return ChannelShuffleInfo();
 	}
 
@@ -2173,7 +2188,10 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		}
 	}
 
-	// Infer channels being shuffled.
+	// If we get this far, we consider the draw a shuffle, whether or not we HLE it.
+	info.draw_is_a_shuffle = true;
+
+	// Bellow are heuristics for specific HLE to use. 
 
 	// Special handling for GSC_IRem hack. The coordinates appear as it the
 	// source is 16 bits, because the the data has already been deswizzled from 32 bits.
@@ -2303,18 +2321,18 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	// it will be manually swizzled before sampling.
 	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle && !IsPageCopy())
 	{
-		if (num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT)
+		if (num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT && frame.Block() != tex0.TBP0)
 		{
 			// Only Blood Will Tell seems to hit this path.
 			GL_INS("HW: Blood Will Tell special case. Cancel HLE.");
-			return ChannelShuffleInfo();
+			info.channel = ChannelFetch_NONE;
 		}
 
 		if (full_xy_bbox.width() > 64)
 		{
 			// Harry Potter and the Chamber of Secrets hits this path.
 			GL_INS("HW: Wide draw special case. Cancel HLE.");
-			return ChannelShuffleInfo();
+			info.channel = ChannelFetch_NONE;
 		}
 	}
 	
@@ -6827,6 +6845,11 @@ void GSRendererHW::EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GS
 
 bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 {
+	if (NEW_SHUFFLE)
+	{
+		return m_channel_shuffle_2;
+	}
+
 	// We have to do the second test early here, because it might be a different source.
 	const bool shuffle = m_channel_shuffle || IsPossibleChannelShuffle();
 

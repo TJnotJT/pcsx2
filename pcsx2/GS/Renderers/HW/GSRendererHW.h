@@ -207,7 +207,11 @@ private:
 		GSVector4i green_blue_hle_data = GSVector4i::zero();
 		bool possible_32_bit_source = false;
 		bool possible_16_bit_source = false;
+		
+		// Whether the draw is a shuffle, regard of whether we use HLE or a manual swizzle.
+		bool draw_is_a_shuffle = false;
 
+		// Returns true if we're going to HLE the shuffle.
 		operator bool() const
 		{
 			return channel != ChannelFetch_NONE;
