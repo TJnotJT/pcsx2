@@ -1533,7 +1533,8 @@ GSVector2i GSRendererHW::GetValidSize(const GSTextureCache::Source* tex, const b
 	}
 
 	// If it's a channel shuffle, it'll likely be just a single page, so assume full screen.
-	if (m_channel_shuffle || (tex && IsPageCopy()))
+	bool channel_shuffle = NEW_SHUFFLE ? m_channel_shuffle_2 : m_channel_shuffle;
+	if (channel_shuffle || (tex && IsPageCopy()))
 	{
 		const int page_x = frame_psm.pgs.x - 1;
 		const int page_y = frame_psm.pgs.y - 1;
@@ -2125,24 +2126,26 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 
 	ChannelShuffleInfo info;
 
-	// If the source is 32 bits, the vertical scaling should be identical.
-	// For 32 bit sources, the V scaling should be larger than Y.
+	// FIXME: Maybe move this earlier.
 	const GSVector4i full_xy_bbox = GSVector4i(m_vt.m_min.p.xyxy(m_vt.m_max.p)).ralign<Align_Outside>(GSVector2i(8, 2));
 	const GSVector4i full_uv_bbox = GSVector4i(m_vt.m_min.t.xyxy(m_vt.m_max.t)).ralign<Align_Outside>(GSVector2i(16, 4));
 
-	GL_INS("HW: Inference based on full bboxes: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
+	GL_INS("HW: Detecting based on full bboxes: pos={%d, %d, %d, %d}, tex={%d, %d, %d, %d}",
 		full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
 		full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
 
+	// Make sure the draw either fits within one page or is page aligned.
+	if ((full_xy_bbox.width() % 64) || full_xy_bbox.width() > 64)
+	{
+		GL_INS("HW: Not a shuffle (incorrect XY size/alignment).");
+		return ChannelShuffleInfo();
+	}
+
+	// FIXME: Comment is useless, improve it.
+	// If the source is 32 bits, the horizontal scaling should differ by a factor of 2.
+	// If the source is 16 bits, the horizontal scaling should usually be the same, unless TBW is modified.
 	info.possible_32_bit_source = (2 * full_xy_bbox.width() == full_uv_bbox.width()) && !shuffle_depth_16;
 	info.possible_16_bit_source = (full_xy_bbox.width() == full_uv_bbox.width()) || shuffle_depth_16;
-
-	if (full_xy_bbox.width() > 64)
-	{
-		Console.Warning("WIDE_SHUFFLE %lld {%d, %d, %d, %d}, {%d, %d, %d, %d}", s_n,
-			full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
-			full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
-	}
 
 	// Exactly one must be true.
 	if (info.possible_32_bit_source == info.possible_16_bit_source)
@@ -2152,14 +2155,6 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 	}
 
 	GL_INS("HW: Real %d bit source for shuffle.", info.possible_32_bit_source ? 32 : 16);
-
-	// Make sure the draw either fits within one page or is page aligned.
-	if (!(GSVector4i(0, 0, 64, 64).rcontains(full_xy_bbox.rsize()) ||
-		GSLocalMemory::IsPageAligned(frame.PSM, full_xy_bbox)))
-	{
-		GL_INS("HW: Not a shuffle (incorrect XY size/alignment).");
-		return ChannelShuffleInfo();
-	}
 
 	// Make sure the next quad is spaced correctly.
 	if (num_quads > 1)
@@ -2328,6 +2323,8 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 			info.channel = ChannelFetch_NONE;
 		}
 
+		// FIXME: Remove this and combine the above ifs.
+		// We already check with above.
 		if (full_xy_bbox.width() > 64)
 		{
 			// Harry Potter and the Chamber of Secrets hits this path.
@@ -8114,7 +8111,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	const TextureMinMaxResult& tmm, GSDevice::RecycledTexture& src_copy)
 {
 	// don't overwrite the texture when using channel shuffle, but keep the palette
-	if (!m_channel_shuffle)
+	if (NEW_SHUFFLE ? !m_channel_shuffle_2 : !m_channel_shuffle)
 	{
 		m_conf.cb_ps.ChannelShuffleOffset = GSVector2(0, 0);
 		m_conf.tex = tex->m_texture;
