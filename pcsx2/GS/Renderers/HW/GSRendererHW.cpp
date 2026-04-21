@@ -2134,11 +2134,16 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		full_xy_bbox.x, full_xy_bbox.y, full_xy_bbox.z, full_xy_bbox.w,
 		full_uv_bbox.x, full_uv_bbox.y, full_uv_bbox.z, full_uv_bbox.w);
 
-	// Make sure the draw either fits within one page or is page aligned.
-	if ((full_xy_bbox.width() % 64) || full_xy_bbox.width() > 64)
+	if (!shuffle_depth_16)
 	{
-		GL_INS("HW: Not a shuffle (incorrect XY size/alignment).");
-		return ChannelShuffleInfo();
+		// Make sure the draw either fits within one page or is page width aligned.
+		const bool single_page_shuffle = GSVector4i(0, 0, 64, 64).rcontains(full_xy_bbox.rsize());
+		const bool page_width_aligned = (full_xy_bbox.width() & 64) == 0;
+		if (!(single_page_shuffle || page_width_aligned))
+		{
+			GL_INS("HW: Not a shuffle (not single page or page width aligned).");
+			return ChannelShuffleInfo();
+		}
 	}
 
 	// FIXME: Comment is useless, improve it.
@@ -2311,26 +2316,14 @@ GSRendererHW::ChannelShuffleInfo GSRendererHW::DetectChannelShuffle()
 		}
 	}
 
-	// Handle special cases that don't work reliably with HLE channel shuffle or might not
-	// not really be a shuffle. Even if the source is 32 bit being reinterpreted as 8 bit,
-	// it will be manually swizzled before sampling.
-	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle && !IsPageCopy())
+	// Handle special cases that doesn't work reliably with HLE channel shuffle or might not
+	// not really be a shuffle.
+	if (!info.green_blue_hle && !info.urban_chaos_hle && !info.tales_of_abyss_hle && !IsPageCopy() &&
+		num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT && frame.Block() != tex0.TBP0)
 	{
-		if (num_quads <= 32 && clamp.WMT == CLAMP_REGION_REPEAT && frame.Block() != tex0.TBP0)
-		{
-			// Only Blood Will Tell seems to hit this path.
-			GL_INS("HW: Blood Will Tell special case. Cancel HLE.");
-			info.channel = ChannelFetch_NONE;
-		}
-
-		// FIXME: Remove this and combine the above ifs.
-		// We already check with above.
-		if (full_xy_bbox.width() > 64)
-		{
-			// Harry Potter and the Chamber of Secrets hits this path.
-			GL_INS("HW: Wide draw special case. Cancel HLE.");
-			info.channel = ChannelFetch_NONE;
-		}
+		// Only Blood Will Tell seems to hit this path.
+		GL_INS("HW: Blood Will Tell special case. Cancel HLE.");
+		info.channel = ChannelFetch_NONE;
 	}
 	
 	return info;
