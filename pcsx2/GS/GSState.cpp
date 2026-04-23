@@ -200,7 +200,6 @@ void GSState::Reset(bool hardware_reset)
 	m_index->tail = 0;
 	m_scanmask_used = 0;
 	m_texflush_flag = false;
-	m_channel_shuffle = false;
 	m_dirty_gs_regs = 0;
 	m_backed_up_ctx = -1;
 

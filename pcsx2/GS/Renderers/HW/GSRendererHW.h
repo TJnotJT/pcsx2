@@ -286,8 +286,8 @@ private:
 	bool SkipSplitChannelShuffleDraw();
 
 	template<bool fst>
-	ChannelShuffleInfo DetectChannelShuffle();
-	void DetectChannelShuffle();
+	ChannelShuffleInfo DetectChannelShuffleImpl() const;
+	ChannelShuffleInfo DetectChannelShuffle() const;
 	bool DetectChannelShuffleFast(); // For use in CRC hacks.
 	void DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
