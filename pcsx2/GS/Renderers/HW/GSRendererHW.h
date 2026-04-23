@@ -294,14 +294,14 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 
-	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout);
+	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout) const;
 
 	// Channel shuffle functions.
 	bool SkipSplitChannelShuffleDraw();
 
 	template<bool fst>
-	ChannelShuffleInfo DetectChannelShuffle();
-	void DetectChannelShuffle();
+	ChannelShuffleInfo DetectChannelShuffleImpl() const;
+	ChannelShuffleInfo DetectChannelShuffle() const;
 	bool DetectChannelShuffleFast(); // For use in CRC hacks.
 	void DetectChannelShuffleSecondPass(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
