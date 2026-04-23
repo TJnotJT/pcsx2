@@ -280,7 +280,7 @@ private:
 	bool IsPageCopy() const;
 	bool NextDrawMatchesShuffle() const;
 
-	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout);
+	bool GetShuffleQuadXYUV(const GSVertex* RESTRICT verts, const u16* RESTRICT index, GSVector4i& xyout, GSVector4i& uvout) const;
 
 	// Channel shuffle functions.
 	bool SkipSplitChannelShuffleDraw();

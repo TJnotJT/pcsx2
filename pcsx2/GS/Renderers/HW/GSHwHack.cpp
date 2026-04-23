@@ -705,9 +705,7 @@ bool GSHwHack::GSC_PolyphonyDigitalGames(GSRendererHW& r, int& skip)
 	static bool shuffle_hle_active = false;
 	static u32 shuffle_fbmsk = 0;
 
-	bool is_cs_new = r.DetectChannelShuffleFast();
-
-	const bool is_cs = NEW_SHUFFLE ? is_cs_new : r.IsPossibleChannelShuffle();
+	const bool is_cs = r.DetectChannelShuffleFast();
 	if (shuffle_hle_active && is_cs)
 	{
 		if (RFBMSK == shuffle_fbmsk)

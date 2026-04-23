@@ -5053,13 +5053,13 @@ __forceinline bool GSState::EarlyDetectShuffle(u32 prim)
 	return false;
 }
 
-__fi GSVector4 GSState::GetXYWindow(const GSVertex& v)
+__fi GSVector4 GSState::GetXYWindow(const GSVertex& v) const
 {
 	return GSVector4(GetVertexXY(v) - m_context->scissor.xyof.xyxy()) / 16.0f;
 }
 
 template<bool fst>
-__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q)
+__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q) const
 {
 	if constexpr (fst)
 	{
@@ -5075,12 +5075,12 @@ __fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q)
 }
 
 template<bool fst>
-__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v)
+__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v) const
 {
 	return GetTexCoordsImpl<fst>(v, v.RGBAQ.Q);
 }
 
-__fi GSVector4 GSState::GetTexCoords(const GSVertex& v, float q)
+__fi GSVector4 GSState::GetTexCoords(const GSVertex& v, float q) const
 {
 	if (PRIM->FST)
 	{
@@ -5092,7 +5092,7 @@ __fi GSVector4 GSState::GetTexCoords(const GSVertex& v, float q)
 	}
 }
 
-__fi GSVector4 GSState::GetTexCoords(const GSVertex& v)
+__fi GSVector4 GSState::GetTexCoords(const GSVertex& v) const
 {
 	return GetTexCoords(v, v.RGBAQ.Q);
 }
@@ -5127,7 +5127,7 @@ bool GSState::GetQuadCornersImpl(const GSVertex* v, const u16* i, GSVertex& vout
 }
 
 template<u32 primclass>
-void GSState::GetQuadBBoxWindowImpl(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout)
+void GSState::GetQuadBBoxWindowImpl(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout) const
 {
 	const GSVector4 xy0 = GetXYWindow(v0);
 	const GSVector4 xy1 = GetXYWindow(v1);
@@ -5136,7 +5136,7 @@ void GSState::GetQuadBBoxWindowImpl(const GSVertex& v0, const GSVertex& v1, GSVe
 }
 
 template<u32 primclass, bool tme, bool fst>
-void GSState::GetQuadBBoxWindowImpl(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout, GSVector4& texout, bool keep_tex_order)
+void GSState::GetQuadBBoxWindowImpl(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout, GSVector4& texout, bool keep_tex_order) const
 {
 	if constexpr (!tme)
 	{
@@ -5232,18 +5232,18 @@ else \
 	pxFail("Wrong prim class."); \
 }
 
-bool GSState::GetQuadCorners(const GSVertex* v, const u16* i, GSVertex& vout0, GSVertex& vout1)
+bool GSState::GetQuadCorners(const GSVertex* v, const u16* i, GSVertex& vout0, GSVertex& vout1) const
 {
 	GEN_TMPL_SELECT_2(GetQuadCornersImpl, v, i, vout0, vout1);
 	return false;
 }
 
-void GSState::GetQuadBBoxWindow(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout)
+void GSState::GetQuadBBoxWindow(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout) const
 {
 	GEN_TMPL_SELECT_1(GetQuadBBoxWindowImpl, v0, v1, xyout);
 }
 
-void GSState::GetQuadBBoxWindow(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout, GSVector4& texout, bool keep_tex_order)
+void GSState::GetQuadBBoxWindow(const GSVertex& v0, const GSVertex& v1, GSVector4& xyout, GSVector4& texout, bool keep_tex_order) const
 {
 	GEN_TMPL_SELECT_2(GetQuadBBoxWindowImpl, v0, v1, xyout, texout, keep_tex_order);
 }
