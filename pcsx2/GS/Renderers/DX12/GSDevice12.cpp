@@ -3285,7 +3285,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ABE", sel.abe);
 	sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
 	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
-	sm.AddMacro("PS_ROV_DEPTH", sel.rov_depth);
+	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
@@ -4371,9 +4371,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds = config.ps.rov_depth ? nullptr : static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_ds = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? nullptr : static_cast<GSTexture12*>(config.ds);
 	GSTexture12* draw_rt_rov = config.ps.rov_color ? static_cast<GSTexture12*>(config.rt) : nullptr;
-	GSTexture12* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTexture12*>(config.ds) : nullptr;
+	GSTexture12* draw_ds_rov = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
 	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
@@ -4771,13 +4771,13 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		{
 			GL_INS("ROV Pass (Color=%s/%s, D=%s/%s)",
 				draw_rt_rov ? (draw_rt_rov->GetState() == GSTexture::State::Dirty ? "Preserve" :
-					draw_rt_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+					draw_rt_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOP)" :
 					draw_rt_rov->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
 				draw_rt_rov ? (config.ps.rov_color ? "UAV" : "Standard") : "None",
 				draw_ds_rov ? (draw_ds_rov->GetState() == GSTexture::State::Dirty ? "Preserve" :
-					draw_ds_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOOP)" :
+					draw_ds_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOP)" :
 					draw_ds_rov->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
-				draw_ds_rov ? (config.ps.rov_depth ? "UAV" : "Standard") : "None");
+				draw_ds_rov ? (config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? "UAV" : "Standard") : "None");
 
 			// Do UAV state updates here as we need the GPU descriptor handles to be allocated in BindDrawPipeline() for UAV clears.
 			if (draw_rt_rov)
@@ -4880,14 +4880,14 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
 	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
-	m_pipeline_selector.dss.key = config.ps.rov_depth ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
+	m_pipeline_selector.dss.key = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
 	m_pipeline_selector.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
 	m_pipeline_selector.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.rov_color;
-	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.rov_depth;
-	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.rov_depth;
+	m_pipeline_selector.ds = config.ds != nullptr && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE;
+	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE;
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)

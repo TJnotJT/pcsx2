@@ -50,6 +50,12 @@
 #define PS_AA1_TRIANGLE_SW_Z 3
 #endif
 
+#ifndef PS_ROV_DEPTH_NONE
+#define PS_ROV_DEPTH_NONE 0
+#define PS_ROV_DEPTH_READ_WRITE 1
+#define PS_ROV_DEPTH_READ_ONLY 2
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -131,14 +137,14 @@
 #define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
-#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1 || PS_ROV_DEPTH)
-#define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH)
+#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1)
+#define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH || (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE))
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
-#define PS_RETURN_DEPTH_ROV (ZWRITE && PS_ROV_DEPTH)
-#define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
-#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
+#define PS_RETURN_DEPTH_ROV (ZWRITE && (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE))
+#define PS_RETURN_DEPTH (ZWRITE && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE))
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE) && !ZWRITE)
 
 struct VS_INPUT
 {
@@ -206,7 +212,7 @@ struct PS_OUTPUT_REAL
 	#endif
 #endif
 
-#if PS_RETURN_DEPTH && ZWRITE
+#if PS_RETURN_DEPTH
 	// In DX12 we do depth feedback loops with a color copy.
 	#if SW_DEPTH && PS_NO_COLOR1 && DX12
 		#if NUM_RTS > 0
@@ -245,7 +251,7 @@ Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 #endif
 Texture2D<float> PrimMinTexture : register(t3);
-#if !PS_ROV_DEPTH
+#if PS_ROV_DEPTH == PS_ROV_DEPTH_NONE
 Texture2D<float> DepthTexture : register(t4);
 #endif
 SamplerState TextureSampler : register(s0);
@@ -255,7 +261,7 @@ RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
 static float4 cachedRtValue;
 #endif
 
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
 static float cachedDepthValue;
 #endif
@@ -300,7 +306,7 @@ float4 RtLoad(int2 xy)
 
 float DepthLoad(int2 xy)
 {
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 	return cachedDepthValue;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
@@ -316,7 +322,7 @@ void RtWrite(int2 xy, float4 c)
 
 void DepthWrite(int2 xy, float d)
 {
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 	DepthTextureRov[xy] = d;
 #endif
 }
@@ -1299,7 +1305,7 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 [earlydepthstencil]
 #endif
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 #define DISCARD rov_discard = true
 #else
 #define DISCARD discard
@@ -1320,11 +1326,11 @@ void ps_main(PS_INPUT input)
 	cachedRtValue = RtTextureRov[input.p.xy];
 #endif
 
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 	cachedDepthValue = DepthTextureRov[input.p.xy];
 #endif
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 	bool rov_discard = false;
 #endif
 
@@ -1570,16 +1576,14 @@ if (bad)
 		#endif
 	#endif
 #elif PS_RETURN_COLOR_ROV
-	#if PS_COLOR_FEEDBACK
-		float4 rt_col = RtLoad(input.p.xy);
+	float4 rt_col = RtLoad(input.p.xy);
 
-		output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
-		output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
-		output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
-		output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
+	output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
+	output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
+	output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
+	output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
 		
-		output.c0 = rov_discard ? rt_col : output.c0;
-	#endif
+	output.c0 = rov_discard ? rt_col : output.c0;
 
 	RtWrite(input.p.xy, output.c0);
 #endif
@@ -1587,12 +1591,12 @@ if (bad)
 	// Depth write back
 #if PS_RETURN_DEPTH
 	output_real.depth = input.p.z;
-	#if PS_DEPTH_FEEDBACK && PS_NO_COLOR1 && DX12
+	#if SW_DEPTH && PS_NO_COLOR1 && DX12
 		// Output color clone for feedback.
 		output_real.depth_color = input.p.z;
 	#endif
 #elif PS_RETURN_DEPTH_ROV
-	#if PS_DEPTH_FEEDBACK
+	#if SW_DEPTH
 		input.p.z = rov_discard ? DepthLoad(input.p.xy) : input.p.z;
 	#endif
 	DepthWrite(input.p.xy, input.p.z);

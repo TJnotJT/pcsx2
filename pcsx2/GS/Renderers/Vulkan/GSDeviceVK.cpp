@@ -5015,7 +5015,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ABE", sel.abe);
 	AddMacro(ss, "PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
 	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
-	AddMacro(ss, "PS_ROV_DEPTH", sel.rov_depth);
+	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());
@@ -6023,9 +6023,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 	GSTextureVK* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTextureVK*>(config.rt);
-	GSTextureVK* draw_ds = config.ps.rov_depth ? nullptr : static_cast<GSTextureVK*>(config.ds);
+	GSTextureVK* draw_ds = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? nullptr : static_cast<GSTextureVK*>(config.ds);
 	GSTextureVK* draw_rt_rov = config.ps.rov_color ? static_cast<GSTextureVK*>(config.rt) : nullptr;
-	GSTextureVK* draw_ds_rov = config.ps.rov_depth ? static_cast<GSTextureVK*>(config.ds) : nullptr;
+	GSTextureVK* draw_ds_rov = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? static_cast<GSTextureVK*>(config.ds) : nullptr;
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
 
@@ -6514,13 +6514,13 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.vs.key = config.vs.key;
 	pipe.ps.key_hi = config.ps.key_hi;
 	pipe.ps.key_lo = config.ps.key_lo;
-	pipe.dss.key = config.ps.rov_depth ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
+	pipe.dss.key = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
 	pipe.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	pipe.bs.constant = 0; // don't dupe states with different alpha values
 	pipe.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	pipe.topology = static_cast<u32>(config.topology);
 	pipe.rt = config.rt != nullptr && !config.ps.rov_color;
-	pipe.ds = config.ds != nullptr && !config.ps.rov_depth;
+	pipe.ds = config.ds != nullptr && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE;
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))

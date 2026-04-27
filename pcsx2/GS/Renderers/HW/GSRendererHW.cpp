@@ -7603,7 +7603,7 @@ void GSRendererHW::SetupROV()
 	const bool full_barrier = m_conf.require_full_barrier;
 
 	// Flags that determine the feedback we would need if we used ROVs for the current draw.
-	// Indicates that the texture is read (not necessarily written; feedback is probably the wrong word).
+	// Indicates that the texture is read (not necessarily written).
 	bool feedback_color = m_conf.ps.IsFeedbackLoopRT() || (m_conf.tex && m_conf.tex == m_conf.rt) || m_conf.ps.tex_is_fb ||
 	                      colormask_needs_rt || afail_needs_rt || blend_needs_rt || date || m_conf.ps.fbmask ||
 	                      m_conf.ps.HasShaderDiscard();
@@ -7830,25 +7830,8 @@ void GSRendererHW::SetupROV()
 	// Do the actual config for depth.
 	if (use_rov_depth_final)
 	{
-		if (ztst)
-		{
-			GL_INS("ROV: Using SW depth test%s", m_conf.depth.ztst != ZTST_ALWAYS ? " and disabling HW" : "");
-			m_conf.ps.ztst = m_cached_ctx.TEST.ZTST;
-		}
-
-		if (depth_write)
-		{
-			GL_INS("ROV: Using SW depth write%s",
-				(m_conf.depth.zwe || (m_conf.alpha_second_pass.enable && m_conf.alpha_second_pass.depth.zwe)) ?
-				" and disabling HW" : "");
-		}
-		else
-		{
-			GL_INS("ROV: No depth write");
-		}
-		
-		m_conf.ps.rov_depth = true;
-		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable HW depth/stencil
+		ConfigureDepthFeedback(true);
+		m_conf.ps.rov_depth = depth_write ? GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE : GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
 	}
 
 	// Do the actual config for color.
@@ -7960,7 +7943,7 @@ void GSRendererHW::SetupROV()
 		m_conf.ps.rov_color = true;
 	}
 
-	// Remove regular barriers (they will be replaced by UAV barriers).
+	// Remove regular barriers.
 	if (use_rov_color_final || use_rov_depth_final)
 	{
 		m_conf.require_full_barrier = false;
@@ -9189,14 +9172,14 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 }
 
 // Setup barriers and/or SW depth testing for depth feedback.
-void GSRendererHW::ConfigureDepthFeedback()
+void GSRendererHW::ConfigureDepthFeedback(bool rov_depth)
 {
-	if (m_conf.ps.IsFeedbackLoopDepth())
+	if (m_conf.ps.IsFeedbackLoopDepth() || rov_depth)
 	{
 		const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
 		// We need barriers for the feedback.
-		if (features.feedback_loops())
+		if (features.feedback_loops() && !rov_depth)
 		{
 			m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
 			m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
@@ -9469,7 +9452,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.rov_depth)
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback &&
+		m_conf.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE)
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 

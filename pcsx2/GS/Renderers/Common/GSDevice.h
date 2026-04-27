@@ -305,6 +305,7 @@ struct alignas(16) GSHWDrawConfig
 	using PS_ATST  = GSShader::PS_ATST;
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
+	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -429,7 +430,7 @@ struct alignas(16) GSHWDrawConfig
 				
 				// ROVs
 				u32 rov_color : 1;
-				u32 rov_depth : 1;
+				PS_ROV_DEPTH rov_depth : 2; // 0 - disabled; 1 - read/write; 2 - read only;
 			};
 
 			struct
@@ -472,7 +473,7 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || rov_depth;
+			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth;
 		}
 
 		__fi bool HasShaderDiscard() const
@@ -509,7 +510,10 @@ struct alignas(16) GSHWDrawConfig
 				aa1 = PS_AA1::TRIANGLE;
 			}
 
-			rov_depth = 0;
+			if (rov_depth == PS_ROV_DEPTH::READ_WRITE)
+			{
+				rov_depth = PS_ROV_DEPTH::READ_ONLY;
+			}
 		}
 
 		__fi bool HasColorOutput() const
@@ -519,7 +523,7 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasDepthOutput() const
 		{
-			return zfloor || zclamp || rov_depth;
+			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
 		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");

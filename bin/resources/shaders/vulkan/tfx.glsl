@@ -381,6 +381,12 @@ void main()
 #define PS_AA1_TRIANGLE_SW_Z 3
 #endif
 
+#ifndef PS_ROV_DEPTH_NONE
+#define PS_ROV_DEPTH_NONE 0
+#define PS_ROV_DEPTH_READ_WRITE 1
+#define PS_ROV_DEPTH_READ_ONLY 2
+#endif
+
 #ifndef PS_FST
 #define PS_FST 0
 #define PS_WMS 0
@@ -446,18 +452,18 @@ void main()
 #define AA1_NEEDS_DEPTH (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || PS_ROV_DEPTH)
-#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
+#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH || (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE))
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
-#define PS_RETURN_DEPTH_ROV (ZWRITE && PS_ROV_DEPTH)
-#define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
-#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
+#define PS_RETURN_DEPTH_ROV (ZWRITE && (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE))
+#define PS_RETURN_DEPTH (ZWRITE && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE))
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE) && !ZWRITE)
 
 #define NEEDS_TEX (PS_TFX != 4)
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 #extension GL_ARB_fragment_shader_interlock : enable
 #extension GL_ARB_shader_image_load_store : enable
 #endif
@@ -513,18 +519,14 @@ layout(location = 0) in VSOutput
 
 #if PS_ROV_COLOR
 	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
-	#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
-		vec4 cachedRtValue;
-		vec4 sample_from_rt() { return cachedRtValue; }
-	#endif
+	vec4 cachedRtValue;
+	vec4 sample_from_rt() { return cachedRtValue; }
 #endif
 
-#if PS_ROV_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-	#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		float cachedDepthValue;
-		vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
-	#endif
+	float cachedDepthValue;
+	vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
 #endif
 
 #if NEEDS_TEX
@@ -538,13 +540,13 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			layout(set = 1, binding = 2) uniform texture2D RtSampler;
 			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0); }
 		#endif
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ROV_DEPTH == PS_ROV_DEPTH_NONE)
 			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
 			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0); }
 		#endif
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ROV_DEPTH == PS_ROV_DEPTH_NONE)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
@@ -552,7 +554,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_ROV_DEPTH == PS_ROV_DEPTH_NONE)
 			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
 		#endif
@@ -1566,7 +1568,7 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 layout(pixel_interlock_ordered) in;
 #endif
 
@@ -1574,7 +1576,7 @@ layout(pixel_interlock_ordered) in;
 layout(early_fragment_tests) in;
 #endif
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 #define DISCARD rov_discard = true
 #else
 #define DISCARD discard
@@ -1589,19 +1591,19 @@ void main()
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
-#if PS_ROV_COLOR || PS_ROV_DEPTH
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 	beginInvocationInterlockARB();
 #endif
 
-#if PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT
+#if PS_ROV_COLOR
 	cachedRtValue = imageLoad(RtImageRov, ivec2(gl_FragCoord.xy));
 #endif
 
-#if PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
 	cachedDepthValue = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
 #endif
 
-#if (PS_ROV_COLOR && PS_FEEDBACK_LOOP_IS_NEEDED_RT) || (PS_ROV_DEPTH && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
+#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 	bool rov_discard = gl_HelperInvocation;
 #endif
 
@@ -1816,16 +1818,14 @@ void main()
 	
 	// Writing back color (nothing to do for non-ROV)
 	#if PS_RETURN_COLOR_ROV
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_RT
-			vec4 rt_col = sample_from_rt();
+		vec4 rt_col = sample_from_rt();
 
-			o_col0.r = bool(ColorMask.r) ? o_col0.r : rt_col.r;
-			o_col0.g = bool(ColorMask.g) ? o_col0.g : rt_col.g;
-			o_col0.b = bool(ColorMask.b) ? o_col0.b : rt_col.b;
-			o_col0.a = bool(ColorMask.a) ? o_col0.a : rt_col.a;
+		o_col0.r = bool(ColorMask.r) ? o_col0.r : rt_col.r;
+		o_col0.g = bool(ColorMask.g) ? o_col0.g : rt_col.g;
+		o_col0.b = bool(ColorMask.b) ? o_col0.b : rt_col.b;
+		o_col0.a = bool(ColorMask.a) ? o_col0.a : rt_col.a;
 
-			o_col0 = rov_discard ? rt_col : o_col0;
-		#endif
+		o_col0 = rov_discard ? rt_col : o_col0;
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 	#endif
@@ -1833,13 +1833,12 @@ void main()
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = input_z;
 	#elif PS_RETURN_DEPTH_ROV
-		#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-			input_z = rov_discard ? sample_from_depth().r : input_z;
-		#endif
+		input_z = rov_discard ? sample_from_depth().r : input_z;
+
 		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 	#endif
 
-	#if PS_ROV_COLOR || PS_ROV_DEPTH
+	#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
 		endInvocationInterlockARB();
 	#endif
 #endif // PS_DATE
