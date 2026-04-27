@@ -7894,7 +7894,7 @@ void GSRendererHW::SetupROV()
 				m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
 				m_conf.depth.date = false; // Don't use stencil with ROV
 				m_conf.depth.date_one = false; // Don't use stencil with ROV
-				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM
+				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM. FIXME: Make this nicer.
 				m_conf.datm = static_cast<SetDATM>(0); // Not needed
 			}
 		}
@@ -7933,6 +7933,9 @@ void GSRendererHW::SetupROV()
 			m_conf.ps.atst = ps_atst;
 			m_conf.ps.afail = static_cast<GSHWDrawConfig::PS_AFAIL>(m_cached_ctx.TEST.AFAIL);
 			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
+
+			if (afail == AFAIL_RGB_ONLY)
+				m_conf.ps.afail = PS_AFAIL::RGB_ONLY_SW_Z;
 			
 			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, afail, ps_aref);
 
