@@ -7596,6 +7596,8 @@ void GSRendererHW::SetupROV()
 		(m_optimized_blend.A == 1 || m_optimized_blend.B == 1 ||
 			m_optimized_blend.C == 1 || m_optimized_blend.D == 1);
 
+	const bool two_pass_alpha = GSHWDrawConfig::HasAlphaTestSecondPass(m_conf.alpha_test);
+
 	const bool date = m_conf.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::Off;
 
 	const bool ztst = m_cached_ctx.DepthRead();
@@ -7613,11 +7615,9 @@ void GSRendererHW::SetupROV()
 	// Determine what ROVs would be needed to eliminate barriers based on the current config.
 	bool use_rov_color = color_write &&
 	                     ((full_barrier && m_conf.ps.IsFeedbackLoopRT()) ||
-	                     m_conf.alpha_second_pass.enable ||
-	                     m_conf.blend_multi_pass.enable);
+							 two_pass_alpha || m_conf.blend_multi_pass.enable);
 	bool use_rov_depth = depth_write &&
-	                     ((full_barrier && m_conf.ps.IsFeedbackLoopDepth()) ||
-	                     m_conf.alpha_second_pass.enable);
+	                     ((full_barrier && m_conf.ps.IsFeedbackLoopDepth()) || two_pass_alpha);
 
 	if (m_rov_preset == 4)
 	{
@@ -7830,6 +7830,7 @@ void GSRendererHW::SetupROV()
 	// Do the actual config for depth.
 	if (use_rov_depth_final)
 	{
+		GL_INS("ROV: Using %s depth ROV", depth_write ? "read/write" : "read-only");
 		ConfigureDepthFeedback(true);
 		m_conf.ps.rov_depth = depth_write ? GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE : GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
 	}
@@ -7917,8 +7918,9 @@ void GSRendererHW::SetupROV()
 			m_conf.ps.pabe = true;
 		}
 
-		// Alpha test setup
-		if (ate)
+		// Alpha test setup. KEEP will already be fine.
+		// FIXME: NEVER might not work correctly here.
+		if (ate && m_conf.alpha_test != GSHWDrawConfig::AlphaTestMode::KEEP)
 		{
 			GL_INS("ROV: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
 				" and disabling alpha second pass" : "");
