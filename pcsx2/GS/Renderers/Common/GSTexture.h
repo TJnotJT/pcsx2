@@ -66,8 +66,11 @@ protected:
 	Type m_type = Type::Invalid;
 	Format m_format = Format::Invalid;
 	State m_state = State::Dirty;
+
+	// ROV state tracking
 	std::unique_ptr<GSTexture> m_depth_color; // For depth texture points to the parallel color texture.
 	bool m_depth_color_active = false; // Tracks if depth is being used as color.
+	float m_avg_barriers_rov = 1.0f;
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -136,21 +139,9 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
-	__fi bool IsDepthColor() const
-	{
-		return m_depth_color_active;
-	}
-	__fi void ForgetDepthColor()
-	{
-		m_depth_color_active = false;
-	}
-	virtual bool IsUnorderedAccess() const { return false; }
-
+	
 	__fi State GetState() const { return m_state; }
 	__fi void SetState(State state) { m_state = state; }
-
-	void CreateDepthColor();
-	virtual void UpdateDepthColor(bool color_to_ds) { pxFailRel("Not implemented."); }
 
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
@@ -180,6 +171,32 @@ public:
 		if (m_depth_color)
 			return mem += m_depth_color.get()->GetMemUsage();
 		return mem;
+	}
+
+	// ROV/UAV functions
+	__fi float GetAvgBarriersROV() const
+	{
+		return m_avg_barriers_rov;
+	}
+	__fi void SetAvgBarriersROV(float barriers)
+	{
+		m_avg_barriers_rov = barriers;
+	}
+	void CreateDepthColor();
+	virtual void UpdateDepthColor(bool color_to_ds) { pxFailRel("Not implemented."); }
+	__fi bool IsDepthColor() const
+	{
+		return m_depth_color_active;
+	}
+	__fi void ResetROVState()
+	{
+		m_depth_color_active = false;
+		m_avg_barriers_rov = 0.0f;
+	}
+	virtual bool IsUnorderedAccess() const
+	{
+		pxFailRel("Not implemented");
+		return false;
 	}
 
 	// Helper routines for formats/types
