@@ -1818,14 +1818,7 @@ void main()
 	
 	// Writing back color (nothing to do for non-ROV)
 	#if PS_RETURN_COLOR_ROV
-		vec4 rt_col = sample_from_rt();
-
-		o_col0.r = bool(ColorMask.r) ? o_col0.r : rt_col.r;
-		o_col0.g = bool(ColorMask.g) ? o_col0.g : rt_col.g;
-		o_col0.b = bool(ColorMask.b) ? o_col0.b : rt_col.b;
-		o_col0.a = bool(ColorMask.a) ? o_col0.a : rt_col.a;
-
-		o_col0 = rov_discard ? rt_col : o_col0;
+		o_col0 = mix(sample_from_rt(), o_col0, bvec4(ColorMask & uvec4(!rov_discard)));
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 	#endif

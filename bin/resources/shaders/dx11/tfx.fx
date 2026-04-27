@@ -1576,14 +1576,7 @@ if (bad)
 		#endif
 	#endif
 #elif PS_RETURN_COLOR_ROV
-	float4 rt_col = RtLoad(input.p.xy);
-
-	output.c0.r = bool(ColorMask.r) ? output.c0.r : rt_col.r;
-	output.c0.g = bool(ColorMask.g) ? output.c0.g : rt_col.g;
-	output.c0.b = bool(ColorMask.b) ? output.c0.b : rt_col.b;
-	output.c0.a = bool(ColorMask.a) ? output.c0.a : rt_col.a;
-		
-	output.c0 = rov_discard ? rt_col : output.c0;
+	output.c0 = (bool4(ColorMask) & !rov_discard) ? output.c0 : RtLoad(input.p.xy);
 
 	RtWrite(input.p.xy, output.c0);
 #endif
