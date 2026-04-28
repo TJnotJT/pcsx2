@@ -4351,9 +4351,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? nullptr : static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds);
 	GSTexture12* draw_rt_rov = config.ps.rov_color ? static_cast<GSTexture12*>(config.rt) : nullptr;
-	GSTexture12* draw_ds_rov = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? static_cast<GSTexture12*>(config.ds) : nullptr;
+	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
 	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
@@ -4587,7 +4587,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
-		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE,
+		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
 		config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
 	// DX12 equivalent of vkCmdClearAttachments for StencilOne
@@ -4755,7 +4755,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				draw_ds_rov ? (draw_ds_rov->GetState() == GSTexture::State::Dirty ? "Preserve" :
 					draw_ds_rov->GetState() == GSTexture::State::Invalidated ? "Discard (NOP)" :
 					draw_ds_rov->GetState() == GSTexture::State::Cleared ? "Clear" : "???") : "None",
-				draw_ds_rov ? (config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? "UAV" : "Standard") : "None");
+				draw_ds_rov ? (config.ps.HasDepthROV() ? "UAV" : "Standard") : "None");
 
 			// Do UAV state updates here as we need the GPU descriptor handles to be allocated in BindDrawPipeline() for UAV clears.
 			if (draw_rt_rov)
@@ -4858,14 +4858,14 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
 	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
-	m_pipeline_selector.dss.key = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
+	m_pipeline_selector.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
 	m_pipeline_selector.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
 	m_pipeline_selector.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.rov_color;
-	m_pipeline_selector.ds = config.ds != nullptr && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE;
-	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE;
+	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
+	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)

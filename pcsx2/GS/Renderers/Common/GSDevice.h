@@ -430,7 +430,7 @@ struct alignas(16) GSHWDrawConfig
 				
 				// ROVs
 				u32 rov_color : 1;
-				PS_ROV_DEPTH rov_depth : 2; // 0 - disabled; 1 - read/write; 2 - read only;
+				PS_ROV_DEPTH rov_depth : 2;
 			};
 
 			struct
@@ -524,6 +524,16 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool HasDepthOutput() const
 		{
 			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
+		}
+
+		__fi bool HasDepthROV() const
+		{
+			return rov_depth == PS_ROV_DEPTH::READ_ONLY || rov_depth == PS_ROV_DEPTH::READ_WRITE;
+		}
+
+		__fi bool HasDepthROVWrite() const
+		{
+			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
 		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
