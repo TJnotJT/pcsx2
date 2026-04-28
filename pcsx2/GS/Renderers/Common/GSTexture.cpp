@@ -292,6 +292,7 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 
 	g_gs_device->DrawMultiStretchRects(new_areas.data(), n_new_areas, m_depth_color.get(),
 	                                   ShaderConvert::FLOAT32_DEPTH_TO_COLOR);
+	g_perfmon.Put(GSPerfMon::TextureCopiesROVDepth, 1.0);
 
 	m_depth_color_active = true;
 	m_depth_color_valid_area = new_valid_area_int;
@@ -317,6 +318,7 @@ void GSTexture::ResolveDepthColor(const char* debug_caller)
 
 	GSVector4 dst_rect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
 	g_gs_device->StretchRect(m_depth_color.get(), this, dst_rect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+	g_perfmon.Put(GSPerfMon::TextureCopiesROVDepth, 1.0);
 }
 
 GSDownloadTexture::GSDownloadTexture(u32 width, u32 height, GSTexture::Format format)

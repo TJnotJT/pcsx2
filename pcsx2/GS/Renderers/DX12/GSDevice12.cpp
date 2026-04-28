@@ -4795,6 +4795,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			}
 
 			Draw(config);
+			g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0f);
 		}
 		return;
 	}
