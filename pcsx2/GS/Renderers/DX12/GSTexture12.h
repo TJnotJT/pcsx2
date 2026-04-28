@@ -48,7 +48,7 @@ public:
 
 	__fi const D3D12DescriptorHandle& GetReadDepthViewDescriptor() const
 	{
-		pxAssertRel(!IsDepthColor(), "Trying to access read depth view descriptor for depth as color");
+		pxAssertRel(!IsDepthColor(), "Access read depth view descriptor for depth color");
 		return m_read_dsv_descriptor;
 	}
 	
@@ -56,7 +56,7 @@ public:
 	{
 		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_depth_color.get())->m_srv_descriptor;
+			return GetDepthColor()->m_srv_descriptor;
 		}
 		else
 		{
@@ -66,7 +66,7 @@ public:
 	
 	__fi const D3D12DescriptorHandle& GetWriteDescriptor() const
 	{
-		pxAssertRel(!IsDepthColor(), "Trying to access write descriptor for depth as color");
+		pxAssertRel(!IsDepthColor(), "Access write descriptor for depth color");
 		return m_write_descriptor;
 	}
 
@@ -74,7 +74,7 @@ public:
 	{
 		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_depth_color.get())->m_uav_descriptor;
+			return GetDepthColor()->m_uav_descriptor;
 		}
 		else
 		{
@@ -92,7 +92,7 @@ public:
 	{
 		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_depth_color.get())->m_resource_state;
+			return GetDepthColor()->m_resource_state;
 		}
 		else
 		{
@@ -104,7 +104,7 @@ public:
 	{
 		if (IsDepthColor())
 		{
-			static_cast<GSTexture12*>(m_depth_color.get())->m_resource_state = state;
+			GetDepthColor()->m_resource_state = state;
 		}
 		else
 		{
@@ -118,7 +118,7 @@ public:
 	{
 		if (IsDepthColor())
 		{
-			return static_cast<GSTexture12*>(m_depth_color.get())->m_resource.get();
+			return GetDepthColor()->m_resource.get();
 		}
 		else
 		{
@@ -128,13 +128,13 @@ public:
 
 	__fi ID3D12Resource* GetFBLResource() const
 	{
-		pxAssertRel(!IsDepthColor(), "Trying to FBL resource for depth as color");
+		pxAssertRel(!IsDepthColor(), "Access FBL resource for depth as color");
 		return m_resource_fbl.get();
 	}
 
 	__fi bool IsSimultaneousAccess() const
 	{
-		return IsDepthColor() ? static_cast<GSTexture12*>(m_depth_color.get())->m_simultaneous_tex : m_simultaneous_tex;
+		return IsDepthColor() ? GetDepthColor()->IsSimultaneousAccess() : m_simultaneous_tex;
 	}
 	
 	void* GetNativeHandle() const override;
@@ -148,7 +148,6 @@ public:
 	void SetDebugName(std::string_view name) override;
 #endif
 
-	void UpdateDepthColor(bool color_to_ds) override;
 	virtual bool IsUnorderedAccess() const override { return GetResourceState() == ResourceState::PixelShaderUAV; }
 
 	void TransitionToState(ResourceState state);
@@ -191,8 +190,8 @@ private:
 	ID3D12Resource* AllocateUploadStagingBuffer(const void* data, u32 pitch, u32 upload_pitch, u32 height) const;
 	void CopyTextureDataForUpload(void* dst, const void* src, u32 pitch, u32 upload_pitch, u32 height) const;
 
-	// For transition to/from UAV usage.
-	void IssueUAVBarrierInternal(ID3D12GraphicsCommandList* cmdlist);
+	GSTexture12* GetDepthColor() { return static_cast<GSTexture12*>(m_depth_color.get()); }
+	const GSTexture12* GetDepthColor() const { return static_cast<const GSTexture12*>(m_depth_color.get()); }
 
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource;
 	wil::com_ptr_nothrow<ID3D12Resource> m_resource_fbl;

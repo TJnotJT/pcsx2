@@ -1593,7 +1593,7 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 		{
 			Console.Warning("Color -> DS in CopyRect()");
 		}
-		sTex->UpdateDepthColor(true);
+		sTex->ResolveDepthColor();
 	}
 
 	if (dTex && dTex->IsDepthColor())
@@ -1603,7 +1603,7 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 		{
 			Console.Warning("Color -> DS in CopyRect()");
 		}
-		dTex->UpdateDepthColor(true);
+		dTex->ResolveDepthColor();
 	}
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -1846,7 +1846,7 @@ void GSDevice12::DoMultiStretchRects(
 			Console.Warning("Color -> DS in DoMultiStretchRects()");
 		}
 		EndRenderPass();
-		dTex->UpdateDepthColor(true);
+		dTex->ResolveDepthColor();
 	}
 
 	// Set up vertices first.
@@ -1968,7 +1968,7 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 			Console.Warning("Color -> DS in DoStretchRect()");
 		}
 		EndRenderPass();
-		dTex->UpdateDepthColor(true);
+		dTex->ResolveDepthColor();
 	}
 
 	SetUtilityRootSignature();
@@ -4376,16 +4376,19 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds_rov = config.ps.rov_depth != GSHWDrawConfig::PS_ROV_DEPTH::NONE ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
-	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
+	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
-		GL_INS("DS -> Color in RenderHW()");
-		if (GSConfig.HWROVLogging)
+		if (!draw_ds_rov->IsDepthColor())
 		{
-			Console.Warning("DS -> Color in RenderHW()");
+			GL_INS("DS -> Color in RenderHW()");
+			if (GSConfig.HWROVLogging)
+			{
+				Console.Warning("DS -> Color in RenderHW()");
+			}
 		}
 		EndRenderPass();
-		draw_ds_rov->UpdateDepthColor(false);
+		draw_ds_rov->UpdateDepthColor(config.drawarea);
 	}
 
 	if (draw_ds && draw_ds->IsDepthColor())
@@ -4397,7 +4400,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("Color -> DS in RenderHW()");
 		}
 		EndRenderPass();
-		draw_ds->UpdateDepthColor(true);
+		draw_ds->ResolveDepthColor();
 	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
@@ -4609,7 +4612,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
-		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe,
+		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && config.ps.rov_depth == GSHWDrawConfig::PS_ROV_DEPTH::NONE,
 		config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
 	// DX12 equivalent of vkCmdClearAttachments for StencilOne

@@ -70,7 +70,8 @@ protected:
 	// ROV state tracking
 	std::unique_ptr<GSTexture> m_depth_color; // For depth texture points to the parallel color texture.
 	bool m_depth_color_active = false; // Tracks if depth is being used as color.
-	float m_avg_barriers_rov = 1.0f;
+	GSVector4i m_depth_color_valid_area = GSVector4i::zero(); // Valid area of the depth color texture.
+	float m_avg_barriers_rov = 1.0f; // Value >= 1.0 indicating roughly how many barriers are saved by using as ROV.
 
 	// frame number (arbitrary base) the texture was recycled on
 	// different purpose than texture cache ages, do not attempt to merge
@@ -183,7 +184,6 @@ public:
 		m_avg_barriers_rov = barriers;
 	}
 	void CreateDepthColor();
-	virtual void UpdateDepthColor(bool color_to_ds) { pxFailRel("Not implemented."); }
 	__fi bool IsDepthColor() const
 	{
 		return m_depth_color_active;
@@ -199,6 +199,13 @@ public:
 		return false;
 	}
 
+	__fi bool IsDepthColorValid(const GSVector4i& area) const
+	{
+		return IsDepthColor() && m_depth_color_valid_area.rcontains(area);
+	}
+	void UpdateDepthColor(GSVector4i draw_area); // Update depth color from real depth in the area.
+	void ResolveDepthColor(); // Copy depth color back to real depth.
+public:
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
 };

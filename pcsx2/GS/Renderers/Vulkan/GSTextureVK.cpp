@@ -357,7 +357,7 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 		{
 			Console.Warning("Color -> DS in Update()");
 		}
-		UpdateDepthColor(true);
+		ResolveDepthColor();
 	}
 
 	if (layer >= m_mipmap_levels)
@@ -620,51 +620,6 @@ void GSTextureVK::OverrideImageLayout(Layout new_layout)
 	m_layout = new_layout;
 }
 
-void GSTextureVK::UpdateDepthColor(bool color_to_ds)
-{
-	pxAssertRel(IsDepthStencil() && IsDepthColor() == color_to_ds, "Wrong use of UpdateDepthColor()");
-
-	GL_PUSH("Updating %s", color_to_ds ? "Color -> DS" : "DS -> Color");
-
-	GSDeviceVK* device = GSDeviceVK::GetInstance();
-
-	pxAssert(!device->InRenderPass());
-
-	CreateDepthColor();
-
-	SetUseFenceCounter(device->GetCurrentFenceCounter());
-
-	if (color_to_ds && IsDepthColor())
-	{
-		m_depth_color_active = false;
-
-		// For cleared state simply propagate it.
-		if (GetState() != State::Cleared)
-		{
-			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(m_depth_color.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
-			device->EndRenderPass();
-			device->UnbindTexture(static_cast<GSTextureVK*>(m_depth_color.get()));
-
-			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
-		}
-	}
-	else if (!color_to_ds && !IsDepthColor())
-	{
-		// For cleared state simply propagate it.
-		if (GetState() != State::Cleared)
-		{
-			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(this, m_depth_color.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
-			device->EndRenderPass();
-			device->UnbindTexture(static_cast<GSTextureVK*>(m_depth_color.get()));
-
-			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
-		}
-
-		m_depth_color_active = true;
-	}
-}
 
 void GSTextureVK::TransitionToLayout(Layout layout)
 {
@@ -984,7 +939,7 @@ void GSDownloadTextureVK::CopyFromTexture(
 		{
 			Console.Warning("Color -> DS in CopyFromTexture()");
 		}
-		vkTex->UpdateDepthColor(true);
+		vkTex->ResolveDepthColor();
 	}
 
 	pxAssert(vkTex->GetFormat() == m_format);

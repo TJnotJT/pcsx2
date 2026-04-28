@@ -610,7 +610,7 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 		{
 			Console.Warning("Color -> DS in Update()");
 		}
-		UpdateDepthColor(true);
+		ResolveDepthColor();
 	}
 
 	if (layer >= m_mipmap_levels)
@@ -1240,51 +1240,6 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 	SetState(GSTexture::State::Dirty);
 }
 
-void GSTexture12::UpdateDepthColor(bool color_to_ds)
-{
-	pxAssertRel(IsDepthStencil() && IsDepthColor() == color_to_ds, "Wrong use of UpdateDepthColor()");
-
-	GL_PUSH("Updating %s", color_to_ds ? "Color -> DS" : "DS -> Color");
-
-	GSDevice12* device = GSDevice12::GetInstance();
-
-	pxAssert(!device->InRenderPass());
-
-	CreateDepthColor();
-
-	SetUseFenceCounter(device->GetCurrentFenceValue());
-
-	if (color_to_ds)
-	{
-		m_depth_color_active = false;
-		
-		// For cleared state simply propagate it.
-		if (GetState() != State::Cleared)
-		{
-			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(m_depth_color.get(), this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
-			device->EndRenderPass();
-			device->UnbindTexture(static_cast<GSTexture12*>(m_depth_color.get()));
-			
-			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
-		}
-	}
-	else
-	{
-		// For cleared state simply propagate it.
-		if (GetState() != State::Cleared)
-		{
-			GSVector4 dRect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-			device->StretchRect(this, m_depth_color.get(), dRect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
-			device->EndRenderPass();
-			device->UnbindTexture(static_cast<GSTexture12*>(m_depth_color.get()));
-
-			g_perfmon.Put(GSPerfMon::TextureCopies, 1.0);
-		}
-
-		m_depth_color_active = true;
-	}
-}
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)
 	: GSDownloadTexture(width, height, format)
@@ -1349,7 +1304,7 @@ void GSDownloadTexture12::CopyFromTexture(
 		{
 			Console.Warning("Color -> DS in CopyFromTexture()");
 		}
-		tex12->UpdateDepthColor(true);
+		tex12->ResolveDepthColor();
 	}
 
 	pxAssert(tex12->GetFormat() == m_format);

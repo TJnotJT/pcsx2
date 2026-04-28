@@ -13,6 +13,7 @@
 
 #include <bit>
 #include <bitset>
+#include <array>
 
 GSTexture::GSTexture() = default;
 
@@ -192,14 +193,134 @@ void GSTexture::CreateDepthColor()
 	if (!m_depth_color)
 	{
 		m_depth_color.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
+		m_depth_color_valid_area = GSVector4i::zero();
 #ifdef PCSX2_DEVBUILD
 		if (GSConfig.UseDebugDevice)
 		{
+			// FIXME: Track the actual debug names.
 			m_depth_color->SetDebugName(fmt::format("0x{:x} Depth color for @ 0x{:x}",
 				reinterpret_cast<u64>(m_depth_color.get()), reinterpret_cast<u64>(this)));
 		}
 #endif
 	}
+}
+
+void GSTexture::UpdateDepthColor(GSVector4i draw_area)
+{
+	pxAssert(IsDepthStencil());
+
+	if (!m_depth_color)
+		CreateDepthColor();
+
+	GL_PUSH("HW: UpdateDepthColor {%d, %d, %d, %d}", draw_area.x, draw_area.y, draw_area.z, draw_area.w);
+
+	// Align copied areas to 128 to avoid too many small copies.
+	draw_area = draw_area.ralign<Align_Outside>(GSVector2i(128, 128)).rintersect(GetRect());
+
+	// This is a bit hacky but we need to deactivate depth color in the body of this function
+	// so that the shader copies use the depth resource instead of depth color as the source texture.
+	m_depth_color_active = false;
+
+	if (m_depth_color_valid_area.rcontains(draw_area) || // Everything is already valid.
+		GetState() == State::Cleared) // Simply propagate clears.
+	{
+		GL_INS("HW: Cleared - early exit");
+		m_depth_color_active = true;
+		return;
+	}
+
+	if (m_depth_color_valid_area.rempty())
+	{
+		// No current valid area so just copy the whole draw area.
+		GL_INS("HW: Initialize empty valid area.");
+
+		GSVector4 dst_rect(draw_area);
+		GSVector4 src_rect(dst_rect / GSVector4(GetSize()).xyxy());
+
+		g_gs_device->StretchRect(this, src_rect, m_depth_color.get(), dst_rect, ShaderConvert::FLOAT32_DEPTH_TO_COLOR, false);
+
+		m_depth_color_valid_area = draw_area;
+		m_depth_color_active = true;
+		return;
+	}
+
+	GL_INS("HW: Split new area into pieces");
+
+	const GSVector4i new_valid_area_int = m_depth_color_valid_area.runion(draw_area);
+
+	const GSVector4 old_valid_area(m_depth_color_valid_area);
+	const GSVector4 new_valid_area(new_valid_area_int);
+
+	const int less = (new_valid_area < old_valid_area).mask();
+	const int greater = (new_valid_area > old_valid_area).mask();
+
+	const bool need_left_area = (less & 1) != 0;
+	const bool need_top_area = (less & 2) != 0;
+	const bool need_right_area = (greater & 4) != 0;
+	const bool need_bottom_area = (greater & 8) != 0;
+
+	std::array<GSDevice::MultiStretchRect, 4> new_areas;
+	u32 n_new_areas = 0;
+
+	if (need_left_area)
+	{
+		// Whole left side of new area.
+		new_areas[n_new_areas++].dst_rect = new_valid_area.insert32<0, 2>(old_valid_area);
+	}
+
+	if (need_right_area)
+	{
+		// Whole right side of new area.
+		new_areas[n_new_areas++].dst_rect = new_valid_area.insert32<2, 0>(old_valid_area);
+	}
+
+	if (need_top_area)
+	{
+		// Top side of new area except right/left sides.
+		new_areas[n_new_areas++].dst_rect = old_valid_area.xyzy().insert32<1, 1>(new_valid_area);
+	}
+
+	if (need_bottom_area)
+	{
+		// Bottom side of new area except right/left sides.
+		new_areas[n_new_areas++].dst_rect = old_valid_area.xwzw().insert32<3, 3>(new_valid_area);
+	}
+
+	const GSVector4 dim = GSVector4(GetSize()).xyxy();
+	for (u32 i = 0; i < n_new_areas; i++)
+	{
+		new_areas[i].src_rect = new_areas[i].dst_rect / dim;
+		new_areas[i].linear = false;
+		new_areas[i].src = this;
+	}
+
+	g_gs_device->DrawMultiStretchRects(new_areas.data(), n_new_areas, m_depth_color.get(),
+	                                   ShaderConvert::FLOAT32_DEPTH_TO_COLOR);
+
+	m_depth_color_active = true;
+	m_depth_color_valid_area = new_valid_area_int;
+}
+
+void GSTexture::ResolveDepthColor()
+{
+	pxAssert(IsDepthStencil() && IsDepthColor());
+
+	GL_PUSH("HW: ResolveDepthColor {%d, %d, %d, %d}",
+		m_depth_color_valid_area.x, m_depth_color_valid_area.y,
+		m_depth_color_valid_area.z, m_depth_color_valid_area.w);
+
+	m_depth_color_active = false;
+	m_depth_color_valid_area = GSVector4i::zero();
+
+	// Simply propagate clears.
+	if (GetState() == State::Cleared)
+	{
+		GL_INS("HW: Cleared - early exit");
+		return;
+	}
+
+	GSVector4 dst_rect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
+	g_gs_device->StretchRect(m_depth_color.get(), this, dst_rect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 }
 
 GSDownloadTexture::GSDownloadTexture(u32 width, u32 height, GSTexture::Format format)
