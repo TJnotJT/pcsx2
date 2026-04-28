@@ -191,11 +191,19 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 	pxAssert(IsDepthStencil());
 
 	GL_PUSH("HW: UpdateDepthColor {%d, %d, %d, %d}", draw_area.x, draw_area.y, draw_area.z, draw_area.w);
+	if (GSConfig.HWROVLogging)
+	{
+		Console.Warning("UpdateDepthColor {%d, %d, %d, %d}", draw_area.x, draw_area.y, draw_area.z, draw_area.w);
+	}
 
 	// Create the depth color copy if it doesn't exist.
 	if (!m_depth_color)
 	{
 		GL_INS("HW: Creating the depth color copy");
+		if (GSConfig.HWROVLogging)
+		{
+			Console.Warning("Creating the depth color copy");
+		}
 
 		m_depth_color.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
 		m_depth_color_valid_area = GSVector4i::zero();

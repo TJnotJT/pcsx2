@@ -3616,7 +3616,9 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 {
 	pxAssert(i == TEXTURE_RT_UAV || i == TEXTURE_DEPTH_UAV);
 
-	GSTexture12* bind_uav;
+	GSTexture12* uav12 = static_cast<GSTexture12*>(uav);
+
+	GSTexture12* bind_uav12;
 	if (uav)
 	{
 		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
@@ -3636,21 +3638,21 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 			dtex->TransitionToState(GSTexture12::ResourceState::PixelShaderUAV);
 		}
 		dtex->SetUseFenceCounter(GetCurrentFenceValue());
-		bind_uav = dtex;
+		bind_uav12 = dtex;
 	}
 	else
 	{
-		bind_uav = m_null_texture.get();
+		bind_uav12 = m_null_texture.get();
 	}
 
 	const int i_uav = i - TEXTURE_RT_UAV;
 
-	if (m_tfx_textures_uav[i_uav] == bind_uav)
+	if (m_tfx_textures_uav[i_uav] == bind_uav12)
 		return;
 
 	// Store pointer to the texture in addition to descriptor since depth UAVs have a color copy.
-	m_tfx_textures_uav[i_uav] = static_cast<GSTexture12*>(bind_uav);
-	m_tfx_textures[i] = static_cast<GSTexture12*>(bind_uav)->GetUAVDescriptor();
+	m_tfx_textures_uav[i_uav] = bind_uav12;
+	m_tfx_textures[i] = bind_uav12->GetUAVDescriptor();
 	m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
 
 	// Unbind conflicting RTs if needed.
@@ -3661,8 +3663,8 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		PSSetShaderResource(i_conflict, nullptr, false);
 
 		// Unbind conflicting source texture
-		if ((m_tfx_textures[TEXTURE_TEXTURE] == static_cast<GSTexture12*>(uav)->GetSRVDescriptor()) ||
-			(!uav->IsDepthColor() && m_tfx_textures[TEXTURE_TEXTURE] == static_cast<GSTexture12*>(uav)->GetFBLDescriptor()))
+		if ((m_tfx_textures[TEXTURE_TEXTURE] == uav12->GetSRVDescriptor()) ||
+			(!uav->IsDepthColor() && m_tfx_textures[TEXTURE_TEXTURE] == uav12->GetFBLDescriptor()))
 		{
 			PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
 		}
@@ -3670,7 +3672,7 @@ void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
 		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
 		for (GSTexture12** rt : curr_rts)
 		{
-			if (*rt == static_cast<GSTexture12*>(uav))
+			if (*rt == uav12)
 			{
 				*rt = nullptr;
 				m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
@@ -4359,14 +4361,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
-		if (!draw_ds_rov->IsDepthColor())
-		{
-			GL_INS("DS -> Color in RenderHW()");
-			if (GSConfig.HWROVLogging)
-			{
-				Console.Warning("DS -> Color in RenderHW()");
-			}
-		}
 		EndRenderPass();
 		draw_ds_rov->UpdateDepthColor(config.drawarea);
 	}

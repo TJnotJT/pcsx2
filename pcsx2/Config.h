@@ -477,6 +477,13 @@ enum class GSDepthFeedbackMode : u8
 	DepthAsRT = 3,
 };
 
+enum class GSROVBarrierModeVK : u8
+{
+	None = 0,
+	EveryDraw = 1,
+	EveryRenderPass = 2,
+};
+
 enum class AchievementOverlayPosition : u8
 {
 	TopLeft,
@@ -893,17 +900,8 @@ struct Pcsx2Config
 		s8 OverrideTextureBarriers = -1;
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 
-		u32 HWROVHistoryTextures = 16;
-		u32 HWROVHistoryDraws = 32;
-		u32 HWROVMaxBarriers = 16;
-		float HWROVHistoryWeightColor = 0.75f;
-		float HWROVHistoryWeightDepth = 0.75f;
-		float HWROVBarriersEnableColor = 2.0f;
-		float HWROVBarriersEnableDepth = 4.0f;
-		float HWROVBarriersDisableColor = 1.125f;
-		float HWROVBarriersDisableDepth = 1.25f;
 		u32 HWROVPreset = 1;
-		u32 HWROVUseBarriersVK = false;
+		GSROVBarrierModeVK HWROVUseBarriersVK = GSROVBarrierModeVK::None;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
