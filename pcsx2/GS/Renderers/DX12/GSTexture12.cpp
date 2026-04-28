@@ -49,10 +49,12 @@ void GSTexture12::Destroy(bool defer)
 {
 	if (m_depth_color)
 	{
-		static_cast<GSTexture12*>(m_depth_color.get())->Destroy(defer);
+		GetDepthColor()->Destroy(defer);
 		m_depth_color.release();
 		m_depth_color_active = false;
 	}
+
+	ResetROVState();
 
 	GSDevice12* const dev = GSDevice12::GetInstance();
 	dev->UnbindTexture(this);
@@ -1197,8 +1199,10 @@ void GSTexture12::CommitClearUAV(const D3D12CommandList& cmdlist, D3D12_GPU_DESC
 
 	if (IsDepthStencil())
 	{
+		pxAssert(IsDepthColor());
 		cmdlist.list4->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
 			GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
+		m_depth_color_valid_area = GetRect();
 	}
 	else
 	{
@@ -1215,9 +1219,10 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 	{
 		if (IsDepthColor())
 		{
-			static_cast<GSTexture12*>(m_depth_color.get())->TransitionToState(cmdlist, ResourceState::RenderTarget);
-			cmdlist.list4->ClearRenderTargetView(static_cast<GSTexture12*>(m_depth_color.get())->GetWriteDescriptor(),
+			GetDepthColor()->TransitionToState(cmdlist, ResourceState::RenderTarget);
+			cmdlist.list4->ClearRenderTargetView(GetDepthColor()->GetWriteDescriptor(),
 				GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
+			m_depth_color_valid_area = GetRect();
 		}
 		else
 		{

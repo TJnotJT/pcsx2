@@ -216,10 +216,12 @@ void GSTextureVK::Destroy(bool defer)
 
 	if (m_depth_color)
 	{
-		static_cast<GSTextureVK*>(m_depth_color.get())->Destroy(defer);
+		GetDepthColor()->Destroy(defer);
 		m_depth_color.release();
 		m_depth_color_active = false;
 	}
+
+	ResetROVState();
 
 	if (m_type == Type::RenderTarget || m_type == Type::DepthStencil)
 	{
@@ -586,6 +588,7 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 			alignas(16) VkClearColorValue cv = {{m_clear_value.depth, 0.0f, 0.0f, 0.0f}};
 			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
 			vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+			m_depth_color_valid_area = GetRect();
 		}
 		else
 		{

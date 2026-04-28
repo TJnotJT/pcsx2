@@ -219,7 +219,8 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 	if (m_depth_color_valid_area.rcontains(draw_area) || // Everything is already valid.
 		GetState() == State::Cleared) // Simply propagate clears.
 	{
-		GL_INS("HW: Cleared - early exit");
+		// Valid area will be set in CommitClear.
+		GL_INS("HW: Cleared so early exit");
 		m_depth_color_active = true;
 		return;
 	}
@@ -310,7 +311,7 @@ void GSTexture::ResolveDepthColor(const char* debug_caller)
 	// Simply propagate clears.
 	if (GetState() == State::Cleared)
 	{
-		GL_INS("HW: Cleared - early exit");
+		GL_INS("HW: Cleared so early exit");
 		return;
 	}
 
