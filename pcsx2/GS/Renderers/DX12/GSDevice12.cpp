@@ -1944,7 +1944,10 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 		GSVector4 sRectPx = sRect * GSVector4(sTex->GetSize()).xyxy();
 		sRectPx = sRectPx.floor().xyzw(sRectPx.ceil());
 		if (!sTex->IsDepthColorValid(GSVector4i(sRectPx)))
+		{
+			EndRenderPass();
 			sTex->ResolveDepthColor("DoStretchRect");
+		}
 	}
 
 	if (sTex->GetResourceState() != GSTexture12::ResourceState::PixelShaderResource)
