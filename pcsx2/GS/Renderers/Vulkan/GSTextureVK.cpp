@@ -354,7 +354,7 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 {
 	if (IsDepthColor())
 	{
-		ResolveDepthColor("GSTextureVK::Update");
+		ExitDepthColor("GSTextureVK::Update");
 	}
 
 	if (layer >= m_mipmap_levels)
@@ -588,7 +588,6 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 			alignas(16) VkClearColorValue cv = {{m_clear_value.depth, 0.0f, 0.0f, 0.0f}};
 			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
 			vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
-			m_depth_color_valid_area = GetRect();
 		}
 		else
 		{
@@ -932,7 +931,7 @@ void GSDownloadTextureVK::CopyFromTexture(
 
 	if (vkTex->IsDepthColor())
 	{
-		vkTex->ResolveDepthColor("CopyFromTexture");
+		vkTex->ExitDepthColor("CopyFromTexture");
 	}
 
 	pxAssert(vkTex->GetFormat() == m_format);

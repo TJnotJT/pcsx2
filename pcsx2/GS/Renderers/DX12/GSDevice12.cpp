@@ -1588,12 +1588,12 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		sTex->ResolveDepthColor("CopyRect");
+		sTex->ExitDepthColor("CopyRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		dTex->ResolveDepthColor("CopyRect");
+		dTex->ExitDepthColor("CopyRect");
 	}
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -1831,7 +1831,7 @@ void GSDevice12::DoMultiStretchRects(
 	if (dTex && dTex->IsDepthColor())
 	{
 		EndRenderPass();
-		dTex->ResolveDepthColor("DoMultiStretchRects");
+		dTex->ExitDepthColor("DoMultiStretchRects");
 	}
 
 	// Set up vertices first.
@@ -1938,18 +1938,6 @@ void GSDevice12::BeginRenderPassForStretchRect(
 void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSTexture12* dTex, const GSVector4& dRect,
 	const ID3D12PipelineState* pipeline, bool linear, bool allow_discard)
 {
-	// Make sure depth color is valid in the area, otherwise resolve to real depth.
-	if (sTex->IsDepthColor())
-	{
-		GSVector4 sRectPx = sRect * GSVector4(sTex->GetSize()).xyxy();
-		sRectPx = sRectPx.floor().xyzw(sRectPx.ceil());
-		if (!sTex->IsDepthColorValid(GSVector4i(sRectPx)))
-		{
-			EndRenderPass();
-			sTex->ResolveDepthColor("DoStretchRect");
-		}
-	}
-
 	if (sTex->GetResourceState() != GSTexture12::ResourceState::PixelShaderResource)
 	{
 		// can't transition in a render pass
@@ -1960,7 +1948,7 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 	if (dTex && dTex->IsDepthColor())
 	{
 		EndRenderPass();
-		dTex->ResolveDepthColor("DoStretchRect");
+		dTex->ExitDepthColor("DoStretchRect");
 	}
 
 	SetUtilityRootSignature();
@@ -4370,18 +4358,18 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
-	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
+	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		EndRenderPass();
-		draw_ds_rov->UpdateDepthColor(config.drawarea);
+		draw_ds_rov->EnterDepthColor();
 	}
 
 	if (draw_ds && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		EndRenderPass();
-		draw_ds->ResolveDepthColor("RenderHW");
+		draw_ds->ExitDepthColor("RenderHW");
 	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));

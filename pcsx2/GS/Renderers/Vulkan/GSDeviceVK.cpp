@@ -2885,12 +2885,12 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		sTex->ResolveDepthColor("CopyRect");
+		sTex->ExitDepthColor("CopyRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		dTex->ResolveDepthColor("CopyRect");
+		dTex->ExitDepthColor("CopyRect");
 	}
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -3037,7 +3037,7 @@ void GSDeviceVK::DoMultiStretchRects(
 	if (dTex && dTex->IsDepthColor())
 	{
 		EndRenderPass();
-		dTex->ResolveDepthColor("DoMultiStretchRects");
+		dTex->ExitDepthColor("DoMultiStretchRects");
 	}
 
 	// Set up vertices first.
@@ -3161,18 +3161,6 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSTextureVK* dTex, const GSVector4& dRect,
 	VkPipeline pipeline, bool linear, bool allow_discard)
 {
-	// Make sure depth color is valid in the area, otherwise resolve to real depth.
-	if (sTex->IsDepthColor())
-	{
-		GSVector4 sRectPx = sRect * GSVector4(sTex->GetSize()).xyxy();
-		sRectPx = sRectPx.floor().xyzw(sRectPx.ceil());
-		if (!sTex->IsDepthColorValid(GSVector4i(sRectPx)))
-		{
-			EndRenderPass();
-			sTex->ResolveDepthColor("DoStretchRect");
-		}
-	}
-
 	if (sTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 	{
 		// can't transition in a render pass
@@ -3182,7 +3170,7 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		dTex->ResolveDepthColor("DoStretchRect");
+		dTex->ExitDepthColor("DoStretchRect");
 	}
 
 	SetUtilityTexture(sTex, linear ? m_linear_sampler : m_point_sampler);
@@ -3248,12 +3236,12 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel, 
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		sTex->ResolveDepthColor("BlitRect");
+		sTex->ExitDepthColor("BlitRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		dTex->ResolveDepthColor("BlitRect");
+		dTex->ExitDepthColor("BlitRect");
 	}
 
 	sTexVK->TransitionToLayout(GSTextureVK::Layout::TransferSrc);
@@ -6010,18 +5998,18 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
 
-	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
+	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		EndRenderPass();
-		draw_ds_rov->UpdateDepthColor(config.drawarea);
+		draw_ds_rov->EnterDepthColor();
 	}
 
 	if (draw_ds && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
 		EndRenderPass();
-		draw_ds->ResolveDepthColor("RenderHW");
+		draw_ds->ExitDepthColor("RenderHW");
 	}
 
 	// stream buffer in first, in case we need to exec

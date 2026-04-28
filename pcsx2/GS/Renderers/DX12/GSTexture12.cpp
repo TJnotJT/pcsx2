@@ -607,7 +607,7 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 {
 	if (IsDepthColor())
 	{
-		ResolveDepthColor("GSTexture::Update");
+		ExitDepthColor("GSTexture12::Update");
 	}
 
 	if (layer >= m_mipmap_levels)
@@ -1202,7 +1202,6 @@ void GSTexture12::CommitClearUAV(const D3D12CommandList& cmdlist, D3D12_GPU_DESC
 		pxAssert(IsDepthColor());
 		cmdlist.list4->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
 			GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
-		m_depth_color_valid_area = GetRect();
 	}
 	else
 	{
@@ -1222,7 +1221,6 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 			GetDepthColor()->TransitionToState(cmdlist, ResourceState::RenderTarget);
 			cmdlist.list4->ClearRenderTargetView(GetDepthColor()->GetWriteDescriptor(),
 				GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
-			m_depth_color_valid_area = GetRect();
 		}
 		else
 		{
@@ -1299,9 +1297,9 @@ void GSDownloadTexture12::CopyFromTexture(
 
 	if (tex12->IsDepthColor())
 	{
-		tex12->ResolveDepthColor("CopyFromTexture");
+		tex12->ExitDepthColor("CopyFromTexture");
 	}
-
+	
 	pxAssert(tex12->GetFormat() == m_format);
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());
 	pxAssert(src.z <= tex12->GetWidth() && src.w <= tex12->GetHeight());
