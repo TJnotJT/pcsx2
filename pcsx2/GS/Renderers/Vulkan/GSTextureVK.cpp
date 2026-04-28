@@ -660,10 +660,10 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 	// Transition to a write only layout using an extra barrier, then to feedback fixes this issue.
 	if (old_layout == Layout::ReadWriteImage && new_layout != Layout::ColorAttachment && new_layout != Layout::ReadWriteImage)
 	{
+		GL_INS("VK: Doing extra transition for broken RDNA2 feedback transitions");
 		TransitionSubresourcesToLayout(command_buffer, 0, num_levels, old_layout, Layout::ColorAttachment);
 		old_layout = Layout::ColorAttachment;
 	}
-
 
 	VkImageAspectFlags aspect;
 	if (IsDepthStencil() && !IsDepthColor())

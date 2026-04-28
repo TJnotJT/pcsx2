@@ -3161,6 +3161,15 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSTextureVK* dTex, const GSVector4& dRect,
 	VkPipeline pipeline, bool linear, bool allow_discard)
 {
+	// Make sure depth color is valid in the area, otherwise resolve to real depth.
+	if (sTex->IsDepthColor())
+	{
+		GSVector4 sRectPx = sRect * GSVector4(sTex->GetSize()).xyxy();
+		sRectPx = sRectPx.floor().xyzw(sRectPx.ceil());
+		if (!sTex->IsDepthColorValid(GSVector4i(sRectPx)))
+			sTex->ResolveDepthColor("DoStretchRect");
+	}
+
 	if (sTex->GetLayout() != GSTextureVK::Layout::ShaderReadOnly)
 	{
 		// can't transition in a render pass

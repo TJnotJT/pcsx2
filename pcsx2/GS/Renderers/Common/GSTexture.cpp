@@ -248,8 +248,6 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 		return;
 	}
 
-	GL_INS("HW: Split new area into pieces");
-
 	const GSVector4i new_valid_area_int = m_depth_color_valid_area.runion(draw_area);
 
 	const GSVector4 old_valid_area(m_depth_color_valid_area);
@@ -290,6 +288,8 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 		new_areas[n_new_areas++].dst_rect = old_valid_area.xwzw().insert32<3, 3>(new_valid_area);
 	}
 
+	GL_INS("HW: Split new area into %d pieces", n_new_areas);
+
 	const GSVector4 dim = GSVector4(GetSize()).xyxy();
 	for (u32 i = 0; i < n_new_areas; i++)
 	{
@@ -314,6 +314,9 @@ void GSTexture::ResolveDepthColor(const char* debug_caller)
 		m_depth_color_valid_area.x, m_depth_color_valid_area.y,
 		m_depth_color_valid_area.z, m_depth_color_valid_area.w);
 
+	const GSVector4 dRect(m_depth_color_valid_area);
+	const GSVector4 sRect(dRect / GSVector4(GetSize()).xyxy());
+
 	m_depth_color_active = false;
 	m_depth_color_valid_area = GSVector4i::zero();
 
@@ -324,8 +327,7 @@ void GSTexture::ResolveDepthColor(const char* debug_caller)
 		return;
 	}
 
-	GSVector4 dst_rect(0.0f, 0.0f, static_cast<float>(GetWidth()), static_cast<float>(GetHeight()));
-	g_gs_device->StretchRect(m_depth_color.get(), this, dst_rect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
+	g_gs_device->StretchRect(m_depth_color.get(), sRect, this, dRect, ShaderConvert::FLOAT32_COLOR_TO_DEPTH, false);
 	g_perfmon.Put(GSPerfMon::TextureCopiesROVDepth, 1.0);
 }
 
