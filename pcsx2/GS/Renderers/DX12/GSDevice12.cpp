@@ -1588,22 +1588,12 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in CopyRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in CopyRect()");
-		}
-		sTex->ResolveDepthColor();
+		sTex->ResolveDepthColor("CopyRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in CopyRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in CopyRect()");
-		}
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("CopyRect");
 	}
 
 	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
@@ -1840,13 +1830,8 @@ void GSDevice12::DoMultiStretchRects(
 	
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in DoMultiStretchRects()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in DoMultiStretchRects()");
-		}
 		EndRenderPass();
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("DoMultiStretchRects");
 	}
 
 	// Set up vertices first.
@@ -1962,13 +1947,8 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in DoStretchRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in DoStretchRect()");
-		}
 		EndRenderPass();
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("DoStretchRect");
 	}
 
 	SetUtilityRootSignature();
@@ -4394,13 +4374,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (draw_ds && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
-		GL_INS("Color -> DS in RenderHW()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in RenderHW()");
-		}
 		EndRenderPass();
-		draw_ds->ResolveDepthColor();
+		draw_ds->ResolveDepthColor("RenderHW");
 	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));

@@ -2885,22 +2885,12 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in CopyRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in CopyRect()");
-		}
-		sTex->ResolveDepthColor();
+		sTex->ResolveDepthColor("CopyRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in CopyRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in CopyRect()");
-		}
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("CopyRect");
 	}
 
 	GSTextureVK* const sTexVK = static_cast<GSTextureVK*>(sTex);
@@ -3046,13 +3036,8 @@ void GSDeviceVK::DoMultiStretchRects(
 	
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in DoMultiStretchRects()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in DoMultiStretchRects()");
-		}
 		EndRenderPass();
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("DoMultiStretchRects");
 	}
 
 	// Set up vertices first.
@@ -3185,13 +3170,7 @@ void GSDeviceVK::DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSText
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in DoStretchRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in DoStretchRect()");
-		}
-		EndRenderPass();
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("DoStretchRect");
 	}
 
 	SetUtilityTexture(sTex, linear ? m_linear_sampler : m_point_sampler);
@@ -3257,22 +3236,12 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel, 
 
 	if (sTex && sTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in BlitRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in BlitRect()");
-		}
-		sTex->ResolveDepthColor();
+		sTex->ResolveDepthColor("BlitRect");
 	}
 
 	if (dTex && dTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in BlitRect()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in BlitRect()");
-		}
-		dTex->ResolveDepthColor();
+		dTex->ResolveDepthColor("BlitRect");
 	}
 
 	sTexVK->TransitionToLayout(GSTextureVK::Layout::TransferSrc);
@@ -6032,14 +6001,6 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (draw_ds_rov && !draw_ds_rov->IsDepthColorValid(config.drawarea))
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
-		if (!draw_ds_rov->IsDepthColor())
-		{
-			GL_INS("DS -> Color in RenderHW()");
-			if (GSConfig.HWROVLogging)
-			{
-				Console.Warning("DS -> Color in RenderHW()");
-			}
-		}
 		EndRenderPass();
 		draw_ds_rov->UpdateDepthColor(config.drawarea);
 	}
@@ -6047,13 +6008,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (draw_ds && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because uses a draw and could mess up render state.
-		GL_INS("Color -> DS in RenderHW()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in RenderHW()");
-		}
 		EndRenderPass();
-		draw_ds->ResolveDepthColor();
+		draw_ds->ResolveDepthColor("RenderHW");
 	}
 
 	// stream buffer in first, in case we need to exec

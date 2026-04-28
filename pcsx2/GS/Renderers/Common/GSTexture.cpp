@@ -186,12 +186,17 @@ void GSTexture::GenerateMipmapsIfNeeded()
 	GenerateMipmap();
 }
 
-void GSTexture::CreateDepthColor()
+void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 {
 	pxAssert(IsDepthStencil());
 
+	GL_PUSH("HW: UpdateDepthColor {%d, %d, %d, %d}", draw_area.x, draw_area.y, draw_area.z, draw_area.w);
+
+	// Create the depth color copy if it doesn't exist.
 	if (!m_depth_color)
 	{
+		GL_INS("HW: Creating the depth color copy");
+
 		m_depth_color.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
 		m_depth_color_valid_area = GSVector4i::zero();
 #ifdef PCSX2_DEVBUILD
@@ -203,16 +208,6 @@ void GSTexture::CreateDepthColor()
 		}
 #endif
 	}
-}
-
-void GSTexture::UpdateDepthColor(GSVector4i draw_area)
-{
-	pxAssert(IsDepthStencil());
-
-	if (!m_depth_color)
-		CreateDepthColor();
-
-	GL_PUSH("HW: UpdateDepthColor {%d, %d, %d, %d}", draw_area.x, draw_area.y, draw_area.z, draw_area.w);
 
 	// Align copied areas to 128 to avoid too many small copies.
 	draw_area = draw_area.ralign<Align_Outside>(GSVector2i(128, 128)).rintersect(GetRect());
@@ -301,11 +296,11 @@ void GSTexture::UpdateDepthColor(GSVector4i draw_area)
 	m_depth_color_valid_area = new_valid_area_int;
 }
 
-void GSTexture::ResolveDepthColor()
+void GSTexture::ResolveDepthColor(const char* debug_caller)
 {
 	pxAssert(IsDepthStencil() && IsDepthColor());
 
-	GL_PUSH("HW: ResolveDepthColor {%d, %d, %d, %d}",
+	GL_PUSH("HW: ResolveDepthColor (caller: %s) {%d, %d, %d, %d}", debug_caller,
 		m_depth_color_valid_area.x, m_depth_color_valid_area.y,
 		m_depth_color_valid_area.z, m_depth_color_valid_area.w);
 

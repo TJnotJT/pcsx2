@@ -352,12 +352,7 @@ bool GSTextureVK::Update(const GSVector4i& r, const void* data, int pitch, int l
 {
 	if (IsDepthColor())
 	{
-		GL_INS("Color -> DS in Update()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in Update()");
-		}
-		ResolveDepthColor();
+		ResolveDepthColor("GSTextureVK::Update");
 	}
 
 	if (layer >= m_mipmap_levels)
@@ -934,12 +929,7 @@ void GSDownloadTextureVK::CopyFromTexture(
 
 	if (vkTex->IsDepthColor())
 	{
-		GL_INS("Color -> DS in CopyFromTexture()");
-		if (GSConfig.HWROVLogging)
-		{
-			Console.Warning("Color -> DS in CopyFromTexture()");
-		}
-		vkTex->ResolveDepthColor();
+		vkTex->ResolveDepthColor("CopyFromTexture");
 	}
 
 	pxAssert(vkTex->GetFormat() == m_format);

@@ -183,7 +183,6 @@ public:
 	{
 		m_avg_barriers_rov = barriers;
 	}
-	void CreateDepthColor();
 	__fi bool IsDepthColor() const
 	{
 		return m_depth_color_active;
@@ -198,13 +197,12 @@ public:
 		pxFailRel("Not implemented");
 		return false;
 	}
-
 	__fi bool IsDepthColorValid(const GSVector4i& area) const
 	{
 		return IsDepthColor() && m_depth_color_valid_area.rcontains(area);
 	}
 	void UpdateDepthColor(GSVector4i draw_area); // Update depth color from real depth in the area.
-	void ResolveDepthColor(); // Copy depth color back to real depth.
+	void ResolveDepthColor(const char* debug_caller); // Copy depth color back to real depth.
 public:
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
