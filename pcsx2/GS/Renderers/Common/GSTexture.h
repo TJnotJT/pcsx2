@@ -190,6 +190,7 @@ public:
 	__fi void ResetROVState()
 	{
 		m_depth_color_active = false;
+		m_depth_color_valid_area = GSVector4i::zero();
 		m_avg_barriers_rov = 0.0f;
 	}
 	virtual bool IsUnorderedAccess() const
