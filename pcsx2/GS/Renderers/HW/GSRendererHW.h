@@ -247,6 +247,7 @@ private:
 		const GSVector2i& unscaled_size, float& vs_scale_x, float& vs_scale_y);
 	void DetermineBarriers(GSTextureCache::Target* rt);
 
+	void GetROVPreset();
 	void GetForcedROVUsage(bool& color_cov, bool& depth_rov); // Whether having color or depth with the current config forces the other.
 	void DetermineROVUsage(); // Heuristics to determine whether to enable/disable ROV
 	void ConfigureROV(bool color_rov, bool depth_rov); // Actual config for ROV
@@ -331,16 +332,12 @@ private:
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
 
 	// Settings for the ROV enable/disable heuristic.
-	u32 m_rov_history_textures = 16;
-	u32 m_rov_history_draws = 32;
 	u32 m_rov_max_barriers = 16;
-	float m_rov_history_weight_color = 0.75f;
-	float m_rov_history_weight_depth = 0.75f;
-	float m_rov_barriers_enable_color = 2.0f;
-	float m_rov_barriers_enable_depth = 4.0f;
-	float m_rov_barriers_disable_color = 1.125f;
-	float m_rov_barriers_disable_depth = 1.25f;
-	u32 m_rov_preset = 0;
+	float m_rov_history_weight = 0.0f;
+	float m_rov_barriers_enable = 0.0f;
+	float m_rov_barriers_disable = 0.0f;
+	GSROVPreset m_rov_preset = GSROVPreset::Balanced;
+	bool m_rov_preset_init = false;
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;

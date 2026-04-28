@@ -477,6 +477,13 @@ enum class GSDepthFeedbackMode : u8
 	DepthAsRT = 3,
 };
 
+enum class GSROVPreset : u8
+{
+	Balanced = 0,
+	Conservative = 1,
+	AlwaysOn = 2,
+};
+
 enum class GSROVBarrierModeVK : u8
 {
 	None = 0,
@@ -900,7 +907,7 @@ struct Pcsx2Config
 		s8 OverrideTextureBarriers = -1;
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 
-		u32 HWROVPreset = 1;
+		GSROVPreset HWROVPreset = GSROVPreset::Balanced;
 		GSROVBarrierModeVK HWROVUseBarriersVK = GSROVBarrierModeVK::None;
 
 		u8 CAS_Sharpness = 50;

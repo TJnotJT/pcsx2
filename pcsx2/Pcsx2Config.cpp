@@ -756,16 +756,8 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWAA1 = false;
 	HWROV = false;
 	HWROVLogging = false;
-	HWROVHistoryTextures = 16;
-	HWROVHistoryDraws = 32;
-	HWROVMaxBarriers = 16;
-	HWROVHistoryWeightColor = 0.75f;
-	HWROVHistoryWeightDepth = 0.75f;
-	HWROVBarriersEnableColor = 2.0f;
-	HWROVBarriersEnableDepth = 4.0f;
-	HWROVBarriersDisableColor = 1.125f;
-	HWROVBarriersDisableDepth = 1.25f;
-	HWROVUseBarriersVK = 0;
+	HWROVUseBarriersVK = GSROVBarrierModeVK::None;
+	HWROVPreset = GSROVPreset::Balanced;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1056,17 +1048,8 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(HWAA1);
 	SettingsWrapBitBool(HWROV);
 	SettingsWrapBitBool(HWROVLogging);
-	SettingsWrapEntry(HWROVHistoryDraws);
-	SettingsWrapEntry(HWROVHistoryTextures);
-	SettingsWrapEntry(HWROVMaxBarriers);
-	SettingsWrapEntry(HWROVHistoryWeightColor);
-	SettingsWrapEntry(HWROVHistoryWeightDepth);
-	SettingsWrapEntry(HWROVBarriersEnableColor);
-	SettingsWrapEntry(HWROVBarriersEnableDepth);
-	SettingsWrapEntry(HWROVBarriersDisableColor);
-	SettingsWrapEntry(HWROVBarriersDisableDepth);
-	SettingsWrapEntry(HWROVPreset);
-	SettingsWrapEntry(HWROVUseBarriersVK);
+	SettingsWrapIntEnumEx(HWROVPreset, "HWROVPreset");
+	SettingsWrapIntEnumEx(HWROVUseBarriersVK, "HWROVUseBarriersVK");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
