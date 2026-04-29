@@ -654,6 +654,15 @@ private:
 	D3D12DescriptorHandle m_tfx_samplers_handle_gpu;
 	D3D12DescriptorHandle m_tfx_rt_textures_handle_gpu;
 
+	// Get GPU UAV handles for doing UAV clears.
+	__fi D3D12_GPU_DESCRIPTOR_HANDLE GetUAVHandleGPU(u32 tex)
+	{
+		pxAssert(tex == TEXTURE_RT_UAV || tex == TEXTURE_DEPTH_UAV);
+		return D3D12_GPU_DESCRIPTOR_HANDLE {
+			(tex - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
+		};
+	}
+
 	D3D12DescriptorHandle m_utility_texture_cpu;
 	D3D12DescriptorHandle m_utility_texture_gpu;
 	D3D12DescriptorHandle m_utility_sampler_cpu;

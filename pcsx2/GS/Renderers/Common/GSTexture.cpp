@@ -226,7 +226,7 @@ void GSTexture::EnterDepthColor()
 	{
 		const ShaderConvert shader = ShaderConvert::FLOAT32_DEPTH_TO_COLOR;
 		g_gs_device->StretchRect(this, m_depth_color.get(), GSVector4(GetRect()), shader, false);
-		g_perfmon.Put(GSPerfMon::TextureCopiesROVDepth, 1.0);
+		g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1);
 	}
 
 	m_depth_color_active = true; // Needs to set after StretchRect.
@@ -245,7 +245,7 @@ void GSTexture::ExitDepthColor(const char* debug_caller)
 	{
 		const ShaderConvert shader = ShaderConvert::FLOAT32_COLOR_TO_DEPTH;
 		g_gs_device->StretchRect(m_depth_color.get(), this, GSVector4(GetRect()), shader, false);
-		g_perfmon.Put(GSPerfMon::TextureCopiesROVDepth, 1.0);
+		g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1);
 	}
 }
 

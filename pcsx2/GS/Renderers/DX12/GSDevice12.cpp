@@ -4754,14 +4754,10 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			// Do UAV state updates here as we need the GPU descriptor handles to be allocated in BindDrawPipeline() for UAV clears.
 			if (draw_rt_rov)
 			{
-				D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_rt = {
-					m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
-					(TEXTURE_RT_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
-				};
 				if (draw_rt_rov->GetState() == GSTexture::State::Cleared)
 				{
-					// Small optimization: clear directly as UAV.
-					draw_rt_rov->CommitClearUAV(gpu_handle_rt);
+					// Clear directly as UAV.
+					draw_rt_rov->CommitClearUAV(GetUAVHandleGPU(TEXTURE_RT_UAV));
 				}
 				if (config.ps.HasColorOutput())
 				{
@@ -4772,14 +4768,10 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 			if (draw_ds_rov)
 			{
-				D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle_ds = {
-					m_tfx_rt_textures_handle_gpu.gpu_handle.ptr +
-					(TEXTURE_DEPTH_UAV - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
-				};
 				if (draw_ds_rov->GetState() == GSTexture::State::Cleared)
 				{
-					// Small optimization: clear directly as UAV.
-					draw_ds_rov->CommitClearUAV(gpu_handle_ds);
+					// Clear directly as UAV.
+					draw_ds_rov->CommitClearUAV(GetUAVHandleGPU(TEXTURE_DEPTH_UAV));
 				}
 				if (config.ps.HasDepthOutput())
 				{
@@ -4789,7 +4781,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			}
 
 			Draw(config);
-			g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0f);
+			g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 		}
 		return;
 	}

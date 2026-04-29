@@ -858,6 +858,7 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 		(old_layout == Layout::ReadWriteImage || new_layout == Layout::ReadWriteImage))
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
+		g_perfmon.Put(GSPerfMon::BarriersROV, 1);
 	}
 }
 

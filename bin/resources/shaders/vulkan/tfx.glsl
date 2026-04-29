@@ -463,11 +463,6 @@ void main()
 
 #define NEEDS_TEX (PS_TFX != 4)
 
-#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
-#extension GL_ARB_fragment_shader_interlock : enable
-#extension GL_ARB_shader_image_load_store : enable
-#endif
-
 layout(std140, set = 0, binding = 1) uniform cb1
 {
 	vec3 FogColor;

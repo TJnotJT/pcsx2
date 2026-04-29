@@ -3794,6 +3794,11 @@ static void AddShaderHeader(std::stringstream& ss)
 		ss << "#define DISABLE_TEXTURE_BARRIER 1\n";
 	if (features.texture_barrier && dev->UseFeedbackLoopLayout())
 		ss << "#define HAS_FEEDBACK_LOOP_LAYOUT 1\n";
+	if (features.rov)
+	{
+		ss << "#extension GL_ARB_fragment_shader_interlock : enable\n";
+		ss << "#extension GL_ARB_shader_image_load_store : enable\n";
+	}
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)
@@ -6628,5 +6633,5 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 	Draw(config);
 
 	if (config.ps.rov_color || config.ps.HasDepthROV())
-		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0);
+		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }

@@ -1188,6 +1188,7 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 		(before_state == ResourceState::PixelShaderUAV || after_state == ResourceState::PixelShaderUAV))
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
+		g_perfmon.Put(GSPerfMon::BarriersROV, 1);
 	}
 }
 
