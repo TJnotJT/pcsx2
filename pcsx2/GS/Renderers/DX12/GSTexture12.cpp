@@ -824,19 +824,6 @@ void GSTexture12::TransitionToState(ResourceState state)
 
 void GSTexture12::TransitionToState(const D3D12CommandList& cmdlist, ResourceState state)
 {
-	// Depth/color must be updated explicitly before transitioning
-	if (IsDepthStencil())
-	{
-		if (state == ResourceState::PixelShaderUAV && !IsDepthColor())
-		{
-			pxFail("Transitioning to depth UAV without depth color.");
-		}
-		else if ((state == ResourceState::DepthReadStencil || state == ResourceState::DepthWriteStencil) && IsDepthColor())
-		{
-			pxFail("Transitioning to depth while in depth color.");
-		}
-	}
-
 	if (GetResourceState() == state)
 		return;
 
@@ -845,9 +832,37 @@ void GSTexture12::TransitionToState(const D3D12CommandList& cmdlist, ResourceSta
 	SetResourceState(state);
 }
 
+#ifdef PCSX2_DEVBUILD
+static void DebugCheckUAVState(const GSTexture12* tex,
+	GSTexture12::ResourceState before_state, GSTexture12::ResourceState after_state)
+{
+	// This is to make sure that we don't accidentally transition depth to the wrong state when using the color clone for ROV draws.
+	// The current system requires explicitly transitioning depth in/out of depth color (aka ROV) mode, so that we don't have unexpected
+	// shader copies messing things up.
+	if (tex->IsDepthStencil())
+	{
+		if (tex->IsDepthColor())
+		{
+			pxAssert(before_state != GSTexture12::ResourceState::DepthReadStencil &&
+				before_state != GSTexture12::ResourceState::DepthWriteStencil &&
+				after_state != GSTexture12::ResourceState::DepthReadStencil &&
+				after_state != GSTexture12::ResourceState::DepthWriteStencil);
+		}
+		else
+		{
+			pxAssert(before_state != GSTexture12::ResourceState::PixelShaderUAV &&
+				after_state != GSTexture12::ResourceState::PixelShaderUAV);
+		}
+	}
+}
+#endif
+
 void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, u32 level,
 	ResourceState before_state, ResourceState after_state) const
 {
+#ifdef PCSX2_DEVBUILD
+	DebugCheckUAVState(this, before_state, after_state);
+#endif
 	if (GSDevice12::GetInstance()->UseEnhancedBarriers())
 	{
 		// Read only depth requires special handling as we might want to write stencil.
@@ -885,7 +900,7 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 					barrier.SyncBefore = D3D12_BARRIER_SYNC_DEPTH_STENCIL;
 				break;
 			case ResourceState::DepthReadStencil:
-				pxAssert(!IsSimultaneousAccess() && !IsDepthColor());
+				pxAssert(!IsSimultaneousAccess());
 				pxAssert(level == D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
 
 				barriers[0].Subresources = {0, static_cast<uint>(m_mipmap_levels), 0, 1, 0, 1};
@@ -1062,7 +1077,7 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 				barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 				break;
 			case ResourceState::DepthReadStencil:
-				pxAssert(!IsSimultaneousAccess() && !IsDepthColor());
+				pxAssert(!IsSimultaneousAccess());
 				pxAssert(m_mipmap_levels == 1);
 				pxAssert(level == D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
 
@@ -1113,7 +1128,7 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 				barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 				break;
 			case ResourceState::DepthReadStencil:
-				pxAssert(!IsSimultaneousAccess() && !IsDepthColor());
+				pxAssert(!IsSimultaneousAccess());
 				pxAssert(m_mipmap_levels == 1);
 				pxAssert(level == D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
 
@@ -1166,6 +1181,13 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 		}
 
 		cmdlist.list4->ResourceBarrier(num_barriers, barriers);
+	}
+
+	// Count as a UAV barrier if we transition to/from UAV.
+	if (IsRenderTargetOrDepthStencil() &&
+		(before_state == ResourceState::PixelShaderUAV || after_state == ResourceState::PixelShaderUAV))
+	{
+		g_perfmon.Put(GSPerfMon::Barriers, 1);
 	}
 }
 

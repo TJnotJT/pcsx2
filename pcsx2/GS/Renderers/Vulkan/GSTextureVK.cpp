@@ -633,22 +633,37 @@ void GSTextureVK::TransitionToLayout(VkCommandBuffer command_buffer, Layout new_
 	SetLayout(new_layout);
 }
 
+#ifdef PCSX2_DEVBUILD
+static void DebugCheckUAVLayout(const GSTextureVK* tex,
+	GSTextureVK::Layout old_layout, GSTextureVK::Layout new_layout)
+{
+	// This is to make sure that we don't accidentally transition depth to the wrong layout when using the color clone for ROV draws.
+	// The current system requires explicitly transitioning depth in/out of depth color (aka UAV) mode, so that we don't have unexpected
+	// shader copies messing things up.
+	if (tex->IsDepthStencil())
+	{
+		if (tex->IsDepthColor())
+		{
+			// Depth color so don't mix with real depth stencil.
+			pxAssert(old_layout != GSTextureVK::Layout::DepthStencilAttachment &&
+				new_layout != GSTextureVK::Layout::DepthStencilAttachment);
+		}
+		else
+		{
+			// Real depth stencil mode so don't mix with UAV.
+			pxAssert(old_layout != GSTextureVK::Layout::ReadWriteImage &&
+				new_layout != GSTextureVK::Layout::ReadWriteImage);
+		}
+	}
+}
+#endif
+
 void GSTextureVK::TransitionSubresourcesToLayout(
 	VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout)
 {
-	// Depth/color must be updated explicitly before transitioning
-	if (IsDepthStencil())
-	{
-		if (new_layout == Layout::ReadWriteImage && !IsDepthColor())
-		{
-			pxFail("Transitioning to depth UAV without depth color.");
-		}
-		else if (new_layout == Layout::DepthStencilAttachment && IsDepthColor())
-		{
-			pxFail("Transitioning to depth while in depth color.");
-		}
-	}
-
+#ifdef PCSX2_DEVBUILD
+	DebugCheckUAVLayout(this, old_layout, new_layout);
+#endif
 	// RDNA2 transition issue discovered by Air.
 	// Windows RDNA2 drivers don't always correctly transition the layout(?) when ROV is involved.
 	// ReadWriteImage -> Feedback transitions are broken.
@@ -837,6 +852,13 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 			break;
 	}
 	vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+	// Count as a UAV barrier if we transition to/from UAV.
+	if (IsRenderTargetOrDepthStencil() &&
+		(old_layout == Layout::ReadWriteImage || new_layout == Layout::ReadWriteImage))
+	{
+		g_perfmon.Put(GSPerfMon::Barriers, 1);
+	}
 }
 
 VkFramebuffer GSTextureVK::GetFramebuffer(bool feedback_loop)
