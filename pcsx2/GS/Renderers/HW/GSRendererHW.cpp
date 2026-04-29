@@ -7643,12 +7643,7 @@ void GSRendererHW::DetermineROVUsage()
 
 	if (!(needs_enabling || needs_disabling))
 	{
-		GL_INS("ROV: Draw=%d => No action taken.", GSState::s_n);
-		if (GSConfig.HWROVLogging)
-		{
-			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | No action taken.",
-				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers);
-		}
+		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | No action taken.", s_n, m_conf.rt, m_conf.ds, barriers);
 		return;
 	}
 	
@@ -7689,28 +7684,19 @@ void GSRendererHW::DetermineROVUsage()
 
 		GetForcedROVUsage(use_rov_color_final, use_rov_depth_final);
 
-		if (GSConfig.HWROVLogging)
-		{
-			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} >= {:.2} => {} | C={} => {} | D={} => {}.",
-				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
-				needs_enabling ? "Enable ROV" : "Continue ROV",
-				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
-				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
-		}
+		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | AVGBAR=%.2f >= %.2f => %s | C=%d => %d | D=%d => %d.",
+			s_n, m_conf.rt, m_conf.ds, barriers, test_barriers, threshold, needs_enabling ? "Enable ROV" : "Continue ROV",
+			use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
 	}
 	else
 	{
 		// Disable or continue non-ROVs.
 		use_rov_color_final = false;
 		use_rov_depth_final = false;
-		if (GSConfig.HWROVLogging)
-		{
-			Console.WarningFmt("ROV: Draw={} | C={:016x} | D={:016x} | BAR={:.2} | AVGBAR={:.2} < {:.2} => {} | C={} => {} | D={} => {}.",
-				s_n, reinterpret_cast<u64>(m_conf.rt), reinterpret_cast<u64>(m_conf.ds), barriers, test_barriers, threshold,
-				needs_enabling ? "Continue non-ROV" : "Disable ROV",
-				static_cast<u32>(use_rov_color), static_cast<u32>(use_rov_color_final),
-				static_cast<u32>(use_rov_depth), static_cast<u32>(use_rov_depth_final));
-		}
+		
+		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | AVGBAR=%.2f < %.2f => %s | C=%d => %d | D=%d => %d.",
+			s_n, m_conf.rt, m_conf.ds, barriers, test_barriers, threshold, needs_enabling ? "Continue non-ROV" : "Disable ROV",
+			use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
 	}
 
 	GL_INS("ROV: Color ROV %s / depth ROV %s",

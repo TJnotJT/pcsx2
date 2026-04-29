@@ -190,11 +190,7 @@ void GSTexture::CreateDepthColor()
 {
 	pxAssert(!m_depth_color);
 
-	GL_INS("HW: Creating depth color");
-	if (GSConfig.HWROVLogging)
-	{
-		Console.Warning("Creating depth color");
-	}
+	GL_ROV("HW: CreateDepthColor (tex=%016p)", this);
 
 	m_depth_color.reset(g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Float32, false));
 #ifdef PCSX2_DEVBUILD
@@ -209,11 +205,7 @@ void GSTexture::EnterDepthColor()
 {
 	pxAssert(IsDepthStencil() && !IsDepthColor());
 
-	GL_PUSH("HW: EnterDepthColor");
-	if (GSConfig.HWROVLogging)
-	{
-		Console.Warning("EnterDepthColor");
-	}
+	GL_PUSH_ROV("HW: EnterDepthColor (tex=%016p)", this);
 
 	// Create depth color if it doesn't exist.
 	if (!m_depth_color)
@@ -234,7 +226,7 @@ void GSTexture::ExitDepthColor(const char* debug_caller)
 {
 	pxAssert(IsDepthStencil() && IsDepthColor());
 
-	GL_PUSH("HW: ExitDepthColor (caller: %s)", debug_caller);
+	GL_PUSH_ROV("HW: ExitDepthColor (caller=%s, tex=%016p)", debug_caller, this);
 
 	m_depth_color_active = false; // Needs to set before StretchRect.
 
