@@ -402,17 +402,6 @@ bool GSDevice12::CreateDescriptorHeaps()
 		return false;
 	}
 
-	// Allocate null SRV descriptor for unbound textures.
-	constexpr D3D12_SHADER_RESOURCE_VIEW_DESC null_srv_desc = {
-		DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_SRV_DIMENSION_TEXTURE2D, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING};
-
-	if (!m_descriptor_heap_manager.Allocate(&m_null_srv_descriptor))
-	{
-		pxFailRel("Failed to allocate null descriptor");
-		return false;
-	}
-
-	m_device->CreateShaderResourceView(nullptr, &null_srv_desc, m_null_srv_descriptor.cpu_handle);
 	return true;
 }
 
@@ -2530,21 +2519,6 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 
 	SetViewport(vp);
 	SetScissor(scissor);
-
-	// FIXME: REMOVE
-	// Unbind conflicting UAVs
-	//std::array<GSTexture12*, 3> curr_rts{ m_current_render_target, m_current_depth_render_target, m_current_depth_target };
-	//std::array<GSTexture12**, 2> curr_uavs{ &m_tfx_textures_uav[0], &m_tfx_textures_uav[1] };
-	//for (u32 i = TEXTURE_RT_UAV; i <= TEXTURE_DEPTH_UAV; i++)
-	//{
-	//	for (GSTexture12* rt : curr_rts)
-	//	{
-	//		if (m_tfx_textures_uav[i - TEXTURE_RT_UAV] == rt)
-	//		{
-	//			PSSetUnorderedAccess(i, nullptr, false);
-	//		}
-	//	}
-	//}
 }
 
 bool GSDevice12::GetSampler(D3D12DescriptorHandle* cpu_handle, GSHWDrawConfig::SamplerSelector ss)
@@ -3154,7 +3128,6 @@ void GSDevice12::DestroyResources()
 
 	m_shader_cache.Close();
 
-	m_descriptor_heap_manager.Free(&m_null_srv_descriptor);
 	m_timestamp_query_buffer.reset();
 	m_timestamp_query_allocation.reset();
 	m_sampler_heap_manager.Destroy();
@@ -3675,79 +3648,6 @@ void GSDevice12::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 		PSSetShaderResource(TEXTURE_DEPTH_UAV, nullptr, false);
 	}
 }
-
-// FIXME: REMOVE
-// Note: Handling of UAVs is different from VK because in DX12 we handle clearing/dirty state
-// update closer to the actual draw to make use of DX12's functionality for UAV clearing
-// without transitioning to render target.
-//void GSDevice12::PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state)
-//{
-//	pxAssert(i == TEXTURE_RT_UAV || i == TEXTURE_DEPTH_UAV);
-//
-//	GSTexture12* uav12 = static_cast<GSTexture12*>(uav);
-//
-//	GSTexture12* bind_uav12;
-//	if (uav)
-//	{
-//		GSTexture12* dtex = static_cast<GSTexture12*>(uav);
-//
-//		pxAssert(m_features.rov);
-//		pxAssert(!dtex->IsDepthStencil() || dtex->IsDepthColor());
-//		
-//		if (check_state)
-//		{
-//			if (dtex->GetResourceState() != GSTexture12::ResourceState::PixelShaderUAV && InRenderPass())
-//			{
-//				GL_INS("Ending render pass due to resource transition");
-//				EndRenderPass();
-//			}
-//
-//			// Clears will be handled in SendHWDraw().
-//			dtex->TransitionToState(GSTexture12::ResourceState::PixelShaderUAV);
-//		}
-//		dtex->SetUseFenceCounter(GetCurrentFenceValue());
-//		bind_uav12 = dtex;
-//	}
-//	else
-//	{
-//		bind_uav12 = m_null_texture.get();
-//	}
-//
-//	const int i_uav = i - TEXTURE_RT_UAV;
-//
-//	if (m_tfx_textures_uav[i_uav] == bind_uav12)
-//		return;
-//
-//	// Store pointer to the texture in addition to descriptor since depth UAVs have a color copy.
-//	m_tfx_textures_uav[i_uav] = bind_uav12;
-//	m_tfx_textures[i] = bind_uav12->GetUAVDescriptor();
-//	m_dirty_flags |= DIRTY_FLAG_TFX_RT_TEXTURES;
-//
-//	// Unbind conflicting RTs if needed.
-//	if (uav)
-//	{
-//		// Unbind conflicting RT texture
-//		const u32 i_conflict = (i == TEXTURE_RT_UAV) ? TEXTURE_RT : TEXTURE_DEPTH;
-//		PSSetShaderResource(i_conflict, nullptr, false);
-//
-//		// Unbind conflicting source texture
-//		if ((m_tfx_textures[TEXTURE_TEXTURE] == uav12->GetSRVDescriptor()) ||
-//			(!uav->IsDepthColor() && m_tfx_textures[TEXTURE_TEXTURE] == uav12->GetFBLDescriptor()))
-//		{
-//			PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
-//		}
-//
-//		std::array<GSTexture12**, 3> curr_rts{ &m_current_render_target, &m_current_depth_render_target, &m_current_depth_target };
-//		for (GSTexture12** rt : curr_rts)
-//		{
-//			if (*rt == uav12)
-//			{
-//				*rt = nullptr;
-//				m_dirty_flags |= DIRTY_FLAG_RENDER_TARGET;
-//			}
-//		}
-//	}
-//}
 
 void GSDevice12::SetUtilityRootSignature()
 {

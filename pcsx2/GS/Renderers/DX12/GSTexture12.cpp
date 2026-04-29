@@ -1198,17 +1198,6 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 	}
 }
 
-// FIXME: REMOVE
-//void GSTexture12::CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
-//{
-//	if (m_state != GSTexture::State::Cleared)
-//		return;
-//
-//	GSDevice12::GetInstance()->EndRenderPass();
-//
-//	CommitClearUAV(GSDevice12::GetInstance()->GetCommandList(), gpu_handle);
-//}
-
 void GSTexture12::CommitClear()
 {
 	if (m_state != GSTexture::State::Cleared)
@@ -1217,31 +1206,6 @@ void GSTexture12::CommitClear()
 	GSDevice12::GetInstance()->EndRenderPass();
 	CommitClear(GSDevice12::GetInstance()->GetCommandList());
 }
-
-// FIXME: REMOVE
-//void GSTexture12::CommitClearUAV(const D3D12CommandList& cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle)
-//{
-//	if (GetResourceState() != ResourceState::PixelShaderUAV)
-//	{
-//		// This is an optimization for when we are already in unordered access, so shouldn't be used otherwise.
-//		Console.Warning("CommitClearUAV: Not in UAV state.");
-//		TransitionToState(cmdlist, ResourceState::PixelShaderUAV);
-//	}
-//
-//	if (IsDepthStencil())
-//	{
-//		pxAssert(IsDepthColor());
-//		cmdlist.list4->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
-//			GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
-//	}
-//	else
-//	{
-//		cmdlist.list4->ClearUnorderedAccessViewFloat(gpu_handle, GetUAVDescriptor(), GetResource(),
-//			GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
-//	}
-//
-//	SetState(GSTexture::State::Dirty);
-//}
 
 void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 {

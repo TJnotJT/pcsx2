@@ -134,7 +134,6 @@ public:
 	D3D12DescriptorHeapManager& GetRTVHeapManager() { return m_rtv_heap_manager; }
 	D3D12DescriptorHeapManager& GetDSVHeapManager() { return m_dsv_heap_manager; }
 	D3D12DescriptorHeapManager& GetSamplerHeapManager() { return m_sampler_heap_manager; }
-	const D3D12DescriptorHandle& GetNullSRVDescriptor() const { return m_null_srv_descriptor; } // FIXME: REMOVE; UNUSED!
 	D3D12StreamBuffer& GetTextureStreamBuffer() { return m_texture_stream_buffer; }
 
 	// Root signature access.
@@ -236,7 +235,6 @@ private:
 	D3D12DescriptorHeapManager m_rtv_heap_manager;
 	D3D12DescriptorHeapManager m_dsv_heap_manager;
 	D3D12DescriptorHeapManager m_sampler_heap_manager;
-	D3D12DescriptorHandle m_null_srv_descriptor; // FIXME: REMOVE UNUSED
 
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_1;
 
@@ -545,8 +543,6 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
-	// FIXME: REMOVE
-	//void PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
 		bool depth_read = false, const GSVector2i& viewport_size = {});
@@ -693,17 +689,6 @@ private:
 	D3D12DescriptorHandle m_tfx_textures_handle_gpu;
 	D3D12DescriptorHandle m_tfx_samplers_handle_gpu;
 	D3D12DescriptorHandle m_tfx_rt_textures_handle_gpu;
-
-	// FIXME: REMOVE
-	// Get GPU UAV handle for doing UAV clears.
-	//__fi D3D12_GPU_DESCRIPTOR_HANDLE GetUAVHandleGPU(u32 tex)
-	//{
-	//	pxAssert(tex == TEXTURE_RT_UAV || tex == TEXTURE_DEPTH_UAV);
-	//	const UINT64 base_addr = m_tfx_rt_textures_handle_gpu.gpu_handle.ptr;
-	//	const UINT64 desc_size = static_cast<UINT64>(GetDescriptorAllocator().GetDescriptorIncrementSize());
-	//	const UINT64 elem = static_cast<UINT64>(tex - TEXTURE_RT);
-	//	return D3D12_GPU_DESCRIPTOR_HANDLE{ base_addr + elem * desc_size };
-	//}
 
 	D3D12DescriptorHandle m_utility_texture_cpu;
 	D3D12DescriptorHandle m_utility_texture_gpu;
