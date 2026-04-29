@@ -143,8 +143,8 @@
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
 #define PS_RETURN_DEPTH_ROV (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
-#define PS_RETURN_DEPTH (ZWRITE && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE))
-#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && (PS_ROV_DEPTH == PS_ROV_DEPTH_NONE) && !ZWRITE)
+#define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
 struct VS_INPUT
 {
@@ -251,7 +251,7 @@ Texture2D<float4> Palette : register(t1);
 Texture2D<float4> RtTexture : register(t2);
 #endif
 Texture2D<float> PrimMinTexture : register(t3);
-#if PS_ROV_DEPTH == PS_ROV_DEPTH_NONE
+#if !PS_ROV_DEPTH
 Texture2D<float> DepthTexture : register(t4);
 #endif
 SamplerState TextureSampler : register(s0);
@@ -261,7 +261,7 @@ RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
 static float4 cachedRtValue;
 #endif
 
-#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
+#if PS_ROV_DEPTH
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
 static float cachedDepthValue;
 #endif
@@ -306,7 +306,7 @@ float4 RtLoad(int2 xy)
 
 float DepthLoad(int2 xy)
 {
-#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
+#if PS_ROV_DEPTH
 	return cachedDepthValue;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
@@ -322,7 +322,7 @@ void RtWrite(int2 xy, float4 c)
 
 void DepthWrite(int2 xy, float d)
 {
-#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
+#if PS_ROV_DEPTH
 	DepthTextureRov[xy] = d;
 #endif
 }
@@ -1305,7 +1305,7 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 [earlydepthstencil]
 #endif
 
-#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
+#if PS_ROV_COLOR || PS_ROV_DEPTH
 #define DISCARD rov_discard = true
 #else
 #define DISCARD discard
@@ -1326,11 +1326,11 @@ void ps_main(PS_INPUT input)
 	cachedRtValue = RtTextureRov[input.p.xy];
 #endif
 
-#if PS_ROV_DEPTH != PS_ROV_DEPTH_NONE
+#if PS_ROV_DEPTH
 	cachedDepthValue = DepthTextureRov[input.p.xy];
 #endif
 
-#if PS_ROV_COLOR || (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
+#if PS_ROV_COLOR || PS_ROV_DEPTH
 	bool rov_discard = false;
 #endif
 
