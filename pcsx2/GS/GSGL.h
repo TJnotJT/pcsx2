@@ -61,4 +61,6 @@
 	#define GL_POP()     (void)(0)
 	#define GL_INS(...)  (void)(0)
 	#define GL_PERF(...) (void)(0)
+	#define GL_ROV(...) (void)(0)
+	#define GL_PUSH_ROV(...) (void)(0)
 #endif
