@@ -56,6 +56,44 @@ public:
 		D3D12_RESOURCE_DESC desc;
 	};
 
+	enum class ResourceType
+	{
+		SRV, // Shader resource view
+		FBL, // Feedback loop
+		UAV, // Unordered access
+	};
+
+	D3D12DescriptorHandle GetResourceDescriptor(GSTexture12* tex, ResourceType type) const
+	{
+		switch (type)
+		{
+			case ResourceType::SRV:
+				return tex->GetSRVDescriptor();
+			case ResourceType::FBL:
+				return m_enhanced_barriers ? tex->GetSRVDescriptor() : tex->GetFBLDescriptor();
+			case ResourceType::UAV:
+				return tex->GetUAVDescriptor();
+			default:
+				pxFailRel("Impossible.");
+				return D3D12DescriptorHandle{ 0, 0 };
+		}
+	}
+
+	static constexpr GSTexture12::ResourceState GetResourceState(ResourceType type)
+	{
+		switch (type)
+		{
+			case ResourceType::SRV:
+			case ResourceType::FBL:
+				return GSTexture12::ResourceState::PixelShaderResource;
+			case ResourceType::UAV:
+				return GSTexture12::ResourceState::PixelShaderUAV;
+			default:
+				pxFailRel("Impossible.");
+				return static_cast<GSTexture12::ResourceState>(-1);
+		}
+	}
+
 	__fi IDXGIAdapter1* GetAdapter() const { return m_adapter.get(); }
 	__fi ID3D12Device* GetDevice() const { return m_device.get(); }
 	__fi ID3D12CommandQueue* GetCommandQueue() const { return m_command_queue.get(); }
@@ -96,7 +134,6 @@ public:
 	D3D12DescriptorHeapManager& GetRTVHeapManager() { return m_rtv_heap_manager; }
 	D3D12DescriptorHeapManager& GetDSVHeapManager() { return m_dsv_heap_manager; }
 	D3D12DescriptorHeapManager& GetSamplerHeapManager() { return m_sampler_heap_manager; }
-	const D3D12DescriptorHandle& GetNullSRVDescriptor() const { return m_null_srv_descriptor; } // FIXME: REMOVE; UNUSED!
 	D3D12StreamBuffer& GetTextureStreamBuffer() { return m_texture_stream_buffer; }
 
 	// Root signature access.
@@ -198,7 +235,6 @@ private:
 	D3D12DescriptorHeapManager m_rtv_heap_manager;
 	D3D12DescriptorHeapManager m_dsv_heap_manager;
 	D3D12DescriptorHeapManager m_sampler_heap_manager;
-	D3D12DescriptorHandle m_null_srv_descriptor; // FIXME: REMOVE UNUSED
 
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_1;
 
@@ -504,9 +540,9 @@ public:
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
-	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool feedback = false);
+	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
-	void PSSetUnorderedAccess(int i, GSTexture* uav, bool check_state);
+	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
 		bool depth_read = false, const GSVector2i& viewport_size = {});
@@ -653,15 +689,6 @@ private:
 	D3D12DescriptorHandle m_tfx_textures_handle_gpu;
 	D3D12DescriptorHandle m_tfx_samplers_handle_gpu;
 	D3D12DescriptorHandle m_tfx_rt_textures_handle_gpu;
-
-	// Get GPU UAV handles for doing UAV clears.
-	__fi D3D12_GPU_DESCRIPTOR_HANDLE GetUAVHandleGPU(u32 tex)
-	{
-		pxAssert(tex == TEXTURE_RT_UAV || tex == TEXTURE_DEPTH_UAV);
-		return D3D12_GPU_DESCRIPTOR_HANDLE {
-			(tex - TEXTURE_RT) * GetDescriptorAllocator().GetDescriptorIncrementSize()
-		};
-	}
 
 	D3D12DescriptorHandle m_utility_texture_cpu;
 	D3D12DescriptorHandle m_utility_texture_gpu;
