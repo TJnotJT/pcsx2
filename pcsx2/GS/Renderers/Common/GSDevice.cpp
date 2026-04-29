@@ -677,6 +677,10 @@ void GSDevice::Recycle(GSTexture* t)
 
 	t->SetLastFrameUsed(m_frame);
 
+#ifdef PCSX2_DEVBUILD
+	t->SetDebugName("");
+#endif
+
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];
 	pool.push_front(t);
 	m_pool_memory_usage += t->GetMemUsage();

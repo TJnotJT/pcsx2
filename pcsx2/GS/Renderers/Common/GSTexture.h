@@ -79,6 +79,9 @@ protected:
 	bool m_needs_mipmaps_generated = true;
 	ClearValue m_clear_value = {};
 
+#ifdef PCSX2_DEVBUILD
+	std::string m_debug_name;
+#endif
 public:
 	GSTexture();
 	virtual ~GSTexture();

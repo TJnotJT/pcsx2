@@ -119,6 +119,10 @@ void GSTexture12::Destroy(bool defer)
 	}
 
 	m_write_descriptor_type = WriteDescriptorType::None;
+
+#ifdef PCSX2_DEVBUILD
+	m_debug_name.clear();
+#endif
 }
 
 // For use with non-simultaneous textures only.
@@ -813,6 +817,8 @@ void GSTexture12::SetDebugName(std::string_view name)
 		return;
 
 	D3D12::SetObjectName(m_resource.get(), name);
+
+	m_debug_name = name;
 }
 
 #endif

@@ -266,6 +266,10 @@ void GSTextureVK::Destroy(bool defer)
 		m_image = VK_NULL_HANDLE;
 		m_allocation = VK_NULL_HANDLE;
 	}
+
+#ifdef PCSX2_DEVBUILD
+	m_debug_name.clear();
+#endif
 }
 
 VkImageLayout GSTextureVK::GetVkLayout() const
@@ -563,6 +567,8 @@ void GSTextureVK::SetDebugName(std::string_view name)
 
 	Vulkan::SetObjectName(GSDeviceVK::GetInstance()->GetDevice(), m_image, "%.*s", static_cast<int>(name.size()), name.data());
 	Vulkan::SetObjectName(GSDeviceVK::GetInstance()->GetDevice(), m_view, "%.*s", static_cast<int>(name.size()), name.data());
+
+	m_debug_name = name;
 }
 
 #endif

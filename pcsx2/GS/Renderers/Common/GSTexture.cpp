@@ -200,9 +200,7 @@ void GSTexture::CreateDepthColor()
 #ifdef PCSX2_DEVBUILD
 	if (GSConfig.UseDebugDevice)
 	{
-		// FIXME: Track the actual debug names.
-		m_depth_color->SetDebugName(fmt::format("0x{:x} Depth color for @ 0x{:x}",
-			reinterpret_cast<u64>(m_depth_color.get()), reinterpret_cast<u64>(this)));
+		m_depth_color->SetDebugName(m_debug_name + " (color clone)");
 	}
 #endif
 }
