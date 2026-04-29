@@ -153,8 +153,9 @@ public:
 	void TransitionToState(ResourceState state);
 	void CommitClear();
 	void CommitClear(const D3D12CommandList& cmdlist);
-	void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v);
-	void CommitClearUAV(const D3D12CommandList& cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle);
+	// FIXME: REMOVE
+	//void CommitClearUAV(D3D12_GPU_DESCRIPTOR_HANDLE v);
+	//void CommitClearUAV(const D3D12CommandList& cmdlist, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle);
 
 	void Destroy(bool defer = true);
 

@@ -5350,11 +5350,9 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
 	GSTextureVK* oldVkRt = m_tfx_textures[TFX_TEXTURE_RT_ROV] != m_null_texture.get() ?
-	                       const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_RT_ROV]) :
-	                       nullptr;
+	                       m_tfx_textures[TFX_TEXTURE_RT_ROV] : nullptr;
 	GSTextureVK* oldVkDs = m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] != m_null_texture.get() ?
-	                       const_cast<GSTextureVK*>(m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]) :
-	                       nullptr;
+	                       m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] : nullptr;
 
 	if (!(vkRt || vkDs || oldVkRt || oldVkDs))
 		return;
@@ -5390,7 +5388,7 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	{
 		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, vkDs, true, false);
 
-		// Unbind conflicting RT texture
+		// Unbind conflicting depth texture
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 
 		// Unbind conflicting source texture
@@ -6298,7 +6296,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		EndRenderPass();
 	}
 	
-	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthOutput());
+	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
 	OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
 

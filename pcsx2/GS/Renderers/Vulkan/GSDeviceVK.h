@@ -712,7 +712,7 @@ private:
 	float m_current_line_width = 1.0f;
 	u8 m_blend_constant_color = 0;
 
-	std::array<const GSTextureVK*, NUM_TFX_TEXTURES> m_tfx_textures{};
+	std::array<GSTextureVK*, NUM_TFX_TEXTURES> m_tfx_textures{};
 	VkSampler m_tfx_sampler = VK_NULL_HANDLE;
 	u32 m_tfx_sampler_sel = 0;
 	VkDescriptorSet m_tfx_ubo_descriptor_set = VK_NULL_HANDLE;
