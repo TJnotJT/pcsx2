@@ -1557,7 +1557,7 @@ if (bad)
 
 #if PS_AA1 == PS_AA1_TRIANGLE_SW_Z
 	if (!bool(input.interior))
-		input.p.z = DepthTexture.Load(int3(input.p.xy, 0)).r; // No depth update for triangle edges.
+		input.p.z = DepthLoad(input.p.xy); // No depth update for triangle edges.
 #endif
 
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)

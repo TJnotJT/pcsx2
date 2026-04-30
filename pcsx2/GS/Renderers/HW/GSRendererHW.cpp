@@ -7850,10 +7850,12 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 			float ps_aref;
 			GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
 			m_conf.ps.atst = ps_atst;
-			m_conf.ps.afail =
-				(m_cached_ctx.TEST.AFAIL == AFAIL_RGB_ONLY)
-					? PS_AFAIL::RGB_ONLY_SW_Z
-					: static_cast<GSHWDrawConfig::PS_AFAIL>(m_cached_ctx.TEST.AFAIL);
+			m_conf.ps.afail = static_cast<GSHWDrawConfig::PS_AFAIL>(m_cached_ctx.TEST.AFAIL);
+			if (m_cached_ctx.DepthWrite() && m_cached_ctx.TEST.AFAIL == AFAIL_RGB_ONLY)
+			{
+				pxAssert(depth_rov); // Should have enabled depth ROV for depth feedback loop.
+				m_conf.ps.afail = PS_AFAIL::RGB_ONLY_SW_Z;
+			}
 			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
 
 			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, static_cast<u32>(m_conf.ps.afail), ps_aref);
