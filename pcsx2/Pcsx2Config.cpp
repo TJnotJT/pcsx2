@@ -756,7 +756,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWAA1 = false;
 	HWROV = false;
 	HWROVLogging = false;
-	HWROVBarriersVK = GSROVBarrierModeVK::None;
+	HWROVBarriersVK = GSROVBarriersVKMode::None;
 	HWROVPreset = GSROVPreset::Disabled;
 
 	ManualUserHacks = false;

@@ -5412,7 +5412,7 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	};
 
 	// The following are to fix issues with some systems that seem to require barriers even with FSI.
-	if (GSConfig.HWROVBarriersVK == GSROVBarrierModeVK::EveryDraw)
+	if (GSConfig.HWROVBarriersVK == GSROVBarriersVKMode::EveryDraw)
 	{
 		// Adds a barriers to the UAVs before every draw. Can result in a large performance hit.
 		if ((vkRt || vkDs) && InRenderPass())
@@ -5433,11 +5433,11 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 			}
 		}
 	}
-	else if (GSConfig.HWROVBarriersVK == GSROVBarrierModeVK::EveryRenderPass)
+	else if (GSConfig.HWROVBarriersVK == GSROVBarriersVKMode::EveryRenderPass)
 	{
 		// A lower overhead fix that seems to work sometimes. We only do a barrier when we are changing
 		// the UAV, unbinding the UAV, or binding a UAV where there was not one previously.
-		for (auto& old_new_tex : std::array{ std::array{ vkRt, oldVkRt }, std::array{ vkDs , oldVkDs } })
+		for (const auto& old_new_tex : std::array{ std::array{ vkRt, oldVkRt }, std::array{ vkDs , oldVkDs } })
 		{
 			if (old_new_tex[0] != old_new_tex[1])
 			{
@@ -6281,13 +6281,6 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		// Unbind to avoid conflicts with framebuffer
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
-	}
-
-	// If we're doing UAV barriers every renderpass, artificially start a new renderpass when the UAVs change.
-	if (GSConfig.HWROVBarriersVK == GSROVBarrierModeVK::EveryRenderPass && (draw_rt_rov || draw_ds_rov) &&
-		(draw_rt_rov != m_tfx_textures[TFX_TEXTURE_RT_ROV] || draw_ds_rov != m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]))
-	{
-		EndRenderPass();
 	}
 	
 	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());

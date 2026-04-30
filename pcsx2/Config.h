@@ -485,7 +485,7 @@ enum class GSROVPreset : u8
 	Aggressive   = 3,
 };
 
-enum class GSROVBarrierModeVK : u8
+enum class GSROVBarriersVKMode : u8
 {
 	None = 0,
 	EveryDraw = 1,
@@ -909,7 +909,7 @@ struct Pcsx2Config
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 
 		GSROVPreset HWROVPreset = GSROVPreset::Disabled;
-		GSROVBarrierModeVK HWROVBarriersVK = GSROVBarrierModeVK::None;
+		GSROVBarriersVKMode HWROVBarriersVK = GSROVBarriersVKMode::None;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
