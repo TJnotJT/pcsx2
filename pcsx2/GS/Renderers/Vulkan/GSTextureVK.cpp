@@ -669,7 +669,6 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 #ifdef PCSX2_DEVBUILD
 	DebugCheckUAVLayout(this, old_layout, new_layout);
 #endif
-	// RDNA2 transition issue discovered by Air.
 	// Windows RDNA2 drivers don't always correctly transition the layout(?) when ROV is involved.
 	// ReadWriteImage -> Feedback transitions are broken.
 	// ReadWriteImage -> Read only layout  -> Feedback transitions are broken.
