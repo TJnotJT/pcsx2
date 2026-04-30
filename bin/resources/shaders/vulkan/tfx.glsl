@@ -514,14 +514,14 @@ layout(location = 0) in VSOutput
 
 #if PS_ROV_COLOR
 	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
-	vec4 cachedRtValue;
-	vec4 sample_from_rt() { return cachedRtValue; }
+	vec4 rov_rt_value;
+	vec4 sample_from_rt() { return rov_rt_value; }
 #endif
 
 #if PS_ROV_DEPTH
 	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-	float cachedDepthValue;
-	vec4 sample_from_depth() { return vec4(cachedDepthValue, 0.0f, 0.0f, 0.0f); }
+	float rov_depth_value;
+	vec4 sample_from_depth() { return vec4(rov_depth_value, 0.0f, 0.0f, 0.0f); }
 #endif
 
 #if NEEDS_TEX
@@ -1591,11 +1591,11 @@ void main()
 #endif
 
 #if PS_ROV_COLOR
-	cachedRtValue = imageLoad(RtImageRov, ivec2(gl_FragCoord.xy));
+	rov_rt_value = imageLoad(RtImageRov, ivec2(gl_FragCoord.xy));
 #endif
 
 #if PS_ROV_DEPTH
-	cachedDepthValue = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
+	rov_depth_value = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH

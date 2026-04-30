@@ -258,12 +258,12 @@ SamplerState TextureSampler : register(s0);
 
 #if PS_ROV_COLOR
 RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
-static float4 cachedRtValue;
+static float4 rov_rt_value;
 #endif
 
 #if PS_ROV_DEPTH
 RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
-static float cachedDepthValue;
+static float rov_depth_value;
 #endif
 
 #ifdef DX12
@@ -298,7 +298,7 @@ cbuffer cb1
 float4 RtLoad(int2 xy)
 {
 #if PS_ROV_COLOR
-	return cachedRtValue;
+	return rov_rt_value;
 #else
 	return RtTexture.Load(int3(int2(xy), 0));
 #endif
@@ -307,7 +307,7 @@ float4 RtLoad(int2 xy)
 float DepthLoad(int2 xy)
 {
 #if PS_ROV_DEPTH
-	return cachedDepthValue;
+	return rov_depth_value;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
 #endif
@@ -1323,11 +1323,11 @@ void ps_main(PS_INPUT input)
 #endif
 
 #if PS_ROV_COLOR
-	cachedRtValue = RtTextureRov[input.p.xy];
+	rov_rt_value = RtTextureRov[input.p.xy];
 #endif
 
 #if PS_ROV_DEPTH
-	cachedDepthValue = DepthTextureRov[input.p.xy];
+	rov_depth_value = DepthTextureRov[input.p.xy];
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH
