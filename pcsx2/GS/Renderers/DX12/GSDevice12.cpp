@@ -4315,9 +4315,9 @@ void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
-	GSTexture12* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
+	GSTexture12* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
 	GSTexture12* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds);
-	GSTexture12* draw_rt_rov = config.ps.rov_color ? static_cast<GSTexture12*>(config.rt) : nullptr;
+	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
@@ -4346,7 +4346,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	UpdateHWPipelineSelector(config);
 
 	// Handle RT hazard when no barrier was requested
-	if (m_features.texture_barrier && config.tex && (config.tex == config.rt) && !(config.require_one_barrier || config.require_full_barrier) && !config.ps.rov_color)
+	if (m_features.texture_barrier && config.tex && (config.tex == config.rt) && !(config.require_one_barrier || config.require_full_barrier) && !config.ps.HasColorROV())
 	{
 		g_perfmon.Put(GSPerfMon::Barriers, 1);
 		FeedbackBarrier(draw_rt);
@@ -4381,7 +4381,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			g_gs_device->SetColorClipTexture(nullptr);
 
 			colclip_rt = nullptr;
-			draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTexture12*>(config.rt);
+			draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
 		}
 		else
 		{
@@ -4747,7 +4747,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 	if (BindDrawPipeline(pipe))
 		Draw(config);
 
-	if (config.ps.rov_color || config.ps.HasDepthROV())
+	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
@@ -4757,11 +4757,11 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
 	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
 	m_pipeline_selector.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
-	m_pipeline_selector.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
+	m_pipeline_selector.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
-	m_pipeline_selector.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
+	m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
-	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.rov_color;
+	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
 }

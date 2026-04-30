@@ -5990,9 +5990,9 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
-	GSTextureVK* draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTextureVK*>(config.rt);
+	GSTextureVK* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTextureVK*>(config.rt);
 	GSTextureVK* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds);
-	GSTextureVK* draw_rt_rov = config.ps.rov_color ? static_cast<GSTextureVK*>(config.rt) : nullptr;
+	GSTextureVK* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTextureVK*>(config.rt) : nullptr;
 	GSTextureVK* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTextureVK*>(config.ds) : nullptr;
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
@@ -6109,7 +6109,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			g_gs_device->SetColorClipTexture(nullptr);
 
 			colclip_rt = nullptr;
-			draw_rt = config.ps.rov_color ? nullptr : static_cast<GSTextureVK*>(config.rt);
+			draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTextureVK*>(config.rt);
 		}
 		else
 		{
@@ -6472,11 +6472,11 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.ps.key_hi = config.ps.key_hi;
 	pipe.ps.key_lo = config.ps.key_lo;
 	pipe.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
-	pipe.bs.key = config.ps.rov_color ? GSHWDrawConfig::BlendState().key : config.blend.key;
+	pipe.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : config.blend.key;
 	pipe.bs.constant = 0; // don't dupe states with different alpha values
-	pipe.cms.key = config.ps.rov_color ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
+	pipe.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	pipe.topology = static_cast<u32>(config.topology);
-	pipe.rt = config.rt != nullptr && !config.ps.rov_color;
+	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
@@ -6623,6 +6623,6 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 
 	Draw(config);
 
-	if (config.ps.rov_color || config.ps.HasDepthROV())
+	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }

@@ -526,6 +526,11 @@ struct alignas(16) GSHWDrawConfig
 			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
 		}
 
+		__fi bool HasColorROV() const
+		{
+			return rov_color != 0;
+		}
+
 		__fi bool HasDepthROV() const
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_ONLY || rov_depth == PS_ROV_DEPTH::READ_WRITE;
