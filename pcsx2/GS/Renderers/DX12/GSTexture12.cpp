@@ -230,7 +230,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				desc.desc1.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
 			optimized_clear_value.Format = rtv_format;
 			state = ResourceState::RenderTarget;
-			if (uav_format != DXGI_FORMAT_UNKNOWN)
+			if (GSConfig.HWROV && uav_format != DXGI_FORMAT_UNKNOWN)
 			{
 				desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 			}
