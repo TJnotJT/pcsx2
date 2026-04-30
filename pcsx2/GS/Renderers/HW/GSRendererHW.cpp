@@ -7495,6 +7495,8 @@ void GSRendererHW::GetROVPreset()
 		m_rov_preset_init = true;
 		switch (m_rov_preset)
 		{
+			default:
+				pxFailRel("Unknown ROV preset");
 			case GSROVPreset::Balanced:
 				m_rov_max_barriers = 16;
 				m_rov_history_weight = 0.75f;
@@ -7512,9 +7514,6 @@ void GSRendererHW::GetROVPreset()
 				m_rov_history_weight = 0.0f;
 				m_rov_barriers_enable = 2.0f;
 				m_rov_barriers_disable = 1.0f;
-				break;
-			default:
-				pxFailRel("Unknown ROV preset");
 				break;
 		}
 	}

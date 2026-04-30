@@ -5362,7 +5362,7 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 
 	if (vkRt)
 	{
-		PSSetShaderResource(TFX_TEXTURE_RT_ROV, vkRt, true, false);
+		PSSetShaderResource(TFX_TEXTURE_RT_ROV, vkRt, true, ResourceType::UAV);
 
 		// Unbind conflicting RT texture
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
@@ -5386,7 +5386,7 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 
 	if (vkDs)
 	{
-		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, vkDs, true, false);
+		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, vkDs, true, ResourceType::UAV);
 
 		// Unbind conflicting depth texture
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
@@ -5460,14 +5460,14 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	}
 }
 
-void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool read_only)
+void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type)
 {
 	GSTextureVK* vkTex = static_cast<GSTextureVK*>(sr);
 	if (vkTex)
 	{
 		if (check_state)
 		{
-			GSTextureVK::Layout layout = read_only ? GSTextureVK::Layout::ShaderReadOnly : GSTextureVK::Layout::ReadWriteImage;
+			const GSTextureVK::Layout layout = GetResourceLayout(type);
 
 			vkTex->CommitClear();
 

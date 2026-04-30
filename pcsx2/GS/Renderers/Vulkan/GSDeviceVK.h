@@ -302,6 +302,25 @@ public:
 		FeedbackLoopFlag_ReadAndWriteDepth = 4,
 	};
 
+	enum class ResourceType
+	{
+		SRV, // Shader resource view (read only)
+		UAV, // Unordered access (read/write)
+	};
+
+	static constexpr GSTextureVK::Layout GetResourceLayout(ResourceType type)
+	{
+		switch (type)
+		{
+			default:
+				pxFailRel("Impossible.");
+			case ResourceType::SRV:
+				return GSTextureVK::Layout::ShaderReadOnly;
+			case ResourceType::UAV:
+				return GSTextureVK::Layout::ReadWriteImage;
+		}
+	}
+
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
@@ -579,7 +598,7 @@ public:
 	void VSSetIndexBuffer(const void* index, size_t count);
 
 	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
-	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, bool read_only = true);
+	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
