@@ -757,7 +757,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWROV = false;
 	HWROVLogging = false;
 	HWROVUseBarriersVK = GSROVBarrierModeVK::None;
-	HWROVPreset = GSROVPreset::Balanced;
+	HWROVPreset = GSROVPreset::Disabled;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;

@@ -7488,7 +7488,7 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
 	}
 }
 
-void GSRendererHW::GetROVPreset()
+bool GSRendererHW::GetROVPreset()
 {
 	if (!m_rov_preset_init || m_rov_preset != GSConfig.HWROVPreset)
 	{
@@ -7496,8 +7496,6 @@ void GSRendererHW::GetROVPreset()
 		m_rov_preset_init = true;
 		switch (m_rov_preset)
 		{
-			default:
-				pxFailRel("Unknown ROV preset");
 			case GSROVPreset::Balanced:
 				m_rov_max_barriers = 16;
 				m_rov_history_weight = 0.75f;
@@ -7510,14 +7508,21 @@ void GSRendererHW::GetROVPreset()
 				m_rov_barriers_enable = 8.0f;
 				m_rov_barriers_disable = 1.5f;
 				break;
-			case GSROVPreset::AlwaysOn:
+			case GSROVPreset::Aggressive:
 				m_rov_max_barriers = 2;
 				m_rov_history_weight = 0.0f;
 				m_rov_barriers_enable = 2.0f;
 				m_rov_barriers_disable = 1.0f;
 				break;
+			default:
+				pxFailRel("Unknown ROV preset.");
+			case GSROVPreset::Disabled:
+				m_rov_preset = GSROVPreset::Disabled;
+				break;
 		}
 	}
+
+	return m_rov_preset != GSROVPreset::Disabled;
 }
 
 void GSRendererHW::DetermineROVUsage()
@@ -7527,7 +7532,8 @@ void GSRendererHW::DetermineROVUsage()
 	if (!features.rov)
 		return;
 
-	GetROVPreset();
+	if (!GetROVPreset())
+		return;
 
 	GL_PUSH("HW: ROV Setup");
 

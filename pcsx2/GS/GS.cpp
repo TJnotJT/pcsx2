@@ -701,7 +701,8 @@ void GSgetStats(SmallStringBase& info)
 	}
 	else
 	{
-		if (!GSConfig.HWROV)
+		const bool using_rov = GSConfig.HWROV && GSConfig.HWROVPreset != GSROVPreset::Disabled;
+		if (!using_rov)
 		{
 			info.format("{} HW | {} PRIM | {} DRW | {} DRWC | {} BAR | {} RP | {} RB | {} TC | {} TU",
 				api_name,
