@@ -756,7 +756,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWAA1 = false;
 	HWROV = false;
 	HWROVLogging = false;
-	HWROVUseBarriersVK = GSROVBarrierModeVK::None;
+	HWROVBarriersVK = GSROVBarrierModeVK::None;
 	HWROVPreset = GSROVPreset::Disabled;
 
 	ManualUserHacks = false;
@@ -861,6 +861,8 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(UserHacks_BilinearHack) &&
 		OpEqu(OverrideTextureBarriers) &&
 		OpEqu(DepthFeedbackMode) &&
+		OpEqu(HWROVPreset) &&
+		OpEqu(HWROVBarriersVK) &&
 
 		OpEqu(CAS_Sharpness) &&
 		OpEqu(ShadeBoost_Brightness) &&
@@ -1049,7 +1051,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(HWROV);
 	SettingsWrapBitBool(HWROVLogging);
 	SettingsWrapIntEnumEx(HWROVPreset, "HWROVPreset");
-	SettingsWrapIntEnumEx(HWROVUseBarriersVK, "HWROVUseBarriersVK");
+	SettingsWrapIntEnumEx(HWROVBarriersVK, "HWROVBarriersVK");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");

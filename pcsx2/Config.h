@@ -909,7 +909,7 @@ struct Pcsx2Config
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 
 		GSROVPreset HWROVPreset = GSROVPreset::Disabled;
-		GSROVBarrierModeVK HWROVUseBarriersVK = GSROVBarrierModeVK::None;
+		GSROVBarrierModeVK HWROVBarriersVK = GSROVBarrierModeVK::None;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;

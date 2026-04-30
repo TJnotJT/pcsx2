@@ -7497,18 +7497,21 @@ bool GSRendererHW::GetROVPreset()
 		switch (m_rov_preset)
 		{
 			case GSROVPreset::Balanced:
+				// Need 8 barriers to activate at once or a string of > 2.
 				m_rov_max_barriers = 16;
 				m_rov_history_weight = 0.75f;
 				m_rov_barriers_enable = 2.0f;
 				m_rov_barriers_disable = 1.125f;
 				break;
 			case GSROVPreset::Conservative:
-				m_rov_max_barriers = 64;
+				// Need 16 barriers to activate at once or a string of > 4.
+				m_rov_max_barriers = 32;
 				m_rov_history_weight = 0.75f;
-				m_rov_barriers_enable = 8.0f;
-				m_rov_barriers_disable = 1.5f;
+				m_rov_barriers_enable = 4.0f;
+				m_rov_barriers_disable = 1.25f;
 				break;
 			case GSROVPreset::Aggressive:
+				// Need 2 barriers to activate then stays on until deactivated externally (e.g. RT recycled).
 				m_rov_max_barriers = 2;
 				m_rov_history_weight = 0.0f;
 				m_rov_barriers_enable = 2.0f;
@@ -7516,8 +7519,9 @@ bool GSRendererHW::GetROVPreset()
 				break;
 			default:
 				pxFailRel("Unknown ROV preset.");
-			case GSROVPreset::Disabled:
 				m_rov_preset = GSROVPreset::Disabled;
+				[[fallthrough]];
+			case GSROVPreset::Disabled:
 				break;
 		}
 	}
