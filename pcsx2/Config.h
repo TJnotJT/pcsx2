@@ -477,6 +477,21 @@ enum class GSDepthFeedbackMode : u8
 	DepthAsRT = 3,
 };
 
+enum class GSROVPreset : u8
+{
+	Disabled     = 0,
+	Balanced     = 1,
+	Conservative = 2,
+	Aggressive   = 3,
+};
+
+enum class GSROVBarriersVKMode : u8
+{
+	None = 0,
+	EveryDraw = 1,
+	EveryRenderPass = 2,
+};
+
 enum class AchievementOverlayPosition : u8
 {
 	TopLeft,
@@ -793,6 +808,8 @@ struct Pcsx2Config
 					HWMipmap : 1,
 					HWAccurateAlphaTest: 1,
 					HWAA1 : 1,
+					HWROV : 1,
+					HWROVLogging : 1,
 					ManualUserHacks : 1,
 					UserHacks_AlignSpriteX : 1,
 					UserHacks_CPUFBConversion : 1,
@@ -890,6 +907,9 @@ struct Pcsx2Config
 		TriFiltering TriFilter = DEFAULT_TRILINEAR_FILTERING_MODE;
 		s8 OverrideTextureBarriers = -1;
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
+
+		GSROVPreset HWROVPreset = GSROVPreset::Disabled;
+		GSROVBarriersVKMode HWROVBarriersVK = GSROVBarriersVKMode::None;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
