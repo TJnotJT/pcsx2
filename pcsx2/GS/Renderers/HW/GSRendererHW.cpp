@@ -6802,6 +6802,7 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 	m_optimized_blend.B = m_conf.ps.blend_b;
 	m_optimized_blend.C = m_conf.ps.blend_c;
 	m_optimized_blend.D = m_conf.ps.blend_d;
+	m_optimized_blend.FIX = AFIX;
 
 	// TODO: blend_ad_alpha_masked, as well as other blend cases can be optimized on dx11/dx12/gl to use
 	// blend multipass more which might be faster, vk likely won't benefit as barriers are already fast.
@@ -7777,6 +7778,9 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 			m_conf.ps.blend_b = m_optimized_blend.B;
 			m_conf.ps.blend_c = m_optimized_blend.C;
 			m_conf.ps.blend_d = m_optimized_blend.D;
+
+			if (m_conf.ps.blend_c == ALPHA_C_FIX)
+				m_conf.cb_ps.TA_MaxDepth_Af.a = m_optimized_blend.FIX / 128.0f;
 
 			// Disable HW or mixed blend or multipass blend
 			m_conf.blend = {};
