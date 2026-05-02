@@ -839,6 +839,12 @@ __ri void ImGuiManager::DrawSettingsOverlay(float scale, float margin, float spa
 		if (GSConfig.HWAA1)
 			APPEND("AA1 ");
 
+		if (GSConfig.HWROV && GSConfig.HWROVPreset != GSROVPreset::Disabled)
+			APPEND("ROV={} ", static_cast<int>(GSConfig.HWROVPreset));
+
+		if (GSConfig.HWROVBarriersVK != GSROVBarriersVKMode::None)
+			APPEND("RBVK={} ", static_cast<int>(GSConfig.HWROVBarriersVK));
+
 		// deliberately test global and print local here for auto values
 		if (EmuConfig.GS.TextureFiltering != BiFiltering::PS2)
 			APPEND("BF={} ", static_cast<unsigned>(GSConfig.TextureFiltering));
