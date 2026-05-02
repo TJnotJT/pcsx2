@@ -6899,6 +6899,15 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 
 	switch (GSConfig.AccurateBlendingUnit)
 	{
+		case AccBlendLevel::Ultra:
+			// Enable SW blend and disable optimizations.
+			sw_blending = true;
+			accumulation_blend = false;
+			blend_mix = false;
+			color_dest_blend = false;
+			color_dest_blend2 = false;
+			blend_zero_to_one_range = false;
+			break;
 		case AccBlendLevel::Maximum:
 			sw_blending |= true;
 			accumulation_blend &= (GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].bpp == 32);
@@ -6938,23 +6947,17 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 			break;
 	}
 
-	if (features.framebuffer_fetch)
-	{
+	const bool force_sw_blending =
 		// If we have fbfetch, use software blending when we need the fb value for anything else.
 		// This saves outputting the second color when it's not needed.
-		if (one_barrier || m_conf.require_full_barrier)
-		{
-			sw_blending = true;
-			color_dest_blend = false;
-			accumulation_blend = false;
-			blend_mix = false;
-		}
-	}
+		(features.framebuffer_fetch && (one_barrier || m_conf.require_full_barrier)) ||
 
-	if (m_conf.ps.IsFeedbackLoopDepth() && !features.depth_feedback)
-	{
 		// If we are doing depth feedback with a second RT we must use SW blending to avoid
 		// mixing dual source blending with multiple render targets.
+		(m_conf.ps.IsFeedbackLoopDepth() && !features.depth_feedback);
+	
+	if (force_sw_blending)
+	{
 		sw_blending = true;
 		color_dest_blend = false;
 		accumulation_blend = false;
