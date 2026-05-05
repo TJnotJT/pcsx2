@@ -498,15 +498,15 @@ __fi static void RoundUV(VectorI& u, VectorI& v, const GSScanlineLocalData& loca
 
 	// Determine round down.
 	const VectorI round_down_const = VectorI::load<true>(g_const_256b.m_round_down);
-	const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
-	const VectorI round_down_v = (round_setting_v == round_down_const);
+	const VectorI round_down_u = ((round_setting_u & round_down_const) != VectorI::zero()) & ~at_left;
+	const VectorI round_down_v = (round_setting_v & round_down_const) != VectorI::zero();
 
 	// Determine round up.
 	// U round down gets converted to round up at left pixels.
 	const VectorI round_up_const = VectorI::load<true>(g_const_256b.m_round_up);
-	const VectorI round_up_u = (round_setting_u == round_up_const) |
-	                           ((round_setting_u == round_down_const) & at_left);
-	const VectorI round_up_v = (round_setting_v == round_up_const);
+	const VectorI round_up_u = ((round_setting_u & round_up_const) != VectorI::zero()) |
+	                           (((round_setting_u & round_down_const) != VectorI::zero()) & at_left);
+	const VectorI round_up_v = (round_setting_v & round_up_const) != VectorI::zero();
 
 	// Round U, V, to nearest half texel.
 	const VectorI quarter_texel = VectorI::load<true>(g_const_256b.m_quarter_texel);
@@ -522,6 +522,15 @@ __fi static void RoundUV(VectorI& u, VectorI& v, const GSScanlineLocalData& loca
 	u = u.blend8(ui + threshold, close_u & round_up_u);
 	v = v.blend8(vi - threshold, close_v & round_down_v);
 	v = v.blend8(vi + threshold, close_v & round_up_v);
+
+	// Swap if needed.
+	const VectorI round_swap_const = VectorI::load<true>(g_const_256b.m_round_swap);
+	const VectorI round_swap = (round_setting_u & round_swap_const) != VectorI::zero();
+
+	const VectorI tmp_u = u;
+	const VectorI tmp_v = v;
+	u = u.blend8(tmp_v, round_swap);
+	v = v.blend8(tmp_u, round_swap);
 }
 
 void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local)
@@ -574,8 +583,6 @@ __ri void GSDrawScanline::CDrawScanline(int pixels, int left, int top, const GSV
 
 	if (sel.rounduv)
 	{
-		local.temp.round.left = left;
-
 		const u32 bits = scan.t.U32[2];
 		const int prim_left = (bits >> 0) & 0xFFF;
 		const int prim_top = (bits >> 12) & 0xFFF;
