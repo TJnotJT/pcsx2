@@ -3135,6 +3135,7 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	sm.AddMacro("ROUND_UV_UP", fmt::format("{}", static_cast<int>(ROUND_UV_UP)));
 	sm.AddMacro("ROUND_UV_DOWN", fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)));
 	sm.AddMacro("ROUND_UV_PER_PIXEL", fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)));
+	sm.AddMacro("ROUND_UV_SWAP", fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)));
 	sm.AddMacro("VS_TME", sel.tme);
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
@@ -3161,6 +3162,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("ROUND_UV_UP", fmt::format("{}", static_cast<int>(ROUND_UV_UP)));
 	sm.AddMacro("ROUND_UV_DOWN", fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)));
 	sm.AddMacro("ROUND_UV_PER_PIXEL", fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)));
+	sm.AddMacro("ROUND_UV_SWAP", fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)));
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_FST", sel.fst);
 	sm.AddMacro("PS_WMS", sel.wms);

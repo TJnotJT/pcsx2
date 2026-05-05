@@ -614,6 +614,10 @@ float4 round_and_clamp_uv(PS_INPUT input)
 	uv = clamp(uv, input.clampuv.xy, input.clampuv.zw);
 #endif
 
+#if PS_ROUND_UV != 0
+	uv = bool2(input.rounduv.zw & ROUND_UV_SWAP) ? uv.yx : uv;
+#endif
+
 	return float4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 }
 
@@ -1999,9 +2003,13 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 			v1.ti.zw = tex.zy;
 			v2.ti.zw = tex.xw;
 
-			v0.ti.xy = v0.ti.zw * TextureScale;
-			v1.ti.xy = v1.ti.zw * TextureScale;
-			v2.ti.xy = v2.ti.zw * TextureScale;
+			float2 texscale = TextureScale;
+			#if VS_ROUND_UV
+				texscale = bool2(v0.rounduv.zw & ROUND_UV_SWAP) ? texscale.yx : texscale;
+			#endif
+			v0.ti.xy = v0.ti.zw * texscale;
+			v1.ti.xy = v1.ti.zw * texscale;
+			v2.ti.xy = v2.ti.zw * texscale;
 		#endif
 	#endif
 

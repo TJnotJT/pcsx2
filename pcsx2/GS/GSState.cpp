@@ -3952,7 +3952,7 @@ static constexpr u8 triangle_comparison_lut[16] =
 
 // Determines ordering of two triangles in parallel if both are right.
 // More efficient than calling IsTriangleRight twice.
-template <u32 tme, u32 fst>
+template <u32 tme, u32 fst, u32 swapuv = 0>
 __forceinline bool AreTrianglesRight(const GSVertex* RESTRICT vin, const u16* RESTRICT index0, const u16* RESTRICT index1,
 	TriangleOrdering* out_triangle0, TriangleOrdering* out_triangle1)
 {
@@ -3960,11 +3960,22 @@ __forceinline bool AreTrianglesRight(const GSVertex* RESTRICT vin, const u16* RE
 	if (tme && fst)
 	{
 		// Compare xy and uv together
-		mask = GSVector4i::cxpr8(
-			(s8)0, (s8)1, (s8)8, (s8)9,
-			(s8)2, (s8)3, (s8)10, (s8)11,
-			(s8)0, (s8)1, (s8)8, (s8)9,
-			(s8)2, (s8)3, (s8)10, (s8)11);
+		if (swapuv)
+		{
+			mask = GSVector4i::cxpr8(
+				(s8)0, (s8)1, (s8)10, (s8)11,
+				(s8)2, (s8)3, (s8)8, (s8)9,
+				(s8)0, (s8)1, (s8)10, (s8)11,
+				(s8)2, (s8)3, (s8)8, (s8)9);
+		}
+		else
+		{
+			mask = GSVector4i::cxpr8(
+				(s8)0, (s8)1, (s8)8, (s8)9,
+				(s8)2, (s8)3, (s8)10, (s8)11,
+				(s8)0, (s8)1, (s8)8, (s8)9,
+				(s8)2, (s8)3, (s8)10, (s8)11);
+		}
 	}
 	else
 	{
@@ -3994,9 +4005,18 @@ __forceinline bool AreTrianglesRight(const GSVertex* RESTRICT vin, const u16* RE
 		GSVector4 st4 = GSVector4::cast(GSVector4i(vin[index1[1]].m[0]));
 		GSVector4 st5 = GSVector4::cast(GSVector4i(vin[index1[2]].m[0]));
 
-		vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2));
-		vcmp1 = vcmp1 & GSVector4i::cast(st3.xyxy() == st4.upld(st5));
-		vcmp2 = vcmp2 & GSVector4i::cast(st1.upld(st4) == st2.upld(st5));
+		if (swapuv)
+		{
+			vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2)).yxwz();
+			vcmp1 = vcmp1 & GSVector4i::cast(st3.xyxy() == st4.upld(st5)).yxwz();
+			vcmp2 = vcmp2 & GSVector4i::cast(st1.upld(st4) == st2.upld(st5)).yxwz();
+		}
+		else
+		{
+			vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2));
+			vcmp1 = vcmp1 & GSVector4i::cast(st3.xyxy() == st4.upld(st5));
+			vcmp2 = vcmp2 & GSVector4i::cast(st1.upld(st4) == st2.upld(st5));
+		}
 	}
 	int cmp0 = GSVector4::cast(vcmp0).mask();
 	int cmp1 = GSVector4::cast(vcmp1).mask();
@@ -4014,18 +4034,29 @@ __forceinline bool AreTrianglesRight(const GSVertex* RESTRICT vin, const u16* RE
 	return true;
 }
 
-template <u32 tme, u32 fst>
+template <u32 tme, u32 fst, u32 swapuv = 0>
 __forceinline bool IsTriangleRight(const GSVertex* RESTRICT vin, const u16* RESTRICT index, TriangleOrdering* out_triangle)
 {
 	GSVector4i mask;
 	if (tme && fst)
 	{
 		// Compare xy and uv together
-		mask = GSVector4i::cxpr8(
-			(s8)0, (s8)1, (s8)8, (s8)9,
-			(s8)2, (s8)3, (s8)10, (s8)11,
-			(s8)0, (s8)1, (s8)8, (s8)9,
-			(s8)2, (s8)3, (s8)10, (s8)11);
+		if (swapuv)
+		{
+			mask = GSVector4i::cxpr8(
+				(s8)0, (s8)1, (s8)10, (s8)11,
+				(s8)2, (s8)3, (s8)8, (s8)9,
+				(s8)0, (s8)1, (s8)10, (s8)11,
+				(s8)2, (s8)3, (s8)8, (s8)9);
+		}
+		else
+		{
+			mask = GSVector4i::cxpr8(
+				(s8)0, (s8)1, (s8)8, (s8)9,
+				(s8)2, (s8)3, (s8)10, (s8)11,
+				(s8)0, (s8)1, (s8)8, (s8)9,
+				(s8)2, (s8)3, (s8)10, (s8)11);
+		}
 	}
 	else
 	{
@@ -4048,8 +4079,16 @@ __forceinline bool IsTriangleRight(const GSVertex* RESTRICT vin, const u16* REST
 		GSVector4 st1 = GSVector4::cast(GSVector4i(vin[index[1]].m[0]));
 		GSVector4 st2 = GSVector4::cast(GSVector4i(vin[index[2]].m[0]));
 
-		vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2));
-		vcmp1 = vcmp1 & GSVector4i::cast(st1 == st2); // ignore top 64 bits
+		if (swapuv)
+		{
+			vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2)).yxwz();
+			vcmp1 = vcmp1 & GSVector4i::cast(st1 == st2).yxwz(); // ignore top 64 bits
+		}
+		else
+		{
+			vcmp0 = vcmp0 & GSVector4i::cast(st0.xyxy() == st1.upld(st2));
+			vcmp1 = vcmp1 & GSVector4i::cast(st1 == st2); // ignore top 64 bits
+		}
 	}
 	int cmp0 = GSVector4::cast(vcmp0).mask();
 	int cmp1 = GSVector4::cast(vcmp1).mask() & 0x3;
@@ -4065,11 +4104,11 @@ __forceinline bool IsTriangleRight(const GSVertex* RESTRICT vin, const u16* REST
 }
 
 // Determines whether the triangle are right and form a quad
-template <u32 tme, u32 fst>
+template <u32 tme, u32 fst, u32 swapuv = 0>
 __forceinline bool AreTrianglesQuad(const GSVertex* RESTRICT vin, const u16* RESTRICT index0, const u16* RESTRICT index1,
 	TriangleOrdering* out_triangle0, TriangleOrdering* out_triangle1)
 {
-	if (!AreTrianglesRight<tme, fst>(vin, index0, index1, out_triangle0, out_triangle1))
+	if (!AreTrianglesRight<tme, fst, swapuv>(vin, index0, index1, out_triangle0, out_triangle1))
 		return false;
 
 	// The two triangles are now laid out in one of these four orderings:
@@ -4913,14 +4952,15 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 	const int th = 1 << m_context->TEX0.TH;
 	const bool linear = m_vt.IsRealLinear();
 
-	// Corners of right-angle corners for triangles forming quads.
-	std::vector<u32> tri_quad_corners;
+	std::vector<u32> tri_quad_corners; // Corners of right-angle corners for triangles forming quads.
+	std::vector<bool> tri_swap_uv; // Whether triangle swaps UV (i.e. U follows Y, V follows X).
 
 	// Only apply this to draws where all triangles form axis-aligned quads (both for XY and UV).
 	if (primclass == GS_TRIANGLE_CLASS)
 	{
 		GSVertex* RESTRICT vtx = m_vertex->buff;
 		u16* RESTRICT index = m_index->buff;
+		const bool allow_swap = GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::On && GSIsHardwareRenderer(); // FIXME: Implement for SW renderer
 
 		if (m_index->tail % 6 != 0)
 			return false;
@@ -4933,8 +4973,18 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 			TriangleOrdering tri0, tri1;
 
 			// Check if vertex XYs and UVs form an axis-aligned quad.
-			if (!AreTrianglesQuad<tme, fst>(vtx, idx0, idx1, &tri0, &tri1))
-				return false;
+			if (AreTrianglesQuad<tme, fst, 0>(vtx, idx0, idx1, &tri0, &tri1))
+			{
+				tri_swap_uv.push_back(false);
+			}
+			else if (allow_swap && AreTrianglesQuad<tme, fst, 1>(vtx, idx0, idx1, &tri0, &tri1))
+			{
+				tri_swap_uv.push_back(true);
+			}
+			else
+			{
+				return false; // No quad
+			}
 
 			// For ST make sure that Q is flat.
 			if constexpr (tme && !fst)
@@ -4968,16 +5018,19 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 	for (u32 i = 0; i < count; i += n)
 	{
 		GSVertex v0, v1; // Corners of the quad.
+		bool swap_uv;
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
 			v0 = vtx[tri_quad_corners[2 * (i / n) + 0]];
 			v1 = vtx[tri_quad_corners[2 * (i / n) + 1]];
+			swap_uv = tri_swap_uv[i / n];
 		}
 		else
 		{
 			v0 = vtx[i + 0];
 			v1 = vtx[i + 1];
+			swap_uv = false;
 
 			if constexpr (primclass == GS_SPRITE_CLASS && tme && !fst)
 				v0.RGBAQ.Q = v1.RGBAQ.Q; // Use Q of second vertex for sprites.
@@ -4986,16 +5039,16 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 		if constexpr (tme)
 		{
 			const auto GetUV_f = [&]<int uv>(const GSVertex & v) {
-				const u16 UV = (uv == 0) ? v.U : v.V;
-				const float ST = (uv == 0) ? v.ST.S : v.ST.T;
-				const int tsize = (uv == 0) ? tw : th;
+				const u16 UV = ((uv == 0) != swap_uv) ? v.U : v.V;
+				const float ST = ((uv == 0) != swap_uv) ? v.ST.S : v.ST.T;
+				const int tsize = ((uv == 0) != swap_uv) ? tw : th;
 				return fst ? static_cast<float>(UV) : 16.0f * (ST / v.RGBAQ.Q) * tsize;
 			};
 
 			const auto GetUV = [&]<int uv>(const GSVertex & v) -> std::pair<int, bool> {
-				const u16 UV = (uv == 0) ? v.U : v.V;
-				const float ST = (uv == 0) ? v.ST.S : v.ST.T;
-				const int tsize = (uv == 0) ? tw : th;
+				const u16 UV = ((uv == 0) != swap_uv) ? v.U : v.V;
+				const float ST = ((uv == 0) != swap_uv) ? v.ST.S : v.ST.T;
+				const int tsize = ((uv == 0) != swap_uv) ? tw : th;
 
 				const float UV_f = GetUV_f.template operator()<uv>(v);
 				
@@ -5038,7 +5091,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				const int tex0_round = tex0 + (pos0_round - pos0) * scale;
 				const int tex1_round = tex1 + (pos1_round - pos1) * scale;
 				return ((tex0_round | tex1_round) & 0xF) == 0;
-				};
+			};
 
 			// First condition: dU/dX is an integer and pixel centers correspond to texel boundaries.
 			const bool scaled_aligned_U = ((dU % dX) == 0) && EndpointsAligned(X0, X1, U0, U1, dU / dX);
@@ -5114,6 +5167,12 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 					round_V = allow_round_V ? round_V : 0;
 				}
 
+				if (swap_uv)
+				{
+					round_U |= ROUND_UV_SWAP;
+					round_V |= ROUND_UV_SWAP;
+				}
+
 				// Rounding settings (4 bits each for each U, V).
 				const u32 round_settings = round_U | (round_V << 4);
 
@@ -5127,7 +5186,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				if (dV_bias_up && j == 1)
 					V = static_cast<float>(V0 + dY);
 
-				// Save pre-divided UV in ST.
+				// Save pre-divided UV in ST. UV are swapped if the swap flag is set.
 				vtx[i + j].ST.S = U;
 				vtx[i + j].ST.T = V;
 

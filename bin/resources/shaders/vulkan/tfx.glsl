@@ -540,9 +540,13 @@ void main()
 			v1.ti.zw = tex.zy;
 			v2.ti.zw = tex.xw;
 
-			v0.ti.xy = v0.ti.zw * TextureScale;
-			v1.ti.xy = v1.ti.zw * TextureScale;
-			v2.ti.xy = v2.ti.zw * TextureScale;
+			vec2 texscale = TextureScale;
+			#if VS_ROUND_UV
+				texscale = mix(texscale, texscale.yx, bvec2(v0.rounduv.zw & ROUND_UV_SWAP));
+			#endif
+			v0.ti.xy = v0.ti.zw * texscale;
+			v1.ti.xy = v1.ti.zw * texscale;
+			v2.ti.xy = v2.ti.zw * texscale;
 		#endif
 	#endif
 
@@ -1121,6 +1125,10 @@ vec4 round_and_clamp_uv()
 
 #if PS_CLAMP_UV
 	uv = clamp(uv, vsIn.clampuv.xy, vsIn.clampuv.zw);
+#endif
+
+#if PS_ROUND_UV != 0
+	uv = mix(uv, uv.yx, bvec2(vsIn.rounduv.zw & uvec2(ROUND_UV_SWAP)));
 #endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.

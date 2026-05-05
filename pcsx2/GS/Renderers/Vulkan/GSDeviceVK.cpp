@@ -3731,6 +3731,7 @@ static void AddShaderHeader(std::stringstream& ss)
 	ss << "#define ROUND_UV_UP " << fmt::format("{}", static_cast<int>(ROUND_UV_UP)) << "\n";
 	ss << "#define ROUND_UV_DOWN " << fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)) << "\n";
 	ss << "#define ROUND_UV_PER_PIXEL " << fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)) << "\n";
+	ss << "#define ROUND_UV_SWAP " << fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)) << "\n";
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)
