@@ -5833,6 +5833,16 @@ void GSRendererHW::EmulateAA1()
 	}
 }
 
+bool GSRendererHW::CanTwoPassAA1()
+{
+	const bool good_depth = (!m_cached_ctx.DepthRead() || !m_cached_ctx.DepthWrite() || m_cached_ctx.TEST.ZTST == ZTST_GEQUAL);
+
+	// Depth is nice so that we can do a depth prepass.
+	return (!m_cached_ctx.DepthRead() || !m_cached_ctx.DepthWrite() || m_cached_ctx.TEST.ZTST == ZTST_GEQUAL) &&
+	       (!m_cached_ctx.TEST.ATE || m_cached_ctx.TEST.AFAIL == AFAIL_ZB_ONLY || m_cached_ctx.TEST.AFAIL == AFAIL_KEEP) &&
+	       (!m_cached_ctx.TEST.DATE);
+}
+
 bool GSRendererHW::EmulateDATEEarlyFail(DATEOptions& date, GSTextureCache::Target* rt)
 {
 	if (!date.enabled)

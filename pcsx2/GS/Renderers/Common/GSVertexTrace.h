@@ -31,8 +31,8 @@ public:
 	{
 		int min, max;
 
-		// Separate inference for depth if using AA1 coverage alpha, since edges don't write depth.
-		int depth_min, depth_max;
+		// Separate inference for interior if using AA1 coverage alpha.
+		int interior_min, interior_max;
 
 		bool valid;
 	};
