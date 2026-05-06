@@ -4923,25 +4923,18 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 	//   the Vs always round up at texel boundaries. This it the only configuration out of the 4 possible
 	//   that has this exception.
 
-	// Side note: The reason for this behavior might be due to the GS fixed-point precision for computing gradients,
-	// since power-of-2 and non-power-of-2 denominators have different behavior. However, this pattern only seems to
-	// hold when the width or height is <= 512 pixels. At > 512 pixels, the rounding seems to be sporadically up/down,
-	// suggesting that reciprocals < 1 / 512 are somehow treated differently. Fortunately, a width or height of 640
+	// Side note: The power-of-two pattern only seems to hold when the width or height is <= 512 pixels.
+	// At > 512 pixels, the rounding seems to be sporadically up/down, suggesting that reciprocals < 1 / 512
+	// are somehow treated differently by the GS. Fortunately, a width or height of 640
 	// rounds down the UVs, so no changes are needed to the below code in most cases.
 
 	static_assert(primclass == GS_TRIANGLE_CLASS || primclass == GS_SPRITE_CLASS);
-
-	// FIXME: REMOVE
-	// We need UVs to fit in 1:11:4 fixed point format for ST conversion.
-	//const bool uv_too_large =
-	//	((m_vt.m_max.t.xyxy() > GSVector4(static_cast<float>(0x7FFF) / 16.0f)) |
-	//	(m_vt.m_min.t.xyxy() < GSVector4(static_cast<float>(-0x8000) / 16.0f))).mask();
 
 	// We pre-divide Q so must ensure it's not used for mipmap.
 	const bool q_is_one = m_vt.m_eq.q && m_vt.m_min.t.w == 1.0f;
 	const bool need_q_for_mipmap = !fst && IsMipMapActive() && m_context->TEX1.LCM == 0 && !q_is_one;
 	
-	if (!(GSConfig.AccurateUVRounding && PRIM->TME && /*!uv_too_large &&*/ !need_q_for_mipmap))
+	if (!(GSConfig.AccurateUVRounding && PRIM->TME && !need_q_for_mipmap))
 		return false;
 
 	// How many vertices for each quad.
@@ -5139,10 +5132,10 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		// Get rounding info for each vertex.
 		for (u32 j = 0; j < n; j++)
 		{
-			u32 round_U; // Round flag for U.
-			u32 round_V; // Round flag for V.
-			int sX; // Stepping origin X (no error at these X).
-			int sY; // Stepping origin Y (no error at these Y).
+			u32 round_U = 0; // Round flag for U.
+			u32 round_V = 0; // Round flag for V.
+			int sX = -1; // Stepping origin X (no error at these X).
+			int sY = -1; // Stepping origin Y (no error at these Y).
 
 			if constexpr (primclass == GS_TRIANGLE_CLASS)
 			{
@@ -5159,14 +5152,8 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 				const bool negV = ((dY < 0) != (dV < 0)) != bottom_right_triangle;
 
 				// For triangles, both dX and dY must be powers of 2 for no error.
-				round_U =
-					bias_U_up ? ROUND_UV_UP :
-					bias_U_down ? ROUND_UV_DOWN :
-					(negU || (pow2_dX && pow2_dY) || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-				round_V =
-					bias_V_up ? ROUND_UV_UP :
-					bias_V_down ? ROUND_UV_DOWN :
-					(negV || (pow2_dX && pow2_dY) || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_U = (negU || (pow2_dX && pow2_dY) || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = (negV || (pow2_dX && pow2_dY) || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 				// Hypothesis: triangles step along the left edge and left-to-right on scanlines,
 				// so there's no error at the first vertex of the left edge.
@@ -5176,20 +5163,18 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			else
 			{
 				// For sprites, treat each axis independently.
-				round_U =
-					bias_U_up ? ROUND_UV_UP :
-					bias_U_down ? ROUND_UV_DOWN :
-					((dU < 0) || pow2_dX || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
-				round_V =
-					bias_V_up ? ROUND_UV_UP :
-					bias_V_down ? ROUND_UV_DOWN :
-					((dV < 0) || pow2_dY || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_U = ((dU < 0) || pow2_dX || (dU == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
+				round_V = ((dV < 0) || pow2_dY || (dV == 0)) ? ROUND_UV_UP : ROUND_UV_DOWN;
 
 				// Hypothesis: The GS steps in the direction specified by vertices when rasterizing
 				// sprites so there's no error at the X or Y of the first vertex.
 				sX = X0;
 				sY = Y0;
 			}
+
+			// Explicit biasing overrides rounding error heuristics.
+			round_U = bias_U_up ? ROUND_UV_UP : bias_U_down ? ROUND_UV_DOWN : round_U;
+			round_V = bias_V_up ? ROUND_UV_UP : bias_V_down ? ROUND_UV_DOWN : round_V;
 
 			if (swap_uv)
 			{
@@ -5202,33 +5187,13 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 			if (!allow_round_V)
 				round_V &= ~(ROUND_UV_UP | ROUND_UV_DOWN);
 
-			if (allow_round_U && (bias_U_up || bias_U_down))
-			{
-				printf("");
-			}
-			if (allow_round_V && (bias_V_up || bias_V_down))
-			{
-				printf("");
-			}
-
 			// Rounding settings (4 bits each for U, V).
 			const u32 round_settings = round_U | (round_V << 4);
 			
-			const GSVector4 curr_uv = GetUV(vtx[i + j]);
-			float U = curr_uv.x;
-			float V = curr_uv.y;
-
-			// If the game is biasing UV up then we can't rely on the original coordinates.
-			// This currently only applies to sprites, so just modify the second vertex.
-			//if (allow_round_U && bias_U_bias_up && j == 1)
-			//	U = static_cast<float>(U0 + dX);
-			//if (allow_round_V && bias_V_bias_up && j == 1)
-			//	V = static_cast<float>(V0 + dY);
-
 			// Save pre-divided UV in ST.
-			vtx[i + j].ST.S = U;
-			vtx[i + j].ST.T = V;
+			vtx[i + j].ST.U64 = GetUV(vtx[i + j]).U64[0];
 
+			// Save top-left integer coords in 24 bits.
 			const u32 prim_topleft = ((sX >> 4) & 0xFFF) | (((sY >> 4) & 0xFFF) << 12);
 
 			// Save rounding info in unused Q.
