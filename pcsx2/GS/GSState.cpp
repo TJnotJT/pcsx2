@@ -5946,14 +5946,15 @@ __forceinline void GSState::VertexKick(u32 skip)
 			bbox += GSVector4i(-0x10, -0x10, 0x10, 0x10);
 		}
 
-		// Make the bottom-right endpoints exclusive for rectangle intersection to work correctly.
-		bbox += GSVector4i::cxpr(0, 0, 1, 1);
+		// Fix degenerate bboxes for points/lines.
+		if constexpr (primclass == GS_POINT_CLASS || primclass == GS_LINE_CLASS)
+			bbox += (bbox.zwzw() == bbox.xyxy()) & GSVector4i::cxpr(0, 0, 1, 1);
 
 		// Do scissor test and empty bbox test.
 		GSVector4i test = GSVector4i(bbox.rintersects(m_context->scissor.cull)) == GSVector4i::cxpr(0);
 
 		// Test for degenerate triangle.
-		if (primclass == GS_TRIANGLE_CLASS)
+		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
 			test |= v0.eq64(v1) | v1.eq64(v2) | v0.eq64(v2);
 		}
