@@ -379,6 +379,8 @@ void main()
 #define PS_AA1_LINE 1
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
+#define PS_AA1_TRIANGLE_INTERIORS_ONLY 4
+#define PS_AA1_TRIANGLE_EDGES_ONLY 5
 #endif
 
 #ifndef PS_FST
@@ -1539,6 +1541,14 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 
 void main()
 {
+#if PS_AA1 == PS_AA1_TRIANGLE_INTERIORS_ONLY
+	if (!bool(vsIn.interior))
+		discard; // FIXME: Do this in nvertex shader instead.
+#elif PS_AA1 == PS_AA1_TRIANGLE_EDGES_ONLY
+	if (bool(vsIn.interior))
+		discard; // FIXME: Do this in nvertex shader instead.
+#endif 
+
 	float input_z = gl_FragCoord.z;
 
 	// Must floor before depth testing.
@@ -1559,6 +1569,8 @@ void main()
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
+
+
 #if PS_DATE >= 5
 
 #if PS_WRITE_RG == 1

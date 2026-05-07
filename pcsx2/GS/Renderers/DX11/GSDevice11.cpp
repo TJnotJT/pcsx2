@@ -2928,7 +2928,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		Draw(config);
 
 		config.ps.date = 3;
-		config.alpha_second_pass.ps.date = 3;
+		config.second_pass.ps.date = 3;
 		SetupPS(config.ps, nullptr, config.sampler);
 	}
 
@@ -2950,12 +2950,12 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
 	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass2 = config.second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
 	if (draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2))))
 	{
 		config.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
-		config.alpha_second_pass.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
+		config.second_pass.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
 
 		// Requires a copy of the RT.
 		draw_rt_clone = CreateTexture(rtsize.x, rtsize.y, 1, draw_rt->GetFormat(), true);
@@ -2965,7 +2965,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool ds_feedbackloop_pass1 = config.ps.IsFeedbackLoopDepth();
-	const bool ds_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass2 = config.second_pass.ps.IsFeedbackLoopDepth();
 	if (draw_ds && m_features.depth_feedback && (config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(ds_feedbackloop_pass1 || ds_feedbackloop_pass2))
 	{
@@ -2997,23 +2997,23 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		Draw(config);
 	}
 
-	if (config.alpha_second_pass.enable)
+	if (config.second_pass)
 	{
-		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.second_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
-			SetupPS(config.alpha_second_pass.ps, &config.cb_ps, config.sampler);
+			config.cb_ps.FogColor_AREF.a = config.second_pass.ps_aref;
+			SetupPS(config.second_pass.ps, &config.cb_ps, config.sampler);
 		}
 		else
 		{
 			// ps cbuffer hasn't changed, so don't bother checking
-			SetupPS(config.alpha_second_pass.ps, nullptr, config.sampler);
+			SetupPS(config.second_pass.ps, nullptr, config.sampler);
 		}
 
-		const bool one_barrier = config.alpha_second_pass.require_one_barrier && m_features.multidraw_fb_copy;
-		SetupOM(config.alpha_second_pass.depth, OMBlendSelector(config.alpha_second_pass.colormask, config.blend), config.blend.constant);
+		const bool one_barrier = config.second_pass.require_one_barrier && m_features.multidraw_fb_copy;
+		SetupOM(config.second_pass.depth, OMBlendSelector(config.second_pass.colormask, config.blend), config.blend.constant);
 		SendHWDraw(config, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds,
-			one_barrier, config.alpha_second_pass.require_full_barrier);
+			one_barrier, config.second_pass.require_full_barrier);
 	}
 
 	if (colclip_rt)

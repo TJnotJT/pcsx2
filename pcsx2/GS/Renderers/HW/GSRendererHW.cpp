@@ -5495,6 +5495,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 3;
+
+					if (m_conf.second_pass.type == GSHWDrawConfig::SecondPassType::AA1)
+					{
+						m_conf.second_pass.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+					}
 				}
 				else
 				{
@@ -5810,14 +5815,25 @@ void GSRendererHW::EmulateAA1()
 		}
 		else if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
 		{
-			// Force SW depth so that Z writes can be prevented for edge pixels.
 			if (m_cached_ctx.DepthWrite())
 			{
-				GL_INS("HW: AA1 triangles with depth feedback.");
+				if (GSConfig.AccurateBlendingUnit < AccBlendLevel::Maximum && CanTwoPassAA1())
+				{
+					// Two pass AA1
+					GL_INS("HW: AA1 triangles two pass.");
 
-				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_SW_Z; // Allows discarding depth on edge pixels.
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_INTERIORS_ONLY;
+					m_conf.second_pass.type = GSHWDrawConfig::SecondPassType::AA1;
+				}
+				else
+				{
+					// Force SW depth so that Z writes can be prevented for edge pixels.
+					GL_INS("HW: AA1 triangles with depth feedback.");
 
-				ConfigureDepthFeedback(); // Enable barriers/SW depth test.
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_SW_Z; // Allows discarding depth on edge pixels.
+
+					ConfigureDepthFeedback(); // Enable barriers/SW depth test.
+				}
 			}
 			else
 			{
@@ -5835,12 +5851,17 @@ void GSRendererHW::EmulateAA1()
 
 bool GSRendererHW::CanTwoPassAA1()
 {
-	const bool good_depth = (!m_cached_ctx.DepthRead() || !m_cached_ctx.DepthWrite() || m_cached_ctx.TEST.ZTST == ZTST_GEQUAL);
+	// Can't have a complex alpha test that decouples color/depth write.
+	// Also it might end up needing an alpha second pass.
+	const bool good_alpha_test = !m_cached_ctx.TEST.ATE || m_cached_ctx.TEST.AFAIL == AFAIL_KEEP;
 
-	// Depth is nice so that we can do a depth prepass.
-	return (!m_cached_ctx.DepthRead() || !m_cached_ctx.DepthWrite() || m_cached_ctx.TEST.ZTST == ZTST_GEQUAL) &&
-	       (!m_cached_ctx.TEST.ATE || m_cached_ctx.TEST.AFAIL == AFAIL_ZB_ONLY || m_cached_ctx.TEST.AFAIL == AFAIL_KEEP) &&
-	       (!m_cached_ctx.TEST.DATE);
+	// The triangle interiors should be opaque, otherwise blending might interact with depth test.
+	const bool opaque = IsOpaque(true);
+
+	// Can't have alpha test since that makes color/depth write interact.
+	const bool no_date = !m_cached_ctx.TEST.DATE;
+
+	return good_alpha_test && opaque && no_date;
 }
 
 bool GSRendererHW::EmulateDATEEarlyFail(DATEOptions& date, GSTextureCache::Target* rt)
@@ -8356,7 +8377,7 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 		return;
 	}
 
-	GL_PUSH("HW: Alpha test config (1)");
+	GL_PUSH("HW: Alpha test config (1st pass)");
 
 	// Temp pixel shader constants for the setup.
 	PS_ATST ps_atst;
@@ -8505,13 +8526,18 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 	}
 	else if (simple_fb_only)
 	{
+		pxAssert(!m_conf.second_pass); // Should not have enabled for AA1.
+
 		// First pass is to update color; second pass is to update Z.
 		GL_INS("Alpha test: RGBA then Z (accurate)");
 
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY;
+		m_conf.second_pass.type = GSHWDrawConfig::SecondPassType::AlphaTest;
 	}
 	else if (simple_rgb_only)
 	{
+		pxAssert(!m_conf.second_pass); // Should not have enabled for AA1.
+
 		// First pass is to update color; second pass is to update Z;
 		GL_INS("Alpha test: RGBA (A with dual-source blend), then Z (accurate)");
 
@@ -8534,11 +8560,13 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 		}
 
 		// The actual blend setup will be done later after determining blending.
-
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY;
+		m_conf.second_pass.type = GSHWDrawConfig::SecondPassType::AlphaTest;
 	}
 	else
 	{
+		pxAssert(!m_conf.second_pass); // Should not have enabled for AA1.
+
 		// Use pass/fail method. Accurate for simple ZB_ONLY, otherwise may be inaccurate.
 		GL_INS("Alpha test: Two pass with pass/fail");
 
@@ -8548,111 +8576,133 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 		m_conf.cb_ps.FogColor_AREF.a = ps_aref;
 		m_conf.ps.afail = PS_AFAIL::KEEP;
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::PASS_THEN_FAIL;
+		m_conf.second_pass.type = GSHWDrawConfig::SecondPassType::AlphaTest;
 	}
 }
 
 void GSRendererHW::EmulateAlphaTestSecondPass()
 {
-	if (!GSHWDrawConfig::HasAlphaTestSecondPass(m_conf.alpha_test))
+	const auto Copy2ndPassData = [&]() {
+		std::memcpy(&m_conf.second_pass.vs, &m_conf.vs, sizeof(m_conf.vs));
+		std::memcpy(&m_conf.second_pass.ps, &m_conf.ps, sizeof(m_conf.ps));
+		std::memcpy(&m_conf.second_pass.colormask, &m_conf.colormask, sizeof(m_conf.colormask));
+		std::memcpy(&m_conf.second_pass.depth, &m_conf.depth, sizeof(m_conf.depth));
+		m_conf.second_pass.ps_aref = m_conf.cb_ps.FogColor_AREF.a;
+	};
+
+	if (m_conf.second_pass.type == GSHWDrawConfig::SecondPassType::AlphaTest)
 	{
-		return;
-	}
+		pxAssert(GSHWDrawConfig::HasAlphaTestSecondPass(m_conf.alpha_test));
+		GL_INS("HW: Alpha test config (2nd pass)");
 
-	GL_PUSH("HW: Alpha test config (2)");
+		const u32 atst = m_cached_ctx.TEST.ATST;
+		const u32 afail = m_cached_ctx.TEST.AFAIL;
+		const u32 aref = m_cached_ctx.TEST.AREF;
 
-	const u32 atst = m_cached_ctx.TEST.ATST;
-	const u32 afail = m_cached_ctx.TEST.AFAIL;
-	const u32 aref = m_cached_ctx.TEST.AREF;
+		// Temp variables for PS config.
+		PS_ATST ps_atst;
+		float ps_aref;
 
-	// Temp variables for PS config.
-	PS_ATST ps_atst;
-	float ps_aref;
+		Copy2ndPassData();
 
-	std::memcpy(&m_conf.alpha_second_pass.ps, &m_conf.ps, sizeof(m_conf.ps));
-	std::memcpy(&m_conf.alpha_second_pass.colormask, &m_conf.colormask, sizeof(m_conf.colormask));
-	std::memcpy(&m_conf.alpha_second_pass.depth, &m_conf.depth, sizeof(m_conf.depth));
-
-	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY ||
-		m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
-	{
-		// Two pass methods to process RGBA then Z. Always accurate.
-
-		m_conf.depth.zwe = false; // Disable Z write on first pass
-
-		m_conf.alpha_second_pass.colormask.wrgba = false; // Disable color write on second pass
-
-		// Only need a second pass if Z is written.
-		if (m_conf.alpha_second_pass.depth.zwe)
+		if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY ||
+			m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
 		{
-			// Enable alpha test on second pass and discard failing fragments.
-			GetAlphaTestConfigPS(atst, aref, false, ps_atst, ps_aref);
-			m_conf.alpha_second_pass.enable = true;
-			m_conf.alpha_second_pass.ps.atst = ps_atst;
-			m_conf.alpha_second_pass.ps_aref = ps_aref;
-			m_conf.alpha_second_pass.ps.afail = PS_AFAIL::KEEP;
-		}
+			// Two pass methods to process RGBA then Z. Always accurate.
 
-		// Setup for RBG_ONLY dual source blend selection
-		if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
-		{
-			pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
-			if (!m_conf.blend.enable)
+			m_conf.depth.zwe = false; // Disable Z write on first pass
+
+			m_conf.second_pass.colormask.wrgba = 0; // Disable color write on second pass
+
+			// Only need a second pass if Z is written.
+			if (m_conf.second_pass.depth.zwe)
 			{
-				m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
-					GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
+				// Enable alpha test on second pass and discard failing fragments.
+				GetAlphaTestConfigPS(atst, aref, false, ps_atst, ps_aref);
+				m_conf.second_pass.ps.atst = ps_atst;
+				m_conf.second_pass.ps_aref = ps_aref;
+				m_conf.second_pass.ps.afail = PS_AFAIL::KEEP;
 			}
 			else
 			{
-				if (m_conf.blend_multi_pass.enable)
+				m_conf.second_pass.Disable();
+			}
+
+			// Setup for RBG_ONLY dual source blend selection
+			if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
+			{
+				pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
+				if (!m_conf.blend.enable)
 				{
-					m_conf.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					m_conf.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+					m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
+						GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
 				}
 				else
 				{
-					m_conf.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					m_conf.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+					if (m_conf.blend_multi_pass.enable)
+					{
+						m_conf.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+						m_conf.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+					}
+					else
+					{
+						m_conf.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+						m_conf.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+					}
 				}
 			}
 		}
+		else
+		{
+			// Pass-then-fail method or NEVER.
+
+			// Determine the write mask for fragments on each pass.
+			if (afail == AFAIL_FB_ONLY)
+			{
+				// Disable Z write on second pass
+				m_conf.second_pass.depth.zwe = false;
+			}
+			else if (afail == AFAIL_ZB_ONLY)
+			{
+				m_conf.second_pass.colormask.wrgba = 0; // Disable color write on second pass
+			}
+			else if (afail == AFAIL_RGB_ONLY)
+			{
+				// Disable Z write on second pass
+				m_conf.second_pass.depth.zwe = false;
+
+				m_conf.second_pass.colormask.wrgba = m_conf.colormask.wrgba & 7; // Disable A write on second pass
+			}
+
+			// Only enable second pass if color or Z is written.
+			if (m_conf.second_pass.colormask.wrgba || m_conf.second_pass.depth.zwe)
+			{
+				// Enable alpha test and discard passing fragments on second pass.
+				GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
+				m_conf.second_pass.ps.atst = ps_atst;
+				m_conf.second_pass.ps_aref = ps_aref;
+				m_conf.second_pass.ps.afail = PS_AFAIL::KEEP;
+			}
+			else
+			{
+				m_conf.second_pass.Disable();
+			}
+		}
 	}
-	else
+	else if (m_conf.second_pass.type == GSHWDrawConfig::SecondPassType::AA1)
 	{
-		// Pass-then-fail method or NEVER.
+		GL_INS("HW: AA1 config (2nd pass).");
 
-		// Determine the write mask for fragments on each pass.
-		if (afail == AFAIL_FB_ONLY)
-		{
-			// Disable Z write on second pass
-			m_conf.alpha_second_pass.depth.zwe = false;
-		}
-		else if (afail == AFAIL_ZB_ONLY)
-		{
-			m_conf.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
-		}
-		else if (afail == AFAIL_RGB_ONLY)
-		{
-			// Disable Z write on second pass
-			m_conf.alpha_second_pass.depth.zwe = false;
+		Copy2ndPassData();
 
-			m_conf.alpha_second_pass.colormask.wrgba = m_conf.colormask.wrgba & 7; // Disable A write on second pass
-		}
-
-		// Only enable second pass if color or Z is written.
-		if (m_conf.alpha_second_pass.colormask.wrgba || m_conf.alpha_second_pass.depth.zwe)
-		{
-			// Enable alpha test and discard passing fragments on second pass.
-			GetAlphaTestConfigPS(atst, aref, true, ps_atst, ps_aref);
-			m_conf.alpha_second_pass.enable = true;
-			m_conf.alpha_second_pass.ps.atst = ps_atst;
-			m_conf.alpha_second_pass.ps_aref = ps_aref;
-			m_conf.alpha_second_pass.ps.afail = PS_AFAIL::KEEP;
-		}
+		// Second pass draws edges only.
+		m_conf.second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_EDGES_ONLY;
+		m_conf.second_pass.depth.zwe = false;
 	}
 
-	if (m_conf.alpha_second_pass.enable)
+	if (m_conf.second_pass)
 	{
-		pxAssertRel(m_conf.alpha_second_pass.colormask.wrgba || m_conf.alpha_second_pass.depth.zwe,
+		pxAssertRel(m_conf.second_pass.colormask.wrgba || m_conf.second_pass.depth.zwe,
 			"Alpha second pass has no color/depth write.");
 	}
 
@@ -8663,28 +8713,28 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	}
 
 	// Some housekeeping for the second pass.
-	if (m_conf.alpha_second_pass.colormask.wrgba == 0)
+	if (m_conf.second_pass.colormask.wrgba == 0)
 	{
-		m_conf.alpha_second_pass.ps.DisableColorOutput();
+		m_conf.second_pass.ps.DisableColorOutput();
 	}
-	if (!m_conf.alpha_second_pass.depth.zwe)
+	if (!m_conf.second_pass.depth.zwe)
 	{
-		m_conf.alpha_second_pass.ps.DisableDepthOutput();
+		m_conf.second_pass.ps.DisableDepthOutput();
 	}
-	if (m_conf.alpha_second_pass.ps.IsFeedbackLoopRT() || m_conf.alpha_second_pass.ps.IsFeedbackLoopDepth())
+	if (m_conf.second_pass.ps.IsFeedbackLoopRT() || m_conf.second_pass.ps.IsFeedbackLoopDepth())
 	{
-		m_conf.alpha_second_pass.require_one_barrier = m_conf.require_one_barrier;
-		m_conf.alpha_second_pass.require_full_barrier = m_conf.require_full_barrier;
+		m_conf.second_pass.require_one_barrier = m_conf.require_one_barrier;
+		m_conf.second_pass.require_full_barrier = m_conf.require_full_barrier;
 	}
 
 	// Finally, if the first pass is never used do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
-		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
-		std::memcpy(&m_conf.colormask, &m_conf.alpha_second_pass.colormask, sizeof(m_conf.colormask));
-		std::memcpy(&m_conf.depth, &m_conf.alpha_second_pass.depth, sizeof(m_conf.depth));
-		m_conf.cb_ps.FogColor_AREF.a = m_conf.alpha_second_pass.ps_aref;
-		m_conf.alpha_second_pass.enable = false;
+		std::memcpy(&m_conf.ps, &m_conf.second_pass.ps, sizeof(m_conf.ps));
+		std::memcpy(&m_conf.colormask, &m_conf.second_pass.colormask, sizeof(m_conf.colormask));
+		std::memcpy(&m_conf.depth, &m_conf.second_pass.depth, sizeof(m_conf.depth));
+		m_conf.cb_ps.FogColor_AREF.a = m_conf.second_pass.ps_aref;
+		m_conf.second_pass.Disable();
 	}
 
 	// If the alpha test prevents all writes, abort the draw.
@@ -8982,7 +9032,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		// HW depth test should be disabled in place of SW depth test
 		pxAssert(m_conf.depth.ztst == ZTST_ALWAYS);
 		// Second pass alpha shouldn't be enabled
-		pxAssert(!m_conf.alpha_second_pass.enable);
+		pxAssert(!m_conf.second_pass);
 
 		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
 	}
@@ -10426,7 +10476,7 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
 	config.datm = SetDATM::DATM0;
 	config.line_expand = false;
-	config.alpha_second_pass.enable = false;
+	config.second_pass.Disable();
 	config.vs.key = 0;
 	config.vs.tme = tex != nullptr;
 	config.vs.iip = true;

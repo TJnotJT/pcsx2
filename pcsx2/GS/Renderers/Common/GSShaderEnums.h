@@ -50,10 +50,12 @@ enum class ZTST : uint32_t
 
 enum class PS_AA1 : uint32_t
 {
-	NONE          = 0, ///< No AA1
-	LINE          = 1, ///< AA1 lines
-	TRIANGLE      = 2, ///< AA1 triangles
-	TRIANGLE_SW_Z = 3, ///< AA1 triangles with software Z discard
+	NONE                = 0,     ///< No AA1
+	LINE                = 1,     ///< AA1 lines
+	TRIANGLE            = 2,     ///< AA1 triangles
+	TRIANGLE_SW_Z       = 3,     ///< AA1 triangles with software Z discard
+	TRIANGLE_INTERIORS_ONLY = 4, ///< AA1 triangles interiors only
+	TRIANGLE_EDGES_ONLY = 5,     ///< AA1 triangles edges only
 };
 
 } // namespace GSShader

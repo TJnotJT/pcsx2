@@ -1426,6 +1426,17 @@ static const char* GetPSAA1Name(u32 aa1)
 	return "Unknown";
 }
 
+static const char* GetSecondPassTypeName(GSHWDrawConfig::SecondPassType pass)
+{
+	switch (pass)
+	{
+		case GSHWDrawConfig::SecondPassType::None: return "None";
+		case GSHWDrawConfig::SecondPassType::AlphaTest: return "AlphaTest";
+		case GSHWDrawConfig::SecondPassType::AA1: return "AA1";
+	}
+	return "Unknown";
+}
+
 static void DumpPSSelector(DrawConfigWriter& out, const GSHWDrawConfig::PSSelector& ps)
 {
 	out.WriteLn("aem_fmt: {}", ps.aem_fmt);
@@ -1533,9 +1544,9 @@ static void DumpSamplerSelector(DrawConfigWriter& out, const GSHWDrawConfig::Sam
 	out.WriteLn("lodclamp: {}", ss.lodclamp);
 }
 
-static void DumpAlphaPass(DrawConfigWriter& out, const GSHWDrawConfig::AlphaPass& ap)
+static void DumpSecondPass(DrawConfigWriter& out, const GSHWDrawConfig::SecondPass& ap)
 {
-	out.WriteLn("enable: {}", ap.enable);
+	out.WriteLn("type: {}", GetSecondPassTypeName(ap.type));
 	out.WriteLn("require_one_barrier: {}", ap.require_one_barrier);
 	out.WriteLn("require_full_barrier: {}", ap.require_full_barrier);
 	out.WriteLn("colormask: {:x}", ap.colormask.wrgba);
@@ -1646,8 +1657,8 @@ static void DumpConfig(DrawConfigWriter& out, const GSHWDrawConfig& conf,
 	
 	if (asp)
 	{
-		out.WriteLn("alpha_second_pass:");
-		DumpAlphaPass(out.WithIndent(), conf.alpha_second_pass);
+		out.WriteLn("second_pass:");
+		DumpSecondPass(out.WithIndent(), conf.second_pass);
 	}
 
 	if (bmp)

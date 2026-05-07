@@ -421,7 +421,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 scanmsk : 2;
 
 				// AA1
-				PS_AA1 aa1 : 2; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
+				PS_AA1 aa1 : 3; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
 				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE interaction.
 
 				// Anisotropic filtering
@@ -843,19 +843,37 @@ struct alignas(16) GSHWDrawConfig
 	SetDATM datm;
 	bool line_expand;
 
-	struct AlphaPass
+	enum class SecondPassType : u8
 	{
+		None,
+		AlphaTest,
+		AA1,
+	};
+
+	struct SecondPass
+	{
+		alignas(8) VSSelector vs;
 		alignas(8) PSSelector ps;
-		bool enable : 1;
+		SecondPassType type : 2;
 		bool require_one_barrier : 1;
 		bool require_full_barrier : 1;
 		ColorMaskSelector colormask;
 		DepthStencilSelector depth;
 		float ps_aref;
-	};
-	static_assert(sizeof(AlphaPass) == 24, "alpha pass is 24 bytes");
+		
+		operator bool() const
+		{
+			return type != SecondPassType::None;
+		}
 
-	AlphaPass alpha_second_pass;
+		void Disable()
+		{
+			type = SecondPassType::None;
+		}
+	};
+	static_assert(sizeof(SecondPass) == 32, "second pass is 32 bytes");
+
+	SecondPass second_pass;
 
 	struct BlendMultiPass
 	{
