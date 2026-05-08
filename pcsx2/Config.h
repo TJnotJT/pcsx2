@@ -477,6 +477,15 @@ enum class GSDepthFeedbackMode : u8
 	DepthAsRT = 3,
 };
 
+enum class GSHWAA1Level : u8
+{
+	Off       = 0,
+	LinesOnly = 1,
+	Low       = 2,
+	Medium    = 3,
+	High      = 4,
+};
+
 enum class AchievementOverlayPosition : u8
 {
 	TopLeft,
@@ -726,6 +735,7 @@ struct Pcsx2Config
 		static constexpr AccBlendLevel DEFAULT_BLENDING_ACCURACY = AccBlendLevel::Basic;
 		static constexpr BiFiltering DEFAULT_TEXTURE_FILTERING_MODE = BiFiltering::PS2;
 		static constexpr TriFiltering DEFAULT_TRILINEAR_FILTERING_MODE = TriFiltering::Automatic;
+		static constexpr GSHWAA1Level DEFAULT_AA1_LEVEL = GSHWAA1Level::Off;
 
 		static constexpr float DEFAULT_OSD_SCALE = 100.0f;
 		static constexpr float DEFAULT_OSD_MARGIN = 10.0f;
@@ -792,8 +802,7 @@ struct Pcsx2Config
 					PreloadFrameWithGSData : 1,
 					Mipmap : 1,
 					HWMipmap : 1,
-					HWAccurateAlphaTest : 1,
-					HWAA1 : 1,
+					HWAccurateAlphaTest: 1,
 					ManualUserHacks : 1,
 					UserHacks_AlignSpriteX : 1,
 					UserHacks_CPUFBConversion : 1,
@@ -891,6 +900,7 @@ struct Pcsx2Config
 		TriFiltering TriFilter = DEFAULT_TRILINEAR_FILTERING_MODE;
 		s8 OverrideTextureBarriers = -1;
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
+		GSHWAA1Level HWAA1 = DEFAULT_AA1_LEVEL;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;

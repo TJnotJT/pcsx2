@@ -3,21 +3,12 @@
 
 //#version 420 // Keep it for editor detection
 
-
 #ifdef VERTEX_SHADER
 
 layout(location = 0) in vec2 POSITION;
 layout(location = 1) in vec2 TEXCOORD0;
 layout(location = 7) in vec4 COLOR;
 
-// FIXME set the interpolation (don't know what dx do)
-// flat means that there is no interpolation. The value given to the fragment shader is based on the provoking vertex conventions.
-//
-// noperspective means that there will be linear interpolation in window-space. This is usually not what you want, but it can have its uses.
-//
-// smooth, the default, means to do perspective-correct interpolation.
-//
-// The centroid qualifier only matters when multisampling. If this qualifier is not present, then the value is interpolated to the pixel's center, anywhere in the pixel, or to one of the pixel's samples. This sample may lie outside of the actual primitive being rendered, since a primitive can cover only part of a pixel's area. The centroid qualifier is used to prevent this; the interpolation point must fall within both the pixel's area and the primitive's area.
 out vec4 PSin_p;
 out vec2 PSin_t;
 out vec4 PSin_c;
@@ -27,10 +18,10 @@ void vs_main()
 	PSin_p = vec4(POSITION, 0.5f, 1.0f);
 	PSin_t = TEXCOORD0;
 	PSin_c = COLOR;
-	gl_Position = vec4(POSITION, 0.5f, 1.0f); // NOTE I don't know if it is possible to merge POSITION_OUT and gl_Position
+	gl_Position = vec4(POSITION, 0.5f, 1.0f);
 }
 
-#endif
+#endif // VERTEX_SHADER
 
 #ifdef FRAGMENT_SHADER
 
@@ -40,9 +31,8 @@ in vec4 PSin_c;
 
 layout(binding = 0) uniform sampler2D TextureSampler;
 
-// Give a different name so I remember there is a special case!
 #if defined(ps_convert_rgba8_16bits) || defined(ps_convert_float32_32bits)
-layout(location = 0) out uint SV_Target1;
+layout(location = 0) out uint SV_Target0;
 #elif defined(ps_convert_float32_depth_to_color)
 layout(location = 0) out float SV_Target0;
 #elif !defined(ps_datm1) && \
@@ -106,7 +96,7 @@ void ps_convert_rgba8_16bits()
 {
 	highp uvec4 i = uvec4(sample_c() * vec4(255.5f, 255.5f, 255.5f, 255.5f));
 
-	SV_Target1 = ((i.x & 0x00F8u) >> 3) | ((i.y & 0x00F8u) << 2) | ((i.z & 0x00f8u) << 7) | ((i.w & 0x80u) << 8);
+	SV_Target0 = ((i.x & 0x00F8u) >> 3) | ((i.y & 0x00F8u) << 2) | ((i.z & 0x00f8u) << 7) | ((i.w & 0x80u) << 8);
 }
 #endif
 
@@ -114,7 +104,7 @@ void ps_convert_rgba8_16bits()
 void ps_convert_float32_32bits()
 {
 	// Convert a GL_FLOAT32 depth texture into a 32 bits UINT texture
-	SV_Target1 = uint(exp2(32.0f) * sample_c().r);
+	SV_Target0 = uint(exp2(32.0f) * sample_c().r);
 }
 #endif
 
@@ -604,29 +594,34 @@ void ps_yuv()
 }
 #endif
 
-#if defined(ps_stencil_image_init_0) || defined(ps_stencil_image_init_1) || defined(ps_stencil_image_init_2) || defined(ps_stencil_image_init_3)
+#if defined(ps_primid_image_init_0) || defined(ps_primid_image_init_1) || \
+	defined(ps_primid_image_init_2) || defined(ps_primid_image_init_3) || \
+	defined(ps_primid_image_init_4)
 
 void main()
 {
 	SV_Target0 = vec4(0x7FFFFFFF);
 
-	#ifdef ps_stencil_image_init_0
+	#ifdef ps_primid_image_init_0
 		if((127.5f / 255.0f) < sample_c().a) // < 0x80 pass (== 0x80 should not pass)
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_1
+	#ifdef ps_primid_image_init_1
 		if(sample_c().a < (127.5f / 255.0f)) // >= 0x80 pass
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_2
+	#ifdef ps_primid_image_init_2
 		if((254.5f / 255.0f) < sample_c().a) // < 0x80 pass (== 0x80 should not pass)
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_3
+	#ifdef ps_primid_image_init_3
 		if(sample_c().a < (254.5f / 255.0f)) // >= 0x80 pass
 			SV_Target0 = vec4(-1);
+	#endif
+	#ifdef ps_primid_image_init_4
+		SV_Target0 = vec4(-1); // AA1 primid
 	#endif
 }
 #endif
 
-#endif
+#endif // FRAGMENT_SHADER
