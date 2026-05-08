@@ -5491,14 +5491,18 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 				if (draw_aa1)
 				{
 					GL_INS("HW: AA1 triangle expand.");
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
 					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 3;
 
 					if (m_conf.second_pass.type == GSHWDrawConfig::SecondPassType::AA1)
 					{
-						m_conf.second_pass.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1Interior;
+						m_conf.second_pass.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1Edge;
+					}
+					else
+					{
+						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
 					}
 				}
 				else
@@ -5822,7 +5826,7 @@ void GSRendererHW::EmulateAA1()
 					// Two pass AA1
 					GL_INS("HW: AA1 triangles two pass.");
 
-					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_INTERIORS_ONLY;
+					m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
 					m_conf.second_pass.type = GSHWDrawConfig::SecondPassType::AA1;
 				}
 				else
@@ -8695,8 +8699,8 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 
 		Copy2ndPassData();
 
-		// Second pass draws edges only.
-		m_conf.second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_EDGES_ONLY;
+		// Second pass draws edges without depth.
+		m_conf.second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
 		m_conf.second_pass.depth.zwe = false;
 	}
 

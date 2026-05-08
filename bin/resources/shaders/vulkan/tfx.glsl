@@ -14,6 +14,8 @@
 #define VS_EXPAND_SPRITE 3
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
+#define VS_EXPAND_TRIANGLE_AA1_INTERIOR 6
+#define VS_EXPAND_TRIANGLE_AA1_EDGE 7
 #endif
 
 layout(std140, set = 0, binding = 0) uniform cb0
@@ -255,7 +257,7 @@ void main()
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
-#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+#elif (VS_EXPAND == VS_EXPAND_TRIANGLE_AA1 || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE)
 
 	// Triangles with AA1 are expanded as follows:
 	// - Vertices 0-2: Interior of triangle (1 triangle).
@@ -269,12 +271,21 @@ void main()
 
 	if (interior)
 	{
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE
+		vtx.p = vtx.t = vtx.ti = vtx.c = vec4(2, 2, 2, 1); // Output degenerate triangle.
+#else
 		vtx = load_vertex(load_index(3 * prim_id + prim_offset));
+#endif
 		vsOut.inv_cov = 0.0f; // Full coverage
 		vsOut.interior = 1;
 	}
 	else
 	{
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR
+		vtx.p = vtx.t = vtx.ti = vtx.c = vec4(2, 2, 2, 1); // Output degenerate triangle.
+		vsOut.inv_cov = 1.0f;
+		vsOut.interior = 0;
+#else
 		// Vertex indices for this edge. We need all 3 for determining exterior/interior.
 		uint prim_offset_edges = prim_offset - 3; // range: 0-17
 		uint i0 = prim_offset_edges / 6;
@@ -317,7 +328,7 @@ void main()
 
 		vsOut.interior = 0;
 	}
-
+#endif
 #endif
 
 	gl_Position = vtx.p;
@@ -379,8 +390,6 @@ void main()
 #define PS_AA1_LINE 1
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
-#define PS_AA1_TRIANGLE_INTERIORS_ONLY 4
-#define PS_AA1_TRIANGLE_EDGES_ONLY 5
 #endif
 
 #ifndef PS_FST
@@ -1541,14 +1550,6 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 
 void main()
 {
-#if PS_AA1 == PS_AA1_TRIANGLE_INTERIORS_ONLY
-	if (!bool(vsIn.interior))
-		discard; // FIXME: Do this in nvertex shader instead.
-#elif PS_AA1 == PS_AA1_TRIANGLE_EDGES_ONLY
-	if (bool(vsIn.interior))
-		discard; // FIXME: Do this in nvertex shader instead.
-#endif 
-
 	float input_z = gl_FragCoord.z;
 
 	// Must floor before depth testing.
