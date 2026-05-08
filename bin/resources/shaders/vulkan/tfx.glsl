@@ -14,6 +14,8 @@
 #define VS_EXPAND_SPRITE 3
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
+#define VS_EXPAND_TRIANGLE_AA1_INTERIOR 6
+#define VS_EXPAND_TRIANGLE_AA1_EDGE 7
 #endif
 
 layout(std140, set = 0, binding = 0) uniform cb0
@@ -255,17 +257,31 @@ void main()
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
-#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+#elif (VS_EXPAND == VS_EXPAND_TRIANGLE_AA1 || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE)
 
 	// Triangles with AA1 are expanded as follows:
 	// - Vertices 0-2: Interior of triangle (1 triangle).
 	// - Vertices 3-8: First edge expanded (2 triangles).
 	// - Vertices 9-14: Second edge expanded (2 triangles).
 	// - Vertices 15-20: Third edge expanded (2 triangles).
+	// With INTERIOR or EDGE the corresponding vertices are omitted.
 
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
 	uint prim_id = vid / 21;
 	uint prim_offset = vid - 21 * prim_id; // range: 0-20
+	uint prim_offset_edges = prim_offset - 3; // range: 0-17
 	bool interior = prim_offset < 3;
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR
+	uint prim_id = vid / 3;
+	uint prim_offset = vid - 3 * prim_id; // range: 0-2
+	uint prim_offset_edges = 0; // unused
+	bool interior = true;
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE
+	uint prim_id = vid / 18;
+	uint prim_offset = 0; // unused
+	uint prim_offset_edges = vid - 18 * prim_id; // range: 0-17
+	bool interior = false;
+#endif
 
 	if (interior)
 	{
@@ -276,7 +292,7 @@ void main()
 	else
 	{
 		// Vertex indices for this edge. We need all 3 for determining exterior/interior.
-		uint prim_offset_edges = prim_offset - 3; // range: 0-17
+		
 		uint i0 = prim_offset_edges / 6;
 		uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
 		uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
@@ -379,6 +395,8 @@ void main()
 #define PS_AA1_LINE 1
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
+#define PS_AA1_TRIANGLE_PRIMID 4
+#define PS_AA1_TRIANGLE_PRIMID_INIT 5
 #endif
 
 #ifndef PS_FST
@@ -523,7 +541,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 	#endif
 #endif
 
-#if PS_DATE > 0
+#if PS_DATE > 0 || (PS_AA1 == PS_AA1_TRIANGLE_PRIMID)
 layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
 #endif
 
@@ -1559,6 +1577,7 @@ void main()
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		discard;
 #endif
+
 #if PS_DATE >= 5
 
 #if PS_WRITE_RG == 1
@@ -1588,17 +1607,28 @@ void main()
 		discard;
 	}
 
-#endif		// PS_DATE >= 5
+#endif // PS_DATE >= 5
+
+#if PS_DATE == 3 || PS_AA1 == PS_AA1_TRIANGLE_PRIMID
+	int primid_limit = int(texelFetch(PrimMinTexture, ivec2(gl_FragCoord.xy), 0).r);
 
 #if PS_DATE == 3
-	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(gl_FragCoord.xy), 0).r);
-	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
+	// Note gl_PrimitiveID == primid_limit will be the primitive that will update
 	// the bad alpha value so we must keep it.
-
-	if (gl_PrimitiveID > stencil_ceil) {
+	if (gl_PrimitiveID > primid_limit) {
 		discard;
 	}
 #endif
+
+#if PS_AA1 == PS_AA1_TRIANGLE_PRIMID
+	// Discard if this edge is under the a previous triangles.
+	// Edge should never overlap with its own interior so < and <= should be the same here.
+	if (gl_PrimitiveID <= primid_limit) {
+		discard;
+	}
+#endif
+
+#endif // primid DATE/AA1 discard
 
 	vec4 C = ps_color();
 
@@ -1655,7 +1685,14 @@ void main()
 	// Pixel with alpha equal to 0 will failed (0-127)
 	o_col0 = (C.a < 127.5f) ? vec4(gl_PrimitiveID) : vec4(0x7FFFFFFF);
 
+#elif PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
+
+	// Multiply by 6 because there are 6x as many edge as interior triangles.
+	o_col0 = vec4(6 * gl_PrimitiveID);
+
 #else
+	// Not primid DATE/AA1 setup
+
 	ps_blend(C, alpha_blend);
 
 	#if PS_SHUFFLE

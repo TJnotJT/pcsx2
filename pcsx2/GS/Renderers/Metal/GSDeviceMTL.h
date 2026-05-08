@@ -444,8 +444,7 @@ public:
 
 	void SetupDestinationAlpha(GSTexture* rt, GSTexture* ds, const GSVector4i& r, SetDATM datm);
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off,
-		bool one_barrier, bool full_barrier);
+	void SendHWDraw(GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off);
 
 	// MARK: Debug
 
