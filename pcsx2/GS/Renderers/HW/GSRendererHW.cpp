@@ -5491,10 +5491,20 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 				if (draw_aa1)
 				{
 					GL_INS("HW: AA1 triangle expand.");
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
 					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 3;
+
+					if (m_conf.aa1_second_pass.enable)
+					{
+						// Main handles triangle interiors, second does edges.
+						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1Interior;
+						m_conf.aa1_second_pass.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1Edge;
+					}
+					else
+					{
+						m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+					}
 				}
 				else
 				{
@@ -5788,31 +5798,78 @@ void GSRendererHW::DetermineAlphaScaling(GSTextureCache::Target* rt, GSTextureCa
 	}
 }
 
+void GSRendererHW::OptimizeAlphaTestAndMasks(TryAlphaTestRegion region, GIFRegTEST& test, GSHWDrawConfig::ColorMaskSelector& colormask, bool& zwe)
+{
+	u32 fm = 0, zm = 0;
+	u32 atst = test.ATST;
+	u32 afail = test.AFAIL;
+
+	test.ATE &= !TryAlphaTest(fm, zm, region);
+	colormask.wr &= ((0x000000FF & ~fm) != 0);
+	colormask.wg &= ((0x0000FF00 & ~fm) != 0);
+	colormask.wb &= ((0x00FF0000 & ~fm) != 0);
+	colormask.wa &= ((0xFF000000 & ~fm) != 0);
+	zwe &= (zm == 0);
+
+	if (test.ATE)
+	{
+		SimplifyAlphaTest(colormask, m_interior_depth_write, atst, afail);
+		test = m_cached_ctx.TEST;
+		test.ATST = atst;
+		test.AFAIL = afail;
+		test.ATE &= (atst != ATST_ALWAYS);
+	}
+}
+
 void GSRendererHW::EmulateAA1()
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
 	pxAssert(!features.aa1 || features.feedback_loops());
 
-	if (IsCoverageAlphaSupported())
+	if (!IsCoverageAlphaSupported())
+		return;
+
+	// Optimize alpha tests on interiors and/or edges.
+	m_interior_test = m_cached_ctx.TEST;
+	m_interior_mask = m_conf.colormask;
+	m_interior_depth_write = m_cached_ctx.DepthWrite();
+	m_edge_test = m_cached_ctx.TEST;
+	m_edge_mask = m_conf.colormask;
+	if (m_cached_ctx.TEST.ATE)
 	{
-		m_conf.ps.abe = PRIM->ABE; // ABE flag determines how coverage is used for alpha.
+		OptimizeAlphaTestAndMasks(TryAlphaTestRegion::INTERIOR, m_interior_test, m_interior_mask, m_interior_depth_write);
 
-		if (m_vt.m_primclass == GS_LINE_CLASS)
+		bool edge_depth_write = false; // edges always don't write depth.
+		OptimizeAlphaTestAndMasks(TryAlphaTestRegion::EDGE, m_edge_test, m_edge_mask, edge_depth_write);
+	}
+
+	if (!m_edge_mask.wrgba)
+	{
+		GL_INS("HW: AA1 disabled, no write on edges.");
+		return;
+	}
+
+	m_conf.ps.abe = PRIM->ABE; // ABE flag determines how coverage is used for alpha.
+
+	if (m_vt.m_primclass == GS_LINE_CLASS)
+	{
+		GL_INS("HW: AA1 lines. No depth write.");
+
+		// AA1: Z is not written on lines since coverage is always less than 0x80.
+		m_conf.depth.zwe = false;
+		m_cached_ctx.ZBUF.ZMSK = 1;
+
+		m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::LINE;
+	}
+	else if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
+	{
+		if (m_cached_ctx.DepthWrite())
 		{
-			GL_INS("HW: AA1 lines. No depth write.");
-
-			// AA1: Z is not written on lines since coverage is always less than 0x80.
-			m_conf.depth.zwe = false;
-			m_cached_ctx.ZBUF.ZMSK = 1;
-
-			m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::LINE;
-		}
-		else if (m_vt.m_primclass == GS_TRIANGLE_CLASS)
-		{
-			// Force SW depth so that Z writes can be prevented for edge pixels.
-			if (m_cached_ctx.DepthWrite())
+			if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Maximum)
 			{
+				// Depth feedback AA1, more accurate/expensive.
+				// Force SW depth so that Z writes can be prevented for edge pixels.
 				GL_INS("HW: AA1 triangles with depth feedback.");
 
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_SW_Z; // Allows discarding depth on edge pixels.
@@ -5821,15 +5878,24 @@ void GSRendererHW::EmulateAA1()
 			}
 			else
 			{
-				GL_INS("HW: AA1 triangles with no depth write.");
+				// Two pass AA1, less accurate/expensive.
+				// First draw triangle interiors, then edges with depth masked.
+				GL_INS("HW: AA1 triangles two pass.");
 
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
+				m_conf.aa1_second_pass.enable = true;
 			}
 		}
 		else
 		{
-			pxFail("Unsupported primclass for AA1"); // Impossible
+			GL_INS("HW: AA1 triangles with no depth write.");
+
+			m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
 		}
+	}
+	else
+	{
+		pxFail("Unsupported primclass for AA1"); // Impossible
 	}
 }
 
@@ -8335,59 +8401,69 @@ void GSRendererHW::GetAlphaTestConfigPS(const u32 atst, const u8 aref, const boo
 	}
 }
 
+void GSRendererHW::SimplifyAlphaTest(const GSHWDrawConfig::ColorMaskSelector& colormask, const bool zwe, u32& atst, u32& afail)
+{
+	if (afail == AFAIL_RGB_ONLY && !colormask.wa)
+		afail = AFAIL_FB_ONLY;
+
+	if (!zwe && !colormask.wrgba)
+		atst = ATST_NEVER;
+
+	if ((afail == AFAIL_FB_ONLY && !zwe) ||
+		(afail == AFAIL_RGB_ONLY && !colormask.wa && !zwe) ||
+		(afail == AFAIL_ZB_ONLY && !colormask.wrgba))
+	{
+		// Failing alpha test is a NOP.
+		atst = ATST_ALWAYS;
+	}
+
+	if ((afail == AFAIL_FB_ONLY && !colormask.wrgba) ||
+		(afail == AFAIL_RGB_ONLY && !(colormask.wrgba & 7)) ||
+		(afail == AFAIL_ZB_ONLY && !zwe))
+	{
+		// Failing alpha test discards both color/depth.
+		afail = AFAIL_KEEP;
+	}
+}
+
 void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
-	if (!m_cached_ctx.TEST.ATE)
+	// If doing two pass AA1, optimize alpha test based on interiors only.
+	// Alpha test on edges is handled later.
+	GIFRegTEST& test = m_conf.aa1_second_pass.enable ? m_interior_test : m_cached_ctx.TEST;
+	const bool zwe = m_conf.aa1_second_pass.enable ? m_interior_depth_write : m_cached_ctx.DepthWrite();
+	const GSHWDrawConfig::ColorMaskSelector& colormask = m_conf.aa1_second_pass.enable ? m_interior_mask : m_conf.colormask;
+
+	if (!test.ATE)
 	{
 		GL_INS("HW: Alpha test disabled");
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::NONE;
 		return;
 	}
 
-	GL_PUSH("HW: Alpha test config (1)");
+	GL_PUSH("HW: Alpha test config (1st pass)");
 
 	// Temp pixel shader constants for the setup.
 	PS_ATST ps_atst;
 	float ps_aref;
 
-	u32 atst = m_cached_ctx.TEST.ATST;
-	u32 afail = m_cached_ctx.TEST.GetAFAIL(m_cached_ctx.FRAME.PSM);
-	u8 aref = m_cached_ctx.TEST.AREF;
-	const bool zwe = m_cached_ctx.DepthWrite();
+	u32 atst = test.ATST;
+	u32 afail = test.GetAFAIL(m_cached_ctx.FRAME.PSM);
+	u8 aref = test.AREF;
 
 	// First make some simplifications.
-	if (afail == AFAIL_RGB_ONLY && !m_conf.colormask.wa)
-		afail = AFAIL_FB_ONLY;
+	SimplifyAlphaTest(colormask, zwe, atst, afail);
 
-	if (!zwe && !m_conf.colormask.wrgba)
-		atst = ATST_NEVER;
-
-	if ((afail == AFAIL_FB_ONLY && !zwe) ||
-		(afail == AFAIL_RGB_ONLY && !m_conf.colormask.wa && !zwe) ||
-		(afail == AFAIL_ZB_ONLY && !m_conf.colormask.wrgba))
-	{
-		// Failing alpha test is a NOP.
-		atst = ATST_ALWAYS;
-	}
-
-	if ((afail == AFAIL_FB_ONLY && !m_conf.colormask.wrgba) ||
-		(afail == AFAIL_RGB_ONLY && (!(m_conf.colormask.wrgba & 7))) ||
-		(afail == AFAIL_ZB_ONLY && !zwe))
-	{
-		// Failing alpha test discards both color/depth.
-		afail = AFAIL_KEEP;
-	}
-
-	m_cached_ctx.TEST.ATST = atst;
-	m_cached_ctx.TEST.AFAIL = afail;
+	test.ATST = atst;
+	test.AFAIL = afail;
 	GL_INS("Using: ATST = %s, AFAIL = %s", GSUtil::GetATSTName(atst), GSUtil::GetAFAILName(afail));
 
 	if (atst == ATST_ALWAYS)
 	{
 		GL_INS("Alpha test: ALWAYS (disable)");
-		m_cached_ctx.TEST.ATE = false;
+		test.ATE = false;
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::NONE;
 		return;
 	}
@@ -8442,6 +8518,11 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 		features.feedback_loops() &&
 		(!afail_needs_depth || m_conf.ps.IsFeedbackLoopDepth());
 
+	// If we might end up doing 3 passes with barriers because of AA1. Probably don't want that.
+	const bool possible_3_pass_barrier =
+		m_conf.require_full_barrier && features.feedback_loops() &&
+		(afail != AFAIL_KEEP) && m_conf.aa1_second_pass.enable;
+
 	// Determine if we can use FB-fetch for color only feedback.
 	const bool free_fbfetch_feedback = features.framebuffer_fetch && !afail_needs_depth;
 
@@ -8453,7 +8534,7 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 
 	// Prefer feedback method only if it's free (color only feedback) or enabled.
 	const bool prefer_feedback = free_barrier_feedback || free_fbfetch_feedback ||
-	                             GSConfig.HWAccurateAlphaTest;
+	                             possible_3_pass_barrier || GSConfig.HWAccurateAlphaTest;
 
 	// The simple cases can be handle accurately in two passes so no point
 	// in requiring barriers if they are not already required.
@@ -8524,7 +8605,6 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 		}
 
 		// The actual blend setup will be done later after determining blending.
-
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY;
 	}
 	else
@@ -8541,26 +8621,49 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 	}
 }
 
+// Set up dual source blend so that we can do conditional alpha discard in the shader by manipulating the blend factors.
+void GSRendererHW::GetAlphaTestRGBOnlyDSBConfig(GSHWDrawConfig::BlendState& blend, GSHWDrawConfig::BlendMultiPass* blend_multi_pass)
+{
+	if (!blend.enable)
+	{
+		blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
+			GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
+	}
+	else
+	{
+		if (blend_multi_pass && blend_multi_pass->enable)
+		{
+			blend_multi_pass->blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+			blend_multi_pass->blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+		}
+		else
+		{
+			blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
+			blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
+		}
+	}
+}
+
 void GSRendererHW::EmulateAlphaTestSecondPass()
 {
 	if (!GSHWDrawConfig::HasAlphaTestSecondPass(m_conf.alpha_test))
-	{
 		return;
-	}
 
-	GL_PUSH("HW: Alpha test config (2)");
-
-	const u32 atst = m_cached_ctx.TEST.ATST;
-	const u32 afail = m_cached_ctx.TEST.AFAIL;
-	const u32 aref = m_cached_ctx.TEST.AREF;
-
-	// Temp variables for PS config.
-	PS_ATST ps_atst;
-	float ps_aref;
+	GL_INS("HW: Alpha test config (2nd pass)");
 
 	std::memcpy(&m_conf.alpha_second_pass.ps, &m_conf.ps, sizeof(m_conf.ps));
 	std::memcpy(&m_conf.alpha_second_pass.colormask, &m_conf.colormask, sizeof(m_conf.colormask));
 	std::memcpy(&m_conf.alpha_second_pass.depth, &m_conf.depth, sizeof(m_conf.depth));
+
+	const GIFRegTEST& test = m_conf.aa1_second_pass.enable ? m_interior_test : m_cached_ctx.TEST;
+
+	const u32 atst = test.ATST;
+	const u32 afail = test.AFAIL;
+	const u32 aref = test.AREF;
+
+	// Temp variables for PS config.
+	PS_ATST ps_atst;
+	float ps_aref;
 
 	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_FB_ONLY ||
 		m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
@@ -8569,7 +8672,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 
 		m_conf.depth.zwe = false; // Disable Z write on first pass
 
-		m_conf.alpha_second_pass.colormask.wrgba = false; // Disable color write on second pass
+		m_conf.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
 
 		// Only need a second pass if Z is written.
 		if (m_conf.alpha_second_pass.depth.zwe)
@@ -8586,24 +8689,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 		if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::SIMPLE_RGB_ONLY)
 		{
 			pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
-			if (!m_conf.blend.enable)
-			{
-				m_conf.blend = GSHWDrawConfig::BlendState(true, GSDevice::CONST_ONE, GSDevice::CONST_ZERO,
-					GSDevice::OP_ADD, GSDevice::SRC1_ALPHA, GSDevice::INV_SRC1_ALPHA, false, 0);
-			}
-			else
-			{
-				if (m_conf.blend_multi_pass.enable)
-				{
-					m_conf.blend_multi_pass.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					m_conf.blend_multi_pass.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-				}
-				else
-				{
-					m_conf.blend.src_factor_alpha = GSDevice::SRC1_ALPHA;
-					m_conf.blend.dst_factor_alpha = GSDevice::INV_SRC1_ALPHA;
-				}
-			}
+			GetAlphaTestRGBOnlyDSBConfig(m_conf.blend, &m_conf.blend_multi_pass);
 		}
 	}
 	else
@@ -8680,6 +8766,62 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	// If the alpha test prevents all writes, abort the draw.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 		m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::ABORT_DRAW;
+}
+
+void GSRendererHW::EmulateAA1SecondPass()
+{
+	if (!m_conf.aa1_second_pass.enable)
+		return;
+
+	if (m_conf.require_full_barrier && m_conf.ps.IsFeedbackLoopDepth())
+	{
+		// Using depth feedback, so cancel second pass and use accurate path.
+		GL_INS("HW: Using depth feedback, cancel AA1 2nd pass.");
+		m_conf.aa1_second_pass.enable = false;
+		m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_SW_Z;
+	}
+
+	GL_INS("HW: AA1 config (2nd pass).");
+
+	std::memcpy(&m_conf.aa1_second_pass.ps, &m_conf.ps, sizeof(m_conf.ps));
+	std::memcpy(&m_conf.aa1_second_pass.vs, &m_conf.vs, sizeof(m_conf.vs));
+	std::memcpy(&m_conf.aa1_second_pass.colormask, &m_conf.colormask, sizeof(m_conf.colormask));
+	std::memcpy(&m_conf.aa1_second_pass.depth, &m_conf.depth, sizeof(m_conf.depth));
+	std::memcpy(&m_conf.aa1_second_pass.blend, &m_conf.blend, sizeof(m_conf.blend));
+
+	// Second pass draws edges without depth.
+	m_conf.aa1_second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
+	m_conf.aa1_second_pass.depth.zwe = false;
+
+	// Setup alpha test for the second pass for edges.
+	if (m_edge_test.ATE)
+	{
+		if (m_edge_test.AFAIL == AFAIL_FB_ONLY)
+		{
+			// Depth is not written so alpha test is a NOP.
+			m_conf.aa1_second_pass.ps.DisableAlphaTest();
+		}
+		else if (m_edge_test.AFAIL == AFAIL_ZB_ONLY)
+		{
+			// Depth is already not written so alpha test is same as KEEP.
+			m_conf.aa1_second_pass.ps.afail = PS_AFAIL::KEEP;
+		}
+		else if (m_edge_test.AFAIL == AFAIL_RGB_ONLY)
+		{
+			// Use the dual source blend method for conditionally discarding alpha.
+			pxAssert(!m_conf.ps.no_color1); // Make sure dual source blend didn't accidentally get disabled.
+
+			GSHWDrawConfig::PS_ATST ps_atst;
+			float ps_aref;
+			GetAlphaTestConfigPS(m_edge_test.ATST, m_edge_test.AFAIL, false, ps_atst, ps_aref);
+			m_conf.aa1_second_pass.ps.atst = ps_atst;
+			m_conf.aa1_second_pass.ps_aref = ps_aref;
+			m_conf.aa1_second_pass.ps.afail = PS_AFAIL::RGB_ONLY_DSB;
+			GetAlphaTestRGBOnlyDSBConfig(m_conf.aa1_second_pass.blend);
+		}
+	}
+
+	m_conf.aa1_second_pass.ps.DisableDepthOutput();
 }
 
 // Setup barriers and/or SW depth testing for depth feedback.
@@ -8772,9 +8914,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	m_prim_overlap = PrimitiveOverlap(false);
 
-	// Do AA1 setup early so we can mask depth if possible.
-	EmulateAA1();
-
 	if (rt)
 	{
 		EmulateTextureShuffleAndFbmask(rt, tex);
@@ -8784,6 +8923,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 			return;
 		}
 	}
+
+	// Do AA1 setup early so we can mask depth if possible and optimize alpha test further.
+	// This must come AFTER the color mask is determined in EmulateTextureShuffleAndFbmask(),
+	// and BEFORE the alpha range is corrected in CorrectATEAlphaMinMax().
+	EmulateAA1();
 
 	if (EmulateDATEEarlyFail(date_options, rt))
 		return;
@@ -8940,8 +9084,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
 	DetermineBarriers(rt);
 
-	// Perform second pass setup here once barriers are determined.
+	// Perform alpha second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
+
+	// Perform AA1 second pass setup here once barriers are determined.
+	EmulateAA1SecondPass();
 
 	if (m_conf.alpha_test == GSHWDrawConfig::AlphaTestMode::ABORT_DRAW)
 	{
@@ -10417,6 +10564,8 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	config.datm = SetDATM::DATM0;
 	config.line_expand = false;
 	config.alpha_second_pass.enable = false;
+	config.aa1_second_pass.enable = false;
+	config.blend_multi_pass.enable = false;
 	config.vs.key = 0;
 	config.vs.tme = tex != nullptr;
 	config.vs.iip = true;
