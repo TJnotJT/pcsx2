@@ -1413,7 +1413,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.test_and_sample_depth = true;
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
 	m_features.depth_feedback = false;
-	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
+	m_features.aa1 = GSConfig.HWAA1 != GSHWAA1Level::Off && m_features.vs_expand && m_features.feedback_loops();
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -1489,12 +1489,13 @@ void GSDevice12::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDevice12::Draw(const GSHWDrawConfig& config, int offset, int count)
+void GSDevice12::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -1503,9 +1504,9 @@ void GSDevice12::Draw(const GSHWDrawConfig& config, int offset, int count)
 	}
 }
 
-void GSDevice12::Draw(const GSHWDrawConfig& config)
+void GSDevice12::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass)
 {
-	Draw(config, 0, m_index.count);
+	Draw(config, pass, 0, m_index.count);
 }
 
 void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
@@ -2846,9 +2847,9 @@ bool GSDevice12::CompileConvertPipelines()
 		}
 	}
 
-	for (u32 datm = 0; datm < 4; datm++)
+	for (u32 i = 0; i < 5; i++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%d", datm));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%d", i));
 		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, entry_point.c_str()));
 		if (!ps)
 			return false;
@@ -2864,12 +2865,20 @@ bool GSDevice12::CompileConvertPipelines()
 		for (u32 ds = 0; ds < 2; ds++)
 		{
 			gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-			m_date_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
-			if (!m_date_image_setup_pipelines[ds][datm])
+			m_primid_image_setup_pipelines[ds][i] = gpb.Create(m_device.get(), m_shader_cache, false);
+			if (!m_primid_image_setup_pipelines[ds][i])
 				return false;
 
-			D3D12::SetObjectName(m_date_image_setup_pipelines[ds][datm].get(),
-				TinyString::from_format("DATE image clear pipeline (ds={}, datm={})", ds, (datm == 1 || datm == 3)));
+			if (i < 4)
+			{
+				D3D12::SetObjectName(m_primid_image_setup_pipelines[ds][i].get(),
+					TinyString::from_format("DATE primid image clear pipeline (ds={}, datm={})", ds, (i == 1 || i == 3)));
+			}
+			else
+			{
+				D3D12::SetObjectName(m_primid_image_setup_pipelines[ds][i].get(),
+					TinyString::from_format("AA1 primid image clear pipeline"));
+			}
 		}
 	}
 
@@ -3068,7 +3077,7 @@ void GSDevice12::DestroyResources()
 	m_convert = {};
 	m_colclip_setup_pipelines = {};
 	m_colclip_finish_pipelines = {};
-	m_date_image_setup_pipelines = {};
+	m_primid_image_setup_pipelines = {};
 	m_fxaa_pipeline.reset();
 	m_shadeboost_pipeline.reset();
 	m_imgui_pipeline.reset();
@@ -3249,9 +3258,10 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	u32 num_rts = 0;
 	if (p.rt)
 	{
-		const GSTexture::Format format = IsDATEModePrimIDInit(p.ps.date) ?
-		                                     GSTexture::Format::PrimID :
-		                                     (p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
+		const GSTexture::Format format =
+			(IsDATEModePrimIDInit(p.ps.date) || p.ps.aa1 == GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID_INIT) ?
+				GSTexture::Format::PrimID :
+				(p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
 
 		DXGI_FORMAT native_format;
 		LookupNativeFormat(format, nullptr, nullptr, &native_format, nullptr);
@@ -4089,16 +4099,27 @@ void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	EndRenderPass();
 }
 
-GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, PipelineSelector& pipe)
+GSTexture12* GSDevice12::SetupPrimitiveTracking(GSHWDrawConfig& config)
 {
-	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+	const bool date = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking);
+	const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+	pxAssert(date != aa1); // exactly one must be true
 
-	// How this is done:
+	g_perfmon.Put(GSPerfMon::TextureCopies, date ? 1 : 0); // Only a copy if it's DATE; AA1 doesn't sample RT.
+
+	// How DATE is done:
 	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
 	// - so, instead of just filling the int texture with INT_MAX, we sample the RT and use -1 for failing values
 	// - then, instead of sampling the RT with DATE=1/2, we just do a min() without it, the -1 gets preserved
 	// - then, the DATE=3 draw is done as normal
-	GL_INS("Setup DATE Primitive ID Image for {%d,%d}-{%d,%d}", config.drawarea.left, config.drawarea.top,
+
+	// How AA1 is done:
+	// - Initialize the primid texture to -1 (allow everything).
+	// - Write the primid of the interior triangles.
+	// - In the edge pass, discard edge pixels that are overlapped by an interior in primid order.
+
+	GL_INS("Setup %s Primitive ID Image for {%d,%d}-{%d,%d}", date ? "DATE" : "AA1",
+		config.drawarea.left, config.drawarea.top,
 		config.drawarea.right, config.drawarea.bottom);
 
 	const GSVector2i rtsize(config.rt->GetSize());
@@ -4109,17 +4130,22 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 	EndRenderPass();
 
-	// setup the fill quad to prefill with existing alpha values
-	SetUtilityTexture(config.rt, m_point_sampler_cpu);
+	// setup the fill quad to prefill with init values
+	if (date)
+		SetUtilityTexture(config.rt, m_point_sampler_cpu);
+	else
+		SetUtilityTexture(m_null_texture.get(), m_point_sampler_cpu);
 	OMSetRenderTargets(image, nullptr, config.ds, config.drawarea);
+
+	const u32 ds = (config.ds ? 1 : 0);
 
 	// if the depth target has been cleared, we need to preserve that clear
 	BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-		config.ds ? GetLoadOpForTexture(static_cast<GSTexture12*>(config.ds)) :
+		ds ? GetLoadOpForTexture(static_cast<GSTexture12*>(config.ds)) :
 					D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-		config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+		ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-		GSVector4::zero(), config.ds ? config.ds->GetClearDepth() : 0.0f);
+		GSVector4::zero(), ds ? config.ds->GetClearDepth() : 0.0f);
 
 	// draw the quad to prefill the image
 	const GSVector4 src = GSVector4(config.drawarea) / GSVector4(rtsize).xyxy();
@@ -4132,7 +4158,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	};
 	SetUtilityRootSignature();
 	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(m_date_image_setup_pipelines[pipe.ds][static_cast<u8>(config.datm)].get());
+	SetPipeline(m_primid_image_setup_pipelines[ds][aa1 ? 4 : static_cast<u8>(config.datm)].get());
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
 	if (ApplyUtilityState())
 		DrawPrimitive();
@@ -4142,27 +4168,37 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	UploadHWDrawVerticesAndIndices(config);
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
-	PipelineSelector init_pipe(m_pipeline_selector);
-	init_pipe.dss.zwe = false;
-	init_pipe.cms.wrgba = 0;
-	init_pipe.bs = {};
-	init_pipe.rt = true;
-	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
-	init_pipe.ps.no_color = false;
-	init_pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(init_pipe))
-		Draw(config);
+	UpdateHWPipelineSelector(config);
+	PipelineSelector& pipe = m_pipeline_selector;
+	pipe.dss.zwe = false;
+	pipe.cms = GSHWDrawConfig::ColorMaskSelector();
+	pipe.bs = {};
+	pipe.rt = true;
+	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
+	pipe.ps.no_color = false;
+	pipe.ps.no_color1 = true;
+	if (BindDrawPipeline(pipe))
+		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
 
-	// .. by setting it to DATE=3
-	pipe.ps.date = 3;
-	config.alpha_second_pass.ps.date = 3;
+	if (date)
+	{
+		// set DATE=3 for the real draw
+		config.ps.date = 3;
+		config.alpha_second_pass.ps.date = 3;
+		config.aa1_multi_pass.ps.date = 3;
+	}
+	else
+	{
+		// set triangle interiors for the real draw
+		config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
+	}
 
 	// and bind the image to the primitive sampler
 	image->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
-	PSSetShaderResource(3, image, false);
+	PSSetShaderResource(TEXTURE_PRIMID, image, false);
 	return image;
 }
 
@@ -4199,12 +4235,26 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
 	GSTexture12* draw_rt_clone = nullptr;
 
-	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
-	PipelineSelector& pipe = m_pipeline_selector;
+	// Primitive ID tracking DATE/AA1 setup.
+	GSTexture12* date_image = nullptr;
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
+		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
+	{
+		GSTexture* backup_rt = config.rt;
+		config.rt = draw_rt;
+		date_image = SetupPrimitiveTracking(config);
+		config.rt = backup_rt;
+		if (!date_image)
+		{
+			Console.Warning("D3D12: Failed to allocate DATE image, aborting draw.");
+			return;
+		}
+	}
 
 	// figure out the pipeline
+	PipelineSelector& pipe = m_pipeline_selector;
 	UpdateHWPipelineSelector(config);
 
 	// Handle RT hazard when no barrier was requested
@@ -4289,21 +4339,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.blend.constant_enable)
 		SetBlendConstants(config.blend.constant);
 
-	// Primitive ID tracking DATE setup.
-	GSTexture12* date_image = nullptr;
-	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
-	{
-		GSTexture* backup_rt = config.rt;
-		config.rt = draw_rt;
-		date_image = SetupPrimitiveTrackingDATE(config, pipe);
-		config.rt = backup_rt;
-		if (!date_image)
-		{
-			Console.Warning("D3D12: Failed to allocate DATE image, aborting draw.");
-			return;
-		}
-	}
-
 	// Switch to colclip target for colclip hw rendering
 	if (pipe.ps.colclip_hw)
 	{
@@ -4371,8 +4406,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(m_ds_as_rt);
 
-	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.ps.IsFeedbackLoopRT() ||
-		config.alpha_second_pass.ps.IsFeedbackLoopRT())) || (config.tex && config.tex == config.rt));
+	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.ps.IsFeedbackLoopRT() || config.alpha_second_pass.ps.IsFeedbackLoopRT() || config.aa1_multi_pass.ps.IsFeedbackLoopRT())) || (config.tex && config.tex == config.rt));
 	const bool feedback_depth = draw_ds_as_rt != nullptr;
 
 	if (feedback_rt && !m_features.texture_barrier)
@@ -4458,8 +4492,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
-		config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(pipe, config, GSHWDrawConfig::DrawPass::Main, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
 
 	// blend second pass
 	if (config.blend_multi_pass.enable)
@@ -4472,7 +4505,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.ps.blend_hw = config.blend_multi_pass.blend_hw;
 		pipe.ps.dither = config.blend_multi_pass.dither;
 		if (BindDrawPipeline(pipe))
-			Draw(config);
+			Draw(config, GSHWDrawConfig::DrawPass::Blend);
 	}
 
 	// and the alpha pass
@@ -4489,8 +4522,25 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.cms = config.alpha_second_pass.colormask;
 		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
-			config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(pipe, config, GSHWDrawConfig::DrawPass::AlphaSecond, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
+	}
+
+	// and the AA1 pass
+	if (config.aa1_multi_pass.enable)
+	{
+		// cbuffer will definitely be dirty if aref changes, no need to check it
+		if (config.cb_ps.FogColor_AREF.a != config.aa1_multi_pass.ps_aref)
+		{
+			config.cb_ps.FogColor_AREF.a = config.aa1_multi_pass.ps_aref;
+			SetPSConstantBuffer(config.cb_ps);
+		}
+
+		pipe.vs = config.aa1_multi_pass.vs;
+		pipe.ps = config.aa1_multi_pass.ps;
+		pipe.cms = config.aa1_multi_pass.colormask;
+		pipe.dss = config.aa1_multi_pass.depth;
+		pipe.bs = config.aa1_multi_pass.blend;
+		SendHWDraw(pipe, config, GSHWDrawConfig::DrawPass::AA1Second, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
 	}
 
 	if (date_image)
@@ -4532,21 +4582,23 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 }
 
-void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-	GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth, const bool one_barrier,
-	const bool full_barrier)
+void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass,
+	GSTexture12* draw_rt, GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth)
 {
 	const int n_barriers = static_cast<int>(feedback_rt) + static_cast<int>(feedback_depth);
 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
 		if (BindDrawPipeline(pipe))
-			Draw(config);
+			Draw(config, pass);
 		return;
 	}
 
 	if (feedback_rt || feedback_depth)
 	{
+		const bool full_barrier = config.GetFullBarrier(pass);
+		const bool one_barrier = config.GetOneBarrier(pass);
+
 #ifdef PCSX2_DEVBUILD
 		if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
 			Console.Warning("D3D12: Possible unnecessary barrier detected.");
@@ -4577,7 +4629,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 					FeedbackBarrier(draw_ds);
 
 				if (BindDrawPipeline(pipe))
-					Draw(config, p, count);
+					Draw(config, pass, p, count);
 				p += count;
 			}
 
@@ -4596,7 +4648,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 	}
 
 	if (BindDrawPipeline(pipe))
-		Draw(config);
+		Draw(config, pass);
 }
 
 void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
