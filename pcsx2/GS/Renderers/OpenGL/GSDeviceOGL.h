@@ -325,8 +325,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const GSHWDrawConfig& config);
-	void Draw(const GSHWDrawConfig& config, int offset, int count);
+	void Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass);
+	void Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, int offset, int count);
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
@@ -352,9 +352,8 @@ public:
 	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, const GSVector2& ds);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const GSHWDrawConfig& config,
-		GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
-		const bool one_barrier, const bool full_barrier);
+	void SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass,
+		GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds);
 	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
 
 	void VSSetUniformBuffer(GSHWDrawConfig::VSConstantBuffer& cb);

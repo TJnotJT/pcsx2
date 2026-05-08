@@ -328,7 +328,7 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
-		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+		__fi bool UseVSExpandIndexBuffer() const { return (expand >= VSExpand::TriangleAA1 && expand <= VSExpand::TriangleAA1Edge); }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
 
@@ -421,7 +421,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 scanmsk : 2;
 
 				// AA1
-				PS_AA1 aa1 : 2; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
+				PS_AA1 aa1 : 3; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
 				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE interaction.
 
 				// Anisotropic filtering
@@ -843,19 +843,37 @@ struct alignas(16) GSHWDrawConfig
 	SetDATM datm;
 	bool line_expand;
 
-	struct AlphaPass
+	enum class SecondPassType : u8
 	{
+		None,
+		AlphaTest,
+		AA1,
+	};
+
+	struct SecondPass
+	{
+		alignas(8) VSSelector vs;
 		alignas(8) PSSelector ps;
-		bool enable : 1;
+		SecondPassType type : 2;
 		bool require_one_barrier : 1;
 		bool require_full_barrier : 1;
 		ColorMaskSelector colormask;
 		DepthStencilSelector depth;
 		float ps_aref;
-	};
-	static_assert(sizeof(AlphaPass) == 24, "alpha pass is 24 bytes");
+		
+		operator bool() const
+		{
+			return type != SecondPassType::None;
+		}
 
-	AlphaPass alpha_second_pass;
+		void Disable()
+		{
+			type = SecondPassType::None;
+		}
+	};
+	static_assert(sizeof(SecondPass) == 32, "second pass is 32 bytes");
+
+	SecondPass second_pass;
 
 	struct BlendMultiPass
 	{
@@ -877,6 +895,104 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
+	// Draw pass selectors
+	enum class DrawPass
+	{
+		Main,
+		Second,
+		PrimID,
+		Blend,
+	};
+
+	bool GetFullBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Main: return require_full_barrier;
+			case DrawPass::Second: return second_pass.require_one_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::Blend: return false;
+		}
+	}
+
+	bool GetOneBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Main: return require_one_barrier;
+			case DrawPass::Second: return second_pass.require_one_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::Blend: return false;
+		}
+	}
+
+	const VSSelector& GetVS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Blend:
+			case DrawPass::PrimID:
+			case DrawPass::Main: return vs;
+			case DrawPass::Second: return second_pass.vs;
+		}
+	}
+
+	const PSSelector& GetPS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Blend:
+			case DrawPass::PrimID:
+			case DrawPass::Main: return ps;
+			case DrawPass::Second: return second_pass.ps;
+		}
+	}
+
+	const ColorMaskSelector& GetColorMask(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Blend:
+			case DrawPass::Main: return colormask;
+			case DrawPass::Second: return second_pass.colormask;
+			case DrawPass::PrimID: return GSHWDrawConfig::ColorMaskSelector(1);
+		}
+	}
+
+	DepthStencilSelector GetDepth(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+				pxFailRel("Impossible");
+				[[fallthrough]];
+			case DrawPass::Blend:
+			case DrawPass::Main: return depth;
+			case DrawPass::Second: return second_pass.depth;
+			case DrawPass::PrimID:
+			{
+				DepthStencilSelector primid_depth = depth;
+				primid_depth.zwe = false;
+				return primid_depth;
+			}
+		}
+	}
+
 	// Dumping
 	static void DumpConfig(const std::string& path, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true,
@@ -895,6 +1011,8 @@ static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
 			return 2;
 		case GSHWDrawConfig::VSExpand::TriangleAA1:
 			return 7;
+		case GSHWDrawConfig::VSExpand::TriangleAA1Edge:
+			return 6;
 		default:
 			return 1;
 	}

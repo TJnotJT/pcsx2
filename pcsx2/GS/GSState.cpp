@@ -6494,19 +6494,20 @@ void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)
 
 	m_vt.m_alpha.min = min;
 	m_vt.m_alpha.max = max;
-	m_vt.m_alpha.depth_min = min;
-	m_vt.m_alpha.depth_max = max;
+	m_vt.m_alpha.interior_min = min;
+	m_vt.m_alpha.interior_max = max;
 	m_vt.m_alpha.valid = true;
 
 	if (IsCoverageAlphaSupported())
 	{
 		// Expand the alpha range depending on what the AA1 can do to the alpha.
-		
+		// Separate handling for edges (full range) and interior (smaller range) to allow AA1 optimizations.
 		if (PRIM->ABE)
 		{
-			// ABE==1: Coverage is used for alpha only used when incoming alpha is exactly 128.
+			// ABE==1:
+			// Edges: coverage is used for alpha only used when incoming alpha is exactly 128.
 			// If 128 is in the incoming range, expand it down to 0, since edges could be 0-127.
-			// Don't change depth min, since depth isn't written on the edges.
+			// Interior: don't change since interior alpha isn't affect by AA1.
 			if (min <= 128 && 128 <= max)
 			{
 				m_vt.m_alpha.min = std::min(0, min);
@@ -6514,12 +6515,14 @@ void GSState::CalcAlphaMinMax(const int tex_alpha_min, const int tex_alpha_max)
 		}
 		else
 		{
-			// ABE==0: Coverage is always used for alpha, so assume exactly 0-128.
-			// Assume exactly 128 for depth, since depth isn't written on the edges.
+			// ABE==0:
+			// Edges: coverage is always used for alpha on edges, so assume exactly 0-128 for triangles
+			// and 0-127 for lines (lines don't have any interior).
+			// Interior: fixed at 128.
 			m_vt.m_alpha.min = 0;
-			m_vt.m_alpha.max = 128;
-			m_vt.m_alpha.depth_min = 128;
-			m_vt.m_alpha.depth_max = 128;
+			m_vt.m_alpha.max = (m_vt.m_primclass == GS_TRIANGLE_CLASS) ? 128 : 127;
+			m_vt.m_alpha.interior_min = 128;
+			m_vt.m_alpha.interior_max = 128;
 		}
 	}
 }
@@ -6598,13 +6601,13 @@ bool GSState::TryAlphaTest(u32& fm, u32& zm)
 		ALL_FAIL,
 	};
 
-	AlphaTestResult result, depth_result;
+	AlphaTestResult result = UNKNOWN, interior_result = UNKNOWN;
 
 	if (m_context->TEST.ATST == ATST_NEVER)
 	{
 		// Shortcut for NEVER to avoid GetAlphaMinMax below.
 		result = ALL_FAIL;
-		depth_result = ALL_FAIL;
+		interior_result = ALL_FAIL;
 	}
 	else
 	{
@@ -6680,11 +6683,11 @@ bool GSState::TryAlphaTest(u32& fm, u32& zm)
 		};
 
 		result = GetResult(aminmax.min, aminmax.max);
-		depth_result = (result != UNKNOWN) ? result : GetResult(aminmax.depth_min, aminmax.depth_max);
+		interior_result = (result != UNKNOWN) ? result : GetResult(aminmax.interior_min, aminmax.interior_max);
 	}
 
 	const u32 fail_fm = (result == ALL_FAIL) ? 0xffffffff : 0x0;
-	const u32 fail_zm = (depth_result == ALL_FAIL) ? 0xffffffff : 0x0;
+	const u32 fail_zm = (interior_result == ALL_FAIL) ? 0xffffffff : 0x0; // Depth only written in interiors.
 
 	switch (fail_type)
 	{
@@ -6716,9 +6719,9 @@ bool GSState::IsFlatShaded()
 	       m_vt.m_primclass == GS_POINT_CLASS || !PRIM->IIP;
 }
 
-bool GSState::IsOpaque()
+bool GSState::IsOpaque(bool interior_only)
 {
-	if (PRIM->AA1)
+	if (PRIM->AA1 && !interior_only)
 		return false;
 
 	if (!PRIM->ABE)
@@ -6738,8 +6741,8 @@ bool GSState::IsOpaque()
 	{
 		if (context->ALPHA.C == 0)
 		{
-			amin = GetAlphaMinMax().min;
-			amax = GetAlphaMinMax().max;
+			amin = interior_only ? GetAlphaMinMax().interior_min : GetAlphaMinMax().min;
+			amax = interior_only ? GetAlphaMinMax().interior_max : GetAlphaMinMax().max;
 		}
 		else if (context->ALPHA.C == 1)
 		{

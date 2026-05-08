@@ -2364,7 +2364,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 			pxAssert(config.require_full_barrier == false && config.drawlist == nullptr);
 			MRESetHWPipelineState(config.vs, config.ps, {}, {});
 			MREInitHWDraw(config, allocation);
-			SendHWDraw(config, m_current_render.encoder, index_buffer, index_buffer_offset, false, false);
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::PrimID, m_current_render.encoder, index_buffer, index_buffer_offset);
 			config.ps.date = 3;
 			break;
 		}
@@ -2418,18 +2418,18 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	MRESetHWPipelineState(config.vs, config.ps, config.blend, config.colormask);
 	MRESetDSS(config.depth);
 
-	SendHWDraw(config, mtlenc, index_buffer, index_buffer_offset, config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(config, GSHWDrawConfig::DrawPass::Main, mtlenc, index_buffer, index_buffer_offset);
 
-	if (config.alpha_second_pass.enable)
+	if (config.second_pass.enable)
 	{
-		if (config.alpha_second_pass.ps_aref != config.cb_ps.FogColor_AREF.a)
+		if (config.second_pass.ps_aref != config.cb_ps.FogColor_AREF.a)
 		{
-			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.second_pass.ps_aref;
 			MRESetCB(config.cb_ps);
 		}
-		MRESetHWPipelineState(config.vs, config.alpha_second_pass.ps, config.blend, config.alpha_second_pass.colormask);
-		MRESetDSS(config.alpha_second_pass.depth);
-		SendHWDraw(config, mtlenc, index_buffer, index_buffer_offset, config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		MRESetHWPipelineState(config.second_pass.vs, config.second_pass.ps, config.blend, config.second_pass.colormask);
+		MRESetDSS(config.second_pass.depth);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::Second, mtlenc, index_buffer, index_buffer_offset);
 	}
 
 	if (colclip_rt)
@@ -2469,7 +2469,7 @@ static void EncodeDraw(id<MTLRenderCommandEncoder> enc, MTLPrimitiveType topolog
 	}
 }
 
-void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off, bool one_barrier, bool full_barrier)
+void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off)
 {
 	MTLPrimitiveType topology;
 	switch (config.topology)
@@ -2486,6 +2486,8 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder>
 		return;
 	}
 
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool one_barrier = config.GetOneBarrier(pass);
 
 	if (full_barrier)
 	{
