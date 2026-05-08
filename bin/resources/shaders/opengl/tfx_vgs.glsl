@@ -256,30 +256,34 @@ void main()
 	// - Vertices 3-8: First edge expanded (2 triangles).
 	// - Vertices 9-14: Second edge expanded (2 triangles).
 	// - Vertices 15-20: Third edge expanded (2 triangles).
+	// With INTERIOR or EDGE the corresponding vertices are omitted.
 
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
 	uint prim_id = vid / 21;
 	uint prim_offset = vid - 21 * prim_id; // range: 0-20
+	uint prim_offset_edges = prim_offset - 3; // range: 0-17
 	bool interior = prim_offset < 3;
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR
+	uint prim_id = vid / 3;
+	uint prim_offset = vid - 3 * prim_id; // range: 0-2
+	uint prim_offset_edges = 0; // unused
+	bool interior = true;
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE
+	uint prim_id = vid / 18;
+	uint prim_offset = 0; // unused
+	uint prim_offset_edges = vid - 18 * prim_id; // range: 0-17
+	bool interior = false;
+#endif
 
 	if (interior)
 	{
-#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EDGE
-		vtx.p = vtx.t = vtx.ti = vtx.c = float4(2, 2, 2, 1); // Output degenerate triangle.
-#else
 		vtx = load_vertex(load_index(3 * prim_id + prim_offset));
-#endif
 		VSout.inv_cov = 0.0f; // Full coverage
 		VSout.interior = 1;
 	}
 	else
 	{
-#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_INTERIOR
-		vtx.p = vtx.t = vtx.ti = vtx.c = float4(2, 2, 2, 1); // Output degenerate triangle.
-		vtx.inv_cov = 1.0f;
-		vtx.interior = 0;
-#else
 		// Vertex indices for this edge. We need all 3 for determining exterior/interior.
-		uint prim_offset_edges = prim_offset - 3; // range: 0-17
 		uint i0 = prim_offset_edges / 6;
 		uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
 		uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
@@ -288,7 +292,7 @@ void main()
 		// Note: order of top/bottom, inside/outside order is arbitrary,
 		// as long as it assembles into two triangles forming a quad.
 		bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
-		bool is_outside = (edge_offset & 1) != 0;
+		bool is_outside = (edge_offset & 1u) != 0;
 
 		vtx = load_vertex(load_index(3 * prim_id + i0));
 		ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
@@ -319,7 +323,6 @@ void main()
 		}
 
 		VSout.interior = 0;
-#endif
 	}
 
 #endif

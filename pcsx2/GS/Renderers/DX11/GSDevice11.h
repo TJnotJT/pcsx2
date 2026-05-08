@@ -308,8 +308,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const GSHWDrawConfig& config);
-	void Draw(const GSHWDrawConfig& config, int offset, int count);
+	void Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass);
+	void Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, int offset, int count);
 
 	void PushDebugGroup(const char* fmt, ...) override;
 	void PopDebugGroup() override;
@@ -372,9 +372,8 @@ public:
 	void SetupOM(OMDepthStencilSelector dssel, OMBlendSelector bsel, u8 afix);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const GSHWDrawConfig& config,
-		GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
-		const bool one_barrier, const bool full_barrier);
+	void SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass,
+		GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds);
 	void SetRenderHWShaderResources(const GSHWDrawConfig& config, GSTexture* primid_texture);
 
 	void ClearSamplerCache() override;

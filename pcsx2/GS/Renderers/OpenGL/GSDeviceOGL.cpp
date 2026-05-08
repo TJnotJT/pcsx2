@@ -1201,12 +1201,13 @@ void GSDeviceOGL::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_in
 	}
 }
 
-void GSDeviceOGL::Draw(const GSHWDrawConfig& config, int offset, int count)
+void GSDeviceOGL::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -1215,9 +1216,9 @@ void GSDeviceOGL::Draw(const GSHWDrawConfig& config, int offset, int count)
 	}
 }
 
-void GSDeviceOGL::Draw(const GSHWDrawConfig& config)
+void GSDeviceOGL::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass)
 {
-	Draw(config, 0, m_index.count);
+	Draw(config, pass, 0, m_index.count);
 }
 
 void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
@@ -2871,7 +2872,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		SetupOM(dss);
 
 		// Compute primitiveID max that pass the date test (Draw without barrier)
-		Draw(config);
+		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
 		psel.ps.date = 3;
 		config.second_pass.ps.date = 3;
@@ -2970,8 +2971,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
 
-	SendHWDraw(config, rt_feedbackloop_pass1 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass1 ? draw_ds_clone : nullptr, draw_ds,
-		config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(config, GSHWDrawConfig::DrawPass::Main, rt_feedbackloop_pass1 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass1 ? draw_ds_clone : nullptr, draw_ds);
 
 	if (config.blend_multi_pass.enable)
 	{
@@ -2990,7 +2990,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		psel.ps.blend_hw = config.blend_multi_pass.blend_hw;
 		psel.ps.dither = config.blend_multi_pass.dither;
 		SetupPipeline(psel);
-		Draw(config);
+		Draw(config, GSHWDrawConfig::DrawPass::Blend);
 	}
 
 	if (config.second_pass)
@@ -3002,6 +3002,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			PSSetUniformBuffer(config.cb_ps);
 		}
 
+		psel.vs = config.second_pass.vs;
 		psel.ps = config.second_pass.ps;
 		SetupPipeline(psel);
 		OMSetColorMaskState(config.second_pass.colormask);
@@ -3018,8 +3019,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		}
 		const bool one_barrier = config.second_pass.require_one_barrier && m_features.feedback_loops();
 		SetupOM(config.second_pass.depth);
-		SendHWDraw(config, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds,
-			one_barrier, config.second_pass.require_full_barrier);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::Second, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds);
 	}
 
 	if (colclip_rt)
@@ -3039,10 +3039,12 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	}
 }
 
-void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
-	GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
-	const bool one_barrier, const bool full_barrier)
+void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass,
+	GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds)
 {
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool one_barrier = config.GetOneBarrier(pass);
+
 #ifdef PCSX2_DEVBUILD
 	if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("OpenGL: Possible unnecessary barrier detected.");
@@ -3092,7 +3094,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
 				CopyAndBind(ProcessCopyArea(rtsize, original_bbox));
 			}
 
-			Draw(config, p, count);
+			Draw(config, pass, p, count);
 			p += count;
 		}
 
@@ -3113,7 +3115,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
 		}
 	}
 
-	Draw(config);
+	Draw(config, pass);
 }
 
 // Note: used as a callback of DebugMessageCallback. Don't change the signature

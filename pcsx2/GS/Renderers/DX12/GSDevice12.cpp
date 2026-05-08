@@ -1489,12 +1489,13 @@ void GSDevice12::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDevice12::Draw(const GSHWDrawConfig& config, int offset, int count)
+void GSDevice12::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -1503,9 +1504,9 @@ void GSDevice12::Draw(const GSHWDrawConfig& config, int offset, int count)
 	}
 }
 
-void GSDevice12::Draw(const GSHWDrawConfig& config)
+void GSDevice12::Draw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass)
 {
-	Draw(config, 0, m_index.count);
+	Draw(config, pass, 0, m_index.count);
 }
 
 void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
@@ -4151,7 +4152,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
 	if (BindDrawPipeline(init_pipe))
-		Draw(config);
+		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
@@ -4458,8 +4459,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
-		config.require_one_barrier, config.require_full_barrier);
+	if (BindDrawPipeline(pipe))
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::Main, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
 
 	// blend second pass
 	if (config.blend_multi_pass.enable)
@@ -4472,7 +4473,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.ps.blend_hw = config.blend_multi_pass.blend_hw;
 		pipe.ps.dither = config.blend_multi_pass.dither;
 		if (BindDrawPipeline(pipe))
-			Draw(config);
+			Draw(config, GSHWDrawConfig::DrawPass::Blend);
 	}
 
 	// and the alpha pass
@@ -4485,12 +4486,13 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
+		pipe.vs = config.second_pass.vs;
 		pipe.ps = config.second_pass.ps;
 		pipe.cms = config.second_pass.colormask;
 		pipe.dss = config.second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth,
-			config.second_pass.require_one_barrier, config.second_pass.require_full_barrier);
+		if (BindDrawPipeline(pipe))
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::Second, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
 	}
 
 	if (date_image)
@@ -4532,21 +4534,22 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 }
 
-void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-	GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth, const bool one_barrier,
-	const bool full_barrier)
+void GSDevice12::SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass,
+	GSTexture12* draw_rt, GSTexture12* draw_ds, const bool feedback_rt, const bool feedback_depth)
 {
 	const int n_barriers = static_cast<int>(feedback_rt) + static_cast<int>(feedback_depth);
 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		if (BindDrawPipeline(pipe))
-			Draw(config);
+		Draw(config, pass);
 		return;
 	}
 
 	if (feedback_rt || feedback_depth)
 	{
+		const bool full_barrier = config.GetFullBarrier(pass);
+		const bool one_barrier = config.GetOneBarrier(pass);
+
 #ifdef PCSX2_DEVBUILD
 		if ((one_barrier || full_barrier) && !(config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
 			Console.Warning("D3D12: Possible unnecessary barrier detected.");
@@ -4576,8 +4579,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				if (feedback_depth)
 					FeedbackBarrier(draw_ds);
 
-				if (BindDrawPipeline(pipe))
-					Draw(config, p, count);
+				Draw(config, pass, p, count);
 				p += count;
 			}
 
@@ -4595,8 +4597,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		}
 	}
 
-	if (BindDrawPipeline(pipe))
-		Draw(config);
+	Draw(config, pass);
 }
 
 void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
