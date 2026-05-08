@@ -5770,7 +5770,8 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 	// .. by setting it to DATE=3
 	config.ps.date = 3;
-	config.second_pass.ps.date = 3;
+	config.alpha_second_pass.ps.date = 3;
+	config.aa1_second_pass.ps.date = 3;
 
 	// and bind the image to the primitive sampler
 	image->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
@@ -5993,7 +5994,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		pipe.feedback_loop_flags |= m_current_framebuffer_feedback_loop;
 	}
 
-	if (draw_rt && ((config.require_one_barrier && (config.ps.IsFeedbackLoopRT() || config.second_pass.ps.IsFeedbackLoopRT())) ||
+	if (draw_rt && ((config.require_one_barrier && (config.ps.IsFeedbackLoopRT() || config.alpha_second_pass.ps.IsFeedbackLoopRT() || config.aa1_second_pass.ps.IsFeedbackLoopRT())) ||
 		(config.tex && config.tex == config.rt)) && !m_features.texture_barrier)
 	{
 		// Requires a copy of the RT.
@@ -6118,23 +6119,35 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// and the alpha pass
-	if (config.second_pass)
+	if (config.alpha_second_pass.enable)
 	{
 		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		pipe.vs = config.second_pass.vs;
-		pipe.ps = config.second_pass.ps;
-		pipe.cms = config.second_pass.colormask;
-		pipe.dss = config.second_pass.depth;
+		pipe.ps = config.alpha_second_pass.ps;
+		pipe.cms = config.alpha_second_pass.colormask;
+		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
 		if (BindDrawPipeline(pipe))
 		{
-			SendHWDraw(config, GSHWDrawConfig::DrawPass::Second, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
+		}
+	}
+
+	if (config.aa1_second_pass.enable)
+	{
+		pipe.vs = config.aa1_second_pass.vs;
+		pipe.ps = config.aa1_second_pass.ps;
+		pipe.cms = config.aa1_second_pass.colormask;
+		pipe.dss = config.aa1_second_pass.depth;
+		pipe.bs = config.aa1_second_pass.blend;
+		if (BindDrawPipeline(pipe))
+		{
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::AA1Second, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
 		}
 	}
 

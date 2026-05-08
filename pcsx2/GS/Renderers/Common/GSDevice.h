@@ -485,6 +485,12 @@ struct alignas(16) GSHWDrawConfig
 				aa1 = PS_AA1::TRIANGLE;
 			}
 		}
+
+		__fi void DisableAlphaTest()
+		{
+			atst = PS_ATST::NONE;
+			afail = PS_AFAIL::KEEP;
+		}
 	};
 	static_assert(sizeof(PSSelector) == 12, "PSSelector is 12 bytes");
 #pragma pack(pop)
@@ -843,37 +849,19 @@ struct alignas(16) GSHWDrawConfig
 	SetDATM datm;
 	bool line_expand;
 
-	enum class SecondPassType : u8
+	struct AlphaSecondPass
 	{
-		None,
-		AlphaTest,
-		AA1,
-	};
-
-	struct SecondPass
-	{
-		alignas(8) VSSelector vs;
 		alignas(8) PSSelector ps;
-		SecondPassType type : 2;
+		bool enable : 1;
 		bool require_one_barrier : 1;
 		bool require_full_barrier : 1;
 		ColorMaskSelector colormask;
 		DepthStencilSelector depth;
 		float ps_aref;
-		
-		operator bool() const
-		{
-			return type != SecondPassType::None;
-		}
-
-		void Disable()
-		{
-			type = SecondPassType::None;
-		}
 	};
-	static_assert(sizeof(SecondPass) == 32, "second pass is 32 bytes");
+	static_assert(sizeof(AlphaSecondPass) == 24, "second pass is 32 bytes");
 
-	SecondPass second_pass;
+	AlphaSecondPass alpha_second_pass;
 
 	struct BlendMultiPass
 	{
@@ -887,6 +875,19 @@ struct alignas(16) GSHWDrawConfig
 
 	BlendMultiPass blend_multi_pass;
 
+	struct AA1SecondPass
+	{
+		alignas(8) VSSelector vs;
+		alignas(8) PSSelector ps;
+		bool enable : 1;
+		ColorMaskSelector colormask;
+		DepthStencilSelector depth;
+		BlendState blend;
+		float ps_aref;
+	};
+
+	AA1SecondPass aa1_second_pass;
+
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
 	
@@ -899,7 +900,8 @@ struct alignas(16) GSHWDrawConfig
 	enum class DrawPass
 	{
 		Main,
-		Second,
+		AlphaSecond,
+		AA1Second,
 		PrimID,
 		Blend,
 	};
@@ -912,7 +914,8 @@ struct alignas(16) GSHWDrawConfig
 				pxFailRel("Impossible");
 				[[fallthrough]];
 			case DrawPass::Main: return require_full_barrier;
-			case DrawPass::Second: return second_pass.require_one_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
+			case DrawPass::AA1Second: return false;
 			case DrawPass::PrimID: return false;
 			case DrawPass::Blend: return false;
 		}
@@ -926,7 +929,8 @@ struct alignas(16) GSHWDrawConfig
 				pxFailRel("Impossible");
 				[[fallthrough]];
 			case DrawPass::Main: return require_one_barrier;
-			case DrawPass::Second: return second_pass.require_one_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
+			case DrawPass::AA1Second: return false;
 			case DrawPass::PrimID: return false;
 			case DrawPass::Blend: return false;
 		}
@@ -939,10 +943,11 @@ struct alignas(16) GSHWDrawConfig
 			default:
 				pxFailRel("Impossible");
 				[[fallthrough]];
-			case DrawPass::Blend:
-			case DrawPass::PrimID:
 			case DrawPass::Main: return vs;
-			case DrawPass::Second: return second_pass.vs;
+			case DrawPass::AlphaSecond: return vs;
+			case DrawPass::AA1Second: return aa1_second_pass.vs;
+			case DrawPass::Blend: return vs;
+			case DrawPass::PrimID: return vs;
 		}
 	}
 
@@ -953,10 +958,11 @@ struct alignas(16) GSHWDrawConfig
 			default:
 				pxFailRel("Impossible");
 				[[fallthrough]];
-			case DrawPass::Blend:
-			case DrawPass::PrimID:
 			case DrawPass::Main: return ps;
-			case DrawPass::Second: return second_pass.ps;
+			case DrawPass::AlphaSecond: return alpha_second_pass.ps;
+			case DrawPass::AA1Second: return aa1_second_pass.ps;
+			case DrawPass::Blend: return ps;
+			case DrawPass::PrimID: return ps;
 		}
 	}
 
@@ -967,9 +973,10 @@ struct alignas(16) GSHWDrawConfig
 			default:
 				pxFailRel("Impossible");
 				[[fallthrough]];
-			case DrawPass::Blend:
 			case DrawPass::Main: return colormask;
-			case DrawPass::Second: return second_pass.colormask;
+			case DrawPass::AlphaSecond: return alpha_second_pass.colormask;
+			case DrawPass::AA1Second: return aa1_second_pass.colormask;
+			case DrawPass::Blend: return colormask;
 			case DrawPass::PrimID: return GSHWDrawConfig::ColorMaskSelector(1);
 		}
 	}
@@ -981,9 +988,10 @@ struct alignas(16) GSHWDrawConfig
 			default:
 				pxFailRel("Impossible");
 				[[fallthrough]];
-			case DrawPass::Blend:
 			case DrawPass::Main: return depth;
-			case DrawPass::Second: return second_pass.depth;
+			case DrawPass::AlphaSecond: return alpha_second_pass.depth;
+			case DrawPass::AA1Second: return aa1_second_pass.depth;
+			case DrawPass::Blend: return depth;
 			case DrawPass::PrimID:
 			{
 				DepthStencilSelector primid_depth = depth;

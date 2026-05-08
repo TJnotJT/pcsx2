@@ -4159,7 +4159,8 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 	// .. by setting it to DATE=3
 	pipe.ps.date = 3;
-	config.second_pass.ps.date = 3;
+	config.alpha_second_pass.ps.date = 3;
+	config.aa1_second_pass.ps.date = 3;
 
 	// and bind the image to the primitive sampler
 	image->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
@@ -4372,8 +4373,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(m_ds_as_rt);
 
-	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.ps.IsFeedbackLoopRT() ||
-		config.second_pass.ps.IsFeedbackLoopRT())) || (config.tex && config.tex == config.rt));
+	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.ps.IsFeedbackLoopRT() || config.alpha_second_pass.ps.IsFeedbackLoopRT() || config.aa1_second_pass.ps.IsFeedbackLoopRT())) || (config.tex && config.tex == config.rt));
 	const bool feedback_depth = draw_ds_as_rt != nullptr;
 
 	if (feedback_rt && !m_features.texture_barrier)
@@ -4476,21 +4476,20 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// and the alpha pass
-	if (config.second_pass)
+	if (config.alpha_second_pass.enable)
 	{
 		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		pipe.vs = config.second_pass.vs;
-		pipe.ps = config.second_pass.ps;
-		pipe.cms = config.second_pass.colormask;
-		pipe.dss = config.second_pass.depth;
+		pipe.ps = config.alpha_second_pass.ps;
+		pipe.cms = config.alpha_second_pass.colormask;
+		pipe.dss = config.alpha_second_pass.depth;
 		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, GSHWDrawConfig::DrawPass::Second, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
+		SendHWDraw(pipe, config, GSHWDrawConfig::DrawPass::AlphaSecond, draw_rt, draw_ds_as_rt, feedback_rt, feedback_depth);
 	}
 
 	if (date_image)

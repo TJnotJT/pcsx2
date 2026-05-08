@@ -2875,7 +2875,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
 		psel.ps.date = 3;
-		config.second_pass.ps.date = 3;
+		config.alpha_second_pass.ps.date = 3;
+		config.aa1_second_pass.ps.date = 3;
 		SetupPipeline(psel);
 		PSSetShaderResource(3, primid_texture);
 	}
@@ -2934,12 +2935,12 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
 	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass2 = config.second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
 	if (draw_rt && !m_features.texture_barrier && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2))))
 	{
 		config.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
-		config.second_pass.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
+		config.alpha_second_pass.require_one_barrier |= (tex_is_fb && !config.require_full_barrier);
 
 		// Requires a copy of the RT.
 		draw_rt_clone = CreateTexture(rtsize.x, rtsize.y, 1, draw_rt->GetFormat(), true);
@@ -2949,7 +2950,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool ds_feedbackloop_pass1 = config.ps.IsFeedbackLoopDepth();
-	const bool ds_feedbackloop_pass2 = config.second_pass.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopDepth();
 	if (draw_ds && !m_features.texture_barrier && m_features.depth_feedback &&
 		(config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) && (ds_feedbackloop_pass1 || ds_feedbackloop_pass2))
 	{
@@ -2993,20 +2994,19 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		Draw(config, GSHWDrawConfig::DrawPass::Blend);
 	}
 
-	if (config.second_pass)
+	if (config.alpha_second_pass.enable)
 	{
 		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
 			PSSetUniformBuffer(config.cb_ps);
 		}
 
-		psel.vs = config.second_pass.vs;
-		psel.ps = config.second_pass.ps;
+		psel.ps = config.alpha_second_pass.ps;
 		SetupPipeline(psel);
-		OMSetColorMaskState(config.second_pass.colormask);
-		if (config.blend.IsEffective(config.second_pass.colormask))
+		OMSetColorMaskState(config.alpha_second_pass.colormask);
+		if (config.blend.IsEffective(config.alpha_second_pass.colormask))
 		{
 			OMSetBlendState(config.blend.enable, s_gl_blend_factors[config.blend.src_factor],
 				s_gl_blend_factors[config.blend.dst_factor], s_gl_blend_ops[config.blend.op],
@@ -3017,9 +3017,9 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		{
 			OMSetBlendState();
 		}
-		const bool one_barrier = config.second_pass.require_one_barrier && m_features.feedback_loops();
-		SetupOM(config.second_pass.depth);
-		SendHWDraw(config, GSHWDrawConfig::DrawPass::Second, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds);
+		const bool one_barrier = config.alpha_second_pass.require_one_barrier && m_features.feedback_loops();
+		SetupOM(config.alpha_second_pass.depth);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds);
 	}
 
 	if (colclip_rt)
