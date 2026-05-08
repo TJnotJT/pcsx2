@@ -549,7 +549,7 @@ PS_OUTPUT ps_yuv(PS_INPUT input)
 	return output;
 }
 
-float ps_stencil_image_init_0(PS_INPUT input) : SV_Target
+float ps_primid_image_init_0(PS_INPUT input) : SV_Target
 {
 	float c;
 	if ((127.5f / 255.0f) < sample_c(input.t).a) // < 0x80 pass (== 0x80 should not pass)
@@ -559,7 +559,7 @@ float ps_stencil_image_init_0(PS_INPUT input) : SV_Target
 	return c;
 }
 
-float ps_stencil_image_init_1(PS_INPUT input) : SV_Target
+float ps_primid_image_init_1(PS_INPUT input) : SV_Target
 {
 	float c;
 	if (sample_c(input.t).a < (127.5f / 255.0f)) // >= 0x80 pass
@@ -569,7 +569,7 @@ float ps_stencil_image_init_1(PS_INPUT input) : SV_Target
 	return c;
 }
 
-float ps_stencil_image_init_2(PS_INPUT input)
+float ps_primid_image_init_2(PS_INPUT input)
 	: SV_Target
 {
 	float c;
@@ -580,7 +580,7 @@ float ps_stencil_image_init_2(PS_INPUT input)
 	return c;
 }
 
-float ps_stencil_image_init_3(PS_INPUT input)
+float ps_primid_image_init_3(PS_INPUT input)
 	: SV_Target
 {
 	float c;
@@ -589,4 +589,10 @@ float ps_stencil_image_init_3(PS_INPUT input)
 	else
 		c = float(0x7FFFFFFF);
 	return c;
+}
+
+float ps_primid_image_init_4(PS_INPUT input) // AA1 primid
+	: SV_Target
+{
+	return float(-1);
 }

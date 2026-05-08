@@ -753,7 +753,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	Mipmap = true;
 	HWMipmap = true;
 	HWAccurateAlphaTest = false;
-	HWAA1 = false;
+	HWAA1 = DEFAULT_AA1_LEVEL;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -857,6 +857,7 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(UserHacks_BilinearHack) &&
 		OpEqu(OverrideTextureBarriers) &&
 		OpEqu(DepthFeedbackMode) &&
+		OpEqu(HWAA1) &&
 
 		OpEqu(CAS_Sharpness) &&
 		OpEqu(ShadeBoost_Brightness) &&
@@ -909,7 +910,7 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(DisableVertexShaderExpand) &&
 		   OpEqu(OverrideTextureBarriers) &&
 		   OpEqu(DepthFeedbackMode) &&
-		   OpEqu(HWAA1) &&
+		   ((HWAA1 == GSHWAA1Level::Off) == (right.HWAA1 == GSHWAA1Level::Off)) &&
 		   OpEqu(ExclusiveFullscreenControl);
 }
 
@@ -1040,7 +1041,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 
 	SettingsWrapBitBoolEx(HWMipmap, "hw_mipmap");
 	SettingsWrapBitBool(HWAccurateAlphaTest);
-	SettingsWrapBitBool(HWAA1);
+	SettingsWrapIntEnumEx(HWAA1, "HWAA1");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
