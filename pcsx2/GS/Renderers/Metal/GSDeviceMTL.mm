@@ -2261,14 +2261,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	if (!config.vs.UseFixedExpandIndexBuffer())
 	{
 		memcpy(static_cast<u8*>(allocation.cpu_buffer) + vertsize, config.indices, idxsize);
-		if (config.vs.UseVSExpandIndexBuffer())
-		{
-			// VS expand index buffer is bound to the VS instead of the input assembler
-			u32 expand = GetExpansionFactor(config.vs.expand);
-			config.nindices *= expand;
-			config.indices_per_prim *= expand;
-		}
-		else
+		if (!config.vs.UseVSExpandIndexBuffer())
 		{
 			index_buffer = allocation.gpu_buffer;
 			index_buffer_offset = allocation.gpu_offset + vertsize;
@@ -2364,7 +2357,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 			pxAssert(config.require_full_barrier == false && config.drawlist == nullptr);
 			MRESetHWPipelineState(config.vs, config.ps, {}, {});
 			MREInitHWDraw(config, allocation);
-			SendHWDraw(config, m_current_render.encoder, index_buffer, index_buffer_offset, false, false);
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::PrimID, m_current_render.encoder, index_buffer, index_buffer_offset);
 			config.ps.date = 3;
 			break;
 		}
@@ -2418,7 +2411,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	MRESetHWPipelineState(config.vs, config.ps, config.blend, config.colormask);
 	MRESetDSS(config.depth);
 
-	SendHWDraw(config, mtlenc, index_buffer, index_buffer_offset, config.require_one_barrier, config.require_full_barrier);
+	SendHWDraw(config, GSHWDrawConfig::DrawPass::Main, mtlenc, index_buffer, index_buffer_offset);
 
 	if (config.alpha_second_pass.enable)
 	{
@@ -2429,7 +2422,19 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		}
 		MRESetHWPipelineState(config.vs, config.alpha_second_pass.ps, config.blend, config.alpha_second_pass.colormask);
 		MRESetDSS(config.alpha_second_pass.depth);
-		SendHWDraw(config, mtlenc, index_buffer, index_buffer_offset, config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond, mtlenc, index_buffer, index_buffer_offset);
+	}
+
+	if (config.aa1_second_pass.enable)
+	{
+		if (config.aa1_second_pass.ps_aref != config.cb_ps.FogColor_AREF.a)
+		{
+			config.cb_ps.FogColor_AREF.a = config.aa1_second_pass.ps_aref;
+			MRESetCB(config.cb_ps);
+		}
+		MRESetHWPipelineState(config.aa1_second_pass.vs, config.aa1_second_pass.ps, config.aa1_second_pass.blend, config.aa1_second_pass.colormask);
+		MRESetDSS(config.aa1_second_pass.depth);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::AA1Second, mtlenc, index_buffer, index_buffer_offset);
 	}
 
 	if (colclip_rt)
@@ -2469,7 +2474,7 @@ static void EncodeDraw(id<MTLRenderCommandEncoder> enc, MTLPrimitiveType topolog
 	}
 }
 
-void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off, bool one_barrier, bool full_barrier)
+void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, id<MTLRenderCommandEncoder> enc, id<MTLBuffer> buffer, size_t off)
 {
 	MTLPrimitiveType topology;
 	switch (config.topology)
@@ -2479,6 +2484,15 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder>
 		case GSHWDrawConfig::Topology::Triangle: topology = MTLPrimitiveTypeTriangle; break;
 	}
 
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.UseVSExpandIndexBuffer())
+	{
+		// VS expand index buffer is bound to the VS instead of the input assembler
+		u32 expand = GetExpansionFactor(config.vs.expand);
+		config.nindices *= expand;
+		config.indices_per_prim *= expand;
+	}
+
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
 		EncodeDraw(enc, topology, config.nindices, buffer, off, 0);
@@ -2486,6 +2500,8 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder>
 		return;
 	}
 
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool one_barrier = config.GetOneBarrier(pass);
 
 	if (full_barrier)
 	{
