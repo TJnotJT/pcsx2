@@ -395,6 +395,7 @@ void main()
 #define PS_AA1_LINE 1
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
+#define PS_AA1_TRIANGLE_PRIMID 4
 #endif
 
 #ifndef PS_FST
@@ -539,7 +540,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 	#endif
 #endif
 
-#if PS_DATE > 0
+#if PS_DATE > 0 || (PS_AA1 == PS_AA1_TRIANGLE_PRIMID)
 layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
 #endif
 
@@ -1607,14 +1608,22 @@ void main()
 
 #endif		// PS_DATE >= 5
 
-#if PS_DATE == 3
+#if PS_DATE == 3 || PS_AA1 == PS_AA1_TRIANGLE_PRIMID
 	int stencil_ceil = int(texelFetch(PrimMinTexture, ivec2(gl_FragCoord.xy), 0).r);
 	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
 	// the bad alpha value so we must keep it.
 
+#if PS_DATE == 3
 	if (gl_PrimitiveID > stencil_ceil) {
 		discard;
 	}
+#endif
+
+#if PS_AA1 == PS_AA1_TRIANGLE_PRIMID
+	if (gl_PrimitiveID <= stencil_ceil) {
+		discard;
+	}
+#endif
 #endif
 
 	vec4 C = ps_color();

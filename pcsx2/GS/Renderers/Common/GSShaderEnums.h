@@ -56,6 +56,7 @@ enum class PS_AA1 : uint32_t
 	LINE          = 1, ///< AA1 lines
 	TRIANGLE      = 2, ///< AA1 triangles
 	TRIANGLE_SW_Z = 3, ///< AA1 triangles with software Z discard
+	TRIANGLE_PRIMID = 4, ///< AA1 triangles with software Z discard FIXME
 };
 
 } // namespace GSShader

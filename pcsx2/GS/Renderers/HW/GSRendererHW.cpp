@@ -5869,7 +5869,8 @@ void GSRendererHW::EmulateAA1()
 	{
 		if (m_cached_ctx.DepthWrite())
 		{
-			if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Maximum)
+			if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Maximum ||
+				(GSConfig.AccurateBlendingUnit == AccBlendLevel::Full && m_cached_ctx.TEST.DATE))
 			{
 				// Depth feedback AA1, more accurate/expensive.
 				// Force SW depth so that Z writes can be prevented for edge pixels.
@@ -5878,6 +5879,15 @@ void GSRendererHW::EmulateAA1()
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_SW_Z; // Allows discarding depth on edge pixels.
 
 				ConfigureDepthFeedback(); // Enable barriers/SW depth test.
+			}
+			else if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Full)
+			{
+				// Three pass AA1, middle accurate/expensive.
+				// First draw triangle interiors, then edges with depth masked.
+				GL_INS("HW: AA1 triangles two pass.");
+
+				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID; // No special depth handling.
+				m_conf.aa1_second_pass.enable = true;
 			}
 			else
 			{

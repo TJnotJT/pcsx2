@@ -608,7 +608,7 @@ void ps_yuv()
 }
 #endif
 
-#if defined(ps_stencil_image_init_0) || defined(ps_stencil_image_init_1) || defined(ps_stencil_image_init_2) || defined(ps_stencil_image_init_3)
+#if defined(ps_stencil_image_init_0) || defined(ps_stencil_image_init_1) || defined(ps_stencil_image_init_2) || defined(ps_stencil_image_init_3) || defined(ps_stencil_image_init_4)
 
 void main()
 {
@@ -629,6 +629,9 @@ void main()
 	#ifdef ps_stencil_image_init_3
 		if(sample_c(v_tex).a < (254.5f / 255.0f)) // >= 0x80 pass
 			o_col0 = vec4(-1);
+	#endif
+	#ifdef ps_stencil_image_init_4
+		o_col0 = vec4(-1);
 	#endif
 }
 #endif
