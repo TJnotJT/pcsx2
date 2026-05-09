@@ -1353,8 +1353,9 @@ GSVector4 GSRendererHW::RealignTargetTextureCoordinate(const GSTextureCache::Sou
 
 GSVector4i GSRendererHW::ComputeBoundingBox(const GSVector2i& rtsize, float rtscale)
 {
-	const GSVector4 offset = GSVector4(-1.0f, 1.0f); // Round value
-	const GSVector4 box = m_vt.m_min.p.upld(m_vt.m_max.p) + offset.xxyy();
+	const float offset = 1.0f + (IsCoverageAlphaSupported() ? 1.0f : 0.0f); // Round value
+	const GSVector4 box = m_vt.m_min.p.upld(m_vt.m_max.p) + GSVector4(-offset, offset).xxyy();
+
 	return GSVector4i(box * GSVector4(rtscale)).rintersect(GSVector4i(0, 0, rtsize.x, rtsize.y));
 }
 
@@ -5872,7 +5873,7 @@ void GSRendererHW::EmulateAA1()
 			if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Maximum ||
 				(GSConfig.AccurateBlendingUnit == AccBlendLevel::Full && m_cached_ctx.TEST.DATE))
 			{
-				// Depth feedback AA1, more accurate/expensive.
+				// Depth feedback AA1, most accurate/expensive.
 				// Force SW depth so that Z writes can be prevented for edge pixels.
 				GL_INS("HW: AA1 triangles with depth feedback.");
 
@@ -5882,18 +5883,19 @@ void GSRendererHW::EmulateAA1()
 			}
 			else if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Full)
 			{
-				// Three pass AA1, middle accurate/expensive.
+				// Three pass primid AA1, middle accurate/expensive.
 				// First draw triangle interiors, then edges with depth masked.
-				GL_INS("HW: AA1 triangles two pass.");
+				// Discard edge pixels if they are covered by interiors (determine with primid).
+				GL_INS("HW: AA1 triangles primid 3 pass.");
 
-				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
+				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID_INIT; // Setup for init pass.
 				m_conf.aa1_second_pass.enable = true;
 			}
 			else
 			{
-				// Two pass AA1, less accurate/expensive.
+				// Two pass AA1, least accurate/expensive.
 				// First draw triangle interiors, then edges with depth masked.
-				GL_INS("HW: AA1 triangles two pass.");
+				GL_INS("HW: AA1 triangles 2 pass.");
 
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
 				m_conf.aa1_second_pass.enable = true;
@@ -8805,7 +8807,7 @@ void GSRendererHW::EmulateAA1SecondPass()
 	m_conf.aa1_second_pass.ps_aref = m_conf.cb_ps.FogColor_AREF.a;
 
 	// Second pass draws edges without depth.
-	m_conf.aa1_second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID; // FIXME: MAKE A FLAG!!
+	m_conf.aa1_second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID; // FIXME: MAKE A FLAG FOR PRIMID!
 	m_conf.aa1_second_pass.depth.zwe = false;
 
 	// Setup alpha test for the second pass for edges.

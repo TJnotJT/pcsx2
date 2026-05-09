@@ -396,6 +396,7 @@ void main()
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
 #define PS_AA1_TRIANGLE_PRIMID 4
+#define PS_AA1_TRIANGLE_PRIMID_INIT 5
 #endif
 
 #ifndef PS_FST
@@ -1680,6 +1681,11 @@ void main()
 	// DATM == 1
 	// Pixel with alpha equal to 0 will failed (0-127)
 	o_col0 = (C.a < 127.5f) ? vec4(gl_PrimitiveID) : vec4(0x7FFFFFFF);
+
+#elif PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
+
+	// Multiply by 6 because there are 6x as many edge triangles as interior.
+	o_col0 = vec4(6 * gl_PrimitiveID);
 
 #else
 	ps_blend(C, alpha_blend);

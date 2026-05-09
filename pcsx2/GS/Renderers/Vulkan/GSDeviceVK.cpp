@@ -4728,7 +4728,7 @@ void GSDeviceVK::DestroyResources()
 	}
 	for (u32 ds = 0; ds < 2; ds++)
 	{
-		for (u32 datm = 0; datm < 4; datm++)
+		for (u32 datm = 0; datm < 5; datm++) // FIXME: JANK
 		{
 			if (m_date_image_setup_pipelines[ds][datm] != VK_NULL_HANDLE)
 				vkDestroyPipeline(m_device, m_date_image_setup_pipelines[ds][datm], nullptr);
@@ -4947,9 +4947,9 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 
 	// Common state
 	gpb.SetPipelineLayout(m_tfx_pipeline_layout);
-	if (IsDATEModePrimIDInit(p.ps.date))
+	if (IsDATEModePrimIDInit(p.ps.date) || p.ps.aa1 == GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID_INIT)
 	{
-		// DATE image prepass
+		// DATE or AA1 image prepass
 		gpb.SetRenderPass(m_date_image_setup_render_passes[p.ds][0], 0);
 	}
 	else
@@ -5755,7 +5755,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 	PipelineSelector& pipe = m_pipeline_selector;
 	UpdateHWPipelineSelector(config, pipe);
 	pipe.dss.zwe = false;
-	pipe.cms.wrgba = 0;
+	pipe.cms = GSHWDrawConfig::ColorMaskSelector();
 	pipe.bs = {};
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	pipe.rt = true;
@@ -5774,6 +5774,10 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 		config.ps.date = 3;
 		config.alpha_second_pass.ps.date = 3;
 		config.aa1_second_pass.ps.date = 3;
+	}
+	else
+	{
+		config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
 	}
 
 	// and bind the image to the primitive sampler
