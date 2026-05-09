@@ -4171,7 +4171,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		}
 	}
 
-	for (u32 datm = 0; datm < 5; datm++)
+	for (u32 datm = 0; datm < 5; datm++) // FIXME: JANK!
 	{
 		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%d", datm));
 		VkShaderModule ps =
@@ -5769,13 +5769,16 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 	EndRenderPass();
 
 	// .. by setting it to DATE=3
-	config.ps.date = 3;
-	config.alpha_second_pass.ps.date = 3;
-	config.aa1_second_pass.ps.date = 3;
+	if (!aa1) // FIXME: JANK!
+	{
+		config.ps.date = 3;
+		config.alpha_second_pass.ps.date = 3;
+		config.aa1_second_pass.ps.date = 3;
+	}
 
 	// and bind the image to the primitive sampler
 	image->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
-	PSSetShaderResource(3, image, false);
+	PSSetShaderResource(TFX_TEXTURE_PRIMID, image, false);
 	return image;
 }
 
@@ -5818,7 +5821,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (colclip_rt)
 			config.rt = colclip_rt;
 
-		date_image = SetupPrimitiveTrackingDATE(config);
+		date_image = SetupPrimitiveTrackingDATE(config, config.aa1_second_pass.enable); // FIXME: This is JANK!
 		if (!date_image)
 		{
 			Console.Warning("VK: Failed to allocate DATE image, aborting draw.");

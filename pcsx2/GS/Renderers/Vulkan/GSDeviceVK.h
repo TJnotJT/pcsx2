@@ -406,7 +406,7 @@ private:
 	VkPipeline m_colclip_setup_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkPipeline m_colclip_finish_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkRenderPass m_date_image_setup_render_passes[2][2] = {}; // [depth][clear]
-	VkPipeline m_date_image_setup_pipelines[2][4] = {}; // [depth][datm]
+	VkPipeline m_date_image_setup_pipelines[2][5] = {}; // [depth][datm]
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
 

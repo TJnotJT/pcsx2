@@ -5886,7 +5886,7 @@ void GSRendererHW::EmulateAA1()
 				// First draw triangle interiors, then edges with depth masked.
 				GL_INS("HW: AA1 triangles two pass.");
 
-				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID; // No special depth handling.
+				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
 				m_conf.aa1_second_pass.enable = true;
 			}
 			else
@@ -8805,7 +8805,7 @@ void GSRendererHW::EmulateAA1SecondPass()
 	m_conf.aa1_second_pass.ps_aref = m_conf.cb_ps.FogColor_AREF.a;
 
 	// Second pass draws edges without depth.
-	m_conf.aa1_second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
+	m_conf.aa1_second_pass.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID; // FIXME: MAKE A FLAG!!
 	m_conf.aa1_second_pass.depth.zwe = false;
 
 	// Setup alpha test for the second pass for edges.
