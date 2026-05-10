@@ -5721,8 +5721,11 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTracking(GSHWDrawConfig& config)
 
 	EndRenderPass();
 
-	// setup the fill quad to prefill with existing alpha values
-	SetUtilityTexture(config.rt, m_point_sampler);
+	// setup the fill quad to prefill with init values
+	if (date)
+		SetUtilityTexture(config.rt, m_point_sampler);
+	else
+		SetUtilityTexture(m_null_texture.get(), m_point_sampler);
 	OMSetRenderTargets(image, config.ds, config.drawarea);
 
 	// if the depth target has been cleared, we need to preserve that clear

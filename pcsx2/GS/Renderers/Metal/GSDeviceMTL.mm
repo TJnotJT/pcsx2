@@ -1145,11 +1145,13 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	m_primid_init_pipeline[1][1] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_init_datm1"), @"PrimID DATM1 Clear");
 	m_primid_init_pipeline[1][2] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_rta_init_datm0"), @"PrimID DATM0 RTA Clear");
 	m_primid_init_pipeline[1][3] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_rta_init_datm1"), @"PrimID DATM1 RTA Clear");
+	m_primid_init_pipeline[1][4] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_init_aa1"), @"PrimID AA1 Clear");
 	pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 	m_primid_init_pipeline[0][0] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_init_datm0"), @"PrimID DATM0 Clear");
 	m_primid_init_pipeline[0][1] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_init_datm1"), @"PrimID DATM1 Clear");
 	m_primid_init_pipeline[0][2] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_rta_init_datm0"), @"PrimID DATM0 RTA Clear");
 	m_primid_init_pipeline[0][3] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_rta_init_datm1"), @"PrimID DATM1 RTA Clear");
+	m_primid_init_pipeline[0][4] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_primid_init_aa1"), @"PrimID AA1 Clear");
 
 	pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
 	applyAttribute(pdesc.vertexDescriptor, 0, MTLVertexFormatFloat2, offsetof(ConvertShaderVertex, pos),    0);
@@ -1657,7 +1659,8 @@ void GSDeviceMTL::RenderCopy(GSTexture* sTex, id<MTLRenderPipelineState> pipelin
 	// FS Triangle encoder uses vertex ID alone to make a FS triangle, which we then scissor to the desired rectangle
 	MRESetScissor(rect);
 	MRESetPipeline(pipeline);
-	MRESetTexture(sTex, GSMTLTextureIndexNonHW);
+	if (sTex)
+		MRESetTexture(sTex, GSMTLTextureIndexNonHW);
 	[m_current_render.encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
@@ -2340,27 +2343,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		case GSHWDrawConfig::DestinationAlphaMode::Full:
 			break; // No setup
 		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking:
-		{
-			FlushClears(rt);
-			GSVector2i size = rt->GetSize();
-			primid_tex = CreateRenderTarget(size.x, size.y, GSTexture::Format::PrimID);
-			DepthStencilSelector dsel = config.depth;
-			dsel.zwe = 0;
-			GSTexture* depth = dsel.key == DepthStencilSelector::NoDepth().key ? nullptr : config.ds;
-			BeginRenderPass(@"PrimID Destination Alpha Init", primid_tex, MTLLoadActionDontCare, depth, MTLLoadActionLoad);
-			RenderCopy(rt, m_primid_init_pipeline[static_cast<bool>(depth)][static_cast<u8>(config.datm)], config.drawarea);
-			MRESetDSS(dsel);
-			pxAssert(config.ps.date == 1 || config.ps.date == 2);
-			if (config.ps.tex_is_fb)
-				MRESetTexture(rt, GSMTLTextureIndexRenderTarget);
-			config.require_one_barrier = false; // Ending render pass is our barrier
-			pxAssert(config.require_full_barrier == false && config.drawlist == nullptr);
-			MRESetHWPipelineState(config.vs, config.ps, {}, {});
-			MREInitHWDraw(config, allocation);
-			SendHWDraw(config, GSHWDrawConfig::DrawPass::PrimID, m_current_render.encoder, index_buffer, index_buffer_offset);
-			config.ps.date = 3;
-			break;
-		}
+			break; // Done below
 		case GSHWDrawConfig::DestinationAlphaMode::StencilOne:
 			BeginRenderPass(@"Destination Alpha Stencil Clear", nullptr, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare, config.ds, MTLLoadActionDontCare);
 			[m_current_render.encoder setStencilReferenceValue:1];
@@ -2372,6 +2355,40 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 			SetupDestinationAlpha(rt, config.ds, config.drawarea, config.datm);
 			stencil = config.ds;
 			break;
+	}
+
+	// Destination alpha / AA1 primid setup
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
+		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
+	{
+		const bool date = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking);
+		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+		pxAssert(date != aa1); // exactly one must be true
+		FlushClears(rt);
+		GSVector2i size = rt->GetSize();
+		primid_tex = CreateRenderTarget(size.x, size.y, GSTexture::Format::PrimID);
+		DepthStencilSelector dsel = config.depth;
+		dsel.zwe = 0;
+		GSTexture* depth = dsel.key == DepthStencilSelector::NoDepth().key ? nullptr : config.ds;
+		BeginRenderPass(date ? @"PrimID Destination Alpha Init" : @"PrimID AA1 Init", primid_tex, MTLLoadActionDontCare, depth, MTLLoadActionLoad);
+		if (date)
+			RenderCopy(rt, m_primid_init_pipeline[static_cast<bool>(depth)][static_cast<u8>(config.datm)], config.drawarea);
+		else
+			RenderCopy(nullptr, m_primid_init_pipeline[static_cast<bool>(depth)][4], config.drawarea);
+		MRESetDSS(dsel);
+		pxAssert(config.ps.date == 1 || config.ps.date == 2);
+		if (config.ps.tex_is_fb)
+			MRESetTexture(rt, GSMTLTextureIndexRenderTarget);
+		config.require_one_barrier = false; // Ending render pass is our barrier
+		pxAssert(config.require_full_barrier == false && config.drawlist == nullptr);
+		MRESetHWPipelineState(config.vs, config.ps, {}, {});
+		MREInitHWDraw(config, allocation);
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::PrimID, m_current_render.encoder, index_buffer, index_buffer_offset);
+		if (date)
+			config.ps.date = 3;
+		else
+			config.ps.aa1 = GSHWDrawConfig::PS_AA1::Triangle;
+		break;
 	}
 
 	// Try to reduce render pass restarts

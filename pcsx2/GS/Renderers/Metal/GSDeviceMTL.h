@@ -257,7 +257,7 @@ public:
 	MRCOwned<id<MTLRenderPipelineState>> m_datm_pipeline[4];
 	MRCOwned<id<MTLRenderPipelineState>> m_clut_pipeline[2];
 	MRCOwned<id<MTLRenderPipelineState>> m_stencil_clear_pipeline;
-	MRCOwned<id<MTLRenderPipelineState>> m_primid_init_pipeline[2][4];
+	MRCOwned<id<MTLRenderPipelineState>> m_primid_init_pipeline[2][5];
 	MRCOwned<id<MTLRenderPipelineState>> m_colclip_init_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_colclip_clear_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_colclip_resolve_pipeline;

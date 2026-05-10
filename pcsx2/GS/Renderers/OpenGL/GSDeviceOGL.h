@@ -330,7 +330,7 @@ public:
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
-	GSTexture* InitPrimIDTexture(GSTexture* rt, const GSVector4i& area, u8 shader);
+	GSTexture* InitPrimIDTexture(GSTexture* rt, const GSVector2i& rtsize, const GSVector4i& area, u8 shader);
 
 	void CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY) override;
 

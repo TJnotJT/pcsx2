@@ -4122,8 +4122,11 @@ GSTexture12* GSDevice12::SetupPrimitiveTracking(GSHWDrawConfig& config)
 
 	EndRenderPass();
 
-	// setup the fill quad to prefill with existing alpha values
-	SetUtilityTexture(config.rt, m_point_sampler_cpu);
+	// setup the fill quad to prefill with init values
+	if (date)
+		SetUtilityTexture(config.rt, m_point_sampler_cpu);
+	else
+		SetUtilityTexture(m_null_texture.get(), m_point_sampler_cpu);
 	OMSetRenderTargets(image, nullptr, config.ds, config.drawarea);
 
 	const u32 ds = (config.ds ? 1 : 0);

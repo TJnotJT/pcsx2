@@ -1399,10 +1399,8 @@ GSDepthStencilOGL* GSDeviceOGL::CreateDepthStencil(OMDepthStencilSelector dssel)
 	return dss;
 }
 
-GSTexture* GSDeviceOGL::InitPrimIDTexture(GSTexture* rt, const GSVector4i& area, u8 shader)
+GSTexture* GSDeviceOGL::InitPrimIDTexture(GSTexture* rt, const GSVector2i& rtsize, const GSVector4i& area, u8 shader)
 {
-	const GSVector2i& rtsize = rt->GetSize();
-
 	GSTexture* tex = CreateRenderTarget(rtsize.x, rtsize.y, GSTexture::Format::PrimID, false);
 	if (!tex)
 		return nullptr;
@@ -1671,7 +1669,8 @@ void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextu
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	const GLProgram& ps, bool alpha_blend, OMColorMaskSelector cms, bool linear)
 {
-	CommitClear(sTex, true);
+	if (sTex)
+		CommitClear(sTex, true);
 
 	const bool draw_in_depth = dTex->IsDepthStencil();
 
@@ -1679,7 +1678,7 @@ void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextu
 	// Init
 	// ************************************
 
-	GL_PUSH("StretchRect from %d to %d", static_cast<GSTextureOGL*>(sTex)->GetID(), static_cast<GSTextureOGL*>(dTex)->GetID());
+	GL_PUSH("StretchRect from %d to %d", sTex ? static_cast<GSTextureOGL*>(sTex)->GetID() : -1, static_cast<GSTextureOGL*>(dTex)->GetID())
 	if (draw_in_depth)
 		OMSetRenderTargets(nullptr, nullptr, dTex);
 	else
@@ -2767,8 +2766,10 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
 		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
 	{
-		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
-		primid_texture = InitPrimIDTexture(colclip_rt ? colclip_rt : config.rt, config.drawarea, aa1 ? 4 : static_cast<u8>(config.datm));
+		if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
+			primid_texture = InitPrimIDTexture(colclip_rt ? colclip_rt : config.rt, rtsize, config.drawarea, static_cast<u8>(config.datm));
+		else
+			primid_texture = InitPrimIDTexture(nullptr, rtsize, config.drawarea, 4); // AA1
 		if (!primid_texture)
 		{
 			Console.Warning("GL: Failed to allocate primid image, aborting draw.");
