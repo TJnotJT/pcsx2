@@ -2387,7 +2387,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		if (date)
 			config.ps.date = 3;
 		else
-			config.ps.aa1 = GSHWDrawConfig::PS_AA1::Triangle;
+			config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
 	}
 
 	// Try to reduce render pass restarts

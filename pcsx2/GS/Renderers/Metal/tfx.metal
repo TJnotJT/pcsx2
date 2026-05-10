@@ -99,8 +99,8 @@ constant AA1   PS_AA1   = static_cast<AA1>(PS_AA1_RAW);
 	#define FBFETCH_SUPPORT 0
 #endif
 
-constant bool PS_PRIM_CHECKING_INIT = PS_DATE == 1 || PS_DATE == 2;
-constant bool PS_PRIM_CHECKING_READ = PS_DATE == 3;
+constant bool PS_PRIM_CHECKING_INIT = PS_DATE == 1 || PS_DATE == 2 || PS_AA1 = AA1::TRIANGLE_PRIMID_INIT;
+constant bool PS_PRIM_CHECKING_READ = PS_DATE == 3 || PS_AA1 == TRIANGLE_PRIMID;
 #if PRIMID_SUPPORT
 constant bool NEEDS_PRIMID = PS_PRIM_CHECKING_INIT || PS_PRIM_CHECKING_READ;
 #endif
@@ -1338,13 +1338,25 @@ struct PSMain
 				discard_fragment();
 		}
 
-		if (PS_DATE == 3)
+		if (PS_DATE == 3 || PS_AA1 == AA1::TRIANGLE_PRIMID)
 		{
-			float stencil_ceil = prim_id_tex.read(uint2(in.p.xy)).r;
-			// Note prim_id == stencil_ceil will be the primitive that will update
-			// the bad alpha value so we must keep it.
-			if (float(prim_id) > stencil_ceil)
-				discard_fragment();
+			float primid_limit = prim_id_tex.read(uint2(in.p.xy)).r;
+
+			if (PS_DATE == 3)
+			{
+				// Note prim_id == primid_limit will be the primitive that will update
+				// the bad alpha value so we must keep it.
+				if (float(prim_id) > primid_limit)
+					discard_fragment();
+			}
+
+			if (PS_AA1 == AA1::TRIANGLE_PRIMID)
+			{
+				// Discard if this edge is under a previous triangle interior.
+				// Edge should never overlap with its own interior so < and <= should be the same here.
+				if (float(prim_id) <= primid_limit)
+					discard;
+			}
 		}
 
 		float4 C = ps_color();
@@ -1400,6 +1412,12 @@ struct PSMain
 			// DATM == 1, Pixel with alpha equal to 0 will failed (0-127)
 			out.c0 = C.a < 127.5f ? float(prim_id) : FLT_MAX;
 			return out;
+		}
+
+		if (PS_AA1 == AA1::TRIANGLE_PRIMID_INIT)
+		{
+			// Multiply by 6 because there are 6x as many edge triangles as interior triangles.
+			out.c0 = float(6 * primid);
 		}
 
 		ps_blend(C, alpha_blend);

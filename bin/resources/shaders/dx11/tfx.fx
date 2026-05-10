@@ -1340,7 +1340,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 #endif
 
 #if PS_AA1 == PS_AA1_TRIANGLE_PRIMID
-	// Discard if this edge is under the a previous triangles.
+	// Discard if this edge is under a previous triangle interior.
 	// Edge should never overlap with its own interior so < and <= should be the same here.
 	if (int(input.primid) <= primid_limit)
 		discard;
@@ -1362,7 +1362,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #elif PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
 
-	// Multiply by 6 because there are 6x as many edge as interior triangles.
+	// Multiply by 6 because there are 6x as many edge triangles as interior triangles.
 	output.c = float(6 * input.primid);
 	
 #else
