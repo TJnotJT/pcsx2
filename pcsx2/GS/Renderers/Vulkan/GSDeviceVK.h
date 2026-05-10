@@ -406,7 +406,7 @@ private:
 	VkPipeline m_colclip_setup_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkPipeline m_colclip_finish_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkRenderPass m_date_image_setup_render_passes[2][2] = {}; // [depth][clear]
-	VkPipeline m_date_image_setup_pipelines[2][5] = {}; // [depth][datm]
+	VkPipeline m_primid_image_setup_pipelines[2][5] = {}; // [depth][datm]
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
 
@@ -569,7 +569,7 @@ public:
 	void FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect) override;
 
 	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
-	GSTextureVK* SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool aa1);
+	GSTextureVK* SetupPrimitiveTracking(GSHWDrawConfig& config);
 
 	void IASetVertexBuffer(const void* vertex, size_t stride, size_t count, size_t align_multiplier = 1);
 	void IASetIndexBuffer(const void* index, size_t count);

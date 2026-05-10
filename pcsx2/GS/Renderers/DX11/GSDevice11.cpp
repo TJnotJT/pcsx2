@@ -2930,7 +2930,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 		config.ps.date = 3;
 		config.alpha_second_pass.ps.date = 3;
-		config.aa1_second_pass.ps.date = 3;
+		config.aa1_multi_pass.ps.date = 3;
 		SetupPS(config.ps, nullptr, config.sampler);
 	}
 
@@ -2953,7 +2953,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
 	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
 	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass3 = config.aa1_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass3 = config.aa1_multi_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
 	if (draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2 || rt_feedbackloop_pass3))))
 	{
@@ -2969,7 +2969,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	const bool ds_feedbackloop_pass1 = config.ps.IsFeedbackLoopDepth();
 	const bool ds_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopDepth();
-	const bool ds_feedbackloop_pass3 = config.aa1_second_pass.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass3 = config.aa1_multi_pass.ps.IsFeedbackLoopDepth();
 	if (draw_ds && m_features.depth_feedback && (config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(ds_feedbackloop_pass1 || ds_feedbackloop_pass2 || ds_feedbackloop_pass3))
 	{
@@ -3018,24 +3018,24 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds);
 	}
 
-	if (config.aa1_second_pass.enable)
+	if (config.aa1_multi_pass.enable)
 	{
-		SetupVS(config.aa1_second_pass.vs, nullptr);
+		SetupVS(config.aa1_multi_pass.vs, nullptr);
 
-		if (config.cb_ps.FogColor_AREF.a != config.aa1_second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.aa1_multi_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.aa1_second_pass.ps_aref;
-			SetupPS(config.aa1_second_pass.ps, &config.cb_ps, config.sampler);
+			config.cb_ps.FogColor_AREF.a = config.aa1_multi_pass.ps_aref;
+			SetupPS(config.aa1_multi_pass.ps, &config.cb_ps, config.sampler);
 		}
 		else
 		{
 			// ps cbuffer hasn't changed, so don't bother checking
-			SetupPS(config.aa1_second_pass.ps, nullptr, config.sampler);
+			SetupPS(config.aa1_multi_pass.ps, nullptr, config.sampler);
 		}
 
 		const bool one_barrier = config.require_one_barrier && m_features.multidraw_fb_copy;
-		SetupOM(config.aa1_second_pass.depth, OMBlendSelector(config.aa1_second_pass.colormask, config.aa1_second_pass.blend),
-			config.aa1_second_pass.blend.constant);
+		SetupOM(config.aa1_multi_pass.depth, OMBlendSelector(config.aa1_multi_pass.colormask, config.aa1_multi_pass.blend),
+			config.aa1_multi_pass.blend.constant);
 		SendHWDraw(config, GSHWDrawConfig::DrawPass::AA1Second, rt_feedbackloop_pass3 ? draw_rt_clone : nullptr, draw_rt,
 			ds_feedbackloop_pass3 ? draw_ds_clone : nullptr, draw_ds);
 	}

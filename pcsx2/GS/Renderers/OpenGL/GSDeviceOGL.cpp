@@ -2876,7 +2876,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 		psel.ps.date = 3;
 		config.alpha_second_pass.ps.date = 3;
-		config.aa1_second_pass.ps.date = 3;
+		config.aa1_multi_pass.ps.date = 3;
 		SetupPipeline(psel);
 		PSSetShaderResource(3, primid_texture);
 	}
@@ -2936,7 +2936,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
 	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
 	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass3 = config.aa1_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass3 = config.aa1_multi_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
 	if (draw_rt && !m_features.texture_barrier && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2 || rt_feedbackloop_pass3))))
 	{
@@ -2952,7 +2952,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	const bool ds_feedbackloop_pass1 = config.ps.IsFeedbackLoopDepth();
 	const bool ds_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopDepth();
-	const bool ds_feedbackloop_pass3 = config.aa1_second_pass.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass3 = config.aa1_multi_pass.ps.IsFeedbackLoopDepth();
 	if (draw_ds && !m_features.texture_barrier && m_features.depth_feedback &&
 		(config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) && (ds_feedbackloop_pass1 || ds_feedbackloop_pass2 || ds_feedbackloop_pass3))
 	{
@@ -3024,21 +3024,21 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds);
 	}
 
-	if (config.aa1_second_pass.enable)
+	if (config.aa1_multi_pass.enable)
 	{
 		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.aa1_second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.aa1_multi_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.aa1_second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.aa1_multi_pass.ps_aref;
 			PSSetUniformBuffer(config.cb_ps);
 		}
 
-		psel.vs = config.aa1_second_pass.vs;
-		psel.ps = config.aa1_second_pass.ps;
+		psel.vs = config.aa1_multi_pass.vs;
+		psel.ps = config.aa1_multi_pass.ps;
 		SetupPipeline(psel);
-		OMSetColorMaskState(config.aa1_second_pass.colormask);
-		const GSHWDrawConfig::BlendState& blend_aa1 = config.aa1_second_pass.blend;
-		if (blend_aa1.IsEffective(config.aa1_second_pass.colormask))
+		OMSetColorMaskState(config.aa1_multi_pass.colormask);
+		const GSHWDrawConfig::BlendState& blend_aa1 = config.aa1_multi_pass.blend;
+		if (blend_aa1.IsEffective(config.aa1_multi_pass.colormask))
 		{
 			OMSetBlendState(blend_aa1.enable, s_gl_blend_factors[blend_aa1.src_factor],
 				s_gl_blend_factors[blend_aa1.dst_factor], s_gl_blend_ops[blend_aa1.op],
@@ -3050,7 +3050,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			OMSetBlendState();
 		}
 		const bool one_barrier = config.require_one_barrier && m_features.feedback_loops();
-		SetupOM(config.aa1_second_pass.depth);
+		SetupOM(config.aa1_multi_pass.depth);
 		SendHWDraw(config, GSHWDrawConfig::DrawPass::AA1Second, rt_feedbackloop_pass3 ? draw_rt_clone : nullptr, draw_rt,
 			ds_feedbackloop_pass3 ? draw_ds_clone : nullptr, draw_ds);
 	}

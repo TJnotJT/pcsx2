@@ -808,6 +808,20 @@ struct alignas(16) GSHWDrawConfig
 		Full,           ///< Full emulation (using barriers / ROV)
 	};
 
+	enum class AA1Mode : u8
+	{
+		Off,             ///< No AA1
+		OnePass,         ///< Lines or triangles without depth write
+		TwoPass,         ///< Two passes: interiors then edges
+		ThreePassPrimid, ///< Three passes: primid setup, interiors, then edges (with primid discard)
+		DepthFeedback,   ///< Full emulation (using depth feedback barriers)
+	};
+
+	static constexpr bool IsAA1MultiPass(AA1Mode mode)
+	{
+		return mode == AA1Mode::TwoPass || mode == AA1Mode::ThreePassPrimid;
+	}
+
 	enum class ColClipMode : u8
 	{
 		NoModify = 0,
@@ -844,6 +858,8 @@ struct alignas(16) GSHWDrawConfig
 	bool require_full_barrier; ///< Require texture barrier between all prims
 
 	AlphaTestMode alpha_test;
+	
+	AA1Mode aa1_mode;
 
 	DestinationAlphaMode destination_alpha;
 	SetDATM datm;
@@ -886,7 +902,7 @@ struct alignas(16) GSHWDrawConfig
 		float ps_aref;
 	};
 
-	AA1Pass aa1_second_pass;
+	AA1Pass aa1_multi_pass;
 
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
@@ -945,7 +961,7 @@ struct alignas(16) GSHWDrawConfig
 				[[fallthrough]];
 			case DrawPass::Main: return vs;
 			case DrawPass::AlphaSecond: return vs;
-			case DrawPass::AA1Second: return aa1_second_pass.vs;
+			case DrawPass::AA1Second: return aa1_multi_pass.vs;
 			case DrawPass::Blend: return vs;
 			case DrawPass::PrimID: return vs;
 		}
@@ -960,7 +976,7 @@ struct alignas(16) GSHWDrawConfig
 				[[fallthrough]];
 			case DrawPass::Main: return ps;
 			case DrawPass::AlphaSecond: return alpha_second_pass.ps;
-			case DrawPass::AA1Second: return aa1_second_pass.ps;
+			case DrawPass::AA1Second: return aa1_multi_pass.ps;
 			case DrawPass::Blend: return ps;
 			case DrawPass::PrimID: return ps;
 		}
@@ -975,7 +991,7 @@ struct alignas(16) GSHWDrawConfig
 				[[fallthrough]];
 			case DrawPass::Main: return colormask;
 			case DrawPass::AlphaSecond: return alpha_second_pass.colormask;
-			case DrawPass::AA1Second: return aa1_second_pass.colormask;
+			case DrawPass::AA1Second: return aa1_multi_pass.colormask;
 			case DrawPass::Blend: return colormask;
 			case DrawPass::PrimID: return GSHWDrawConfig::ColorMaskSelector(1);
 		}
@@ -990,7 +1006,7 @@ struct alignas(16) GSHWDrawConfig
 				[[fallthrough]];
 			case DrawPass::Main: return depth;
 			case DrawPass::AlphaSecond: return alpha_second_pass.depth;
-			case DrawPass::AA1Second: return aa1_second_pass.depth;
+			case DrawPass::AA1Second: return aa1_multi_pass.depth;
 			case DrawPass::Blend: return depth;
 			case DrawPass::PrimID:
 			{

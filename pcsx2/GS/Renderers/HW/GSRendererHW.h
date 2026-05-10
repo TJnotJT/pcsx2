@@ -227,7 +227,7 @@ private:
 
 	void EmulateZbuffer(const GSTextureCache::Target* ds);
 	void EmulateAA1();
-	void EmulateAA1SecondPass();
+	void EmulateAA1MultiPass();
 	static void SimplifyAlphaTest(const GSHWDrawConfig::ColorMaskSelector& colormask, const bool zwe, u32& atst, u32& afail);
 	void OptimizeAlphaTestAndMasks(TryAlphaTestRegion region, GIFRegTEST& test, GSHWDrawConfig::ColorMaskSelector& colormask, bool& zwe);
 	static void GetAlphaTestConfigPS(const u32 atst, const u8 aref, const bool invert_test, PS_ATST& ps_atst_out, float& aref_out);

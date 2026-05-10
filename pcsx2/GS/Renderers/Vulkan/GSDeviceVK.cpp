@@ -4171,9 +4171,9 @@ bool GSDeviceVK::CompileConvertPipelines()
 		}
 	}
 
-	for (u32 datm = 0; datm < 5; datm++) // FIXME: JANK!
+	for (u32 datm = 0; datm < 5; datm++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%d", datm));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%d", datm));
 		VkShaderModule ps =
 			GetUtilityFragmentShader(*shader, entry_point.c_str());
 		if (ps == VK_NULL_HANDLE)
@@ -4191,12 +4191,12 @@ bool GSDeviceVK::CompileConvertPipelines()
 		for (u32 ds = 0; ds < 2; ds++)
 		{
 			gpb.SetRenderPass(m_date_image_setup_render_passes[ds][0], 0);
-			m_date_image_setup_pipelines[ds][datm] =
+			m_primid_image_setup_pipelines[ds][datm] =
 				gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
-			if (!m_date_image_setup_pipelines[ds][datm])
+			if (!m_primid_image_setup_pipelines[ds][datm])
 				return false;
 
-			Vulkan::SetObjectName(m_device, m_date_image_setup_pipelines[ds][datm],
+			Vulkan::SetObjectName(m_device, m_primid_image_setup_pipelines[ds][datm],
 				"DATE image clear pipeline (ds=%u, datm=%u)", ds, (datm == 1 || datm == 3));
 		}
 	}
@@ -4728,10 +4728,10 @@ void GSDeviceVK::DestroyResources()
 	}
 	for (u32 ds = 0; ds < 2; ds++)
 	{
-		for (u32 datm = 0; datm < 5; datm++) // FIXME: JANK
+		for (u32 datm = 0; datm < 5; datm++)
 		{
-			if (m_date_image_setup_pipelines[ds][datm] != VK_NULL_HANDLE)
-				vkDestroyPipeline(m_device, m_date_image_setup_pipelines[ds][datm], nullptr);
+			if (m_primid_image_setup_pipelines[ds][datm] != VK_NULL_HANDLE)
+				vkDestroyPipeline(m_device, m_primid_image_setup_pipelines[ds][datm], nullptr);
 		}
 	}
 	if (m_fxaa_pipeline != VK_NULL_HANDLE)
@@ -5690,16 +5690,27 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	EndRenderPass();
 }
 
-GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool aa1)
+GSTextureVK* GSDeviceVK::SetupPrimitiveTracking(GSHWDrawConfig& config)
 {
+	const bool date = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking);
+	const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+	pxAssert(date != aa1); // exactly one must be true
+
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 
-	// How this is done:
+	// How DATE is done:
 	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
 	// - so, instead of just filling the int texture with INT_MAX, we sample the RT and use -1 for failing values
 	// - then, instead of sampling the RT with DATE=1/2, we just do a min() without it, the -1 gets preserved
 	// - then, the DATE=3 draw is done as normal
-	GL_INS("Setup DATE Primitive ID Image for {%d,%d}-{%d,%d}", config.drawarea.left, config.drawarea.top,
+
+	// How AA1 is done:
+	// - Initialize the primid texture to -1 (allow everything).
+	// - Write the primid of the interior triangles.
+	// - In the edge pass, discard edge pixels that are overlapped by an interior.
+
+	GL_INS("Setup %s Primitive ID Image for {%d,%d}-{%d,%d}", date ? "DATE": "AA1",
+		config.drawarea.left, config.drawarea.top,
 		config.drawarea.right, config.drawarea.bottom);
 
 	const GSVector2i rtsize(config.rt->GetSize());
@@ -5739,7 +5750,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 		{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
 		{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
 	};
-	const VkPipeline pipeline = m_date_image_setup_pipelines[ds][aa1 ? 4 : static_cast<u8>(config.datm)];
+	const VkPipeline pipeline = m_primid_image_setup_pipelines[ds][aa1 ? 4 : static_cast<u8>(config.datm)];
 	SetPipeline(pipeline);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
 	if (ApplyUtilityState())
@@ -5749,7 +5760,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 	UploadHWDrawVerticesAndIndices(config);
 
 	// primid texture will get re-bound, so clear it since we're using push descriptors
-	PSSetShaderResource(3, m_null_texture.get(), false);
+	PSSetShaderResource(TFX_TEXTURE_PRIMID, m_null_texture.get(), false);
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	PipelineSelector& pipe = m_pipeline_selector;
@@ -5768,15 +5779,16 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, bool
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
 
-	// .. by setting it to DATE=3
-	if (!aa1) // FIXME: JANK!
+	if (date)
 	{
+		// set DATE=3 for the real draw
 		config.ps.date = 3;
 		config.alpha_second_pass.ps.date = 3;
-		config.aa1_second_pass.ps.date = 3;
+		config.aa1_multi_pass.ps.date = 3;
 	}
 	else
 	{
+		// set triangle interiors for the real draw
 		config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
 	}
 
@@ -5813,11 +5825,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (config.topology == GSHWDrawConfig::Topology::Line)
 		SetLineWidth(config.line_expand ? config.cb_ps.ScaleFactor.z : 1.0f);
 
-	// Primitive ID tracking DATE setup.
-	// Needs to be done before
+	// Primitive ID tracking DATE/AA1 setup.
 	GSTextureVK* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
-		config.aa1_second_pass.enable) // FIXME: Add a new flag!
+		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
 	{
 		// If we have a colclip in progress, we need to use the colclip texture, but we can't check this later as there's a chicken/egg problem with the pipe setup.
 		GSTexture* backup_rt = config.rt;
@@ -5825,10 +5836,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (colclip_rt)
 			config.rt = colclip_rt;
 
-		date_image = SetupPrimitiveTrackingDATE(config, config.aa1_second_pass.enable); // FIXME: This is JANK!
+		date_image = SetupPrimitiveTracking(config);
 		if (!date_image)
 		{
-			Console.Warning("VK: Failed to allocate DATE image, aborting draw.");
+			Console.Warning("VK: Failed to allocate primid image, aborting draw.");
 			return;
 		}
 
@@ -6002,7 +6013,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		pipe.feedback_loop_flags |= m_current_framebuffer_feedback_loop;
 	}
 
-	if (draw_rt && ((config.require_one_barrier && (config.ps.IsFeedbackLoopRT() || config.alpha_second_pass.ps.IsFeedbackLoopRT() || config.aa1_second_pass.ps.IsFeedbackLoopRT())) ||
+	if (draw_rt && ((config.require_one_barrier && (config.ps.IsFeedbackLoopRT() || config.alpha_second_pass.ps.IsFeedbackLoopRT() || config.aa1_multi_pass.ps.IsFeedbackLoopRT())) ||
 		(config.tex && config.tex == config.rt)) && !m_features.texture_barrier)
 	{
 		// Requires a copy of the RT.
@@ -6147,20 +6158,20 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// and the AA1 pass
-	if (config.aa1_second_pass.enable)
+	if (config.aa1_multi_pass.enable)
 	{
 		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.aa1_second_pass.ps_aref)
+		if (config.cb_ps.FogColor_AREF.a != config.aa1_multi_pass.ps_aref)
 		{
-			config.cb_ps.FogColor_AREF.a = config.aa1_second_pass.ps_aref;
+			config.cb_ps.FogColor_AREF.a = config.aa1_multi_pass.ps_aref;
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		pipe.vs = config.aa1_second_pass.vs;
-		pipe.ps = config.aa1_second_pass.ps;
-		pipe.cms = config.aa1_second_pass.colormask;
-		pipe.dss = config.aa1_second_pass.depth;
-		pipe.bs = config.aa1_second_pass.blend;
+		pipe.vs = config.aa1_multi_pass.vs;
+		pipe.ps = config.aa1_multi_pass.ps;
+		pipe.cms = config.aa1_multi_pass.colormask;
+		pipe.dss = config.aa1_multi_pass.depth;
+		pipe.bs = config.aa1_multi_pass.blend;
 		if (BindDrawPipeline(pipe))
 		{
 			SendHWDraw(config, GSHWDrawConfig::DrawPass::AA1Second, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr,

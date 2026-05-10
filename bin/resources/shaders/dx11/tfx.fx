@@ -48,6 +48,8 @@
 #define PS_AA1_LINE 1
 #define PS_AA1_TRIANGLE 2
 #define PS_AA1_TRIANGLE_SW_Z 3
+#define PS_AA1_TRIANGLE_PRIMID 4
+#define PS_AA1_TRIANGLE_PRIMID_INIT 5
 #endif
 
 #ifndef PS_FST
@@ -173,7 +175,8 @@ struct PS_INPUT
 #endif
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-#if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
+#if (PS_DATE >= 1 && PS_DATE <= 3) || (PS_AA1 == PS_AA1_TRIANGLE_PRIMID) || \
+	(PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT) || GS_FORWARD_PRIMID
 	uint primid : SV_PrimitiveID;
 #endif
 };
@@ -184,7 +187,7 @@ struct PS_OUTPUT
 {
 #define NUM_RTS 0
 #if !PS_NO_COLOR
-#if PS_DATE == 1 || PS_DATE == 2
+#if PS_DATE == 1 || PS_DATE == 2 || PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
 	float c : SV_Target;
 #else
 	float4 c0 : SV_Target0;
@@ -1325,12 +1328,24 @@ PS_OUTPUT ps_main(PS_INPUT input)
 
 #endif
 
+#if PS_DATE == 3 || PS_AA1 == PS_AA1_TRIANGLE_PRIMID
+
+	int primid_limit = int(PrimMinTexture.Load(int3(input.p.xy, 0)));
+
 #if PS_DATE == 3
-	// Note gl_PrimitiveID == stencil_ceil will be the primitive that will update
+	// Note gl_PrimitiveID == primid_limit will be the primitive that will update
 	// the bad alpha value so we must keep it.
-	int stencil_ceil = int(PrimMinTexture.Load(int3(input.p.xy, 0)));
-	if (int(input.primid) > stencil_ceil)
+	if (int(input.primid) > primid_limit)
 		discard;
+#endif
+
+#if PS_AA1 == PS_AA1_TRIANGLE_PRIMID
+	// Discard if this edge is under the a previous triangles.
+	// Edge should never overlap with its own interior so < and <= should be the same here.
+	if (int(input.primid) <= primid_limit)
+		discard;
+#endif
+
 #endif
 
 	// Get first primitive that will write a failling alpha value
@@ -1345,8 +1360,13 @@ PS_OUTPUT ps_main(PS_INPUT input)
 	// Pixel with alpha equal to 0 will failed (0-127)
 	output.c = (C.a < 127.5f) ? float(input.primid) : float(0x7FFFFFFF);
 
+#elif PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
+
+	// Multiply by 6 because there are 6x as many edge triangles as interior.
+	output.c = float(6 * input.primid);
+	
 #else
-	// Not primid DATE setup
+	// Not primid setup
 
 	ps_blend(C, alpha_blend, input.p.xy);
 
