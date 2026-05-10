@@ -927,10 +927,8 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return require_full_barrier;
-			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_full_barrier;
 			case DrawPass::AA1Second: return require_full_barrier;
 			case DrawPass::PrimID: return false;
 			case DrawPass::Blend: return false;
@@ -942,8 +940,6 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return require_one_barrier;
 			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
 			case DrawPass::AA1Second: return require_one_barrier;
@@ -957,8 +953,6 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return vs;
 			case DrawPass::AlphaSecond: return vs;
 			case DrawPass::AA1Second: return aa1_multi_pass.vs;
@@ -972,8 +966,6 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return ps;
 			case DrawPass::AlphaSecond: return alpha_second_pass.ps;
 			case DrawPass::AA1Second: return aa1_multi_pass.ps;
@@ -987,8 +979,6 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return colormask;
 			case DrawPass::AlphaSecond: return alpha_second_pass.colormask;
 			case DrawPass::AA1Second: return aa1_multi_pass.colormask;
@@ -1002,8 +992,6 @@ struct alignas(16) GSHWDrawConfig
 		switch (pass)
 		{
 			default:
-				pxFailRel("Impossible");
-				[[fallthrough]];
 			case DrawPass::Main: return depth;
 			case DrawPass::AlphaSecond: return alpha_second_pass.depth;
 			case DrawPass::AA1Second: return aa1_multi_pass.depth;
