@@ -64,13 +64,6 @@
        </property>
       </widget>
      </item>
-     <item row="1" column="0">
-      <widget class="QCheckBox" name="hwAA1">
-       <property name="text">
-        <string>AA1</string>
-       </property>
-      </widget>
-     </item>
      <item row="1" column="1">
       <widget class="QCheckBox" name="enableHWFixes">
        <property name="text">
@@ -140,6 +133,16 @@
      </property>
     </widget>
    </item>
+   <item row="5" column="0">
+    <widget class="QLabel" name="blendingLabel">
+     <property name="text">
+      <string>Blending Accuracy:</string>
+     </property>
+     <property name="buddy">
+      <cstring>blending</cstring>
+     </property>
+    </widget>
+   </item>
    <item row="5" column="1">
     <widget class="QComboBox" name="blending">
      <item>
@@ -172,6 +175,16 @@
        <string>Maximum (Very Slow)</string>
       </property>
      </item>
+    </widget>
+   </item>
+   <item row="6" column="0">
+    <widget class="QLabel" name="hwAA1Label">
+     <property name="text">
+      <string>AA1 Level:</string>
+     </property>
+     <property name="buddy">
+      <cstring>hwAA1</cstring>
+     </property>
     </widget>
    </item>
    <item row="6" column="1">
@@ -225,16 +238,6 @@
        <string>Trilinear (Forced)</string>
       </property>
      </item>
-    </widget>
-   </item>
-   <item row="5" column="0">
-    <widget class="QLabel" name="blendingLabel">
-     <property name="text">
-      <string>Blending Accuracy:</string>
-     </property>
-     <property name="buddy">
-      <cstring>blending</cstring>
-     </property>
     </widget>
    </item>
    <item row="2" column="0">
