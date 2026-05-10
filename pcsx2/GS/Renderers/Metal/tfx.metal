@@ -339,17 +339,43 @@ vertex MainVSOut vs_main_expand(
 			return out;
 		}
 		case VSExpand::TriangleAA1:
+		case VSExpand::TriangleAA1Interior:
+		case VSExpand::TriangleAA1Edge:
 		{
 			// Triangles with AA1 are expanded as follows:
 			// - Vertices 0-2: Interior of triangle (1 triangle).
 			// - Vertices 3-8: First edge expanded (2 triangles).
 			// - Vertices 9-14: Second edge expanded (2 triangles).
 			// - Vertices 15-20: Third edge expanded (2 triangles).
+			// With Interior or Edge the corresponding vertices are omitted.
 
-			uint prim_id = vid / 21;
-			uint prim_offset = vid - 21 * prim_id; // range: 0-20
-			bool interior = prim_offset < 3;
-			uint i0 = interior ? prim_offset : (prim_offset - 3) / 6;
+			uint prim_id, prim_offset, prim_offset_edges;
+			bool interior;
+			switch (VS_EXPAND_TYPE)
+			{
+				default:
+				case VSExpand::TriangleAA1:
+					prim_id = vid / 21;
+					prim_offset = vid - 21 * prim_id; // range: 0-20
+					prim_offset_edges = prim_offset - 3; // range: 0-17
+					interior = prim_offset < 3;
+					break;
+				case VSExpand::TriangleAA1Interior:
+					prim_id = vid / 3;
+					prim_offset = vid - 3 * prim_id; // range: 0-2
+					prim_offset_edges = 0; // unused
+					interior = true;
+					break;
+				case VSExpand::TriangleAA1Edge:
+					prim_id = vid / 18;
+					prim_offset = 0; // unused
+					prim_offset_edges = vid - 18 * prim_id; // range: 0-17
+					interior = false;
+					break;
+			}
+
+			// Vertex indices for this edge. We need all 3 for determining exterior/interior.
+			uint i0 = interior ? prim_offset : prim_offset_edges / 6;
 			uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
 			uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
 			MainVSOut out      = vs_main_run(load_vertex(vertices[indices[3 * prim_id + i0]]), cb);
@@ -362,8 +388,6 @@ vertex MainVSOut vs_main_expand(
 			}
 			else
 			{
-				// Vertex indices for this edge. We need all 3 for determining exterior/interior.
-				uint prim_offset_edges = prim_offset - 3; // range: 0-17
 				uint edge_offset = prim_offset_edges - 6 * i0; // range: 0-5
 
 				// Note: order of top/bottom, inside/outside order is arbitrary,
@@ -1355,7 +1379,7 @@ struct PSMain
 				// Discard if this edge is under a previous triangle interior.
 				// Edge should never overlap with its own interior so < and <= should be the same here.
 				if (float(prim_id) <= primid_limit)
-					discard;
+					discard_fragment();
 			}
 		}
 
@@ -1417,7 +1441,7 @@ struct PSMain
 		if (PS_AA1 == AA1::TRIANGLE_PRIMID_INIT)
 		{
 			// Multiply by 6 because there are 6x as many edge triangles as interior triangles.
-			out.c0 = float(6 * primid);
+			out.c0 = float(6 * prim_id);
 		}
 
 		ps_blend(C, alpha_blend);
