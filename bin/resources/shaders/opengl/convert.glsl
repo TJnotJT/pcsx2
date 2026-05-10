@@ -591,27 +591,31 @@ void ps_yuv()
 }
 #endif
 
-#if defined(ps_stencil_image_init_0) || defined(ps_stencil_image_init_1) || defined(ps_stencil_image_init_2) || defined(ps_stencil_image_init_3)
+#if defined(ps_primid_image_init_0) || defined(ps_primid_image_init_1) || defined(ps_primid_image_init_2) || \
+	defined(ps_primid_image_init_3) || defined(ps_primid_image_init_4)
 
 void main()
 {
 	SV_Target0 = vec4(0x7FFFFFFF);
 
-	#ifdef ps_stencil_image_init_0
+	#ifdef ps_primid_image_init_0
 		if((127.5f / 255.0f) < sample_c().a) // < 0x80 pass (== 0x80 should not pass)
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_1
+	#ifdef ps_primid_image_init_1
 		if(sample_c().a < (127.5f / 255.0f)) // >= 0x80 pass
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_2
+	#ifdef ps_primid_image_init_2
 		if((254.5f / 255.0f) < sample_c().a) // < 0x80 pass (== 0x80 should not pass)
 			SV_Target0 = vec4(-1);
 	#endif
-	#ifdef ps_stencil_image_init_3
+	#ifdef ps_primid_image_init_3
 		if(sample_c().a < (254.5f / 255.0f)) // >= 0x80 pass
 			SV_Target0 = vec4(-1);
+	#endif
+	#ifdef ps_primid_image_init_4
+		SV_Target0 = vec4(-1); // AA1 primid
 	#endif
 }
 #endif

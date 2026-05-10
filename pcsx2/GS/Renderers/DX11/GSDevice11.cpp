@@ -548,7 +548,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	for (size_t i = 0; i < std::size(m_date.primid_init_ps); i++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%zu", i));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%zu", i));
 		m_date.primid_init_ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, nullptr, entry_point.c_str());
 		if (!m_date.primid_init_ps[i])
 			return false;
@@ -2841,17 +2841,19 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	// Destination Alpha Setup
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy);
-	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
+		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
 	{
 		primid_texture = CreateRenderTarget(rtsize.x, rtsize.y, GSTexture::Format::PrimID, false);
 		if (!primid_texture)
 		{
-			Console.Warning("D3D11: Failed to allocate DATE image, aborting draw.");
+			Console.Warning("D3D11: Failed to allocate primid image, aborting draw.");
 			return;
 		}
 
+		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
 		DoStretchRect(colclip_rt ? colclip_rt : config.rt, GSVector4(config.drawarea) / GSVector4(rtsize).xyxy(),
-			primid_texture, GSVector4(config.drawarea), m_date.primid_init_ps[static_cast<u8>(config.datm)].get(), nullptr, false);
+			primid_texture, GSVector4(config.drawarea), m_date.primid_init_ps[aa1 ? 4 : static_cast<u8>(config.datm)].get(), nullptr, false);
 	}
 	else if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil ||
 			 (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne && !need_barrier))
@@ -2919,6 +2921,10 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	if (primid_texture)
 	{
+		const bool date = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking);
+		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+		pxAssert(date != aa1); // exactly one must be true
+
 		OMDepthStencilSelector dss = config.depth;
 		dss.zwe = 0;
 		const OMBlendSelector blend(GSHWDrawConfig::ColorMaskSelector(1),
@@ -2928,9 +2934,16 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		SetRenderHWShaderResources(config, nullptr);
 		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
-		config.ps.date = 3;
-		config.alpha_second_pass.ps.date = 3;
-		config.aa1_multi_pass.ps.date = 3;
+		if (date)
+		{
+			config.ps.date = 3;
+			config.alpha_second_pass.ps.date = 3;
+			config.aa1_multi_pass.ps.date = 3;
+		}
+		else
+		{
+			config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
+		}
 		SetupPS(config.ps, nullptr, config.sampler);
 	}
 

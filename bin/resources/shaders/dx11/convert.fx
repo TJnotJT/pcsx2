@@ -591,7 +591,7 @@ float ps_primid_image_init_3(PS_INPUT input)
 	return c;
 }
 
-float ps_primid_image_init_4(PS_INPUT input) // AA1
+float ps_primid_image_init_4(PS_INPUT input) // AA1 primid
 	: SV_Target
 {
 	return float(-1);

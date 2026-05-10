@@ -586,7 +586,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		for (size_t i = 0; i < std::size(m_date.primid_ps); i++)
 		{
 			const std::string ps(GetShaderSource(
-				fmt::format("ps_stencil_image_init_{}", i),
+				fmt::format("ps_primid_image_init_{}", i),
 				GL_FRAGMENT_SHADER, *convert_glsl));
 			m_shader_cache.GetProgram(&m_date.primid_ps[i], m_convert.vs, ps);
 			m_date.primid_ps[i].SetFormattedName("PrimID Destination Alpha Init %d", i);
@@ -1399,7 +1399,7 @@ GSDepthStencilOGL* GSDeviceOGL::CreateDepthStencil(OMDepthStencilSelector dssel)
 	return dss;
 }
 
-GSTexture* GSDeviceOGL::InitPrimDateTexture(GSTexture* rt, const GSVector4i& area, SetDATM datm)
+GSTexture* GSDeviceOGL::InitPrimIDTexture(GSTexture* rt, const GSVector4i& area, u8 shader)
 {
 	const GSVector2i& rtsize = rt->GetSize();
 
@@ -1408,7 +1408,7 @@ GSTexture* GSDeviceOGL::InitPrimDateTexture(GSTexture* rt, const GSVector4i& are
 		return nullptr;
 
 	GL_PUSH("PrimID Destination Alpha Clear");
-	DoStretchRect(rt, GSVector4(area) / GSVector4(rtsize).xyxy(), tex, GSVector4(area), m_date.primid_ps[static_cast<u8>(datm)], false);
+	DoStretchRect(rt, GSVector4(area) / GSVector4(rtsize).xyxy(), tex, GSVector4(area), m_date.primid_ps[shader], false);
 	return tex;
 }
 
@@ -2751,13 +2751,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		case GSHWDrawConfig::DestinationAlphaMode::Full:
 			break; // No setup
 		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking:
-			primid_texture = InitPrimDateTexture(colclip_rt ? colclip_rt : config.rt, config.drawarea, config.datm);
-			if (!primid_texture)
-			{
-				Console.Warning("GL: Failed to allocate DATE image, aborting draw.");
-				return;
-			}
-			break;
+			break; // Done below
 		case GSHWDrawConfig::DestinationAlphaMode::StencilOne:
 			if (need_barrier)
 			{
@@ -2768,6 +2762,18 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		case GSHWDrawConfig::DestinationAlphaMode::Stencil:
 			SetupDATE(colclip_rt ? colclip_rt : config.rt, config.ds, config.datm, config.drawarea);
 			break;
+	}
+
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
+		config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid)
+	{
+		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+		primid_texture = InitPrimIDTexture(colclip_rt ? colclip_rt : config.rt, config.drawarea, aa1 ? 4 : static_cast<u8>(config.datm));
+		if (!primid_texture)
+		{
+			Console.Warning("GL: Failed to allocate primid image, aborting draw.");
+			return;
+		}
 	}
 
 	IASetVertexBuffer(config.verts, config.nverts, GetVertexAlignment(config.vs.expand));
@@ -2859,7 +2865,11 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 
 	if (primid_texture)
 	{
-		GL_PUSH("Destination Alpha PrimID Init");
+		const bool date = (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking);
+		const bool aa1 = (config.aa1_mode == GSHWDrawConfig::AA1Mode::ThreePassPrimid);
+		pxAssert(date != aa1); // exactly one must be true
+
+		GL_PUSH("%s PrimID Init", date ? "DATE" : "AA1");
 
 		OMSetRenderTargets(primid_texture, nullptr, config.ds, &config.scissor);
 		OMColorMaskSelector mask;
@@ -2874,9 +2884,16 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		// Compute primitiveID max that pass the date test (Draw without barrier)
 		Draw(config, GSHWDrawConfig::DrawPass::PrimID);
 
-		psel.ps.date = 3;
-		config.alpha_second_pass.ps.date = 3;
-		config.aa1_multi_pass.ps.date = 3;
+		if (date)
+		{
+			psel.ps.date = 3;
+			config.alpha_second_pass.ps.date = 3;
+			config.aa1_multi_pass.ps.date = 3;
+		}
+		else
+		{
+			psel.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
+		}
 		SetupPipeline(psel);
 		PSSetShaderResource(3, primid_texture);
 	}

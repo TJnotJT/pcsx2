@@ -199,7 +199,7 @@ private:
 	struct
 	{
 		GSDepthStencilOGL* dss = nullptr;
-		GLProgram primid_ps[4];
+		GLProgram primid_ps[5];
 	} m_date;
 
 	struct
@@ -330,7 +330,7 @@ public:
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
-	GSTexture* InitPrimDateTexture(GSTexture* rt, const GSVector4i& area, SetDATM datm);
+	GSTexture* InitPrimIDTexture(GSTexture* rt, const GSVector4i& area, u8 shader);
 
 	void CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY) override;
 

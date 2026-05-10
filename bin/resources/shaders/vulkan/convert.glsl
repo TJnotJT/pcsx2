@@ -635,7 +635,7 @@ void main()
 			o_col0 = vec4(-1);
 	#endif
 	#ifdef ps_primid_image_init_4
-		o_col0 = vec4(-1); // AA1
+		o_col0 = vec4(-1); // AA1 primid
 	#endif
 }
 #endif

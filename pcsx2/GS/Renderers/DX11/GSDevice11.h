@@ -227,7 +227,7 @@ private:
 	{
 		wil::com_ptr_nothrow<ID3D11DepthStencilState> dss;
 		wil::com_ptr_nothrow<ID3D11BlendState> bs;
-		wil::com_ptr_nothrow<ID3D11PixelShader> primid_init_ps[4];
+		wil::com_ptr_nothrow<ID3D11PixelShader> primid_init_ps[5];
 	} m_date;
 
 	struct
