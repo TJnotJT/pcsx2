@@ -5831,7 +5831,8 @@ void GSRendererHW::EmulateAA1()
 
 	pxAssert(!features.aa1 || features.feedback_loops());
 
-	if (!IsCoverageAlphaSupported())
+	if (!IsCoverageAlphaSupported() ||
+		(GSConfig.HWAA1 == GSHWAA1Level::Minimum && m_vt.m_primclass == GS_TRIANGLE_CLASS)) // Minimum AA1 doesn't support triangles.
 	{
 		m_conf.aa1_mode = GSHWDrawConfig::AA1Mode::Off;
 		return;
@@ -5860,7 +5861,7 @@ void GSRendererHW::EmulateAA1()
 
 	m_conf.ps.abe = PRIM->ABE; // ABE flag determines how coverage is used for alpha.
 
-	if (m_vt.m_primclass == GS_LINE_CLASS)
+	if (m_vt.m_primclass == GS_LINE_CLASS) // All AA1 levels supports lines.
 	{
 		GL_INS("HW: AA1 lines. No depth write.");
 
@@ -5875,8 +5876,8 @@ void GSRendererHW::EmulateAA1()
 	{
 		if (m_cached_ctx.DepthWrite())
 		{
-			if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Maximum ||
-				(GSConfig.AccurateBlendingUnit == AccBlendLevel::Full && m_cached_ctx.TEST.DATE))
+			if (GSConfig.HWAA1 == GSHWAA1Level::Maximum ||
+				(GSConfig.HWAA1 == GSHWAA1Level::Medium && m_cached_ctx.TEST.DATE)) // avoid primid with DATE
 			{
 				// Depth feedback AA1, most accurate/expensive.
 				// Force SW depth so that Z writes can be prevented for edge pixels.
@@ -5887,7 +5888,7 @@ void GSRendererHW::EmulateAA1()
 
 				ConfigureDepthFeedback(); // Enable barriers/SW depth test.
 			}
-			else if (GSConfig.AccurateBlendingUnit == AccBlendLevel::Full)
+			else if (GSConfig.HWAA1 == GSHWAA1Level::Medium)
 			{
 				// Three pass primid AA1, middle accurate/expensive.
 				// First draw triangle interiors, then edges with depth masked.
@@ -5897,7 +5898,7 @@ void GSRendererHW::EmulateAA1()
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE_PRIMID_INIT; // Setup for init pass.
 				m_conf.aa1_mode = GSHWDrawConfig::AA1Mode::ThreePassPrimid;
 			}
-			else
+			else if (GSConfig.HWAA1 == GSHWAA1Level::Basic)
 			{
 				// Two pass AA1, least accurate/expensive.
 				// First draw triangle interiors, then edges with depth masked.
@@ -5905,6 +5906,10 @@ void GSRendererHW::EmulateAA1()
 
 				m_conf.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE; // No special depth handling.
 				m_conf.aa1_mode = GSHWDrawConfig::AA1Mode::TwoPass;
+			}
+			else
+			{
+				pxFailRel("Impossible");
 			}
 		}
 		else
@@ -10708,5 +10713,5 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 
 bool GSRendererHW::IsCoverageAlphaSupported()
 {
-	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1;
+	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1 != GSHWAA1Level::Off;
 }
