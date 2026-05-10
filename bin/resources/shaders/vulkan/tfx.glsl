@@ -1621,7 +1621,7 @@ void main()
 #endif
 
 #if PS_AA1 == PS_AA1_TRIANGLE_PRIMID
-	// Discard if this edge is under the a previous triangles.
+	// Discard if this edge is under a previous triangle interior.
 	// Edge should never overlap with its own interior so < and <= should be the same here.
 	if (gl_PrimitiveID <= primid_limit) {
 		discard;
@@ -1687,7 +1687,7 @@ void main()
 
 #elif PS_AA1 == PS_AA1_TRIANGLE_PRIMID_INIT
 
-	// Multiply by 6 because there are 6x as many edge as interior triangles.
+	// Multiply by 6 because there are 6x as many edge triangles as interior triangles.
 	o_col0 = vec4(6 * gl_PrimitiveID);
 
 #else

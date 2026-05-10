@@ -836,8 +836,8 @@ __ri void ImGuiManager::DrawSettingsOverlay(float scale, float margin, float spa
 		if (GSConfig.HWAccurateAlphaTest)
 			APPEND("AAT ");
 		
-		if (GSConfig.HWAA1)
-			APPEND("AA1 ");
+		if (GSConfig.HWAA1 != GSHWAA1Level::Off)
+			APPEND("AA1={} ", static_cast<unsigned>(GSConfig.HWAA1));
 
 		// deliberately test global and print local here for auto values
 		if (EmuConfig.GS.TextureFiltering != BiFiltering::PS2)

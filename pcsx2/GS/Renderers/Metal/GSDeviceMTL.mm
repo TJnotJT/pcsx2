@@ -974,7 +974,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	m_features.cas_sharpening = true;
 	m_features.test_and_sample_depth = true;
 	m_features.depth_feedback = getDepthFeedback(m_dev, m_features.framebuffer_fetch);
-	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand;
+	m_features.aa1 = GSConfig.HWAA1 != GSHWAA1Level::Off && m_features.vs_expand;
 	m_max_texture_size = m_dev.features.max_texsize;
 
 	// Init metal stuff
@@ -2387,7 +2387,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 		if (date)
 			config.ps.date = 3;
 		else
-			config.ps.aa1 = GSHWDrawConfig::PS_AA1::Triangle;
+			config.ps.aa1 = GSHWDrawConfig::PS_AA1::TRIANGLE;
 	}
 
 	// Try to reduce render pass restarts
