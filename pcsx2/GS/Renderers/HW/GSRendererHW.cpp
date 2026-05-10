@@ -10713,5 +10713,5 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 
 bool GSRendererHW::IsCoverageAlphaSupported()
 {
-	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1 != GSHWAA1Level::Off;
+	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1;
 }
