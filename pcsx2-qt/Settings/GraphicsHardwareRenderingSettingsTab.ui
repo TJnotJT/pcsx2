@@ -180,7 +180,7 @@
    <item row="6" column="0">
     <widget class="QLabel" name="hwAA1Label">
      <property name="text">
-      <string>AA1 Level:</string>
+      <string>AA1 Accuracy:</string>
      </property>
      <property name="buddy">
       <cstring>hwAA1</cstring>
