@@ -1005,6 +1005,21 @@ struct alignas(16) GSHWDrawConfig
 		}
 	}
 
+	bool IsAA1Enabled() const
+	{
+		return aa1_mode != AA1Mode::Off;
+	}
+
+	void DisableAA1()
+	{
+		// Does not handle VS disable.
+		aa1_mode = AA1Mode::Off;
+		aa1_multi_pass.enable = false;
+		ps.aa1 = PS_AA1::NONE;
+		if (alpha_second_pass.enable)
+			ps.aa1 = PS_AA1::NONE;
+	}
+
 	// Dumping
 	static void DumpConfig(const std::string& path, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true,
