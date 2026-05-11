@@ -7655,7 +7655,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 			if (tex->m_texture->IsDepthStencilOrDepthInteger())
 			{
 				m_conf.ps.depth_fmt = tex->m_32_bits_fmt ? 1 : 2;
-				m_conf.ps.texint = g_gs_device->Features().depth_integer && tex->m_texture->IsDepthInteger();
+				m_conf.ps.texint = tex->m_texture->IsDepthInteger();
 			}
 			else
 			{

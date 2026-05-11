@@ -631,15 +631,12 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			#if PS_Z_INTEGER
 				layout(input_attachment_index = 1, set = 1, binding = 4) uniform usubpassInput DepthSampler;
-			#else
-				layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
-			#endif
-			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-			#if PS_Z_INTEGER
 				uint sample_from_depth() { return subpassLoad(DepthSampler).r; }
 			#else
+				layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
 				float sample_from_depth() { return subpassLoad(DepthSampler).r; }
 			#endif
+			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
 		#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
