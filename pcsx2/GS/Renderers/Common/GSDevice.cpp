@@ -788,6 +788,11 @@ GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, bool clear, bool pr
 	return CreateCompatibleTexture(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
+{
+	return CreateCompatibleTexture(tex, size.x, size.y, clear, prefer_reuse);
+}
+
 GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
 {
 	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);

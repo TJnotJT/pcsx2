@@ -830,7 +830,7 @@ bool GSHwHack::GSC_Battlefield2(GSRendererHW& r, int& skip)
 
 			if (dst)
 			{
-				g_gs_device->ClearDepthOrDepthInteger(dst->m_texture, r.m_vertex.buff[1].XYZ.Z);
+				g_gs_device->ClearDepthOrDepthInteger(dst->m_texture, r.m_vertex->buff[1].XYZ.Z);
 			}
 		}
 	}

@@ -5417,22 +5417,22 @@ void GSRendererHW::HandleZIntegerVertices()
 	if (!g_gs_device->Features().depth_integer ||
 		m_vt.m_primclass == GS_POINT_CLASS ||
 		m_vt.m_primclass == GS_SPRITE_CLASS ||
-		!m_conf.ds_as_rt ||
-		!m_conf.ds_as_rt->IsDepthInteger())
+		!m_conf.ds_int ||
+		!m_conf.ds_int->IsDepthInteger())
 	{
 		return; // Not using integer depth.
 	}
 
 	// De-index the vertices using the copy buffer
-	while (m_vertex.maxcount < m_index.tail)
+	while (m_vertex->maxcount < m_index->tail)
 		GrowVertexBuffer();
-	for (int i = static_cast<int>(m_index.tail) - 1; i >= 0; i--)
+	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
 	{
-		m_vertex.buff_copy[i] = m_vertex.buff[m_index.buff[i]];
-		m_index.buff[i] = static_cast<u16>(i);
+		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
+		m_index->buff[i] = static_cast<u16>(i);
 	}
-	std::swap(m_vertex.buff, m_vertex.buff_copy);
-	m_vertex.head = m_vertex.next = m_vertex.tail = m_index.tail;
+	std::swap(m_vertex->buff, m_vertex->buff_copy);
+	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
 }
 
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt)
@@ -8992,7 +8992,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	const GSVector2i rt_unscaled_size = rt_or_ds->GetUnscaledSize();
 
 	// Vertex shader config
-	float vs_scale_x, vs_scale_y;
+	float vs_scale_x = FLT_MAX, vs_scale_y = FLT_MAX;
 	DetermineVSConfig(rt, rtscale, rtsize, rt_unscaled_size, vs_scale_x, vs_scale_y);
 
 	m_conf.ps.iip = !IsFlatShaded();
@@ -9020,11 +9020,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.rta_correction = rt->m_rt_alpha_scale;
 	}
 
-	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
-	DetermineBarriers(rt);
-
 	// Handle integer depth
 	EmulateDepthInteger();
+
+	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
+	DetermineBarriers(rt);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
@@ -9046,7 +9046,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	HandleZIntegerVertices();
 
-	SetupIA(rtscale, sx, sy, m_channel_shuffle_width != 0, no_rt);
+	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback)
 	{
@@ -10641,72 +10641,73 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 	}
 }
 
+// Do the depth integer setup if needed for the draw.
 void GSRendererHW::EmulateDepthInteger()
 {
 	// The primclass should be set to INVALID (not zero) by default.
 	m_conf.ps.primclass = GS_INVALID_CLASS;
 
-	// Do the depth integer setup if needed for the draw.
-	if (g_gs_device->Features().depth_integer && m_conf.ds_as_rt && m_conf.ds_as_rt->IsDepthInteger())
+	if (!m_conf.ds_int)
+		return; // Not using integer depth.
+
+	// Should not be using dual source blend with MRTs
+	pxAssert(m_conf.ps.no_color1);
+	// Should have device depth integer feature.
+	pxAssert(g_gs_device->Features().depth_integer);
+
+	m_conf.vs.zint = true;
+	m_conf.ps.zint = true;
+	m_conf.ps.primclass = m_vt.m_primclass;
+
+	// Enable SW Z clamping if necessary. Needed to correctly mask depth.
+	if (m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite())
 	{
-		// Should not be using dual source blend with MRTs
-		pxAssert(m_conf.ps.no_color1);
-
-		m_conf.vs.zint = true;
-		m_conf.ps.zint = true;
-		m_conf.ps.primclass = m_vt.m_primclass;
-
-		// Enable SW Z clamping if necessary.
-		if (m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite())
+		const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
+		m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
+		m_conf.ps.zclamp = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt != 0;
+		if (m_conf.alpha_second_pass.enable)
 		{
-			m_conf.ps.zwrite = true;
-			if (m_conf.alpha_second_pass.enable)
-			{
-				m_conf.alpha_second_pass.ps.zwrite = true;
-			}
-
-			const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
-			m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
-			m_conf.ps.zclamp = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt != 0; // We need Z clamp to correctly mask depth.
-			if (m_conf.alpha_second_pass.enable)
-			{
-				m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp; // We need Z clamp to correctly mask depth.
-			}
+			m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp; // We need Z clamp to correctly mask depth.
 		}
-
-		// Enable SW depth test if needed.
-		if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
-		{
-			m_conf.ps.ztst = m_conf.depth.ztst;
-			m_conf.ps.depth_feedback = true;
-		}
-
-		// Disable HW depth
-		if (m_conf.ds == m_conf.ds_as_rt)
-		{
-			// Make sure we don't use the depth integer as an actual depth buffer.
-			m_conf.ds = nullptr;
-		}
-		m_conf.depth.zwe = false;
-		m_conf.depth.ztst = ZTST_ALWAYS;
-
-		// Tell pixel shader which slot the depth as integer textures is bound to.
-		m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
-
-		// We need at least one barrier if we read depth.
-		if (m_conf.ps.depth_feedback)
-		{
-			m_conf.require_one_barrier = true;
-		}
-
-		// We need barriers if we read and write depth.
-		if (m_cached_ctx.DepthWrite() && m_conf.ps.depth_feedback)
-		{
-			m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
-			m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
-		}
-
-		// Make sure we didn't mess up and assign the color depth to the depth.
-		pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
 	}
+
+	// Enable SW depth test if needed.
+	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
+	{
+		m_conf.ps.ztst = m_conf.depth.ztst;
+	}
+
+	// Disable HW depth
+	if (m_conf.ds == m_conf.ds_int)
+	{
+		// Make sure we don't use the depth integer as an actual depth buffer.
+		m_conf.ds = nullptr;
+	}
+	m_conf.depth.zwe = false;
+	m_conf.depth.ztst = ZTST_ALWAYS;
+
+	// Tell pixel shader which slot the depth as integer textures is bound to.
+	m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+
+	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
+
+	// If the depth format is less than 32 bpp, we need to write to only the appropriate bits,
+	// so need to read the only value.
+	const bool depth_read = m_cached_ctx.DepthRead() || (psm.bpp < 32 && m_cached_ctx.DepthWrite());
+	const bool depth_write = m_cached_ctx.DepthWrite();
+
+	if (depth_read && depth_write)
+	{
+		// We need full barriers even if we only write depth since
+		m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
+		m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
+	}
+	else if (depth_read)
+	{
+		// Need one barrier to read the current depth.
+		m_conf.require_one_barrier = true;
+	}
+
+	// Make sure we didn't accidentally assign the color depth to the depth.
+	pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
 }

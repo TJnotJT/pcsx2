@@ -467,6 +467,7 @@ void main()
 #define TRIANGLE_CLASS 2
 #define SPRITE_CLASS 3
 #define INVALID_CLASS 7
+#endif
 
 #ifndef PS_FST
 #define PS_FST 0

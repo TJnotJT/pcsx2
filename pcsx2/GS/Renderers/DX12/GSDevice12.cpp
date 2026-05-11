@@ -1414,7 +1414,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
 	m_features.depth_feedback = false;
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
-	m_features.depth_integer = m_features.depth_feedback != GSDevice::DepthFeedbackSupport::None;
+	m_features.depth_integer = m_features.vs_expand && m_features.feedback_loops();
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -4251,7 +4251,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(config.ds_as_rt);
+	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(config.ds_int ? config.ds_int : m_ds_as_rt);
 	GSTexture12* draw_ds = static_cast<GSTexture12*>(config.ds);
 	GSTexture12* draw_rt_clone = nullptr;
 
@@ -4341,7 +4341,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	// bind textures before checking the render pass, in case we need to transition them
 	if (config.tex)
 	{
-		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds && config.tex != config.ds_as_rt);
+		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds && config.tex != draw_ds_as_rt);
 		PSSetSampler(config.sampler);
 	}
 	if (config.pal)
@@ -4411,8 +4411,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (!config.tex && ((draw_rt && static_cast<GSTexture12*>(draw_rt)->GetSRVDescriptor() == m_tfx_textures[0]) ||
 		(draw_ds && static_cast<GSTexture12*>(draw_ds)->GetSRVDescriptor() == m_tfx_textures[0])))
 		PSSetShaderResource(0, nullptr, false);
-
-	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(m_ds_as_rt);
 
 	if (InRenderPass() && (m_current_render_target == draw_rt || m_current_depth_target == draw_ds) && !draw_ds_as_rt)
 	{

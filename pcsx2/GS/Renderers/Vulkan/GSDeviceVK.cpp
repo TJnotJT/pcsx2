@@ -5861,9 +5861,9 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() :
-		(config.ds_as_rt ? config.ds_as_rt->GetSize() : config.ds->GetSize()));
+		(config.ds ? config.ds->GetSize() : config.ds_int->GetSize()));
 	GSTextureVK* draw_rt = static_cast<GSTextureVK*>(config.rt);
-	GSTextureVK* draw_ds_as_rt = static_cast<GSTextureVK*>(config.ds_as_rt);
+	GSTextureVK* draw_ds_as_rt = static_cast<GSTextureVK*>(config.ds_int ? config.ds_int : m_ds_as_rt);
 	GSTextureVK* draw_ds = static_cast<GSTextureVK*>(config.ds);
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
@@ -5875,7 +5875,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// bind textures before checking the render pass, in case we need to transition them
 	if (config.tex)
 	{
-		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds_as_rt && config.tex != config.ds);
+		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != draw_ds_as_rt && config.tex != config.ds);
 		PSSetSampler(config.sampler);
 	}
 	if (config.pal)
@@ -6312,7 +6312,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.cms.key = config.colormask.key;
 	pipe.topology = static_cast<u32>(config.topology);
 	pipe.rt = config.rt != nullptr;
-	pipe.ds_as_rt = config.ds_as_rt != nullptr;
+	pipe.ds_as_rt = config.ds_int != nullptr;
 	pipe.ds = config.ds != nullptr;
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
@@ -6321,10 +6321,10 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 		if (config.ps.IsFeedbackLoopRT())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 		if (config.ps.IsFeedbackLoopDepth())
-			pipe.feedback_loop_flags |= config.ds_as_rt ? FeedbackLoopFlag_ReadAndWriteDepthRT :
-			                                              FeedbackLoopFlag_ReadAndWriteDepth;
+			pipe.feedback_loop_flags |= config.ds_int ? FeedbackLoopFlag_ReadAndWriteDepthRT :
+			                                            FeedbackLoopFlag_ReadAndWriteDepth;
 	}
-	if (!(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) && !config.ds_as_rt)
+	if (!(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) && !config.ds_int)
 	{
 		pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
 	}

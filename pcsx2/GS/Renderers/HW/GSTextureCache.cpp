@@ -3002,7 +3002,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 	{
 		rescaler.CalcRescale(dst);
 		
-		GSTexture* tex = g_gs_device->CreateCompatibleTexture(dst->m_texture, new_scaled_size.x, new_scaled_size.y, rescaler.m_clear);
+		GSTexture* tex = g_gs_device->CreateCompatibleTexture(dst->m_texture, rescaler.m_new_scaled_size, rescaler.m_clear);
 		if (!tex)
 			return nullptr;
 
