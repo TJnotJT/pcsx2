@@ -210,6 +210,7 @@ private:
 
 	void ResetStates();
 	void HandleProvokingVertexFirst();
+	void HandleZIntegerVertices();
 	void SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt);
 	void EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	u32 EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
@@ -240,6 +241,10 @@ private:
 	bool EmulateDATEEarlyFail(DATEOptions& date, GSTextureCache::Target* rt);
 	void EmulateDATESelectMethod(DATEOptions& date, GSTextureCache::Target* rt, int& blend_alpha_min, int& blend_alpha_max);
 	void EmulateDATEGetConfig(DATEOptions& date, bool scale_rt_alpha, GSDevice::RecycledTexture& temp_ds);
+	void HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, DATEOptions& date);
+
+	bool UsingMultipleRenderTargets();
+	void EmulateDepthInteger();
 
 	void EmulateDither();
 
@@ -360,6 +365,9 @@ private:
 	std::vector<GSVertexSW> m_sw_vertex_buffer;
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
+
+	// DS as RT
+	bool m_temp_ds_as_rt = false;
 
 public:
 	GSRendererHW();

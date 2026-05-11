@@ -11,12 +11,15 @@ namespace GSShader {
 
 enum class VSExpand : uint8_t
 {
-	None        = 0,
-	Point       = 1,
-	Line        = 2,
-	Sprite      = 3,
-	LineAA1     = 4,
-	TriangleAA1 = 5,
+	None             = 0,
+	Point            = 1,
+	Line             = 2,
+	Sprite           = 3,
+	LineAA1          = 4,
+	TriangleAA1      = 5,
+	PointZInteger    = 6,
+	LineZInteger     = 7,
+	TriangleZInteger = 8,
 };
 
 enum class PS_ATST : uint32_t

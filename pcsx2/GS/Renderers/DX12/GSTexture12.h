@@ -139,6 +139,12 @@ public:
 	
 	virtual bool IsUnorderedAccess() const override { return GetResourceState() == ResourceState::PixelShaderUAV; }
 
+	GSVector4 GetUNormClearColor() const override
+	{
+		return IsDepthInteger() ? GSVector4(static_cast<float>(m_clear_value.color), 0.0f, 0.0f, 0.0f) :
+			GSVector4::unorm8(m_clear_value.color);
+	}
+
 	void* GetNativeHandle() const override;
 
 	bool Update(const GSVector4i& r, const void* data, int pitch, int layer = 0) override;

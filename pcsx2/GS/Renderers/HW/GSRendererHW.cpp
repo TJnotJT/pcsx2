@@ -20,6 +20,7 @@ GSRendererHW::GSRendererHW()
 {
 	MULTI_ISA_SELECT(GSRendererHWPopulateFunctions)(*this);
 	m_mipmap = GSConfig.HWMipmap;
+	UpdateZIntegerEnabled();
 	SetTCOffset();
 
 	pxAssert(!g_texture_cache);
@@ -3696,8 +3697,13 @@ void GSRendererHW::Draw()
 
 		if (!ds && m_cached_ctx.FRAME.FBP != m_cached_ctx.ZBUF.ZBP)
 		{
+			// Use Z integer if using Z32 and and incoming Zs are large.
+			const bool z_integer = g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
+				                   ((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && (static_cast<int>(m_vt.m_max.p.z) >> 24)) ||
+									   GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always);
+
 			ds = g_texture_cache->CreateTarget(ZBUF_TEX0, t_size, GetValidSize(src, possible_shuffle), target_scale, GSTextureCache::DepthStencil,
-				true, 0, false, force_preload, preserve_depth, m_r, src);
+				true, 0, false, force_preload, preserve_depth, m_r, src, z_integer);
 			if (!ds) [[unlikely]]
 			{
 				GL_INS("HW: ERROR: Failed to create ZBUF target, skipping.");
@@ -3883,6 +3889,37 @@ void GSRendererHW::Draw()
 					}
 				}
 			}
+		}
+
+		// Convert the Z buffer F32<->U32 depending on whether the Z integer feature is enabled and the upper bits of Z are set.
+		if (ds->m_texture->IsDepthStencil() && g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
+			((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && ((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max)) ||
+				GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always))
+		{
+			// F32 -> U32
+			const int w = ds->m_texture->GetWidth();
+			const int h = ds->m_texture->GetHeight();
+			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) F32 to U32 (alpha curr=%x, alpha draw=%x).",
+				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
+			GSTexture* tmp = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::UInt32, false);
+			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::FLOAT32_TO_UINT32, false);
+			g_gs_device->Recycle(ds->m_texture);
+			ds->m_texture = tmp;
+		}
+		else if (ds->m_texture->IsDepthInteger() && GSConfig.HWZIntegerMode < GSHardwareZIntegerMode::Always &&
+			!((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max))
+		{
+			// U32 -> F32
+			const int w = ds->m_texture->GetWidth();
+			const int h = ds->m_texture->GetHeight();
+			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) U32 to F32 (alpha curr=%x, alpha draw=%x).",
+				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
+			GSTexture* tmp = g_gs_device->CreateDepthStencil(w, h, GSTexture::Format::DepthStencil, false);
+			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
+			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::UINT32_TO_FLOAT32, false);
+			g_gs_device->Recycle(ds->m_texture);
+			ds->m_texture = tmp;
 		}
 	}
 
@@ -4211,7 +4248,8 @@ void GSRendererHW::Draw()
 							static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 						GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 					}
 
 					g_texture_cache->InvalidateTemporaryZ();
@@ -4227,7 +4265,8 @@ void GSRendererHW::Draw()
 					sRect = sRect.min(GSVector4(1.0f));
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
-					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect),
+						GetDepthCopyShader(ds->m_texture->IsDepthInteger(), g_texture_cache->GetTemporaryZ()->IsDepthInteger()), false);
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);
 				}
@@ -4274,7 +4313,8 @@ void GSRendererHW::Draw()
 
 					if (m_cached_ctx.TEST.ZTST > ZTST_ALWAYS || !dRect.rintersect(GSVector4i(GSVector4(m_r) * ds->m_scale)).eq(dRect))
 					{
-						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect),
+							GetDepthCopyShader(ds->m_texture->IsDepthInteger(), tex->IsDepthInteger()), false);
 					}
 					g_texture_cache->SetTemporaryZ(tex);
 					g_texture_cache->SetTemporaryZInfo(ds->m_TEX0.TBP0, page_offset, rt_page_offset);
@@ -4862,10 +4902,12 @@ void GSRendererHW::Draw()
 
 				if (z_width != new_w || z_height != new_h)
 				{
-					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, GSTexture::Format::DepthStencil, true))
+					if (GSTexture* tex = g_gs_device->CreateCompatibleTexture(
+						g_texture_cache->GetTemporaryZ(), new_w * ds->m_scale, new_h * ds->m_scale, true))
 					{
 						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect),
+							GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), tex->IsDepthInteger()), false);
 						g_texture_cache->InvalidateTemporaryZ();
 						g_texture_cache->SetTemporaryZ(tex);
 					}
@@ -5171,7 +5213,8 @@ void GSRendererHW::Draw()
 						static_cast<float>((real_rect.w + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d rt_vert_offset %d z_horz_offset %d rt_horz_offset %d", s_n, z_vertical_offset, vertical_offset, z_horizontal_offset, horizontal_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 				}
 				else if (m_temp_z_full_copy)
 				{
@@ -5183,7 +5226,8 @@ void GSRendererHW::Draw()
 						static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect),
+						GetDepthCopyShader(g_texture_cache->GetTemporaryZ()->IsDepthInteger(), ds->m_texture->IsDepthInteger()), false);
 				}
 
 				m_temp_z_full_copy = false;
@@ -5365,6 +5409,32 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	}
 }
 
+// FIXME: Handle both provoking vertex first and this together to avoid multiple unnecessary copies.
+// We need vertices to be deindexed for integer Z because is relies on passing the barycentric
+// coordinates and depth values to the fragment shader, so every triangle/line vertex must be unique.
+void GSRendererHW::HandleZIntegerVertices()
+{
+	if (!g_gs_device->Features().depth_integer ||
+		m_vt.m_primclass == GS_POINT_CLASS ||
+		m_vt.m_primclass == GS_SPRITE_CLASS ||
+		!m_conf.ds_int ||
+		!m_conf.ds_int->IsDepthInteger())
+	{
+		return; // Not using integer depth.
+	}
+
+	// De-index the vertices using the copy buffer
+	while (m_vertex->maxcount < m_index->tail)
+		GrowVertexBuffer();
+	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
+	{
+		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
+		m_index->buff[i] = static_cast<u16>(i);
+	}
+	std::swap(m_vertex->buff, m_vertex->buff_copy);
+	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
+}
+
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt)
 {
 	GL_PUSH("HW: IA");
@@ -5416,6 +5486,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 					// M1 requires point size output on *all* points.
 					m_conf.vs.point_size = true;
 				}
+
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::PointZInteger;
+				}
 			}
 			break;
 
@@ -5448,6 +5523,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 						m_conf.indices_per_prim = 6;
 						ExpandLineIndices();
 					}
+				}
+
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::LineZInteger;
 				}
 			}
 			break;
@@ -5517,6 +5597,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 						v_st = (v_st / v_q).insert32<2, 2>(v_st);
 						GSVector4::store<true>(&v[i].ST, v_st);
 					}
+				}
+
+				if (m_conf.vs.zint && m_conf.vs.expand == GSHWDrawConfig::VSExpand::None)
+				{
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleZInteger;
 				}
 			}
 			break;
@@ -6020,38 +6105,8 @@ void GSRendererHW::EmulateDATEGetConfig(DATEOptions& date_options, bool scale_rt
 		m_conf.datm = static_cast<SetDATM>(m_cached_ctx.TEST.DATM);
 
 	// DATE Stencil always needs a depth stencil texture.
-	const bool date_stencil_needs_ds = !m_conf.ds &&
-		(m_conf.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil || m_conf.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne);
-	if (date_stencil_needs_ds)
-	{
-		const bool need_barrier = m_conf.require_one_barrier || (m_conf.require_full_barrier && features.feedback_loops());
-		if ((temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(),
-			GSTexture::Format::DepthStencil, false)), temp_ds))
-		{
-			m_conf.ds = temp_ds.get();
-		}
-		else if (need_barrier)
-		{
-			date_options.stencil_one = false;
-			date_options.barrier = true;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
-			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date. Fallback to Full.");
-		}
-		else if (features.primitive_id && !(m_conf.ps.scanmsk & 2))
-		{
-			date_options.stencil_one = false;
-			date_options.primid = true;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking;
-			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date. Fallback to PrimIDTracking.");
-		}
-		else
-		{
-			date_options.enabled = false;
-			date_options.stencil_one = false;
-			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
-			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date.");
-		}
-	}
+	// If we're doing stencil DATE and we don't have a depth buffer, we need to allocate a temporary one.
+	HandleTemporaryDSForDATE(temp_ds, date_options);
 
 	if (date_options.barrier)
 	{
@@ -6408,7 +6463,7 @@ bool GSRendererHW::TestChannelShuffle(GSTextureCache::Target* src)
 
 __ri u32 GSRendererHW::EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt)
 {
-	if (src && (src->m_texture->GetType() == GSTexture::Type::DepthStencil) && !src->m_32_bits_fmt)
+	if (src && src->m_texture->IsDepthStencilOrDepthInteger() && !src->m_32_bits_fmt)
 	{
 		// So far 2 games hit this code path. Urban Chaos and Tales of Abyss
 		// UC: will copy depth to green channel
@@ -7966,7 +8021,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	// Depth + bilinear filtering isn't done yet. But if the game has just set a Z24 swizzle on a colour texture, we can
 	// just pretend it's not a depth format, since in the texture cache, it's not.
 	// Other games worth testing: Area 51, Burnout
-	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthStencil())
+	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthStencilOrDepthInteger())
 		GL_INS("HW: WARNING: Depth + bilinear filtering not supported");
 
 	// Performance note:
@@ -7985,7 +8040,15 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		// Require a float conversion if the texure is a depth otherwise uses Integral scaling
 		if (psm.depth)
 		{
-			m_conf.ps.depth_fmt = (tex->m_texture->GetType() != GSTexture::Type::DepthStencil) ? 3 : tex->m_32_bits_fmt ? 1 : 2;
+			if (tex->m_texture->IsDepthStencilOrDepthInteger())
+			{
+				m_conf.ps.depth_fmt = tex->m_32_bits_fmt ? 1 : 2;
+				m_conf.ps.texint = tex->m_texture->IsDepthInteger();
+			}
+			else
+			{
+				m_conf.ps.depth_fmt = 3;
+			}
 		}
 
 		// Shuffle is a 16 bits format, so aem is always required
@@ -8065,13 +8128,17 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		}
 
 		// Depth format
-		if (tex->m_texture->IsDepthStencil())
+		if (tex->m_texture->IsDepthStencilOrDepthInteger())
 		{
 			// Require a float conversion if the texure is a depth format
 			m_conf.ps.depth_fmt = (psm.bpp == 16) ? 2 : 1;
 
 			// Don't force interpolation on depth format
 			bilinear &= m_vt.IsLinear();
+
+			// Use integer directly if using integer depth
+			m_conf.ps.texint = g_gs_device->Features().depth_integer && tex->m_texture->IsDepthInteger();
+			bilinear &= !m_conf.ps.texint; // No bilinear for integer
 		}
 
 		const GSVector4 half_pixel = RealignTargetTextureCoordinate(tex);
@@ -8502,12 +8569,14 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
-		if (src_target->m_texture->IsDepthStencil() || std::floor(src_target->GetScale()) != src_target->GetScale())
+		if (src_target->m_texture->IsDepthStencilOrDepthInteger() || std::floor(src_target->GetScale()) != src_target->GetScale())
 		{
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
 			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-				src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+				src_target->m_texture->IsDepthStencilOrDepthInteger() ?
+					GetDepthCopyShader(src_target->m_texture->IsDepthInteger(), src_copy.get()->IsDepthInteger()) : ShaderConvert::COPY,
+				false);
 		}
 		else
 		{
@@ -8540,7 +8609,9 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
 
 		g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-			src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+			src_target->m_texture->IsDepthStencilOrDepthInteger() ?
+				GetDepthCopyShader(src_target->m_texture, src_copy.get()) : ShaderConvert::COPY,
+			false);
 	}
 	m_conf.tex = src_copy.get();
 }
@@ -8817,7 +8888,8 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 
 	// Flags to determine if we can achieve full accuracy with less passes.
 	const bool simple_fb_only = (afail == AFAIL_FB_ONLY) && independent_z;
-	const bool simple_rgb_only = (afail == AFAIL_RGB_ONLY) && independent_z && independent_rgb;
+	const bool simple_rgb_only = (afail == AFAIL_RGB_ONLY) && independent_z && independent_rgb &&
+	                             !UsingMultipleRenderTargets(); // Do not use simple RGB dual source blend with MRTs.
 	const bool simple_zb_only = (afail == AFAIL_ZB_ONLY) && independent_z;
 
 	// Determine where RT and/or depth are needed for the feedback methods.
@@ -8839,17 +8911,21 @@ void GSRendererHW::EmulateAlphaTest(DATEOptions& date_options)
 	// Determine if we have the correct features for depth feedback.
 	const bool depth_feedback_supported = features.feedback_loops();
 
+	// Depth integer already involves feedback so we will select feedback in that case.
+	const bool using_integer_depth = static_cast<bool>(m_conf.ds_int);
+
 	// We need depth feedback but do not have the correct features.
 	const bool avoid_feedback = afail_needs_depth && !depth_feedback_supported;
 
 	// Prefer feedback method only if it's free (color only feedback) or enabled.
 	const bool prefer_feedback = free_barrier_feedback || free_fbfetch_feedback ||
-	                             GSConfig.HWAccurateAlphaTest;
+	                             GSConfig.HWAccurateAlphaTest || using_integer_depth;
 
 	// The simple cases can be handle accurately in two passes so no point
 	// in requiring barriers if they are not already required.
 	const bool prefer_two_pass = !(free_fbfetch_feedback || free_barrier_feedback) &&
-	                             (simple_fb_only || simple_rgb_only || simple_zb_only);
+	                             (simple_fb_only || simple_rgb_only || simple_zb_only) &&
+	                             !using_integer_depth;
 	
 	if (prefer_feedback && !prefer_two_pass && !avoid_feedback)
 	{
@@ -9061,6 +9137,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	// Finally, if the first pass is never used do only the second pass.
 	if (!(m_conf.colormask.wrgba || m_conf.depth.zwe))
 	{
+		GL_INS("Alpha test: First pass has no output, disabling.");
 		std::memcpy(&m_conf.ps, &m_conf.alpha_second_pass.ps, sizeof(m_conf.ps));
 		std::memcpy(&m_conf.colormask, &m_conf.alpha_second_pass.colormask, sizeof(m_conf.colormask));
 		std::memcpy(&m_conf.depth, &m_conf.alpha_second_pass.depth, sizeof(m_conf.depth));
@@ -9130,6 +9207,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		area_out.x, area_out.y, area_out.z, area_out.w);
 #endif
 
+	const GSDevice::FeatureSupport features = g_gs_device->Features();
+
 	const GSDrawingEnvironment& env = *m_draw_env;
 
 	DATEOptions date_options;
@@ -9144,6 +9223,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.ps.scanmsk = env.SCANMSK.MSK;
 	m_conf.rt = rt ? rt->m_texture : nullptr;
 	m_conf.ds = ds ? (m_using_temp_z ? g_texture_cache->GetTemporaryZ() : ds->m_texture) : nullptr;
+	m_conf.ds_int = (features.depth_integer && m_conf.ds && m_conf.ds->IsDepthInteger()) ? m_conf.ds : nullptr;
 
 	pxAssert(!ds || !rt || (m_conf.ds->GetSize().x == m_conf.rt->GetSize().x && m_conf.ds->GetSize().y == m_conf.rt->GetSize().y));
 
@@ -9300,7 +9380,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	const GSVector2i rt_unscaled_size = rt_or_ds->GetUnscaledSize();
 
 	// Vertex shader config
-	float vs_scale_x, vs_scale_y;
+	float vs_scale_x = FLT_MAX, vs_scale_y = FLT_MAX;
 	DetermineVSConfig(rt, rtscale, rtsize, rt_unscaled_size, vs_scale_x, vs_scale_y);
 
 	m_conf.ps.iip = !IsFlatShaded();
@@ -9328,6 +9408,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.rta_correction = rt->m_rt_alpha_scale;
 	}
 
+	// Handle integer depth - FIXME: How interacts with ROV setup??
+	EmulateDepthInteger();
+
 	// Call before computing the full drawlist in case ROV is used and we don't need it.
 	DetermineROVUsage();
 
@@ -9351,6 +9434,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.scissor = (date_options.enabled && !date_options.barrier) ? m_conf.drawarea : scissor;
 
 	HandleProvokingVertexFirst();
+
+	HandleZIntegerVertices();
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
@@ -10111,7 +10196,7 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 			const u32 z = std::min(max_z, m_vertex->buff[1].XYZ.Z);
 			const float d = static_cast<float>(z) * 0x1p-32f;
 			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			g_gs_device->ClearDepth(ds->m_texture, d);
+			g_gs_device->ClearDepthOrDepthInteger(ds->m_texture, z);
 			ds->m_dirty.clear();
 			ds->m_alpha_max = z >> 24;
 			ds->m_alpha_min = z >> 24;
@@ -10884,6 +10969,8 @@ void GSRendererHW::EndHLEHardwareDraw(bool force_copy_on_hazard /* = false */)
 	                      (!GSDevice::IsDualSourceBlendFactor(config.blend.src_factor) &&
 	                       !GSDevice::IsDualSourceBlendFactor(config.blend.dst_factor));
 
+	config.ps.texint = config.tex && config.tex->IsIntegerFormat();
+
 	g_gs_device->RenderHW(m_conf);
 
 	if (copy)
@@ -10903,4 +10990,115 @@ std::size_t GSRendererHW::ComputeDrawlistGetSize(float scale)
 bool GSRendererHW::IsCoverageAlphaSupported()
 {
 	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1;
+}
+
+bool GSRendererHW::UsingMultipleRenderTargets()
+{
+	const bool mrt_for_zint = m_conf.ds_int != nullptr;
+
+	const bool mrt_for_depth_feedback = m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback;
+
+	return mrt_for_zint || mrt_for_depth_feedback;
+}
+
+void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, DATEOptions& date_options)
+{
+	const GSDevice::FeatureSupport& features = g_gs_device->Features();
+
+	if (m_conf.destination_alpha >= GSHWDrawConfig::DestinationAlphaMode::Stencil &&
+		m_conf.destination_alpha <= GSHWDrawConfig::DestinationAlphaMode::StencilOne &&
+		(!m_conf.ds || m_conf.ds->IsDepthInteger()))
+	{
+		const bool is_one_barrier = (features.texture_barrier && m_conf.require_full_barrier && (m_prim_overlap == PRIM_OVERLAP_NO || m_conf.ps.shuffle || m_channel_shuffle));
+		temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), GSTexture::Format::DepthStencil, false));
+		if (temp_ds)
+		{
+			m_conf.ds = temp_ds.get();
+		}
+		else if (features.primitive_id && !(m_conf.ps.scanmsk & 2) && (!m_conf.require_full_barrier || is_one_barrier))
+		{
+			date_options.stencil_one = false;
+			date_options.primid = true;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking;
+			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date. Fallback to PrimIDTracking.");
+		}
+		else
+		{
+			date_options.enabled = false;
+			date_options.stencil_one = false;
+			m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Off;
+			DevCon.Warning("HW: Depth buffer creation failed for Stencil Date.");
+		}
+	}
+}
+
+// Do the depth integer setup if needed for the draw.
+void GSRendererHW::EmulateDepthInteger()
+{
+	// The primclass should be set to INVALID (not zero) by default.
+	m_conf.ps.primclass = GS_INVALID_CLASS;
+
+	if (!m_conf.ds_int)
+		return; // Not using integer depth.
+
+	// Should not be using dual source blend with MRTs
+	pxAssert(m_conf.ps.no_color1);
+	// Should have device depth integer feature.
+	pxAssert(g_gs_device->Features().depth_integer);
+
+	m_conf.vs.zint = true;
+	m_conf.ps.zint = true;
+	m_conf.ps.primclass = m_vt.m_primclass;
+
+	// Enable SW Z clamping if necessary. Needed to correctly mask depth.
+	if (m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite())
+	{
+		const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
+		m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
+		m_conf.ps.zclamp = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt != 0;
+		if (m_conf.alpha_second_pass.enable)
+		{
+			m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp; // We need Z clamp to correctly mask depth.
+		}
+	}
+
+	// Enable SW depth test if needed.
+	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
+	{
+		m_conf.ps.ztst = m_conf.depth.ztst;
+	}
+
+	// Disable HW depth
+	if (m_conf.ds == m_conf.ds_int)
+	{
+		// Make sure we don't use the depth integer as an actual depth buffer.
+		m_conf.ds = nullptr;
+	}
+	m_conf.depth.zwe = false;
+	m_conf.depth.ztst = ZTST_ALWAYS;
+
+	// Tell pixel shader which slot the depth as integer textures is bound to.
+	m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+
+	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
+
+	// If the depth format is less than 32 bpp, we need to write to only the appropriate bits,
+	// so need to read the only value.
+	const bool depth_read = m_cached_ctx.DepthRead() || (psm.bpp < 32 && m_cached_ctx.DepthWrite());
+	const bool depth_write = m_cached_ctx.DepthWrite();
+
+	if (depth_read && depth_write)
+	{
+		// We need full barriers even if we only write depth since
+		m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
+		m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
+	}
+	else if (depth_read)
+	{
+		// Need one barrier to read the current depth.
+		m_conf.require_one_barrier = true;
+	}
+
+	// Make sure we didn't accidentally assign the color depth to the depth.
+	pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
 }
