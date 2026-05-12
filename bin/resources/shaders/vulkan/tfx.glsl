@@ -189,6 +189,20 @@ ProcessedVertex load_vertex(uint index)
 	return vtx;
 }
 
+vec2 get_aa1_triangle_edge_width(vec2 xy0, vec2 xy1, vec2 xy2)
+{
+	vec2 line_delta = xy1 - xy0;
+	vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
+	line_delta /= VertexScale; // compare distances in screen space not NDC
+	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
+	if ((dot(line_expand, line_normal) >= 0.0f) == (dot(xy2 - xy0, line_normal) >= 0.0f))
+	{
+		// Expand direction point towards the interior so flip it.
+		line_expand = -line_expand;
+	}
+	return (line_expand * PointSize) / 2;
+}
+
 void main()
 {
 	ProcessedVertex vtx;
@@ -219,7 +233,7 @@ void main()
 	vec2 line_expand = vec2(line_vector.y, -line_vector.x);
 #elif VS_EXPAND == VS_EXPAND_LINE_AA1
 	// Expand in y direction for shallow lines and x direction for steep lines.
-	line_delta /= VertexScale;
+	line_delta /= VertexScale; // compare distances in screen space not NDC
 	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
 #endif
 	vec2 line_width = (line_expand * PointSize) / 2;
@@ -262,10 +276,14 @@ void main()
 	// - Vertices 3-8: First edge expanded (2 triangles).
 	// - Vertices 9-14: Second edge expanded (2 triangles).
 	// - Vertices 15-20: Third edge expanded (2 triangles).
+	// - Vertices 21-23: First corner cap (1 triangle).
+	// - Vertices 24-26: Second corner cap (1 triangle).
+	// - Vertices 27-29: Third corner cap (1 triangle).
 
-	uint prim_id = vid / 21;
-	uint prim_offset = vid - 21 * prim_id; // range: 0-20
+	uint prim_id = vid / 30;
+	uint prim_offset = vid - 30 * prim_id; // range: 0-20
 	bool interior = prim_offset < 3;
+	bool edge = 3 <= prim_offset && prim_offset < 21;
 
 	if (interior)
 	{
@@ -273,7 +291,7 @@ void main()
 		vsOut.inv_cov = 0.0f; // Full coverage
 		vsOut.interior = 1;
 	}
-	else
+	else if (edge)
 	{
 		// Vertex indices for this edge. We need all 3 for determining exterior/interior.
 		uint prim_offset_edges = prim_offset - 3; // range: 0-17
@@ -293,15 +311,17 @@ void main()
 
 		// Similar expansion to line AA1 except instead of expanding on both sides of
 		// the line we expand on on the side towards the outside of the triangle.
-		vec2 line_delta = vtx.p.xy - other.p.xy;
-		vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
-		vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
-		if ((dot(line_expand, line_normal) >= 0.0f) == (dot(opposite.p.xy - vtx.p.xy, line_normal) >= 0.0f))
-		{
-			// Expand direction point towards the interior so flip it.
-			line_expand = -line_expand;
-		}
-		vec2 line_width = (line_expand * PointSize) / 2;
+		// vec2 line_delta = vtx.p.xy - other.p.xy;
+		// vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
+		// vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
+		// if ((dot(line_expand, line_normal) >= 0.0f) == (dot(opposite.p.xy - vtx.p.xy, line_normal) >= 0.0f))
+		// {
+		// 	// Expand direction point towards the interior so flip it.
+		// 	line_expand = -line_expand;
+		// }
+		// vec2 line_width = (line_expand * PointSize) / 2;
+
+		vec2 line_width = get_aa1_triangle_edge_width(vtx.p.xy, other.p.xy, opposite.p.xy);
 
 		if (is_bottom)
 			vtx = other;
@@ -313,6 +333,40 @@ void main()
 		else
 		{
 			vsOut.inv_cov = 0.0f; // Full coverage
+		}
+
+		vsOut.interior = 0;
+	}
+	else // corner cap
+	{
+		// Vertex indices for this cap. We need all 3 for determining exterior/interior.
+		uint prim_offset_cap = prim_offset - 21; // range: 0-8
+		uint i0 = prim_offset_cap / 3;
+		uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+		uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
+		uint cap_offset = prim_offset_cap - 3 * i0; // range: 0-2
+
+		vtx = load_vertex(load_index(3 * prim_id + i0));
+		ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
+		ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
+
+		if (cap_offset == 0)
+		{
+			// Exactly the triangle corner
+			vsOut.inv_cov = 0.0f; // Full coverage
+		}
+		else
+		{
+			// One of the expanded points adjacent to the corner
+			
+			vec2 xy0 = vtx.p.xy;
+			vec2 xy1 = cap_offset == 1 ? other.p.xy : opposite.p.xy;
+			vec2 xy2 = cap_offset == 1 ? opposite.p.xy : other.p.xy;
+
+			vec2 line_width = get_aa1_triangle_edge_width(xy0, xy1, xy2);
+
+			vtx.p.xy += line_width;
+			vsOut.inv_cov = 1.0f; // No coverage
 		}
 
 		vsOut.interior = 0;
