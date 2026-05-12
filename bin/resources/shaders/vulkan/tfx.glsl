@@ -260,8 +260,19 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 
 	vec2 dq = vec2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
 
-	// Get pixel position -> barycentric matrix
-	mat2 inv_dp_mat = inverse(get_pixel_xy_deltas(v0, v1, v2));
+	// Get the position matrix (offset from first vertex)
+	mat2 dp_mat = get_pixel_xy_deltas(v0, v1, v2);
+
+	// To prevent unstable extrapolation, do not extrapolate if the
+	// minimum perpendicular length of the triangle is < 1 pixel.
+	float area2 = determinant(dp_mat);
+	float len0 = length(dp_mat[0]);
+	float len1 = length(dp_mat[1]);
+	float len2 = length(dp_mat[1] - dp_mat[0]);
+	float min_perp_length = area2 / max(max(len0, len1), len2);
+
+	// Get the position -> barycentric weight matrix
+	mat2 inv_dp_mat = min_perp_length < 1 ? mat2(0) : inverse(dp_mat);
 
 	// Get attribute gradients
 	#if VS_TME
@@ -290,7 +301,8 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 
 	// Extrapolate and clamp color
 	#if VS_IIP
-		v0.c += clamp(dc_grad * dp, vec4(0), vec4(255));
+		v0.c += dc_grad * dp;
+		v0.c = clamp(v0.c, vec4(0), vec4(255));
 	#endif
 
 	v0.p.z += dot(dz_grad, dp); // Extrapolate depth
