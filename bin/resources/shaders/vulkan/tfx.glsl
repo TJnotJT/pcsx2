@@ -243,6 +243,11 @@ vec2 get_aa1_triangle_edge_dir(ProcessedVertex v0, ProcessedVertex v1, Processed
 	return line_expand;
 }
 
+mat2 get_inverse(mat2 mat, float det)
+{
+	return mat2(mat[1][1], -mat[0][1], -mat[1][0], mat[0][0]) / det;
+}
+
 // Extrapolate triangle attributes from the first vertex along the given direction.
 void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2, vec2 dp)
 {
@@ -271,14 +276,14 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 
 	// To prevent unstable extrapolation, do not extrapolate if the
 	// minimum perpendicular length of the triangle is < 1 pixel.
-	float area2 = determinant(dp_mat);
+	float dp_det = determinant(dp_mat); // Twice signed triangle area.
 	float len0 = length(dp_mat[0]);
 	float len1 = length(dp_mat[1]);
 	float len2 = length(dp_mat[1] - dp_mat[0]);
-	float min_perp_length = area2 / max(max(len0, len1), len2);
+	float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
 
 	// Get the position -> barycentric weight matrix
-	mat2 inv_dp_mat = min_perp_length < 1 ? mat2(0) : inverse(dp_mat);
+	mat2 inv_dp_mat = min_perp_length < 1 ? mat2(0) : get_inverse(dp_mat, dp_det);
 
 	// Get attribute gradients
 	#if VS_TME
@@ -421,6 +426,8 @@ void main()
 		ProcessedVertex other = load_vertex(load_index(3 * prim_id + (is_bottom ? i0 : i1)));
 		ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
 
+		// Similar expansion to line AA1 except instead of expanding on both sides of
+		// the line we expand on on the side towards the outside of the triangle.
 		if (is_outside)
 		{
 			vec2 line_dir = get_aa1_triangle_edge_dir(vtx, other, opposite);
