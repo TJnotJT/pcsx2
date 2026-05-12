@@ -327,18 +327,6 @@ void main()
 		ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
 		ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
 
-		// Similar expansion to line AA1 except instead of expanding on both sides of
-		// the line we expand on on the side towards the outside of the triangle.
-		// vec2 line_delta = vtx.p.xy - other.p.xy;
-		// vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
-		// vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
-		// if ((dot(line_expand, line_normal) >= 0.0f) == (dot(opposite.p.xy - vtx.p.xy, line_normal) >= 0.0f))
-		// {
-		// 	// Expand direction point towards the interior so flip it.
-		// 	line_expand = -line_expand;
-		// }
-		// vec2 line_width = (line_expand * PointSize) / 2;
-
 		vec2 line_width = get_aa1_triangle_edge_width(vtx.p.xy, other.p.xy, opposite.p.xy);
 
 		if (is_bottom)
