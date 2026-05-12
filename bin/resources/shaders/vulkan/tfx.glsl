@@ -189,11 +189,13 @@ ProcessedVertex load_vertex(uint index)
 	return vtx;
 }
 
+// Convert XY from NDC to GS pixel coordinates (i.e. 1.0 = 1 GS pixel).
 vec2 get_pixel_xy(vec2 xy)
 {
 	return round(xy / VertexScale) / 16.0f;
 }
 
+// Get the XY deltas in GS pixel coordinates, using first vertex as the origin.
 mat2 get_pixel_xy_deltas(ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2)
 {
 	vec2 xy0 = get_pixel_xy(v0.p.xy);
@@ -202,6 +204,7 @@ mat2 get_pixel_xy_deltas(ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex
 	return mat2(xy1 - xy0, xy2 - xy0);
 }
 
+// Get the outward normal direction to the edge formed by the first two vertices.
 vec2 get_aa1_triangle_edge_normal(ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2)
 {
 	mat2 pos_deltas = get_pixel_xy_deltas(v0, v1, v2);
@@ -220,6 +223,8 @@ vec2 get_aa1_triangle_edge_normal(ProcessedVertex v0, ProcessedVertex v1, Proces
 	return line_normal;
 }
 
+// Get the AA1 outward expand direction to the edge formed by the first two vertices.
+// This is up or down for shallow (X dominant) edges, and right or left for steep (Y dominant) edges.
 vec2 get_aa1_triangle_edge_dir(ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2)
 {
 	mat2 xy_deltas = get_pixel_xy_deltas(v0, v1, v2);
@@ -238,6 +243,7 @@ vec2 get_aa1_triangle_edge_dir(ProcessedVertex v0, ProcessedVertex v1, Processed
 	return line_expand;
 }
 
+// Extrapolate triangle attributes from the first vertex along the given direction.
 void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2, vec2 dp)
 {
 	// Get texture deltas
