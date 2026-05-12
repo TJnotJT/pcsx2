@@ -5984,11 +5984,11 @@ void GSRendererHW::EmulateDATESelectMethod(DATEOptions& date_options, GSTextureC
 		date_options.barrier = true;
 		m_conf.require_full_barrier = true;
 	}
-	else if (features.feedback_loops() && IsCoverageAlphaSupported())
+	else if (features.feedback_loops() && m_conf.aa1_mode > GSHWDrawConfig::AA1Mode::OnePass)
 	{
-		// We're using AA1 for this draw so use only full barrier DATE, to avoid the complications
-		// with stencil/primid setup with AA1 vertex shaders. AA1 triangles usually require full barriers anyway.
-		GL_PERF("DATE: Accurate with IsCoverageAlphaSupported");
+		// We're using multipass AA1 for this draw so use only full barrier DATE, to avoid the complications
+		// with stencil/primid setup with AA1 vertex shaders. AA1 with depth feedback should be used (setup later).
+		GL_PERF("DATE: Accurate with multipass AA1");
 		date_options.barrier = true;
 		m_conf.require_full_barrier = true;
 	}
@@ -6045,7 +6045,7 @@ void GSRendererHW::EmulateDATESelectMethod(DATEOptions& date_options, GSTextureC
 			m_conf.require_full_barrier = true;
 			date_options.barrier = true;
 		}
-		else if (features.primitive_id)
+		else if (features.primitive_id && m_conf.aa1_mode <= GSHWDrawConfig::AA1Mode::OnePass)
 		{
 			GL_PERF("DATE: Accurate with alpha %d-%d", GetAlphaMinMax().min, GetAlphaMinMax().max);
 			date_options.primid = true;
