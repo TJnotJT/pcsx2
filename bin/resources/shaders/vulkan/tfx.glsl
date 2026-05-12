@@ -247,13 +247,12 @@ void main()
 
 	// Use bottom minus top for delta regardless of which vertex we are expanding.
 	vec2 line_delta = is_bottom ? (vtx.p.xy - other.p.xy) : (other.p.xy - vtx.p.xy);
-	vec2 line_vector = normalize(line_delta);
+	vec2 line_vector = normalize(line_delta / VertexScale);
 #if VS_EXPAND == VS_EXPAND_LINE
 	vec2 line_expand = vec2(line_vector.y, -line_vector.x);
 #elif VS_EXPAND == VS_EXPAND_LINE_AA1
 	// Expand in y direction for shallow lines and x direction for steep lines.
-	line_delta /= VertexScale; // compare distances in screen space not NDC
-	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
+	vec2 line_expand = abs(line_vector.x) >= abs(line_vector.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
 #endif
 	vec2 line_width = (line_expand * PointSize) / 2;
 	vec2 offset = is_right ? line_width : -line_width;
@@ -369,7 +368,6 @@ void main()
 		ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
 		ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
 	
-		vsOut.inv_cov = 1.0f; // No coverage
 		if (cap_offset == 0 || cap_offset == 3)
 		{
 			// Exactly the triangle corner
