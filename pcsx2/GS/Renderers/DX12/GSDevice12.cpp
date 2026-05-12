@@ -3262,7 +3262,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
 	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	sm.AddMacro("PS_Z_RT_SLOT", sel.z_rt_slot);
-	sm.AddMacro("PS_Z_INTEGER", sel.zint);
+	sm.AddMacro("PS_Z_INTEGER", static_cast<u32>(sel.zint));
 	sm.AddMacro("PS_PRIMCLASS", sel.primclass);
 	sm.AddMacro("PS_TEX_INTEGER", sel.texint);
 
@@ -4321,7 +4321,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
 	init_pipe.ps.texint = false;
-	init_pipe.ps.zint = false;
+	init_pipe.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::NONE;
 	init_pipe.vs.zint = false;
 	init_pipe.vs.RemoveZIntegerExpand();
 

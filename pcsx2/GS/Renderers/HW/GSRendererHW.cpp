@@ -11047,20 +11047,31 @@ void GSRendererHW::EmulateDepthInteger()
 	pxAssert(g_gs_device->Features().depth_integer);
 
 	m_conf.vs.zint = true;
-	m_conf.ps.zint = true;
 	m_conf.ps.primclass = m_vt.m_primclass;
 
-	// Enable SW Z clamping if necessary. Needed to correctly mask depth.
-	if (m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite())
+	// Setup for pixel shader.
+	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
+	const bool need_clamp = psm.bpp < 32;
+	const bool depth_write = m_cached_ctx.DepthWrite();
+	const bool depth_read = m_cached_ctx.DepthRead() || (depth_write && need_clamp);
+
+	// Enable SW Z to correctly mask depth bits.
+	const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
+	m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
+	m_conf.ps.zclamp = need_clamp;
+	if (m_conf.alpha_second_pass.enable)
 	{
-		const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
-		m_conf.cb_ps.TA_MaxDepth_Af.z = std::bit_cast<float>(max_z);
-		m_conf.ps.zclamp = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt != 0;
-		if (m_conf.alpha_second_pass.enable)
-		{
-			m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp; // We need Z clamp to correctly mask depth.
-		}
+		m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp;
 	}
+
+	if (depth_read && depth_write)
+		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
+	else if (depth_read)
+		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ;
+	else if (depth_write)
+		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::WRITE;
+	else
+		pxFailRel("Impossible"); // Should not have enabled depth integer.
 
 	// Enable SW depth test if needed.
 	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
@@ -11079,13 +11090,6 @@ void GSRendererHW::EmulateDepthInteger()
 
 	// Tell pixel shader which slot the depth as integer textures is bound to.
 	m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
-
-	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
-
-	// If the depth format is less than 32 bpp, we need to write to only the appropriate bits,
-	// so need to read the only value.
-	const bool depth_read = m_cached_ctx.DepthRead() || (psm.bpp < 32 && m_cached_ctx.DepthWrite());
-	const bool depth_write = m_cached_ctx.DepthWrite();
 
 	if (depth_read && depth_write)
 	{

@@ -5055,7 +5055,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	AddMacro(ss, "PS_Z_RT_SLOT", sel.z_rt_slot);
-	AddMacro(ss, "PS_Z_INTEGER", sel.zint);
+	AddMacro(ss, "PS_Z_INTEGER", static_cast<u32>(sel.zint));
 	AddMacro(ss, "PS_PRIMCLASS", sel.primclass);
 	AddMacro(ss, "PS_TEX_INTEGER", sel.texint);
 	ss << m_tfx_source;
@@ -6050,7 +6050,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	pipe.ps.no_color = false;
 	pipe.ps.no_color1 = true;
 	pipe.ps.texint = false;
-	pipe.ps.zint = false;
+	pipe.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::NONE;
 	pipe.vs.zint = false;
 	pipe.vs.RemoveZIntegerExpand();
 
@@ -6357,13 +6357,26 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 	}
 	
-	if (pipe.IsDepthRTFeedbackLoop())
+	if (pipe.IsDepthRTFeedbackLoop() && draw_ds_as_rt)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		pxAssert(!pipe.IsDepthFeedbackLoop()); // Should not have depth as color and depth feedback loop simultaneously.
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, draw_ds_as_rt, false);
+
+		if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] == draw_ds_as_rt)
+		{
+			// Unbind to avoid conflicts.
+			PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, nullptr, false);
+			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
+		}
 	}
-	else if (pipe.IsDepthFeedbackLoop() && draw_ds)
+	else if (draw_ds_as_rt)
+	{
+		// Unbind to avoid conflicts with framebuffer
+		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
+	}
+	
+	if (pipe.IsDepthFeedbackLoop() && draw_ds)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		pxAssert(!pipe.IsDepthRTFeedbackLoop()); // Should not have depth as color and depth feedback loop simultaneously.
@@ -6588,8 +6601,10 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 
 		if (pipe.ds && config.ps.IsFeedbackLoopDepth())
-			pipe.feedback_loop_flags |= config.ds_int ? FeedbackLoopFlag_ReadAndWriteDepthRT :
-			                                            FeedbackLoopFlag_ReadAndWriteDepth;
+			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
+
+		if (pipe.ds_as_rt && config.ps.IsFeedbackLoopDepth())
+			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepthRT;
 	}
 	if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
 	{

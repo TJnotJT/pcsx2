@@ -475,6 +475,13 @@ void main()
 #define INVALID_CLASS 7
 #endif
 
+#ifndef PS_Z_INTEGER_NONE
+#define PS_Z_INTEGER_NONE 0
+#define PS_Z_INTEGER_READ 1
+#define PS_Z_INTEGER_WRITE 2
+#define PS_Z_INTEGER_READ_WRITE 3
+#endif
+
 #ifndef PS_FST
 #define PS_FST 0
 #define PS_WMS 0
@@ -542,10 +549,12 @@ void main()
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define ZTST_NEEDS_DEPTH (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define AA1_NEEDS_DEPTH (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
+#define ZINT_NEEDS_DEPTH (PS_Z_INTEGER & PS_Z_INTEGER_READ)
+#define ZINT_WRITES_DEPTH (PS_Z_INTEGER & PS_Z_INTEGER_WRITE)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
-#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || PS_Z_INTEGER || SW_DEPTH || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZINT_NEEDS_DEPTH)
+#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || ZINT_WRITES_DEPTH || AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
@@ -652,7 +661,7 @@ layout(location = 0) in VSOutput
 	}
 #endif
 
-#if PS_Z_INTEGER && PS_NO_COLOR1
+#if ZINT_WRITES_DEPTH
 	#if PS_Z_RT_SLOT
 		layout(location = 1) out uint o_depth;
 	#else
@@ -661,11 +670,11 @@ layout(location = 0) in VSOutput
 #endif
 
 #if NEEDS_TEX
-#if PS_TEX_INTEGER
-layout(set = 1, binding = 0) uniform usampler2D Texture;
-#else
-layout(set = 1, binding = 0) uniform sampler2D Texture;
-#endif
+	#if PS_TEX_INTEGER
+	layout(set = 1, binding = 0) uniform usampler2D Texture;
+	#else
+	layout(set = 1, binding = 0) uniform sampler2D Texture;
+	#endif
 layout(set = 1, binding = 1) uniform texture2D Palette;
 #endif
 
@@ -2063,7 +2072,9 @@ void main()
 	
 	#if PS_RETURN_DEPTH
 		#if PS_Z_INTEGER
-			o_depth = input_z;
+			#if ZINT_WRITES_DEPTH
+				o_depth = input_z;
+			#endif
 		#else
 			gl_FragDepth = input_z;
 		#endif

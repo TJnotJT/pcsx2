@@ -424,11 +424,12 @@ struct alignas(16) GSHWDrawConfig
 		Line,
 		Triangle,
 	};
-	using VSExpand = GSShader::VSExpand;
-	using PS_ATST  = GSShader::PS_ATST;
-	using PS_AFAIL = GSShader::PS_AFAIL;
-	using PS_AA1   = GSShader::PS_AA1;
+	using VSExpand     = GSShader::VSExpand;
+	using PS_ATST      = GSShader::PS_ATST;
+	using PS_AFAIL     = GSShader::PS_AFAIL;
+	using PS_AA1       = GSShader::PS_AA1;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
+	using PS_Z_INTEGER = GSShader::PS_Z_INTEGER;
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -568,7 +569,7 @@ struct alignas(16) GSHWDrawConfig
 
 				// Integer depth
 				u32 z_rt_slot : 2;
-				u32 zint : 1;
+				PS_Z_INTEGER zint : 2;
 				u32 primclass : 3;
 				u32 texint : 1;
 			};
@@ -613,7 +614,8 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth;
+			const bool zint_needs_depth = zint == PS_Z_INTEGER::READ || zint == PS_Z_INTEGER::READ_WRITE;
+			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zint_needs_depth;
 		}
 
 		__fi bool HasShaderDiscard() const
