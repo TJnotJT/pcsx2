@@ -189,18 +189,37 @@ ProcessedVertex load_vertex(uint index)
 	return vtx;
 }
 
+vec2 get_aa1_triangle_edge_normal(vec2 xy0, vec2 xy1, vec2 xy2)
+{
+	// Convert back to GS subtexel coords.
+	vec2 line_delta = round((xy1 - xy0) / VertexScale);
+	vec2 line_opposite = round((xy2 - xy0) / VertexScale);
+
+	// Get outside pointing normal.
+	vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
+	if (dot(line_opposite, line_normal) >= 0.0f)
+	{
+		// Normal points towards the interior so flip it.
+		line_normal = -line_normal;
+	}
+	return line_normal * PointSize;
+}
+
 vec2 get_aa1_triangle_edge_width(vec2 xy0, vec2 xy1, vec2 xy2)
 {
-	vec2 line_delta = xy1 - xy0;
-	vec2 line_normal = normalize(vec2(line_delta.y, -line_delta.x));
-	line_delta /= VertexScale; // compare distances in screen space not NDC
-	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 2.0f) : vec2(2.0f, 0.0f);
-	if ((dot(line_expand, line_normal) >= 0.0f) == (dot(xy2 - xy0, line_normal) >= 0.0f))
+	// Convert back to GS subtexel coords.
+	vec2 line_delta = round((xy1 - xy0) / VertexScale);
+	vec2 line_opposite = round((xy2 - xy0) / VertexScale);
+
+	// Get outside pointing expand direction.
+	vec2 line_normal = vec2(line_delta.y, -line_delta.x);
+	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 1.0f) : vec2(1.0f, 0.0f);
+	if ((dot(line_expand, line_normal) >= 0.0f) == (dot(line_opposite, line_normal) >= 0.0f))
 	{
 		// Expand direction point towards the interior so flip it.
 		line_expand = -line_expand;
 	}
-	return (line_expand * PointSize) / 2;
+	return line_expand * PointSize;
 }
 
 void main()
@@ -276,12 +295,12 @@ void main()
 	// - Vertices 3-8: First edge expanded (2 triangles).
 	// - Vertices 9-14: Second edge expanded (2 triangles).
 	// - Vertices 15-20: Third edge expanded (2 triangles).
-	// - Vertices 21-23: First corner cap (1 triangle).
-	// - Vertices 24-26: Second corner cap (1 triangle).
-	// - Vertices 27-29: Third corner cap (1 triangle).
+	// - Vertices 21-26: First corner cap (2 triangles).
+	// - Vertices 27-32: Second corner cap (2 triangles).
+	// - Vertices 33-38: Third corner cap (2 triangles).
 
-	uint prim_id = vid / 30;
-	uint prim_offset = vid - 30 * prim_id; // range: 0-20
+	uint prim_id = vid / 39;
+	uint prim_offset = vid - 39 * prim_id; // range: 0-38
 	bool interior = prim_offset < 3;
 	bool edge = 3 <= prim_offset && prim_offset < 21;
 
@@ -341,23 +360,39 @@ void main()
 	{
 		// Vertex indices for this cap. We need all 3 for determining exterior/interior.
 		uint prim_offset_cap = prim_offset - 21; // range: 0-8
-		uint i0 = prim_offset_cap / 3;
+		uint i0 = prim_offset_cap / 6;
 		uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
 		uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
-		uint cap_offset = prim_offset_cap - 3 * i0; // range: 0-2
+		uint cap_offset = prim_offset_cap - 6 * i0; // range: 0-5
 
 		vtx = load_vertex(load_index(3 * prim_id + i0));
 		ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
 		ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
-
-		if (cap_offset == 0)
+	
+		vsOut.inv_cov = 1.0f; // No coverage
+		if (cap_offset == 0 || cap_offset == 3)
 		{
 			// Exactly the triangle corner
 			vsOut.inv_cov = 0.0f; // Full coverage
 		}
-		else
+		else if (cap_offset == 2 || cap_offset == 5)
 		{
-			// One of the expanded points adjacent to the corner
+			// Opposite the triangle corner
+
+			vec2 xy0 = vtx.p.xy;
+			vec2 xy1 = other.p.xy;
+			vec2 xy2 = opposite.p.xy;
+
+			vec2 line_width_0 = get_aa1_triangle_edge_normal(xy0, xy1, xy2);
+			vec2 line_width_1 = get_aa1_triangle_edge_normal(xy0, xy2, xy1);
+
+			vtx.p.xy += normalize(0.5f * (line_width_0 + line_width_1)) * PointSize;
+			
+			vsOut.inv_cov = 1.0f; // No coverage
+		}
+		else // cap_offset == 1 || cap_offset == 4
+		{
+			// One of the expanded points adjacent to the corners
 			
 			vec2 xy0 = vtx.p.xy;
 			vec2 xy1 = cap_offset == 1 ? other.p.xy : opposite.p.xy;
@@ -368,7 +403,7 @@ void main()
 			vtx.p.xy += line_width;
 			vsOut.inv_cov = 1.0f; // No coverage
 		}
-
+	
 		vsOut.interior = 0;
 	}
 
