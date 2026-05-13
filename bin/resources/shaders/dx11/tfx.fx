@@ -260,10 +260,12 @@ struct PS_OUTPUT_REAL
 #endif
 #if PS_RETURN_DEPTH
 	#if PS_Z_INTEGER
-		#if PS_Z_RT_SLOT
-			uint depth : SV_Target1;
-		#else
-			uint depth : SV_Target0;
+		#if ZINT_WRITES_DEPTH
+			#if PS_Z_RT_SLOT
+				uint depth : SV_Target1;
+			#else
+				uint depth : SV_Target0;
+			#endif
 		#endif
 	#else
 		// In DX12 we do depth feedback loops with a color copy.
@@ -1744,7 +1746,13 @@ if (bad)
 
 #if PS_RETURN_DEPTH
 	// Standard depth write
-	output_real.depth = input_z;
+	#if PS_Z_INTEGER
+		#if ZINT_WRITES_DEPTH
+			output_real.depth = input_z;
+		#endif
+	#else
+		output_real.depth = input_z;
+	#endif
 	#if SW_DEPTH && PS_NO_COLOR1 && DX12 && !PS_Z_INTEGER
 		// Output color clone for feedback.
 		output_real.depth_color = input_z;
