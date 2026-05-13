@@ -1850,10 +1850,10 @@ void main()
 
 #if PS_ZTST == ZTST_GEQUAL
 	if (input_z < curr_z)
-		discard;
+		DISCARD;
 #elif PS_ZTST == ZTST_GREATER
 	if (input_z <= curr_z)
-		discard;
+		DISCARD;
 #endif
 
 #if PS_SCANMSK & 2

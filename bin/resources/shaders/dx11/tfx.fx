@@ -1502,10 +1502,10 @@ void ps_main(PS_INPUT input)
 
 #if PS_ZTST == ZTST_GEQUAL
 	if (input_z < curr_z)
-		discard;
+		DISCARD;
 #elif PS_ZTST == ZTST_GREATER
 	if (input_z <= curr_z)
-		discard;
+		DISCARD;
 #endif
 
 	float4 C = ps_color(input);
