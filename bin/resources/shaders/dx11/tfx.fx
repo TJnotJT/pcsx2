@@ -1595,44 +1595,27 @@ VS_INPUT load_vertex(uint index)
 }
 
 // Convert XY from NDC to GS pixel coordinates (i.e. 1.0 = 1 GS pixel).
-float2 get_pixel_xy(float2 xy)
+float2 get_xy_unscaled(float2 xy)
 {
 	return round(xy / VertexScale) / 16.0f;
 }
 
 // Get the XY deltas in GS pixel coordinates, using first vertex as the origin.
-float2x2 get_pixel_xy_deltas(VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2)
+float2x2 get_xy_deltas_unscaled(VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2)
 {
-	float2 xy0 = get_pixel_xy(v0.p.xy);
-	float2 xy1 = get_pixel_xy(v1.p.xy);
-	float2 xy2 = get_pixel_xy(v2.p.xy);
+	float2 xy0 = get_xy_unscaled(v0.p.xy);
+	float2 xy1 = get_xy_unscaled(v1.p.xy);
+	float2 xy2 = get_xy_unscaled(v2.p.xy);
 	return float2x2(xy1 - xy0, xy2 - xy0);
-}
-
-// Get the outward normal direction to the edge formed by the first two vertices.
-float2 get_aa1_triangle_edge_normal(VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2)
-{
-	float2x2 pos_deltas = get_pixel_xy_deltas(v0, v1, v2);
-
-	float2 line_delta = pos_deltas[0];
-	float2 line_opposite = pos_deltas[1];
-
-	float2 line_normal = normalize(float2(line_delta.y, -line_delta.x));
-
-	if (dot(line_opposite, line_normal) >= 0.0f)
-	{
-		// Normal points towards the interior so flip it.
-		line_normal = -line_normal;
-	}
-
-	return line_normal;
 }
 
 // Get the AA1 outward expand direction to the edge formed by the first two vertices.
 // This is up or down for shallow (X dominant) edges, and right or left for steep (Y dominant) edges.
-float2 get_aa1_triangle_edge_dir(VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2)
+// Similar expansion to line AA1 except instead of expanding on both sides of the line,
+// expand on on the side towards the outside of the triangle.
+float2 get_aa1_triangle_expand_dir(VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2)
 {
-	float2x2 xy_deltas = get_pixel_xy_deltas(v0, v1, v2);
+	float2x2 xy_deltas = get_xy_deltas_unscaled(v0, v1, v2);
 	float2 line_delta = xy_deltas[0];
 	float2 line_opposite = xy_deltas[1];
 
@@ -1654,7 +1637,8 @@ float2x2 get_inverse(float2x2 mat, float det)
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
-void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2, float2 dp)
+// dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
+void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2, float2x2 dp_mat, float2 dp)
 {
 	// Get texture deltas
 	#if VS_TME
@@ -1667,7 +1651,7 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 
 	// Get color delta if interpolating
 	#if VS_IIP
-		float4x2 dc = float4x2(v1.c - v0.c, v2.c - v0.c);
+		float2x4 dc = float2x4(v1.c - v0.c, v2.c - v0.c);
 	#endif
 
 	float2 dz = float2(v1.p.z - v0.p.z, v2.p.z - v0.p.z); // Z deltas
@@ -1675,9 +1659,6 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 	float2 df = float2(v1.t.z - v0.t.z, v2.t.z - v0.t.z); // Fog deltas
 
 	float2 dq = float2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
-
-	// Get the position matrix (offset from first vertex)
-	float2x2 dp_mat = get_pixel_xy_deltas(v0, v1, v2);
 
 	// To prevent unstable extrapolation, do not extrapolate if the
 	// minimum perpendicular length of the triangle is < 1 pixel.
@@ -1688,14 +1669,14 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 	float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
 
 	// Get the position -> barycentric weight matrix
-	float2x2 inv_dp_mat = min_perp_length < 1 ? 0 : get_inverse(dp_mat, dp_det);
+	float2x2 inv_dp_mat = min_perp_length < 2 ? 0 : get_inverse(dp_mat, dp_det);
 
 	// Get attribute gradients
 	#if VS_TME
 		float2x2 dt_grad = mul(inv_dp_mat, dt); // Texture
 	#endif
 	#if VS_IIP
-		float4x2 dc_grad = mul(inv_dp_mat, dc); // Color
+		float2x4 dc_grad = mul(inv_dp_mat, dc); // Color
 	#endif
 	float2 dz_grad = mul(inv_dp_mat, dz); // Depth
 	float2 df_grad = mul(inv_dp_mat, df); // Fog
@@ -1839,20 +1820,14 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 		VS_OUTPUT other = vs_main(load_vertex(load_index(3 * prim_id + (is_bottom ? i0 : i1))));
 		VS_OUTPUT opposite = vs_main(load_vertex(load_index(3 * prim_id + i2)));
 
-		// Similar expansion to line AA1 except instead of expanding on both sides of
-		// the line we expand on on the side towards the outside of the triangle.
-		if (is_outside)
-		{
-			float2 line_dir = get_aa1_triangle_edge_dir(vtx, other, opposite);
+		float2x2 pos_deltas = get_xy_deltas_unscaled(vtx, other, opposite);
 
-			extrapolate_aa1_triangle_edge(vtx, other, opposite, line_dir);
+		float2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vtx, other, opposite) : 0;
 
-			vtx.inv_cov = 1.0f; // No coverage
-		}
-		else
-		{
-			vtx.inv_cov = 0.0f; // Full coverage
-		}
+		// Do actual extrapolation, or no-op if expand_dir == 0.
+		extrapolate_aa1_triangle_edge(vtx, other, opposite, pos_deltas, expand_dir);
+
+		vtx.inv_cov = is_outside ? 1.0f : 0.0f; // No coverage on outside, otherwise full.
 
 		vtx.interior = 0;
 	}
@@ -1867,36 +1842,35 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		bool is_near_corner = cap_offset == 0 || cap_offset == 3;
 		bool is_far_corner = cap_offset == 2 || cap_offset == 5;
-		bool is_first = cap_offset < 3;
+		bool is_first_tri = cap_offset < 3;
 
 		vtx = vs_main(load_vertex(load_index(3 * prim_id + i0)));
-		VS_OUTPUT other = vs_main(load_vertex(load_index(3 * prim_id + (is_first ? i1 : i2))));
-		VS_OUTPUT opposite = vs_main(load_vertex(load_index(3 * prim_id + (is_first ? i2 : i1))));
+		VS_OUTPUT other = vs_main(load_vertex(load_index(3 * prim_id + (is_first_tri ? i1 : i2))));
+		VS_OUTPUT opposite = vs_main(load_vertex(load_index(3 * prim_id + (is_first_tri ? i2 : i1))));
 
-		if (is_near_corner)
-		{
-			vtx.inv_cov = 0.0f; // Full coverage
-		}
-		else if (is_far_corner)
-		{
-			float2 line_normal_0 = get_aa1_triangle_edge_normal(vtx, other, opposite);
-			float2 line_normal_1 = get_aa1_triangle_edge_normal(vtx, opposite, other);
+		float2x2 pos_deltas = get_xy_deltas_unscaled(vtx, other, opposite);
 
-			float2 line_dir = normalize((line_normal_0 + line_normal_1) / 2);
+		// Get the edge expansion directions of both incident edges.
+		float2 edge_expand_dir_0 = get_aa1_triangle_expand_dir(vtx, other, opposite);
+		float2 edge_expand_dir_1 = get_aa1_triangle_expand_dir(vtx, opposite, other);
 
-			extrapolate_aa1_triangle_edge(vtx, other, opposite, line_dir);
-			
-			vtx.inv_cov = 1.0f; // No coverage
-		}
-		else
-		{
-			// One of the expanded points adjacent to the corners
-			float2 line_dir = get_aa1_triangle_edge_dir(vtx, other, opposite);
+		// Check if the corner is already filled by the expanded edges.
+		// This happens if the expand directions are the same.
+		// If so we output a degenerate triangle at this corner.
+		bool corner_filled = all(edge_expand_dir_0 == edge_expand_dir_1);
 
-			extrapolate_aa1_triangle_edge(vtx, other, opposite, line_dir);
+		// Nothing if corner is filled, otherwise opposite to the bisector of the corner angle.
+		float2 far_corner_dir = corner_filled ? 0 : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
 
-			vtx.inv_cov = 1.0f; // No coverage
-		}
+		// Determine the expand direction.
+		float2 expand_dir = is_near_corner ? 0 :             // No extrapolation
+		                    is_far_corner ? far_corner_dir : // Opposite to the angle bisector of corner
+		                    edge_expand_dir_0;               // Standard AA1 edge expansion
+
+		// Do the actual extrapolation (no-op if expand_dir == 0).
+		extrapolate_aa1_triangle_edge(vtx, other, opposite, pos_deltas, expand_dir);
+
+		vtx.inv_cov = is_near_corner ? 0.0f : 1.0f; // Full coverage at near corner, otherwise none.
 	
 		vtx.interior = 0;
 	}
