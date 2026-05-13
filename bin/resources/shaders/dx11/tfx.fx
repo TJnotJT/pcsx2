@@ -1831,7 +1831,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		vtx.interior = 0;
 	}
-	else // corner cap
+	else // Corner cap
 	{
 		// Vertex indices for this cap. We need all 3 for determining exterior/interior.
 		uint prim_offset_cap = prim_offset - 21; // range: 0-8

@@ -204,7 +204,6 @@ mat2 get_xy_deltas_unscaled(ProcessedVertex v0, ProcessedVertex v1, ProcessedVer
 	return mat2(xy1 - xy0, xy2 - xy0);
 }
 
-
 // Get the AA1 outward expand direction to the edge formed by the first two vertices.
 // This is up or down for shallow (X dominant) edges, and right or left for steep (Y dominant) edges.
 // Similar expansion to line AA1 except instead of expanding on both sides of the line,
@@ -419,7 +418,7 @@ void main()
 
 		vsOut.interior = 0;
 	}
-	else // corner cap
+	else // Corner cap
 	{
 		// Vertex indices for this cap. We need all 3 for determining exterior/interior.
 		uint prim_offset_cap = prim_offset - 21; // range: 0-8
