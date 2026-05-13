@@ -145,6 +145,10 @@
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
 
+#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE          || \
+                                       VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || \
+                                       VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER))
+
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
@@ -152,8 +156,11 @@
 #define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
-#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1 || PS_Z_INTEGER)
-#define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH || PS_Z_INTEGER)
+#define NEEDS_DEPTH_FOR_ZINT (PS_Z_INTEGER & PS_Z_INTEGER_READ)
+#define ZWRITE_FOR_ZINT (PS_Z_INTEGER & PS_Z_INTEGER_WRITE)
+
+#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1 || NEEDS_DEPTH_FOR_ZINT)
+#define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZWRITE_FOR_ZINT)
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
@@ -197,9 +204,9 @@ struct VS_OUTPUT
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 
 #if VS_Z_INTEGER
-	nointerpolation uint3 zi : COLOR1;
+	nointerpolation uint3 zi : COLOR3;
 	#if VS_NEEDS_BARY
-		float2 bary : COLOR2;
+		float2 bary : COLOR4;
 	#endif
 #endif
 };
@@ -219,9 +226,9 @@ struct PS_INPUT
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 
 #if PS_Z_INTEGER
-	nointerpolation uint3 zi : COLOR1;
+	nointerpolation uint3 zi : COLOR3;
 	#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
-		float2 bary : COLOR2;
+		float2 bary : COLOR4;
 	#endif
 #endif
 
@@ -234,6 +241,16 @@ struct PS_INPUT
 
 struct PS_OUTPUT_REAL
 {
+#if PS_RETURN_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		float c : SV_Target;
+	#else
+		float4 c0 : SV_Target0;
+		#if !PS_NO_COLOR1
+			float4 c1 : SV_Target1;
+		#endif
+	#endif
+#endif
 #if PS_RETURN_DEPTH
 	#if PS_Z_INTEGER
 		#if PS_Z_RT_SLOT
@@ -1465,11 +1482,10 @@ void ps_main(PS_INPUT input)
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
-#if PS_DEPTH_FEEDBACK
+#if SW_DEPTH
+	DEPTH_TYPE curr_z = DepthLoad(input.p.xy);
 	#if PS_Z_INTEGER
-		uint curr_z = DepthLoad(input.p.xy) & MaxDepthPS;
-	#else
-		float curr_z = DepthLoad(input.p.xy);
+		input_z |= (curr_z & ~MaxDepthPS); // Add unused upper bits
 	#endif
 #endif
 
@@ -1695,16 +1711,7 @@ if (bad)
 #endif
 
 #if PS_ZCLAMP && PS_Z_INTEGER
-	// Mask based on depth format
-	input_z |= (DepthLoad(input.p.xy) & ~MaxDepthPS);
-#endif
-
-#if ZWRITE
-	#if SW_DEPTH && PS_NO_COLOR1 && DX12 && !PS_Z_INTEGER
-		// Output color clone for feedback as well as real depth.
-		output.depth_color = input_z;
-	#endif
-	output.depth = input_z;
+	input_z |= (curr_z & ~MaxDepthPS); // Mask based on depth format
 #endif
 
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
@@ -1730,17 +1737,17 @@ if (bad)
 
 #if PS_RETURN_DEPTH
 	// Standard depth write
-	output_real.depth = input;
-	#if SW_DEPTH && PS_NO_COLOR1 && DX12
+	output_real.depth = input_z;
+	#if SW_DEPTH && PS_NO_COLOR1 && DX12 && !PS_Z_INTEGER
 		// Output color clone for feedback.
-		output_real.depth_color = input;
+		output_real.depth_color = input_z;
 	#endif
 #elif PS_RETURN_DEPTH_ROV
 	// ROV depth write
 	#if SW_DEPTH
-		input = rov_discard ? DepthLoad(input.p.xy) : input;
+		input_z = rov_discard ? curr_z : input_z;
 	#endif
-	DepthWrite(input.p.xy, input);
+	DepthWrite(input.p.xy, input_z);
 #endif
 
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
@@ -1884,14 +1891,14 @@ VS_INPUT load_vertex(uint index)
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
 
 	// Barycentric coordinates handling
-#if VS_Z_INTEGER && VS_NEEDS_BARY
-#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
-	uint index_mod = index % 3;
-#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
-	uint index_mod = index & 1;
-#else
-	uint index_mod = 0;
-#endif
+#if VS_NEEDS_BARY
+	#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
+		uint index_mod = index % 3;
+	#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
+		uint index_mod = index & 1;
+	#else
+		uint index_mod = 0;
+	#endif
 	vert.bary = float2(index_mod == 0, index_mod == 1);
 #endif
 

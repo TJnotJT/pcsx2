@@ -6077,7 +6077,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds);
 	GSTextureVK* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTextureVK*>(config.rt) : nullptr;
 	GSTextureVK* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTextureVK*>(config.ds ? config.ds : config.ds_int) : nullptr;
-	GSTextureVK* draw_ds_as_rt = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds_int ? config.ds_int : m_ds_as_rt);
+	GSTextureVK* draw_ds_as_rt = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds_int);
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
 

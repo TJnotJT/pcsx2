@@ -19,8 +19,9 @@
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
 
-#define VS_NEEDS_BARY VS_Z_INTEGER && \
-	(VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
+#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE           || \
+                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER))
 
 layout(std140, set = 0, binding = 0) uniform cb0
 {
@@ -149,9 +150,9 @@ struct ProcessedVertex
 	vec4 c;
 #if VS_Z_INTEGER
 	uint z;
-#if VS_NEEDS_BARY
-	vec2 bary;
-#endif
+	#if VS_NEEDS_BARY
+		vec2 bary;
+	#endif
 #endif
 };
 
@@ -554,13 +555,15 @@ void main()
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
 #define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZINT_NEEDS_DEPTH)
-#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || ZINT_WRITES_DEPTH || AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
+#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZINT_WRITES_DEPTH)
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
 #define PS_RETURN_DEPTH_ROV (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
+
+#define PS_NEEDS_BARY PS_Z_INTEGER && (PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS)
 
 #define NEEDS_TEX (PS_TFX != 4)
 
@@ -624,7 +627,7 @@ layout(location = 0) in VSOutput
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 	#if PS_Z_INTEGER
 		flat uvec3 zi;
-		#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
+		#if PS_NEEDS_BARY
 			vec2 bary;
 		#endif
 	#endif
@@ -1811,7 +1814,7 @@ layout(early_fragment_tests) in;
 void main()
 {
 #if PS_Z_INTEGER
-	#if (PS_PRIMCLASS == TRIANGLE_CLASS || PS_PRIMCLASS == LINE_CLASS)
+	#if PS_NEEDS_BARY
 		// Interpolate integer Z from barycentric coordinates.
 		uint input_z = interp_zint(vsIn.bary, vsIn.zi);
 	#else
@@ -1843,10 +1846,9 @@ void main()
 #endif
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	DEPTH_TYPE curr_z = sample_from_depth();
 	#if PS_Z_INTEGER
-		uint curr_z = sample_from_depth() & MaxDepthPS;
-	#else
-		float curr_z = sample_from_depth();
+		input_z |= (curr_z & ~MaxDepthPS); // Add unused upper bits
 	#endif
 #endif
 
@@ -2059,9 +2061,8 @@ void main()
 		input_z = bool(vsIn.interior) ? input_z : curr_z; // No depth update for triangle edges.
 	#endif
 
-	#if PS_ZCLAMP && PS_Z_INTEGER && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-		// Mask based on depth format
-		input_z |= (sample_from_depth() & ~MaxDepthPS);
+	#if PS_ZCLAMP && PS_Z_INTEGER
+		input_z |= (curr_z & ~MaxDepthPS); // Mask based on depth format
 	#endif
 	
 	#if PS_RETURN_COLOR_ROV

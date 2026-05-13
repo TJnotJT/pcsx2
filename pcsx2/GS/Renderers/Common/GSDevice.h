@@ -441,13 +441,13 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 3;
+				VSExpand expand : 4;
 				u8 zint : 1;
 			};
-			u8 key;
+			u16 key;
 		};
 		VSSelector(): key(0) {}
-		VSSelector(u8 k): key(k) {}
+		VSSelector(u16 k): key(k) {}
 
 		/// Returns true if the fixed index buffer should be used.
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
@@ -466,7 +466,7 @@ struct alignas(16) GSHWDrawConfig
 			}
 		}
 	};
-	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
+	static_assert(sizeof(VSSelector) == 2, "VSSelector is two bytes");
 
 	struct PSSelector
 	{
