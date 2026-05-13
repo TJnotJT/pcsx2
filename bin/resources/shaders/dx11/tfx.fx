@@ -1661,7 +1661,7 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 	float2 dq = float2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
 
 	// To prevent unstable extrapolation, do not extrapolate if the
-	// minimum perpendicular length of the triangle is < 1 pixel.
+	// minimum perpendicular length of the triangle is < 2 pixels.
 	float dp_det = determinant(dp_mat); // Twice signed triangle area.
 	float len0 = length(dp_mat[0]);
 	float len1 = length(dp_mat[1]);
