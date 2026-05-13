@@ -64,6 +64,13 @@
 #define INVALID_CLASS 7
 #endif
 
+#ifndef PS_Z_INTEGER_NONE
+#define PS_Z_INTEGER_NONE 0
+#define PS_Z_INTEGER_READ 1
+#define PS_Z_INTEGER_WRITE 2
+#define PS_Z_INTEGER_READ_WRITE 3
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
