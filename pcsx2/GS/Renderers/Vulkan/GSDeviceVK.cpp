@@ -3588,14 +3588,14 @@ void GSDeviceVK::OMSetRenderTargets(
 	GSTextureVK* vkDsRt = static_cast<GSTextureVK*>(ds_as_rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
 
-	pxAssert(vkRt || vkDsRt || vkDs);
 	pxAssert(!vkDsRt || vkDsRt->IsDepthInteger()); // Only support depth integer in this attachment
 	pxAssert(!vkDs || !vkDs->IsDepthColor());
 
 	if (m_current_render_target != vkRt ||
 		m_current_depth_render_target != vkDsRt ||
 		m_current_depth_target != vkDs ||
-		m_current_framebuffer_feedback_loop != feedback_loop)
+		m_current_framebuffer_feedback_loop != feedback_loop ||
+		m_current_framebuffer == VK_NULL_HANDLE)
 	{
 		// framebuffer change or feedback loop enabled/disabled
 		EndRenderPass();
@@ -5430,7 +5430,7 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	if (!(vkRt || vkDs || oldVkRt || oldVkDs))
 		return;
 
-	pxAssert(!vkDs || vkDs->IsDepthColor());
+	pxAssert(!vkDs || vkDs->IsDepthColor() || vkDs->IsDepthInteger());
 	pxAssert(!(vkRt || vkDs) || m_features.rov);
 
 	if (vkRt)
@@ -6081,14 +6081,14 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
 
-	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
+	if (draw_ds_rov && draw_ds_rov->IsDepthStencil() && !draw_ds_rov->IsDepthColor())
 	{
 		// Do this before making other settings because could use a shader copy mess up render state.
 		EndRenderPass();
 		draw_ds_rov->EnterDepthColor();
 	}
 
-	if (draw_ds && draw_ds->IsDepthColor())
+	if (draw_ds && draw_ds->IsDepthStencil() && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because could use a shader copy mess up render state.
 		EndRenderPass();

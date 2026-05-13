@@ -563,11 +563,11 @@ void main()
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
-#define PS_NEEDS_BARY PS_Z_INTEGER && (PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS)
+#define PS_NEEDS_BARY (PS_Z_INTEGER && (PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS))
 
 #define NEEDS_TEX (PS_TFX != 4)
 
-#ifdef PS_Z_INTEGER
+#if PS_Z_INTEGER
 	#define DEPTH_TYPE uint
 	#define DEPTH_VEC4 uvec4
 	#define DEPTH_TEXTURE utexture2D
@@ -648,7 +648,7 @@ layout(location = 0) in VSOutput
 	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
 	vec4 rov_rt_value;
 	vec4 sample_from_rt() { return rov_rt_value; }
-	void RtWrite(int2 xy, vec4 c)
+	void RtWrite(ivec2 xy, vec4 c)
 	{
 		imageStore(RtImageRov, xy, c);
 	}
@@ -658,23 +658,23 @@ layout(location = 0) in VSOutput
 	layout(set = 1, binding = 6, DEPTH_LAYOUT) uniform restrict coherent DEPTH_IMAGE DepthImageRov;
 	DEPTH_TYPE rov_depth_value;
 	DEPTH_TYPE sample_from_depth() { return rov_depth_value; }
-	void DepthWrite(int2 xy, DEPTH_TYPE d)
+	void DepthWrite(ivec2 xy, DEPTH_TYPE d)
 	{
 		imageStore(DepthImageRov, xy, DEPTH_VEC4(d, 0, 0, 0));
 	}
 #endif
 
-#if ZINT_WRITES_DEPTH
+#if ZINT_WRITES_DEPTH && !PS_ROV_DEPTH
 	layout(location = PS_Z_RT_SLOT) out uint o_depth;
 #endif
 
 #if NEEDS_TEX
 	#if PS_TEX_INTEGER
-	layout(set = 1, binding = 0) uniform usampler2D Texture;
+		layout(set = 1, binding = 0) uniform usampler2D Texture;
 	#else
-	layout(set = 1, binding = 0) uniform sampler2D Texture;
+		layout(set = 1, binding = 0) uniform sampler2D Texture;
 	#endif
-layout(set = 1, binding = 1) uniform texture2D Palette;
+	layout(set = 1, binding = 1) uniform texture2D Palette;
 #endif
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_RT || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
@@ -708,7 +708,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
 #endif
 
-#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_Z_INTEGER
+#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_Z_INTEGER && !PS_ROV_DEPTH
 layout(depth_less) out float gl_FragDepth;
 #endif
 

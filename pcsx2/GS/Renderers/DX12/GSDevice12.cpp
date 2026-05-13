@@ -273,7 +273,7 @@ bool GSDevice12::CreateDevice(u32& vendor_id)
 		if (SUCCEEDED(hr))
 		{
 			debug12->EnableDebugLayer();
-			debug12->SetEnableGPUBasedValidation(true);
+			//debug12->SetEnableGPUBasedValidation(true);
 		}
 		else
 		{
@@ -3625,7 +3625,7 @@ void GSDevice12::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	if (!(d12Rt || d12Ds || oldD12Rt || oldD12Ds))
 		return;
 
-	pxAssert(!d12Ds || d12Ds->IsDepthColor());
+	pxAssert(!d12Ds || d12Ds->IsDepthColor() || d12Ds->IsDepthInteger());
 	pxAssert(!(d12Rt || d12Ds) || m_features.rov);
 
 	if (d12Rt)
@@ -4372,19 +4372,19 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
 	GSTexture12* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds);
+	GSTexture12* draw_ds_as_rt = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds_int ? config.ds_int : m_ds_as_rt);
 	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
-	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
-	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(config.ds_int ? config.ds_int : m_ds_as_rt);
+	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds_int ? config.ds_int : config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
-	if (draw_ds_rov && !draw_ds_rov->IsDepthColor())
+	if (draw_ds_rov && draw_ds_rov->IsDepthStencil() && !draw_ds_rov->IsDepthColor())
 	{
 		// Do this before making other settings because the shader copy could mess up render state.
 		EndRenderPass();
 		draw_ds_rov->EnterDepthColor();
 	}
 
-	if (draw_ds && draw_ds->IsDepthColor())
+	if (draw_ds && draw_ds->IsDepthStencil() && draw_ds->IsDepthColor())
 	{
 		// Do this before making other settings because the shader copy could mess up render state.
 		EndRenderPass();
@@ -4394,7 +4394,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
 	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
-	const GSVector2i rtsize(draw_rt ? draw_rt->GetSize() : (draw_ds ? draw_ds->GetSize() : draw_ds_as_rt->GetSize()));
+	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : (config.ds ? config.ds->GetSize() : config.ds_int->GetSize()));
 
 	PipelineSelector& pipe = m_pipeline_selector;
 
@@ -4831,10 +4831,12 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
-	if (m_ds_as_rt)
+	
+	const GSTexture* ds_as_rt = config.ds_int ? config.ds_int : m_ds_as_rt;
+	m_pipeline_selector.ds_as_rt = ds_as_rt != nullptr && !config.ps.HasDepthROV();
+	if (ds_as_rt)
 	{
-		switch (m_ds_as_rt->GetFormat())
+		switch (ds_as_rt->GetFormat())
 		{
 			case GSTexture::Format::Float32:
 				m_pipeline_selector.ds_as_rt = 1;

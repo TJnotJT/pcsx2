@@ -7576,20 +7576,25 @@ void GSRendererHW::DetermineROVUsage()
 		return;
 	}
 
-	if (m_conf.tex && m_conf.tex == m_conf.rt && !m_conf.ps.tex_is_fb)
+	GSTexture* rt = m_conf.rt;
+
+	// ROV setup happens after depth integer setup so make sure to use the right texture.
+	GSTexture* ds = m_conf.ds ? m_conf.ds : m_conf.ds_int;
+
+	if (m_conf.tex && m_conf.tex == rt && !m_conf.ps.tex_is_fb)
 	{
 		GL_INS("ROV: Disabled because tex is RT and not sampling from current pixel");
 		return;
 	}
 
-	if (m_conf.tex && m_conf.tex == m_conf.ds)
+	if (m_conf.tex && m_conf.tex == ds)
 	{
 		GL_INS("ROV: Disabled because tex is depth");
 		return;
 	}
 
-	const bool color_write = m_conf.rt && m_conf.colormask.wrgba != 0;
-	const bool depth_write = m_conf.ds && m_cached_ctx.DepthWrite();
+	const bool color_write = rt && m_conf.colormask.wrgba != 0;
+	const bool depth_write = ds && m_cached_ctx.DepthWrite();
 
 	const u32 colormask = GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM) & m_conf.colormask.wrgba;
 	const bool colormask_needs_rt = colormask != 0xF;
@@ -7654,25 +7659,25 @@ void GSRendererHW::DetermineROVUsage()
 	const auto Mix = [](float x, float y, float w) { return x * w + y * (1.0f - w); };
 
 	// Get saved history for RT and DS
-	float curr_avg_barriers_color = m_conf.rt ? m_conf.rt->GetAvgBarriersROV() : 0.0f;
-	float curr_avg_barriers_depth = m_conf.ds ? m_conf.ds->GetAvgBarriersROV() : 0.0f;
+	float curr_avg_barriers_color = rt ? rt->GetAvgBarriersROV() : 0.0f;
+	float curr_avg_barriers_depth = ds ? ds->GetAvgBarriersROV() : 0.0f;
 
 	// Updated barrier values
 	float avg_barriers_color = 0.0f;
 	float avg_barriers_depth = 0.0f;
 
 	// Up weight the barriers if we will be using the texture as a ROV, otherwise down weight.
-	if (m_conf.rt)
+	if (rt)
 	{
 		avg_barriers_color = Mix(curr_avg_barriers_color, use_rov_color ? barriers : 1.0f, m_rov_history_weight);
 	}
-	if (m_conf.ds)
+	if (ds)
 	{
 		avg_barriers_depth = Mix(curr_avg_barriers_depth, use_rov_depth ? barriers : 1.0f, m_rov_history_weight);
 	}
 
-	const bool color_is_rov = m_conf.rt && m_conf.rt->IsUnorderedAccess();
-	const bool depth_is_rov = m_conf.ds && m_conf.ds->IsDepthColor();
+	const bool color_is_rov = rt && rt->IsUnorderedAccess();
+	const bool depth_is_rov = ds && ds->IsDepthColor();
 
 	const bool color_needs_enabling = use_rov_color && !color_is_rov;
 	const bool depth_needs_enabling = use_rov_depth && !depth_is_rov;
@@ -7682,7 +7687,7 @@ void GSRendererHW::DetermineROVUsage()
 
 	if (!(needs_enabling || needs_disabling))
 	{
-		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | No action taken.", s_n, m_conf.rt, m_conf.ds, barriers);
+		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | No action taken.", s_n, rt, ds, barriers);
 		return;
 	}
 	
@@ -7724,7 +7729,7 @@ void GSRendererHW::DetermineROVUsage()
 		GetForcedROVUsage(use_rov_color_final, use_rov_depth_final);
 
 		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | AVGBAR=%.2f >= %.2f => %s | C=%d => %d | D=%d => %d.",
-			s_n, m_conf.rt, m_conf.ds, barriers, test_barriers, threshold, needs_enabling ? "Enable ROV" : "Continue ROV",
+			s_n, rt, ds, barriers, test_barriers, threshold, needs_enabling ? "Enable ROV" : "Continue ROV",
 			use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
 	}
 	else
@@ -7734,7 +7739,7 @@ void GSRendererHW::DetermineROVUsage()
 		use_rov_depth_final = false;
 		
 		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%.2f | AVGBAR=%.2f < %.2f => %s | C=%d => %d | D=%d => %d.",
-			s_n, m_conf.rt, m_conf.ds, barriers, test_barriers, threshold, needs_enabling ? "Continue non-ROV" : "Disable ROV",
+			s_n, rt, ds, barriers, test_barriers, threshold, needs_enabling ? "Continue non-ROV" : "Disable ROV",
 			use_rov_color, use_rov_color_final, use_rov_depth, use_rov_depth_final);
 	}
 
@@ -7742,11 +7747,11 @@ void GSRendererHW::DetermineROVUsage()
 		use_rov_color_final ? "enabled" : "disabled", use_rov_depth_final ? "enabled" : "disabled");
 
 	// Update the average barrier history based on whether we decided to use ROVs
-	if (m_conf.rt)
+	if (rt)
 	{
 		avg_barriers_color = Mix(curr_avg_barriers_color, use_rov_color_final ? barriers : 1.0f, m_rov_history_weight);
 	}
-	if (m_conf.ds)
+	if (ds)
 	{
 		avg_barriers_depth = Mix(curr_avg_barriers_depth, use_rov_depth_final ? barriers : 1.0f, m_rov_history_weight);
 	}
@@ -7759,14 +7764,14 @@ void GSRendererHW::DetermineROVUsage()
 	}
 
 	// Update the final barrier values.
-	if (m_conf.rt)
+	if (rt)
 	{
-		m_conf.rt->SetAvgBarriersROV(avg_barriers_color);
+		rt->SetAvgBarriersROV(avg_barriers_color);
 	}
 
-	if (m_conf.ds)
+	if (ds)
 	{
-		m_conf.ds->SetAvgBarriersROV(avg_barriers_depth);
+		ds->SetAvgBarriersROV(avg_barriers_depth);
 	}
 
 	// Do the actual pipeline config
