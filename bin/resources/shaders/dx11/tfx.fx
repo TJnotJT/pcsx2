@@ -1669,42 +1669,33 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 	float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
 
 	// Get the position -> barycentric weight matrix
-	float2x2 inv_dp_mat = min_perp_length < 2 ? 0 : get_inverse(dp_mat, dp_det);
+	float2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
 
-	// Get attribute gradients
-	#if VS_TME
-		float2x2 dt_grad = mul(inv_dp_mat, dt); // Texture
-	#endif
-	#if VS_IIP
-		float2x4 dc_grad = mul(inv_dp_mat, dc); // Color
-	#endif
-	float2 dz_grad = mul(inv_dp_mat, dz); // Depth
-	float2 df_grad = mul(inv_dp_mat, df); // Fog
-	float2 dq_grad = mul(inv_dp_mat, dq); // Q
+	float2 weights = min_perp_length < 2 ? 0 : mul(dp, inv_dp_mat);
 
 	v0.p.xy += dp * PointSize; // Extrapolate position
 
 	// Extrapolate texture coords
 	#if VS_TME
 		#if VS_FST
-			v0.ti.zw += mul(dp, dt_grad);
+			v0.ti.zw += mul(weights, dt);
 			v0.ti.xy = v0.ti.zw * TextureScale;
 		#else
-			v0.t.xy += mul(dp, dt_grad);
+			v0.t.xy += mul(weights, dt);
 			v0.ti.zw = v0.t.xy / TextureScale;
-			v0.t.w += dot(dp, dq_grad);
+			v0.t.w += dot(weights, dq);
 		#endif
 	#endif
 
 	// Extrapolate and clamp color
 	#if VS_IIP
-		v0.c += mul(dp, dc_grad);
+		v0.c += mul(weights, dc);
 		v0.c = clamp(v0.c, 0, 255);
 	#endif
 
-	v0.p.z += dot(dp, dz_grad); // Extrapolate depth
+	v0.p.z += dot(weights, dz); // Extrapolate depth
 
-	v0.t.z += dot(dp, df_grad); // Extrapolate fog
+	v0.t.z += dot(weights, df); // Extrapolate fog
 }
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
