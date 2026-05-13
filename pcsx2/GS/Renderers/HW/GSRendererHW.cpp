@@ -7024,7 +7024,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 
 		// If we are doing depth feedback with a second RT we must use SW blending to avoid
 		// mixing dual source blending with multiple render targets.
-		(m_conf.ps.IsFeedbackLoopDepth() && !features.depth_feedback) ||
+		// Integer depth also uses a second RT (regardless of whether feedback is needed).
+		((m_conf.ps.IsFeedbackLoopDepth() && !features.depth_feedback) || m_conf.ds_int) ||
 		
 		// Force SW blending with barriers.
 		GSConfig.UseDebugBlend;
