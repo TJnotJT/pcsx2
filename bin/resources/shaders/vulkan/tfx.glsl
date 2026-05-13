@@ -665,11 +665,7 @@ layout(location = 0) in VSOutput
 #endif
 
 #if ZINT_WRITES_DEPTH
-	#if PS_Z_RT_SLOT
-		layout(location = 1) out uint o_depth;
-	#else
-		layout(location = 0) out uint o_depth;
-	#endif
+	layout(location = PS_Z_RT_SLOT) out uint o_depth;
 #endif
 
 #if NEEDS_TEX

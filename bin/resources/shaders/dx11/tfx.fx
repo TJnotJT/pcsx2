@@ -181,6 +181,12 @@
 	#define DEPTH_TYPE float
 #endif
 
+#if PS_Z_RT_SLOT
+	#define Z_RT_SLOT SV_Target1
+#else
+	#define Z_RT_SLOT SV_Target0
+#endif
+
 struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
@@ -261,11 +267,7 @@ struct PS_OUTPUT_REAL
 #if PS_RETURN_DEPTH
 	#if PS_Z_INTEGER
 		#if ZINT_WRITES_DEPTH
-			#if PS_Z_RT_SLOT
-				uint depth : SV_Target1;
-			#else
-				uint depth : SV_Target0;
-			#endif
+			uint depth : Z_RT_SLOT;
 		#endif
 	#else
 		// In DX12 we do depth feedback loops with a color copy.
