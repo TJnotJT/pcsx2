@@ -33,25 +33,25 @@ static float4 ps_scanlines(float4 color, int i)
 
 // use ps_copy from convert.metal
 
-fragment float4 ps_filter_scanlines(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_filter_scanlines(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	return ps_scanlines(res.sample(data.t), uint(data.p.y) % 2);
 }
 
-fragment float4 ps_filter_diagonal(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_filter_diagonal(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	uint4 p = uint4(data.p);
 	return ps_crt(res.sample(data.t), (p.x + (p.y % 3)) % 3);
 }
 
-fragment float4 ps_filter_triangular(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_filter_triangular(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	uint4 p = uint4(data.p);
 	uint val = ((p.x + ((p.y >> 1) & 1) * 3) >> 1) % 3;
 	return ps_crt(res.sample(data.t), val);
 }
 
-fragment float4 ps_filter_complex(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_filter_complex(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	float2 texdim = float2(res.texture.get_width(), res.texture.get_height());
 	float factor = (0.9f - 0.4f * cos(2.f * M_PI_F * data.t.y * texdim.y));
@@ -75,9 +75,9 @@ fragment float4 ps_filter_complex(ConvertShaderData data [[stage_in]], ConvertPS
 
 struct LottesCRTPass
 {
-	thread ConvertPSRes& res;
+	thread ConvertPSRes<float>& res;
 	constant GSMTLPresentPSUniform& uniform;
-	LottesCRTPass(thread ConvertPSRes& res, constant GSMTLPresentPSUniform& uniform): res(res), uniform(uniform) {}
+	LottesCRTPass(thread ConvertPSRes<float>& res, constant GSMTLPresentPSUniform& uniform): res(res), uniform(uniform) {}
 
 	float ToLinear1(float c)
 	{
@@ -355,13 +355,13 @@ struct LottesCRTPass
 	}
 };
 
-fragment float4 ps_filter_lottes(ConvertShaderData data [[stage_in]], ConvertPSRes res,
+fragment float4 ps_filter_lottes(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
 	constant GSMTLPresentPSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	return LottesCRTPass(res, uniform).Run(data.p);
 }
 
-fragment float4 ps_4x_rgss(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_4x_rgss(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	float2 dxy = float2(dfdx(data.t.x), dfdy(data.t.y));
 	float3 color = 0;
@@ -377,7 +377,7 @@ fragment float4 ps_4x_rgss(ConvertShaderData data [[stage_in]], ConvertPSRes res
 	return float4(color * 0.25,1);
 }
 
-fragment float4 ps_automagical_supersampling(ConvertShaderData data [[stage_in]], ConvertPSRes res,
+fragment float4 ps_automagical_supersampling(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
 	constant GSMTLPresentPSUniform& cb [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	float2 ratio = (cb.source_size / cb.target_size) * 0.5;

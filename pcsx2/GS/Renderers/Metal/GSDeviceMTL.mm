@@ -1177,7 +1177,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::COLCLIP_INIT:
 			case ShaderConvert::COLCLIP_RESOLVE:
 				continue;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
+			case ShaderConvert::FLOAT32_TO_UINT32:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
@@ -1217,6 +1217,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Float32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+				break;
+			default:
+				pxFail("Unimplemented convert shader.");
 				break;
 		}
 		const u32 scmask = ShaderConvertWriteMask(conv);
@@ -2026,7 +2029,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		MTLRenderPipelineColorAttachmentDescriptor* color1 = [[pdesc colorAttachments] objectAtIndexedSubscript:1];
 		[color1 setPixelFormat:MTLPixelFormatR32Float];
 	}
-	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%x.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
+	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%llx.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
 	auto pipeline = MakePipeline(pdesc, vs, ps, pname);
 
 	[m_current_render.encoder setRenderPipelineState:pipeline];
