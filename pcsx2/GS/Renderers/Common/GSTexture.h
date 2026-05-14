@@ -73,6 +73,9 @@ protected:
 	bool m_needs_mipmaps_generated = true;
 	ClearValue m_clear_value = {};
 
+#ifdef PCSX2_DEVBUILD
+	std::string m_debug_name;
+#endif
 public:
 	GSTexture();
 	virtual ~GSTexture();
@@ -87,6 +90,7 @@ public:
 
 #ifdef PCSX2_DEVBUILD
 	virtual void SetDebugName(std::string_view name) = 0;
+	const std::string& GetDebugName() { return m_debug_name; }
 #endif
 
 	bool Save(const std::string& fn);
@@ -172,6 +176,12 @@ public:
 
 	// Typical size of a RGBA texture
 	u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
+
+	virtual bool IsUnorderedAccess() const
+	{
+		pxFailRel("Not implemented");
+		return false;
+	}
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }
