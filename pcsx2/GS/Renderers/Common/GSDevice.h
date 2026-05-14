@@ -614,7 +614,7 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			const bool zint_needs_depth = zint == PS_Z_INTEGER::READ || zint == PS_Z_INTEGER::READ_WRITE;
+			const bool zint_needs_depth = zint != PS_Z_INTEGER::NONE;
 			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zint_needs_depth;
 		}
 
@@ -666,7 +666,7 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool HasDepthOutput() const
 		{
 			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE) ||
-				(zint == PS_Z_INTEGER::WRITE || zint == PS_Z_INTEGER::READ_WRITE);
+				(zint == PS_Z_INTEGER::READ_WRITE);
 		}
 
 		__fi bool HasColorROV() const

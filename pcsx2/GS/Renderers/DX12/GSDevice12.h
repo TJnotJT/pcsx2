@@ -250,6 +250,7 @@ public:
 				u32 topology : 2;
 				u32 rt : 1;
 				u32 ds_as_rt : 2; // 0: none, 1: Float32, 2: UInt32
+				u32 ds_as_rt_write : 1;
 				u32 ds : 1;
 			};
 

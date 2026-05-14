@@ -69,9 +69,8 @@ enum class PS_ROV_DEPTH : uint32_t
 enum class PS_Z_INTEGER : uint32_t
 {
 	NONE       = 0,
-	READ       = 1,
-	WRITE      = 2,
-	READ_WRITE = 3,
+	READ_WRITE = 1,
+	READ_ONLY  = 2,
 };
 
 } // namespace GSShader

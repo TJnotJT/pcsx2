@@ -3389,7 +3389,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	if (p.ds_as_rt)
 	{
 		gpb.SetBlendState(num_rts - 1, false, D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, D3D12_BLEND_ONE,
-			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
+			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, p.ds_as_rt_write ? 0xF : 0);
 	}
 
 	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache));
@@ -4600,7 +4600,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
-	OMSetRenderTargets(draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_ds, config.scissor,
+	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
 		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
 		config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
@@ -4666,14 +4666,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (!date_image || colclip_rt)
 		UploadHWDrawVerticesAndIndices(config);
 
-	// Set read-only DS as RT sampler if needed
-	if (draw_ds_as_rt && !pipe.ds_as_rt)
-	{
-		PSSetShaderResource(TEXTURE_DEPTH, draw_ds_as_rt, true);
-	}
-
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_rt_rov, draw_ds_rov,
+	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_rt_rov, draw_ds_rov,
 		feedback_rt, feedback_depth, config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
@@ -4838,28 +4832,21 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	const bool zint_write = config.ds_int &&
-		(config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::WRITE ||
-	    config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE);
-	const GSTexture* ds_as_rt = m_ds_as_rt ? m_ds_as_rt : (zint_write ? config.ds_int : nullptr);
-	if (ds_as_rt && !config.ps.HasDepthROV())
+	const GSTexture* ds_as_rt = config.ds_int ? config.ds_int : m_ds_as_rt;
+	if (!config.ps.HasDepthROV() && config.ds_int)
 	{
-		switch (ds_as_rt->GetFormat())
-		{
-			case GSTexture::Format::Float32:
-				m_pipeline_selector.ds_as_rt = 1;
-				break;
-			case GSTexture::Format::UInt32:
-				m_pipeline_selector.ds_as_rt = 2;
-				break;
-			default:
-				pxFail("Wrong format for DS as RT.");
-				break;
-		}
+		m_pipeline_selector.ds_as_rt = 2; // U32 depth
+		m_pipeline_selector.ds_as_rt_write = config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
+	}
+	else if (!config.ps.HasDepthROV() && m_ds_as_rt)
+	{
+		m_pipeline_selector.ds_as_rt = 1; // F32 depth
+		m_pipeline_selector.ds_as_rt_write = 1; // Always written as this path is only for feedback.
 	}
 	else
 	{
 		m_pipeline_selector.ds_as_rt = 0;
+		m_pipeline_selector.ds_as_rt_write = 0;
 	}
 }
 

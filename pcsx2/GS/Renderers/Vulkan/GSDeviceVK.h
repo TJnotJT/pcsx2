@@ -341,6 +341,7 @@ public:
 				u32 topology : 2;
 				u32 rt : 1;
 				u32 ds_as_rt : 1;
+				u32 ds_as_rt_write : 1;
 				u32 ds : 1;
 				u32 line_width : 1;
 				u32 feedback_loop_flags : 4;

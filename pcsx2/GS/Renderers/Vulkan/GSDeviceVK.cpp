@@ -5183,7 +5183,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	if (p.ds_as_rt)
 	{
 		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD);
+			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.ds_as_rt_write ? 0xF : 0);
 	}
 
 	// Tests have shown that it's faster to just enable rast order on the entire pass, rather than alternating
@@ -6357,7 +6357,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 	}
 	
-	if (draw_ds_as_rt)
+	if (pipe.IsDepthRTFeedbackLoop() && draw_ds_as_rt)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		pxAssert(!pipe.IsDepthFeedbackLoop()); // Should not have depth as color and depth feedback loop simultaneously.
@@ -6397,7 +6397,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	
 	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
-	OMSetRenderTargets(draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_ds, config.scissor,
+	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
 		static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
 
 	// Begin render pass if new target or out of the area.
@@ -6593,9 +6593,8 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.topology = static_cast<u32>(config.topology);
 	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	const bool zint_write = config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::WRITE ||
-	                        config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
-	pipe.ds_as_rt = zint_write && !config.ps.HasDepthROV();
+	pipe.ds_as_rt = config.ds_int && !config.ps.HasDepthROV();
+	pipe.ds_as_rt_write = pipe.ds_as_rt && config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))

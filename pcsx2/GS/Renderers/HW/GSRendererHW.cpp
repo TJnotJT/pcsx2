@@ -9414,7 +9414,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		m_conf.ps.rta_correction = rt->m_rt_alpha_scale;
 	}
 
-	// Handle integer depth - FIXME: How interacts with ROV setup??
+	// Handle integer depth
 	EmulateDepthInteger();
 
 	// Call before computing the full drawlist in case ROV is used and we don't need it.
@@ -11081,19 +11081,20 @@ void GSRendererHW::EmulateDepthInteger()
 		m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp;
 	}
 
-	pxAssert(depth_read || depth_write);
-	if (depth_read && depth_write)
+	GL_INS("HW: Write=%d, read=%d, mask=%x", depth_write, depth_read, max_z);
+
+	if (m_cached_ctx.DepthWrite())
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
-	else if (depth_read)
-		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ;
-	else if (depth_write)
-		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::WRITE;
+	else
+		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_ONLY;
 
 	// Enable SW depth test if needed.
 	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
 	{
 		m_conf.ps.ztst = m_conf.depth.ztst;
 	}
+
+	GL_INS("HW: Pixel shader ZTST = %s", GSUtil::GetZTSTName(m_conf.ps.ztst));
 
 	// Disable HW depth
 	if (m_conf.ds == m_conf.ds_int)
@@ -11104,18 +11105,22 @@ void GSRendererHW::EmulateDepthInteger()
 	m_conf.depth.zwe = false;
 	m_conf.depth.ztst = ZTST_ALWAYS;
 
-	// Tell pixel shader which slot the depth as integer textures is bound to.
+	// Tell pixel shader which slot the depth as integer texture is bound to.
 	m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
+
+	GL_INS("HW: Depth integer slot = %d", m_conf.ps.z_rt_slot);
 
 	if (depth_read && depth_write)
 	{
-		// We need full barriers even if we only write depth since
+		// We may need full barriers to read/write depth.
+		GL_INS("HW: Possible full barriers");
 		m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
 		m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
 	}
 	else if (depth_read)
 	{
 		// Need one barrier to read the current depth.
+		GL_INS("HW: Enable one barrier");
 		m_conf.require_one_barrier = true;
 	}
 
