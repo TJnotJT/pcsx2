@@ -11046,7 +11046,17 @@ void GSRendererHW::EmulateDepthInteger()
 	m_conf.ps.primclass = GS_INVALID_CLASS;
 
 	if (!m_conf.ds_int)
-		return; // Not using integer depth.
+		return;
+
+	GL_PUSH("HW: Depth integer setup");
+
+	if (!(m_cached_ctx.DepthRead() || m_cached_ctx.DepthWrite()))
+	{
+		GL_INS("HW: No depth read/write, disable depth integer.");
+		m_conf.ds = (m_conf.ds == m_conf.ds_int) ? nullptr : m_conf.ds;
+		m_conf.ds_int = nullptr;
+		return;
+	}
 
 	// Should not be using dual source blend with MRTs
 	pxAssert(m_conf.ps.no_color1);
@@ -11071,14 +11081,13 @@ void GSRendererHW::EmulateDepthInteger()
 		m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp;
 	}
 
+	pxAssert(depth_read || depth_write);
 	if (depth_read && depth_write)
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
 	else if (depth_read)
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ;
 	else if (depth_write)
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::WRITE;
-	else
-		pxFailRel("Impossible"); // Should not have enabled depth integer.
 
 	// Enable SW depth test if needed.
 	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
