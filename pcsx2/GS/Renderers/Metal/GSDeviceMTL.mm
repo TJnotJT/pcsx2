@@ -2029,7 +2029,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		MTLRenderPipelineColorAttachmentDescriptor* color1 = [[pdesc colorAttachments] objectAtIndexedSubscript:1];
 		[color1 setPixelFormat:MTLPixelFormatR32Float];
 	}
-	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%x.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
+	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%llx.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
 	auto pipeline = MakePipeline(pdesc, vs, ps, pname);
 
 	[m_current_render.encoder setRenderPipelineState:pipeline];
