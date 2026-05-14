@@ -592,6 +592,10 @@ void GSDevice::Recycle(GSTexture* t)
 		return;
 
 	t->SetLastFrameUsed(m_frame);
+		
+#ifdef PCSX2_DEVBUILD
+	t->SetDebugName("");
+#endif
 
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];
 	pool.push_front(t);
@@ -673,6 +677,18 @@ GSTexture* GSDevice::CreateDepthStencil(int w, int h, bool clear, bool prefer_re
 GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, bool clear, bool prefer_reuse)
 {
 	return FetchSurface(GSTexture::Type::DepthStencil, size.x, size.y, 1, GSTexture::Format::DepthStencil,
+		clear, !prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateDepthColor(int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::RenderTarget, w, h, 1, GSTexture::Format::DepthColor,
+		clear, !prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateDepthColor(const GSVector2i& size, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::RenderTarget, size.x, size.y, 1, GSTexture::Format::DepthColor,
 		clear, !prefer_reuse);
 }
 
@@ -1448,9 +1464,9 @@ static const char* GetSetDATMName(SetDATM datm)
 	return "Unknown";
 }
 
-static const char* GetPSAA1Name(u32 aa1)
+static const char* GetPSAA1Name(GSHWDrawConfig::PS_AA1 aa1)
 {
-	switch (static_cast<GSHWDrawConfig::PS_AA1>(aa1))
+	switch (aa1)
 	{
 		case GSHWDrawConfig::PS_AA1::NONE: return "NONE";
 		case GSHWDrawConfig::PS_AA1::LINE: return "LINE";
@@ -1467,6 +1483,17 @@ static const char* GetTexHazardName(u32 tex_hazard)
 		case GSHWDrawConfig::TEX_HAZARD_NONE: return "NONE";
 		case GSHWDrawConfig::TEX_HAZARD_RT: return "RT";
 		case GSHWDrawConfig::TEX_HAZARD_DEPTH: return "DEPTH";
+	}
+	return "Unknown";
+}
+
+static const char* GetPSROVDepthname(GSHWDrawConfig::PS_ROV_DEPTH rov_depth)
+{
+	switch (rov_depth)
+	{
+		case GSHWDrawConfig::PS_ROV_DEPTH::NONE: return "NONE";
+		case GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY: return "READ_ONLY";
+		case GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE: return "READ_WRITE";
 	}
 	return "Unknown";
 }
@@ -1526,9 +1553,11 @@ static void DumpPSSelector(DrawConfigWriter& out, const GSHWDrawConfig::PSSelect
 	out.WriteLn("point_sampler: {}", ps.point_sampler);
 	out.WriteLn("region_rect: {}", ps.region_rect);
 	out.WriteLn("scanmsk: {} ({})", GSUtil::GetSCANMSKName(ps.scanmsk), ps.scanmsk);
-	out.WriteLn("aa1: {} ({})", static_cast<u32>(ps.aa1), GetPSAA1Name(static_cast<u32>(ps.aa1)));
+	out.WriteLn("aa1: {} ({})", static_cast<u32>(ps.aa1), GetPSAA1Name(ps.aa1));
 	out.WriteLn("abe: {}", static_cast<u32>(ps.abe));
 	out.WriteLn("sw_aniso: {}", ps.sw_aniso);
+	out.WriteLn("rov_color: {}", ps.rov_color);
+	out.WriteLn("rov_depth: {} ({})", static_cast<u32>(ps.rov_color), GetPSROVDepthname(ps.rov_depth));
 }
 
 static void DumpVSSelector(DrawConfigWriter& out, const GSHWDrawConfig::VSSelector& vs)
