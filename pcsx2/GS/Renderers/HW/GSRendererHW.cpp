@@ -3892,7 +3892,7 @@ void GSRendererHW::Draw()
 		}
 
 		// Convert the Z buffer F32<->U32 depending on whether the Z integer feature is enabled and the upper bits of Z are set.
-		if (ds->m_texture->IsDepthStencil() && g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
+		if (ds && ds->m_texture->IsDepthStencil() && g_gs_device->Features().depth_integer && m_mem.m_psm[m_cached_ctx.ZBUF.PSM].bpp == 32 &&
 			((GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Enabled && ((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max)) ||
 				GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always))
 		{
@@ -3907,7 +3907,7 @@ void GSRendererHW::Draw()
 			g_gs_device->Recycle(ds->m_texture);
 			ds->m_texture = tmp;
 		}
-		else if (ds->m_texture->IsDepthInteger() && GSConfig.HWZIntegerMode < GSHardwareZIntegerMode::Always &&
+		else if (ds && ds->m_texture->IsDepthInteger() && GSConfig.HWZIntegerMode < GSHardwareZIntegerMode::Always &&
 			!((static_cast<int>(m_vt.m_max.p.z) >> 24) || ds->m_alpha_max))
 		{
 			// U32 -> F32
@@ -6209,7 +6209,7 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	m_conf.vs.iip = !IsFlatShaded();
 }
 
-void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
+void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -6249,7 +6249,7 @@ void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
 
 	if (m_conf.require_full_barrier && features.feedback_loops())
 	{
-		ComputeDrawlistGetSize(rt->m_scale);
+		ComputeDrawlistGetSize(rt ? rt->m_scale : ds->m_scale);
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
@@ -9421,7 +9421,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	DetermineROVUsage();
 
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
-	DetermineBarriers(rt);
+	DetermineBarriers(rt, ds);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
@@ -11069,8 +11069,6 @@ void GSRendererHW::EmulateDepthInteger()
 	// Setup for pixel shader.
 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
 	const bool need_clamp = psm.bpp < 32;
-	const bool depth_write = m_cached_ctx.DepthWrite();
-	const bool depth_read = m_cached_ctx.DepthRead() || (depth_write && need_clamp);
 
 	// Enable SW Z to correctly mask depth bits.
 	const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));
@@ -11081,12 +11079,21 @@ void GSRendererHW::EmulateDepthInteger()
 		m_conf.alpha_second_pass.ps.zclamp = m_conf.ps.zclamp;
 	}
 
-	GL_INS("HW: Write=%d, read=%d, mask=%x", depth_write, depth_read, max_z);
-
 	if (m_cached_ctx.DepthWrite())
+	{
+		GL_INS("HW: Read/write, mask=%x", max_z);
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
+
+		// We don't consider the case where depth is write-only and may not need barriers.
+		// This should be relatively rare.
+		m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
+		m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
+	}
 	else
+	{
 		m_conf.ps.zint = GSHWDrawConfig::PS_Z_INTEGER::READ_ONLY;
+		m_conf.require_one_barrier = true;
+	}
 
 	// Enable SW depth test if needed.
 	if (m_cached_ctx.DepthRead() && !m_conf.ps.DepthTest())
@@ -11109,20 +11116,6 @@ void GSRendererHW::EmulateDepthInteger()
 	m_conf.ps.z_rt_slot = m_conf.rt ? 1 : 0;
 
 	GL_INS("HW: Depth integer slot = %d", m_conf.ps.z_rt_slot);
-
-	if (depth_read && depth_write)
-	{
-		// We may need full barriers to read/write depth.
-		GL_INS("HW: Possible full barriers");
-		m_conf.require_full_barrier |= (m_prim_overlap != PRIM_OVERLAP_NO);
-		m_conf.require_one_barrier |= (m_prim_overlap == PRIM_OVERLAP_NO);
-	}
-	else if (depth_read)
-	{
-		// Need one barrier to read the current depth.
-		GL_INS("HW: Enable one barrier");
-		m_conf.require_one_barrier = true;
-	}
 
 	// Make sure we didn't accidentally assign the color depth to the depth.
 	pxAssert(!m_conf.ds || m_conf.ds->IsDepthStencil());
