@@ -43,9 +43,9 @@ DXGI_FORMAT GSTexture11::GetDXGIFormat(Format format)
 		case GSTexture::Format::BC3:          return DXGI_FORMAT_BC3_UNORM;
 		case GSTexture::Format::BC7:          return DXGI_FORMAT_BC7_UNORM;
 		case GSTexture::Format::Invalid:
-	default:
-		pxAssert(0);
-		return DXGI_FORMAT_UNKNOWN;
+		default:
+			pxAssert(0);
+			return DXGI_FORMAT_UNKNOWN;
 	}
 	// clang-format on
 }
@@ -102,6 +102,8 @@ void GSTexture11::SetDebugName(std::string_view name)
 		GSDevice11::SetD3DDebugObjectName(m_srv.get(), fmt::format("{} SRV", name));
 	if (m_rtv)
 		GSDevice11::SetD3DDebugObjectName(m_rtv.get(), fmt::format("{} RTV", name));
+
+	m_debug_name = name;
 }
 
 #endif
@@ -236,7 +238,7 @@ void GSDownloadTexture11::CopyFromTexture(
 	pxAssert(src.z <= stex->GetWidth() && src.w <= stex->GetHeight());
 	pxAssert(static_cast<u32>(drc.z) <= m_width && static_cast<u32>(drc.w) <= m_height);
 	pxAssert(src_level < static_cast<u32>(stex->GetMipmapLevels()));
-
+	
 	GSDevice11::GetInstance()->CommitClear(stex);
 
 	g_perfmon.Put(GSPerfMon::Readbacks, 1);
