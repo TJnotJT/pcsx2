@@ -6370,13 +6370,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			m_dirty_flags |= static_cast<u32>(DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV);
 		}
 	}
-	else if (draw_ds_as_rt)
-	{
-		// Unbind to avoid conflicts with framebuffer
-		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
-	}
-	
-	if (pipe.IsDepthFeedbackLoop() && draw_ds)
+	else if (pipe.IsDepthFeedbackLoop() && draw_ds)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		pxAssert(!pipe.IsDepthRTFeedbackLoop()); // Should not have depth as color and depth feedback loop simultaneously.
@@ -6602,11 +6596,13 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 		if (pipe.rt && config.ps.IsFeedbackLoopRT())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 
-		if (pipe.ds && config.ps.IsFeedbackLoopDepth())
-			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
-
+		// Only one of DS or DS as RT should use feedback.
+		// If both are bound, the real DS should only be used for stencil.
 		if (pipe.ds_as_rt && config.ps.IsFeedbackLoopDepth())
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepthRT;
+		else if (pipe.ds && config.ps.IsFeedbackLoopDepth())
+			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
+
 	}
 	if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
 	{
