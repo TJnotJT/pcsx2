@@ -19,9 +19,11 @@
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
 
-#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE           || \
-                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || \
-                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER))
+#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE               || \
+                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER     || \
+                                        VS_EXPAND == VS_EXPAND_LINE_AA1           || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_AA1))
 
 layout(std140, set = 0, binding = 0) uniform cb0
 {
@@ -148,12 +150,7 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
-#if VS_Z_INTEGER
 	uint z;
-	#if VS_NEEDS_BARY
-		vec2 bary;
-	#endif
-#endif
 };
 
 uint load_index(uint _i)
@@ -207,27 +204,45 @@ ProcessedVertex load_vertex(uint index)
 	vtx.t.z = a_f.r;
 
 #if VS_Z_INTEGER
-	#if VS_NEEDS_BARY
-		#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
-			uint index_mod = index % 3;
-		#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
-			uint index_mod = index & 1;
-		#else
-			uint index_mod = 0;
-		#endif
-		vtx.bary = vec2(index_mod == 0, index_mod == 1);
-	#endif
 	vtx.z = z;
+#else
+	vtx.z = 0;
 #endif
 
 	return vtx;
+}
+
+uvec3 get_triangle_zint(uint i0, uint i1, uint i2)
+{
+	ProcessedVertex raw0 = load_vertex(i0);
+	ProcessedVertex raw1 = load_vertex(i1);
+	ProcessedVertex raw2 = load_vertex(i2);
+	return uvec3(raw0.z, raw1.z, raw2.z);
+}
+
+vec2 get_triangle_bary(uint i)
+{
+	uint index_mod = i % 3;
+	return vec2(index_mod == 0, index_mod == 1);
+}
+
+uvec3 get_line_zint(uint i0, uint i1)
+{
+	ProcessedVertex raw0 = load_vertex(i0);
+	ProcessedVertex raw1 = load_vertex(i1);
+	return uvec3(raw0.z, raw1.z, 0);
+}
+
+vec2 get_line_bary(uint i)
+{
+	uint index_mod = i & 1;
+	return vec2(index_mod == 0, index_mod == 1);
 }
 
 void main()
 {
 	ProcessedVertex vtx;
 	uint vid = uint(gl_VertexIndex);
-	uvec3 zi;
 
 #if VS_EXPAND == VS_EXPAND_POINT
 
@@ -237,7 +252,7 @@ void main()
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
 
 #if VS_Z_INTEGER
-	zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
 #elif (VS_EXPAND == VS_EXPAND_LINE) || (VS_EXPAND == VS_EXPAND_LINE_AA1)
@@ -271,7 +286,9 @@ void main()
 
 #if VS_Z_INTEGER
 	// All vertices of the same primitive must have z in same order
-	zi = (vid_base & 1) ? uvec3(vtx.z, other.z, 0) : uvec3(other.z, vtx.z, 0);
+	vsOut.zi = is_bottom ? uvec3(other.z, vtx.z, 0) : uvec3(vtx.z, other.z, 0);
+	
+	vsOut.bary = is_bottom ? vec2(0, 1) : vec2(1, 0);
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
@@ -300,7 +317,7 @@ void main()
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
 #if VS_Z_INTEGER
-	zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
 #elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
@@ -366,45 +383,45 @@ void main()
 		vsOut.interior = 0;
 	}
 
+#if VS_Z_INTEGER
+	// All vertices of the same primitive must have z in same order.
+	vsOut.zi = get_triangle_zint(load_index(3 * prim_id + 0),
+	                             load_index(3 * prim_id + 1),
+	                             load_index(3 * prim_id + 2));
+	
+	uint index_offset = interior ? prim_offset : (prim_offset - 3) / 6;
+	vsOut.bary = get_triangle_bary(index_offset);
+#endif
+
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
-	uint vid_base = (vid / 3) * 3;
-	ProcessedVertex raw0 = load_vertex(vid_base + 0);
-	ProcessedVertex raw1 = load_vertex(vid_base + 1);
-	ProcessedVertex raw2 = load_vertex(vid_base + 2);
 	vtx = load_vertex(vid);
 
-	// All vertices of the same primitive must have z in same order
-	zi = uvec3(raw0.z, raw1.z, raw2.z);
+	// All vertices of the same primitive must have z in same order.
+	uint vid_base = (vid / 3) * 3;
+	vsOut.zi = get_triangle_zint(vid_base + 0, vid_base + 1, vid_base + 2);
+
+	vsOut.bary = get_triangle_bary(vid);
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
-	// FIXME: This is inefficient. Only need 2 loads.
-	uint vid_base = vid & ~1;
-	ProcessedVertex raw0 = load_vertex(vid_base + 0);
-	ProcessedVertex raw1 = load_vertex(vid_base + 1);
 	vtx = load_vertex(vid);
 
-	// All vertices of the same primitive must have z in same order
-	zi = uvec3(raw0.z, raw1.z, 0);
+	// All vertices of the same primitive must have z in same order.
+	uint vid_base = vid & ~1;
+	vsOut.zi = get_line_zint(vid_base + 0, vid_base + 1);
+
+	vsOut.bary = get_line_bary(vid);
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
 	vtx = load_vertex(vid);
-
-	zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
 	gl_Position = vtx.p;
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
-
-#if VS_Z_INTEGER
-	vsOut.zi = zi;
-	#if VS_NEEDS_BARY
-		vsOut.bary = vtx.bary;
-	#endif
-#endif
 }
 
 #endif // VS_EXPAND

@@ -6357,7 +6357,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 	}
 	
-	if (pipe.IsDepthRTFeedbackLoop() && draw_ds_as_rt)
+	if (draw_ds_as_rt)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
 		pxAssert(!pipe.IsDepthFeedbackLoop()); // Should not have depth as color and depth feedback loop simultaneously.
@@ -6397,7 +6397,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	
 	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
-	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
+	OMSetRenderTargets(draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_ds, config.scissor,
+		static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
 
 	// Begin render pass if new target or out of the area.
 	if (!InRenderPass())
@@ -6432,7 +6433,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 				}
 				GSVector4::store<true>(&cvs[cv_count++].color, clear_color);
 			}
-			if (draw_ds_as_rt)
+			if (pipe.ds_as_rt)
 			{
 				GSVector4::store<true>(&cvs[cv_count++].color, draw_ds_as_rt->GetUNormClearColor());
 			}
@@ -6592,7 +6593,9 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.topology = static_cast<u32>(config.topology);
 	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	pipe.ds_as_rt = config.ds_int != nullptr && !config.ps.HasDepthROV();
+	const bool zint_write = config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::WRITE ||
+	                        config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE;
+	pipe.ds_as_rt = zint_write && !config.ps.HasDepthROV();
 	pipe.line_width = config.line_expand;
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))

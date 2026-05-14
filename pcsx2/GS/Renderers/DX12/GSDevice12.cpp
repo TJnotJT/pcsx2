@@ -273,7 +273,7 @@ bool GSDevice12::CreateDevice(u32& vendor_id)
 		if (SUCCEEDED(hr))
 		{
 			debug12->EnableDebugLayer();
-			debug12->SetEnableGPUBasedValidation(true);
+			//debug12->SetEnableGPUBasedValidation(true);
 		}
 		else
 		{
@@ -4573,7 +4573,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.ps.IsFeedbackLoopRT() ||
 		config.alpha_second_pass.ps.IsFeedbackLoopRT())) || (config.tex && config.tex == config.rt));
-	const bool feedback_depth = draw_ds_as_rt != nullptr;
+	
+	const bool feedback_depth = pipe.ds_as_rt && config.ps.IsFeedbackLoopDepth();
 
 	if (feedback_rt && !m_features.texture_barrier)
 	{
@@ -4599,7 +4600,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
-	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
+	OMSetRenderTargets(draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_ds, config.scissor,
 		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
 		config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
@@ -4665,8 +4666,14 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (!date_image || colclip_rt)
 		UploadHWDrawVerticesAndIndices(config);
 
+	// Set read-only DS as RT sampler if needed
+	if (draw_ds_as_rt && !pipe.ds_as_rt)
+	{
+		PSSetShaderResource(TEXTURE_DEPTH, draw_ds_as_rt, true);
+	}
+
 	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_rt_rov, draw_ds_rov,
+	SendHWDraw(pipe, config, draw_rt, pipe.ds_as_rt ? draw_ds_as_rt : nullptr, draw_rt_rov, draw_ds_rov,
 		feedback_rt, feedback_depth, config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
@@ -4831,10 +4838,11 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	
-	const GSTexture* ds_as_rt = config.ds_int ? config.ds_int : m_ds_as_rt;
-	m_pipeline_selector.ds_as_rt = ds_as_rt != nullptr && !config.ps.HasDepthROV();
-	if (ds_as_rt)
+	const bool zint_write = config.ds_int &&
+		(config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::WRITE ||
+	    config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE);
+	const GSTexture* ds_as_rt = m_ds_as_rt ? m_ds_as_rt : (zint_write ? config.ds_int : nullptr);
+	if (ds_as_rt && !config.ps.HasDepthROV())
 	{
 		switch (ds_as_rt->GetFormat())
 		{

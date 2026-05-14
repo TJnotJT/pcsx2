@@ -152,9 +152,11 @@
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
 
-#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE          || \
-                                       VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER || \
-                                       VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER))
+#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE               || \
+                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER     || \
+                                        VS_EXPAND == VS_EXPAND_LINE_AA1           || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_AA1))
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
@@ -196,9 +198,6 @@ struct VS_INPUT
 	uint z : POSITION1;
 	uint2 uv : TEXCOORD2;
 	float4 f : COLOR1;
-#if VS_NEEDS_BARY
-	float2 bary : COLOR2;
-#endif
 };
 
 struct VS_OUTPUT
@@ -266,7 +265,7 @@ struct PS_OUTPUT_REAL
 #endif
 #if PS_RETURN_DEPTH
 	#if PS_Z_INTEGER
-		#if ZINT_WRITES_DEPTH
+		#if ZWRITE_FOR_ZINT
 			uint depth : Z_RT_SLOT;
 		#endif
 	#else
@@ -1749,7 +1748,7 @@ if (bad)
 #if PS_RETURN_DEPTH
 	// Standard depth write
 	#if PS_Z_INTEGER
-		#if ZINT_WRITES_DEPTH
+		#if ZWRITE_FOR_ZINT
 			output_real.depth = input_z;
 		#endif
 	#else
@@ -1862,9 +1861,6 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	
 #if VS_Z_INTEGER
 	output.zi = uint3(input.z, 0, 0);
-	#if VS_NEEDS_BARY
-		output.bary = input.bary;
-	#endif
 #endif
 
 	return output;
@@ -1907,19 +1903,34 @@ VS_INPUT load_vertex(uint index)
 	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
 
-	// Barycentric coordinates handling
-#if VS_NEEDS_BARY
-	#if VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER
-		uint index_mod = index % 3;
-	#elif VS_EXPAND == VS_EXPAND_LINE || VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER
-		uint index_mod = index & 1;
-	#else
-		uint index_mod = 0;
-	#endif
-	vert.bary = float2(index_mod == 0, index_mod == 1);
-#endif
-
 	return vert;
+}
+
+uint3 get_triangle_zint(uint i0, uint i1, uint i2)
+{
+	VS_INPUT raw0 = load_vertex(i0);
+	VS_INPUT raw1 = load_vertex(i1);
+	VS_INPUT raw2 = load_vertex(i2);
+	return uint3(raw0.z, raw1.z, raw2.z);
+}
+
+float2 get_triangle_bary(uint i)
+{
+	uint index_mod = i % 3;
+	return float2(index_mod == 0, index_mod == 1);
+}
+
+uint3 get_line_zint(uint i0, uint i1)
+{
+	VS_INPUT raw0 = load_vertex(i0);
+	VS_INPUT raw1 = load_vertex(i1);
+	return uint3(raw0.z, raw1.z, 0);
+}
+
+float2 get_line_bary(uint i)
+{
+	uint index_mod = i & 1;
+	return float2(index_mod == 0, index_mod == 1);
 }
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
@@ -1968,7 +1979,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 #if VS_Z_INTEGER
 	// All vertices of the same primitive must have z in same order
-	vtx.zi = (vid_base & 1) ? uint3(vtx.zi.x, other.zi.x, 0) : uint3(other.zi.x, vtx.zi.x, 0);
+	vtx.zi = is_bottom ? uint3(other.zi.x, vtx.zi.x, 0) : uint3(vtx.zi.x, other.zi.x, 0);
+	vtx.bary = is_bottom ? float2(0, 1) : float2(1, 0);
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
@@ -2064,36 +2076,46 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 		vtx.interior = 0;
 	}
 
+#if VS_Z_INTEGER
+	// All vertices of the same primitive must have z in same order.
+	vtx.zi = get_triangle_zint(load_index(3 * prim_id + 0),
+	                           load_index(3 * prim_id + 1),
+	                           load_index(3 * prim_id + 2));
+	
+	uint index_offset = interior ? prim_offset : (prim_offset - 3) / 6;
+	vtx.bary = get_triangle_bary(index_offset);
+#endif
+
 	return vtx;
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
-	uint vid_base = (vid / 3) * 3;
-	VS_INPUT raw0 = load_vertex(vid_base + 0);
-	VS_INPUT raw1 = load_vertex(vid_base + 1);
-	VS_INPUT raw2 = load_vertex(vid_base + 2);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));
 
-	// All vertices of the same primitive must have z in same order
-	vtx.zi = uint3(raw0.z, raw1.z, raw2.z);
+	// All vertices of the same primitive must have z in same order.
+	uint vid_base = (vid / 3) * 3;
+	vtx.zi = get_triangle_zint(vid_base + 0, vid_base + 1, vid_base + 2);
+	
+	vtx.bary = get_triangle_bary(vid);
 
 	return vtx;
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
-	// FIXME: This is inefficient. Only need 2 loads.
-	uint vid_base = vid & ~1;
-	VS_INPUT raw0 = load_vertex(vid_base + 0);
-	VS_INPUT raw1 = load_vertex(vid_base + 1);
 	VS_OUTPUT vtx = vs_main(load_vertex(vid));
 
 	// All vertices of the same primitive must have z in same order
-	vtx.zi = uint3(raw0.z, raw1.z, 0);
+	uint vid_base = vid & ~1;
+	vtx.zi = get_line_zint(vid_base + 0, vid_base + 1);
 	
+	vtx.bary = get_line_bary(vid);
+
 	return vtx;
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
+
 	return vs_main(load_vertex(vid));
+	
 #endif
 }
 
