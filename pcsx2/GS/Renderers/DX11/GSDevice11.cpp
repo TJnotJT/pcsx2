@@ -227,7 +227,12 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	for (size_t i = 0; i < std::size(m_convert.ps); i++)
 	{
-		m_convert.ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, nullptr, shaderName(static_cast<ShaderConvert>(i)));
+		D3D_SHADER_MACRO integer_input_macro[2]{
+			{ "HAS_INTEGER_INPUT", HasIntegerInput(static_cast<ShaderConvert>(i)) ? "1" : "0" },
+			{ nullptr, nullptr },
+		};
+		m_convert.ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, integer_input_macro,
+			shaderName(static_cast<ShaderConvert>(i)));
 		if (!m_convert.ps[i])
 			return false;
 	}
