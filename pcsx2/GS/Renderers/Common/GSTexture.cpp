@@ -4,6 +4,8 @@
 #include "GS/Renderers/Common/GSTexture.h"
 #include "GS/Renderers/Common/GSDevice.h"
 #include "GS/GSPng.h"
+#include "GS/GSPerfMon.h"
+#include "GS/GSGL.h"
 
 #include "common/Console.h"
 #include "common/BitUtils.h"

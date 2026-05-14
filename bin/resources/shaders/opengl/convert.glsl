@@ -64,13 +64,13 @@ vec4 sample_c()
 
 uint rgba8_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & 0xff;
+	uvec4 i = uvec4(c * 255.5f) & 0xFFu;
 	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
 }
 
 uint rgb5a1_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & uvec4(0xf8, 0xf8, 0xf8, 0x80);
+	uvec4 i = uvec4(c * 255.5f) & uvec4(0xF8u, 0xF8u, 0xF8u, 0x80u);
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
@@ -81,12 +81,12 @@ uint depth_to_uint(float d)
 
 vec4 uint_to_rgba8(uint i)
 {
-	return vec4((i & 0xFF), ((i >> 8) & 0xFF), ((i >> 16) & 0xFF), ((i >> 24) & 0xFF)) / 255.0f;
+	return vec4((i & 0xFFu), ((i >> 8) & 0xFFu), ((i >> 16) & 0xFFu), ((i >> 24) & 0xFFu)) / 255.0f;
 }
 
 vec4 uint_to_rgb5a1(uint i)
 {
-	return vec4(uvec4(i << 3, i >> 2, i >> 7, i >> 8) & uvec4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
+	return vec4(uvec4(i << 3, i >> 2, i >> 7, i >> 8) & uvec4(0xF8u, 0xF8u, 0xF8u, 0x80u)) / 255.0f;
 }
 
 float uint_to_depth32(uint i)
