@@ -14,7 +14,16 @@
 #define VS_EXPAND_SPRITE 3
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
+#define VS_EXPAND_POINT_Z_INTEGER 6
+#define VS_EXPAND_LINE_Z_INTEGER 7
+#define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
+
+#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE               || \
+                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER     || \
+                                        VS_EXPAND == VS_EXPAND_LINE_AA1           || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER || \
+                                        VS_EXPAND == VS_EXPAND_TRIANGLE_AA1))
 
 layout(std140, set = 0, binding = 0) uniform cb0
 {
@@ -40,6 +49,13 @@ layout(location = 0) out VSOutput
 
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
+
+#if VS_Z_INTEGER
+	flat uvec3 zi;
+	#if VS_NEEDS_BARY
+		vec2 bary;
+	#endif
+#endif
 } vsOut;
 
 #if VS_EXPAND == VS_EXPAND_NONE
@@ -134,6 +150,7 @@ struct ProcessedVertex
 	vec4 t;
 	vec4 ti;
 	vec4 c;
+	uint z;
 };
 
 uint load_index(uint _i)
@@ -186,7 +203,40 @@ ProcessedVertex load_vertex(uint index)
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
 
+#if VS_Z_INTEGER
+	vtx.z = z;
+#else
+	vtx.z = 0;
+#endif
+
 	return vtx;
+}
+
+uvec3 get_triangle_zint(uint i0, uint i1, uint i2)
+{
+	ProcessedVertex raw0 = load_vertex(i0);
+	ProcessedVertex raw1 = load_vertex(i1);
+	ProcessedVertex raw2 = load_vertex(i2);
+	return uvec3(raw0.z, raw1.z, raw2.z);
+}
+
+vec2 get_triangle_bary(uint i)
+{
+	uint index_mod = i % 3;
+	return vec2(index_mod == 0, index_mod == 1);
+}
+
+uvec3 get_line_zint(uint i0, uint i1)
+{
+	ProcessedVertex raw0 = load_vertex(i0);
+	ProcessedVertex raw1 = load_vertex(i1);
+	return uvec3(raw0.z, raw1.z, 0);
+}
+
+vec2 get_line_bary(uint i)
+{
+	uint index_mod = i & 1;
+	return vec2(index_mod == 0, index_mod == 1);
 }
 
 void main()
@@ -200,6 +250,10 @@ void main()
 
 	vtx.p.x += ((vid & 1u) != 0u) ? PointSize.x : 0.0f;
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
+
+#if VS_Z_INTEGER
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
+#endif
 
 #elif (VS_EXPAND == VS_EXPAND_LINE) || (VS_EXPAND == VS_EXPAND_LINE_AA1)
 
@@ -230,6 +284,13 @@ void main()
 	vsOut.inv_cov = is_right ? 1.0f : -1.0f;
 #endif
 
+#if VS_Z_INTEGER
+	// All vertices of the same primitive must have z in same order
+	vsOut.zi = is_bottom ? uvec3(other.z, vtx.z, 0) : uvec3(vtx.z, other.z, 0);
+	
+	vsOut.bary = is_bottom ? vec2(0, 1) : vec2(1, 0);
+#endif
+
 	// Lines will be run as (0 1 2) (1 2 3)
 	// This means that both triangles will have a point based off the top line point as their first point
 	// So we don't have to do anything for !IIP
@@ -254,6 +315,10 @@ void main()
 	vtx.p.y = is_bottom ? lt.p.y : vtx.p.y;
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
+
+#if VS_Z_INTEGER
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
+#endif
 
 #elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
 
@@ -323,6 +388,39 @@ void main()
 		#endif
 	}
 
+#if VS_Z_INTEGER
+	// All vertices of the same primitive must have z in same order.
+	vsOut.zi = get_triangle_zint(load_index(3 * prim_id + 0),
+	                             load_index(3 * prim_id + 1),
+	                             load_index(3 * prim_id + 2));
+	
+	uint index_offset = interior ? prim_offset : (prim_offset - 3) / 6;
+	vsOut.bary = get_triangle_bary(index_offset);
+#endif
+
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
+
+	vtx = load_vertex(vid);
+
+	// All vertices of the same primitive must have z in same order.
+	uint vid_base = (vid / 3) * 3;
+	vsOut.zi = get_triangle_zint(vid_base + 0, vid_base + 1, vid_base + 2);
+
+	vsOut.bary = get_triangle_bary(vid);
+
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
+
+	vtx = load_vertex(vid);
+
+	// All vertices of the same primitive must have z in same order.
+	uint vid_base = vid & ~1;
+	vsOut.zi = get_line_zint(vid_base + 0, vid_base + 1);
+
+	vsOut.bary = get_line_bary(vid);
+
+#elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
+	vtx = load_vertex(vid);
+	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
 #endif
 
 	gl_Position = vtx.p;
@@ -392,6 +490,20 @@ void main()
 #define PS_ROV_DEPTH_READ_ONLY 2
 #endif
 
+#ifndef POINT_CLASS
+#define POINT_CLASS 0
+#define LINE_CLASS 1
+#define TRIANGLE_CLASS 2
+#define SPRITE_CLASS 3
+#define INVALID_CLASS 7
+#endif
+
+#ifndef PS_Z_INTEGER_NONE
+#define PS_Z_INTEGER_NONE 0
+#define PS_Z_INTEGER_READ_WRITE 1
+#define PS_Z_INTEGER_READ_ONLY 2
+#endif
+
 #ifndef PS_FST
 #define PS_FST 0
 #define PS_WMS 0
@@ -446,6 +558,10 @@ void main()
 #define PS_TEX_IS_FB 0
 #define PS_ROV_COLOR 0
 #define PS_ROV_DEPTH 0
+#define PS_Z_RT_SLOT 0
+#define PS_Z_INTEGER 0
+#define PS_PRIMCLASS 0
+#define PS_TEX_INTEGER 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -455,10 +571,12 @@ void main()
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define ZTST_NEEDS_DEPTH (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define AA1_NEEDS_DEPTH (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
+#define ZINT_NEEDS_DEPTH (PS_Z_INTEGER != PS_Z_INTEGER_NONE)
+#define ZINT_WRITES_DEPTH (PS_Z_INTEGER == PS_Z_INTEGER_READ_WRITE)
 
 #define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
-#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || SW_DEPTH || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
+#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZINT_NEEDS_DEPTH)
+#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH || ZINT_WRITES_DEPTH)
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
@@ -466,7 +584,27 @@ void main()
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
+#define PS_NEEDS_BARY (PS_Z_INTEGER && (PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS))
+
 #define NEEDS_TEX (PS_TFX != 4)
+
+#if PS_Z_INTEGER
+	#define DEPTH_TYPE uint
+	#define DEPTH_VEC4 uvec4
+	#define DEPTH_TEXTURE utexture2D
+	#define DEPTH_SAMPLER usampler2D
+	#define DEPTH_SUBPASS_INPUT usubpassInput
+	#define DEPTH_LAYOUT r32ui
+	#define DEPTH_IMAGE uimage2D
+#else
+	#define DEPTH_TYPE float
+	#define DEPTH_VEC4 vec4
+	#define DEPTH_TEXTURE texture2D
+	#define DEPTH_SAMPLER sampler2D
+	#define DEPTH_SUBPASS_INPUT subpassInput
+	#define DEPTH_LAYOUT r32f
+	#define DEPTH_IMAGE image2D
+#endif
 
 layout(std140, set = 0, binding = 1) uniform cb1
 {
@@ -474,7 +612,11 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	float AREF;
 	vec4 WH;
 	vec2 TA;
+#if PS_Z_INTEGER
+	uint MaxDepthPS;
+#else
 	float MaxDepthPS;
+#endif
 	float Af;
 	uvec4 FbMask;
 	vec4 HalfTexel;
@@ -504,6 +646,12 @@ layout(location = 0) in VSOutput
 	#endif
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
+	#if PS_Z_INTEGER
+		flat uvec3 zi;
+		#if PS_NEEDS_BARY
+			vec2 bary;
+		#endif
+	#endif
 } vsIn;
 
 #if PS_RETURN_COLOR
@@ -521,17 +669,33 @@ layout(location = 0) in VSOutput
 	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
 	vec4 rov_rt_value;
 	vec4 sample_from_rt() { return rov_rt_value; }
+	void RtWrite(ivec2 xy, vec4 c)
+	{
+		imageStore(RtImageRov, xy, c);
+	}
 #endif
 
 #if PS_ROV_DEPTH
-	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-	float rov_depth_value;
-	vec4 sample_from_depth() { return vec4(rov_depth_value, 0.0f, 0.0f, 0.0f); }
+	layout(set = 1, binding = 6, DEPTH_LAYOUT) uniform restrict coherent DEPTH_IMAGE DepthImageRov;
+	DEPTH_TYPE rov_depth_value;
+	DEPTH_TYPE sample_from_depth() { return rov_depth_value; }
+	void DepthWrite(ivec2 xy, DEPTH_TYPE d)
+	{
+		imageStore(DepthImageRov, xy, DEPTH_VEC4(d, 0, 0, 0));
+	}
+#endif
+
+#if ZINT_WRITES_DEPTH && !PS_ROV_DEPTH
+	layout(location = PS_Z_RT_SLOT) out uint o_depth;
 #endif
 
 #if NEEDS_TEX
-layout(set = 1, binding = 0) uniform sampler2D Texture;
-layout(set = 1, binding = 1) uniform texture2D Palette;
+	#if PS_TEX_INTEGER
+		layout(set = 1, binding = 0) uniform usampler2D Texture;
+	#else
+		layout(set = 1, binding = 0) uniform sampler2D Texture;
+	#endif
+	layout(set = 1, binding = 1) uniform texture2D Palette;
 #endif
 
 #if PS_FEEDBACK_LOOP_IS_NEEDED_RT || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
@@ -541,22 +705,22 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0); }
 		#endif
 		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0); }
+			layout(set = 1, binding = 4) uniform DEPTH_TEXTURE DepthSampler;
+			DEPTH_TYPE sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r; }
 		#endif
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
 		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
+			layout(input_attachment_index = 1, set = 1, binding = 4) uniform DEPTH_SUBPASS_INPUT DepthSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
+			DEPTH_TYPE sample_from_depth() { return subpassLoad(DepthSampler).r; }
 		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
 		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
-			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
+			layout(input_attachment_index = 0, set = 1, binding = 4) uniform DEPTH_SUBPASS_INPUT DepthSampler;
+			DEPTH_TYPE sample_from_depth() { return subpassLoad(DepthSampler).r; }
 		#endif
 	#endif
 #endif
@@ -565,7 +729,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
 #endif
 
-#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_Z_INTEGER && !PS_ROV_DEPTH
 layout(depth_less) out float gl_FragDepth;
 #endif
 
@@ -723,6 +887,8 @@ vec4 sample_c(vec2 uv)
 {
 #if PS_TEX_IS_FB
 	return sample_from_rt();
+#elif PS_TEX_INTEGER
+	return vec4(0.0, 0.0, 0.0, 0.0);
 #elif PS_REGION_RECT
 	return texelFetch(Texture, ivec2(uv), 0);
 #else
@@ -901,18 +1067,24 @@ mat4 sample_4p(uvec4 u)
 
 uint fetch_raw_depth(ivec2 xy)
 {
+#if PS_TEX_INTEGER
+	return texelFetch(Texture, xy, 0).r;
+#else
 #if PS_TEX_IS_FB
 	vec4 col = sample_from_rt();
 #else
 	vec4 col = texelFetch(Texture, xy, 0);
 #endif
 	return uint(col.r * exp2(32.0f));
+#endif
 }
 
 vec4 fetch_raw_color(ivec2 xy)
 {
 #if PS_TEX_IS_FB
 	return sample_from_rt();
+#elif PS_TEX_INTEGER
+	return vec4(0.0, 0.0, 0.0, 0.0);
 #else
 	return texelFetch(Texture, xy, 0);
 #endif
@@ -922,6 +1094,8 @@ vec4 fetch_c(ivec2 uv)
 {
 #if PS_TEX_IS_FB
 	return sample_from_rt();
+#elif PS_TEX_INTEGER
+	return vec4(0.0, 0.0, 0.0, 0.0);
 #else
 	return texelFetch(Texture, uv, 0);
 #endif
@@ -1013,16 +1187,24 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 	{
 		// Based on ps_convert_float32_rgba8 of convert
 
-		// Convert a vec32 depth texture into a RGBA color texture
+		// Convert a float32 or uint32 depth texture into a RGBA color texture
+#if PS_TEX_INTEGER
+		uint d = fetch_raw_depth(uv);
+#else
 		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+#endif
 		t = vec4(uvec4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24)));
 	}
 	#elif (PS_DEPTH_FMT == 2)
 	{
 		// Based on ps_convert_float16_rgb5a1 of convert
 
-		// Convert a vec32 (only 16 lsb) depth into a RGB5A1 color texture
+		// Convert a float32 or uint32 (only 16 lsb) depth into a RGB5A1 color texture
+#if PS_TEX_INTEGER
+		uint d = fetch_raw_depth(uv);
+#else
 		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+#endif
 		t = vec4(uvec4((d & 0x1Fu), ((d >> 5) & 0x1Fu), ((d >> 10) & 0x1Fu), (d >> 15) & 0x01u)) * vec4(8.0f, 8.0f, 8.0f, 128.0f);
 	}
 	#elif (PS_DEPTH_FMT == 3)
@@ -1575,6 +1757,63 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
+// Emulate 64 bit multiplication to avoid using higher feature levels.
+void mul64(uint x, uint y, out uint lo, out uint hi)
+{
+	uint hh = (x >> 16) * (y >> 16);
+	uint hl = (x >> 16) * (y & 0xFFFF);
+	uint lh = (x & 0xFFFF) * (y >> 16);
+	uint ll = (x & 0xFFFF) * (y & 0xFFFF);
+	lo = ll + (hl << 16) + (lh << 16);
+	uint c = ((hl & 0xFFFF) + (lh & 0xFFFF) + (ll >> 16)) >> 16; // carry bit
+	hi = hh + (hl >> 16) + (lh >> 16) + c;
+}
+
+// Interpolate Z using barycentric triangle/line coordinates
+uint interp_zint(vec2 bary, uvec3 z)
+{
+	// Convert weights from floating to 24 bit fixed point.
+	const uint pow24 = 1u << 24;
+	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24);
+	uint w1 = 0;
+	uint w2 = 0;
+
+	// Make sure all weights sum up to 2^24 and are in the correct range
+	w1 = pow24 - w0;
+#if PS_PRIMCLASS == TRIANGLE_CLASS
+	w1 = uint(float(pow24) * bary.y);
+	w1 = min(w1, pow24 - w0);
+	w2 = pow24 - w1 - w0;
+#endif
+
+	// Get the 64 bit products w * z
+	uint z0_lo = 0, z0_hi = 0;
+	uint z1_lo = 0, z1_hi = 0;
+	uint z2_lo = 0, z2_hi = 0;
+
+	mul64(w0, z.x, z0_lo, z0_hi);
+	mul64(w1, z.y, z1_lo, z1_hi);
+#if PS_PRIMCLASS == TRIANGLE_CLASS
+	mul64(w2, z.z, z2_lo, z2_hi);
+#endif
+
+	// Emulate 64 bit addition to avoid using higher feature levels.
+	uint z_lo = z0_lo;
+	uint z_hi = z0_hi;
+
+	z_lo += z1_lo;
+	z_hi += z1_hi + uint(z_lo < z1_lo);
+
+#if PS_PRIMCLASS == TRIANGLE_CLASS
+	z_lo += z2_lo;
+	z_hi += z2_hi + uint(z_lo < z2_lo);
+#endif
+
+	// The weights are 24 bits so get bits 24:55 of the result.
+	// We truncate the lower 23 bits for consistency with zfloor.
+	return (z_hi << 8) + (z_lo >> 24);
+}
+
 #if PS_ROV_COLOR || PS_ROV_DEPTH
 layout(pixel_interlock_ordered) in;
 #endif
@@ -1591,10 +1830,19 @@ layout(early_fragment_tests) in;
 
 void main()
 {
+#if PS_Z_INTEGER
+	#if PS_NEEDS_BARY
+		// Interpolate integer Z from barycentric coordinates.
+		uint input_z = interp_zint(vsIn.bary, vsIn.zi);
+	#else
+		uint input_z = vsIn.zi.x; // No interpolation
+	#endif
+#else
 	float input_z = gl_FragCoord.z;
+#endif
 
+#if PS_ZFLOOR && !PS_Z_INTEGER
 	// Must floor before depth testing.
-#if PS_ZFLOOR
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
@@ -1614,11 +1862,18 @@ void main()
 	bool rov_discard = gl_HelperInvocation;
 #endif
 
+#if PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	DEPTH_TYPE curr_z = sample_from_depth();
+	#if PS_Z_INTEGER
+		input_z |= (curr_z & ~MaxDepthPS); // Add unused upper bits
+	#endif
+#endif
+
 #if PS_ZTST == ZTST_GEQUAL
-	if (input_z < sample_from_depth().r)
+	if (input_z < curr_z)
 		DISCARD;
 #elif PS_ZTST == ZTST_GREATER
-	if (input_z <= sample_from_depth().r)
+	if (input_z <= curr_z)
 		DISCARD;
 #endif
 
@@ -1627,6 +1882,7 @@ void main()
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		DISCARD;
 #endif
+
 #if PS_DATE >= 5
 
 #if PS_WRITE_RG == 1
@@ -1799,7 +2055,7 @@ void main()
 		// Alpha test with feedback
 		#if PS_AFAIL == AFAIL_FB_ONLY
 			if (!atst_pass)
-				input_z = sample_from_depth().r;
+				input_z = curr_z;
 		#elif PS_AFAIL == AFAIL_ZB_ONLY
 			if (!atst_pass)
 				o_col0 = sample_from_rt();
@@ -1807,9 +2063,9 @@ void main()
 			if (!atst_pass)
 			{
 				o_col0.a = sample_from_rt().a;
-			#if PS_AFAIL == AFAIL_RGB_ONLY_SW_Z
-				input_z = sample_from_depth().r;
-			#endif
+				#if PS_AFAIL == AFAIL_RGB_ONLY_SW_Z
+					input_z = curr_z;
+				#endif
 			}
 		#endif
 	#endif
@@ -1819,23 +2075,30 @@ void main()
 	#endif
 	
 	#if PS_AA1 == PS_AA1_TRIANGLE_SW_Z
-		if (!bool(vsIn.interior))
-			input_z = sample_from_depth().r; // No depth update for triangle edges.
+		input_z = bool(vsIn.interior) ? input_z : curr_z; // No depth update for triangle edges.
+	#endif
+
+	#if PS_ZCLAMP && PS_Z_INTEGER
+		input_z |= (curr_z & ~MaxDepthPS); // Mask based on depth format
 	#endif
 	
-	// Writing back color (nothing to do for non-ROV)
 	#if PS_RETURN_COLOR_ROV
+		// Write color ROV
 		o_col0 = mix(sample_from_rt(), o_col0, bvec4(ColorMask & uvec4(!rov_discard)));
-
-		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
+		RtWrite(ivec2(gl_FragCoord.xy), o_col0);
 	#endif
 	
 	#if PS_RETURN_DEPTH
-		gl_FragDepth = input_z;
+		#if PS_Z_INTEGER
+			#if ZINT_WRITES_DEPTH
+				o_depth = input_z;
+			#endif
+		#else
+			gl_FragDepth = input_z;
+		#endif
 	#elif PS_RETURN_DEPTH_ROV
-		input_z = rov_discard ? sample_from_depth().r : input_z;
-
-		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
+		input_z = rov_discard ? sample_from_depth() : input_z;
+		DepthWrite(ivec2(gl_FragCoord.xy), input_z);
 	#endif
 
 	#if PS_ROV_COLOR || PS_ROV_DEPTH
