@@ -110,6 +110,10 @@ void GSTexture12::Destroy(bool defer)
 	}
 
 	m_write_descriptor_type = WriteDescriptorType::None;
+
+#ifdef PCSX2_DEVBUILD
+	m_debug_name.clear();
+#endif
 }
 
 // For use with non-simultaneous textures only.
@@ -217,6 +221,10 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				desc.desc1.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
 			optimized_clear_value.Format = rtv_format;
 			state = ResourceState::RenderTarget;
+			if (uav_format != DXGI_FORMAT_UNKNOWN)
+			{
+				desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+			}
 		}
 		break;
 
@@ -235,15 +243,14 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 			pxAssert(levels == 1);
 			allocationDesc.Flags |= D3D12MA::ALLOCATION_FLAG_COMMITTED;
 			state = ResourceState::PixelShaderResource;
+			pxAssert(uav_format != DXGI_FORMAT_UNKNOWN);
+			desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 		}
 		break;
 
 		default:
 			return {};
 	}
-
-	if (uav_format != DXGI_FORMAT_UNKNOWN)
-		desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
 	wil::com_ptr_nothrow<ID3D12Resource> resource;
 	wil::com_ptr_nothrow<ID3D12Resource> resource_fbl;
@@ -306,7 +313,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		{
 			// OOM isn't fatal.
 			if (hr != E_OUTOFMEMORY)
-				Console.Error("Create texture failed: 0x%08X", hr);
+				Console.Error("Create texture resource 3 failed: 0x%08X", hr);
 
 			return {};
 		}
@@ -330,6 +337,12 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
 				return {};
 			}
+			if (uav_format != DXGI_FORMAT_UNKNOWN && !CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
+			{
+				dev->GetRTVHeapManager().Free(&write_descriptor);
+				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
+				return {};
+			}
 		}
 		break;
 
@@ -350,26 +363,15 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		}
 		break;
 
-		default:
-			break;
-	}
-
-	if (uav_format != DXGI_FORMAT_UNKNOWN && !CreateUAVDescriptor(resource.get(), dsv_format, &uav_descriptor))
-	{
-		switch (write_descriptor_type)
+		case Type::RWTexture:
 		{
-			case WriteDescriptorType::RTV:
-				dev->GetRTVHeapManager().Free(&write_descriptor);
-				break;
-			case WriteDescriptorType::DSV:
-				dev->GetDSVHeapManager().Free(&ro_dsv_descriptor);
-				dev->GetDSVHeapManager().Free(&write_descriptor);
-				break;
-			default:
-				break;
+			if (uav_format != DXGI_FORMAT_UNKNOWN && !CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
+			{
+				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
+				return {};
+			}
 		}
-		dev->GetDescriptorHeapManager().Free(&srv_descriptor);
-		return {};
+		break;
 	}
 
 	// Feedback descriptor used with legacy barriers
@@ -442,7 +444,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resou
 
 	if (uav_format != DXGI_FORMAT_UNKNOWN)
 	{
-		if (!CreateUAVDescriptor(resource.get(), srv_format, &uav_descriptor))
+		if (!CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
 		{
 			switch (write_descriptor_type)
 			{
@@ -796,6 +798,8 @@ void GSTexture12::SetDebugName(std::string_view name)
 		return;
 
 	D3D12::SetObjectName(m_resource.get(), name);
+
+	m_debug_name = name;
 }
 
 #endif
@@ -850,9 +854,9 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 				break;
 			case ResourceState::DepthWriteStencil:
 				pxAssert(!m_simultaneous_tex);
-				barrier.LayoutBefore = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
-				barrier.AccessBefore = D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
-				barrier.SyncBefore = D3D12_BARRIER_SYNC_DEPTH_STENCIL;
+					barrier.LayoutBefore = D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE;
+					barrier.AccessBefore = D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE;
+					barrier.SyncBefore = D3D12_BARRIER_SYNC_DEPTH_STENCIL;
 				break;
 			case ResourceState::DepthReadStencil:
 				pxAssert(!m_simultaneous_tex);
@@ -1137,6 +1141,14 @@ void GSTexture12::TransitionSubresourceToState(const D3D12CommandList& cmdlist, 
 
 		cmdlist.list4->ResourceBarrier(num_barriers, barriers);
 	}
+
+	// Count as a UAV barrier if we transition to/from UAV.
+	if (IsRenderTargetOrDepthStencil() &&
+		(before_state == ResourceState::PixelShaderUAV || after_state == ResourceState::PixelShaderUAV))
+	{
+		g_perfmon.Put(GSPerfMon::Barriers, 1);
+		g_perfmon.Put(GSPerfMon::BarriersROV, 1);
+	}
 }
 
 void GSTexture12::CommitClear()
@@ -1153,8 +1165,8 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 	if (IsDepthStencil())
 	{
 		TransitionToState(cmdlist, ResourceState::DepthWriteStencil);
-		cmdlist.list4->ClearDepthStencilView(
-			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
+		cmdlist.list4->ClearDepthStencilView(GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH,
+			m_clear_value.depth, 0, 0, nullptr);
 	}
 	else
 	{

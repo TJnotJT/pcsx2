@@ -592,6 +592,10 @@ void GSDevice::Recycle(GSTexture* t)
 		return;
 
 	t->SetLastFrameUsed(m_frame);
+		
+#ifdef PCSX2_DEVBUILD
+	t->SetDebugName("");
+#endif
 
 	FastList<GSTexture*>& pool = m_pool[!t->IsTexture()];
 	pool.push_front(t);
@@ -676,6 +680,18 @@ GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, bool clear, bool
 		clear, !prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateDepthColor(int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::RenderTarget, w, h, 1, GSTexture::Format::DepthColor,
+		clear, !prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateDepthColor(const GSVector2i& size, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::RenderTarget, size.x, size.y, 1, GSTexture::Format::DepthColor,
+		clear, !prefer_reuse);
+}
+
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)
 {
 	pxAssert(mipmap_levels != 0 && (mipmap_levels < 0 || mipmap_levels <= GetMipmapLevelsForSize(w, h)));
@@ -706,7 +722,7 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
 	const GSVector4& dRect, ShaderConvertSelector shader, bool linear)
 {
-	pxAssert((dTex && dTex->IsDepthStencil()) == HasFloat32Output(shader.Shader()));
+	pxAssert((dTex && dTex->IsDepthLike()) == HasFloat32Output(shader.Shader()));
 	pxAssert(!linear || !shader.SupportsBilinear()); // Don't allow HW bilinear if SW bilinear is required.
 	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.Shader()),
 		int(sRect.left), int(sRect.top),
