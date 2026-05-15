@@ -1216,7 +1216,7 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 		{
 			GetDepthColor()->TransitionToState(cmdlist, ResourceState::RenderTarget);
 			cmdlist.list4->ClearRenderTargetView(GetDepthColor()->GetWriteDescriptor(),
-				GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f).v, 0, nullptr);
+				GetUNormClearColor().v, 0, nullptr);
 		}
 		else
 		{

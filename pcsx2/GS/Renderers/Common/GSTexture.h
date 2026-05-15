@@ -165,7 +165,12 @@ public:
 	__fi float GetClearDepth() const { return m_clear_value.depth; }
 	__fi float GetClearDepthInteger() const { return m_clear_value.color; }
 	// FIXME: Rename to GetVectorClearColor
-	virtual GSVector4 GetUNormClearColor() const { return GSVector4::unorm8(m_clear_value.color); }
+	__fi GSVector4 GetUNormClearColor() const
+	{
+		return IsDepthInteger() ?
+			GSVector4(static_cast<float>(m_clear_value.color), 0.0f, 0.0f, 0.0f) :
+			GSVector4::unorm8(m_clear_value.color);
+	}
 
 	__fi void SetClearColor(u32 color)
 	{
