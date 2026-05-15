@@ -5059,7 +5059,6 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	AddMacro(ss, "PS_Z_RT_SLOT", sel.z_rt_slot);
 	AddMacro(ss, "PS_Z_INTEGER", static_cast<u32>(sel.zint));
-	AddMacro(ss, "PS_PRIMCLASS", sel.primclass);
 	AddMacro(ss, "PS_TEX_INTEGER", sel.texint);
 	ss << m_tfx_source;
 

@@ -3263,7 +3263,6 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	sm.AddMacro("PS_Z_RT_SLOT", sel.z_rt_slot);
 	sm.AddMacro("PS_Z_INTEGER", static_cast<u32>(sel.zint));
-	sm.AddMacro("PS_PRIMCLASS", sel.primclass);
 	sm.AddMacro("PS_TEX_INTEGER", sel.texint);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));

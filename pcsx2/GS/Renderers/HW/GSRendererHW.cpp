@@ -11014,9 +11014,6 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 // Do the depth integer setup if needed for the draw.
 void GSRendererHW::EmulateDepthInteger()
 {
-	// The primclass should be set to INVALID (not zero) by default.
-	m_conf.ps.primclass = GS_INVALID_CLASS;
-
 	if (!m_conf.ds_int)
 		return;
 
@@ -11036,7 +11033,6 @@ void GSRendererHW::EmulateDepthInteger()
 	pxAssert(g_gs_device->Features().depth_integer);
 
 	m_conf.vs.zint = true;
-	m_conf.ps.primclass = m_vt.m_primclass;
 
 	// Setup for pixel shader.
 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];

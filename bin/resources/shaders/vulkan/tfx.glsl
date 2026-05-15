@@ -466,14 +466,6 @@ void main()
 #define PS_ROV_DEPTH_READ_ONLY 2
 #endif
 
-#ifndef POINT_CLASS
-#define POINT_CLASS 0
-#define LINE_CLASS 1
-#define TRIANGLE_CLASS 2
-#define SPRITE_CLASS 3
-#define INVALID_CLASS 7
-#endif
-
 #ifndef PS_Z_INTEGER_NONE
 #define PS_Z_INTEGER_NONE 0
 #define PS_Z_INTEGER_READ_WRITE 1
@@ -536,7 +528,6 @@ void main()
 #define PS_ROV_DEPTH 0
 #define PS_Z_RT_SLOT 0
 #define PS_Z_INTEGER 0
-#define PS_PRIMCLASS 0
 #define PS_TEX_INTEGER 0
 #endif
 
