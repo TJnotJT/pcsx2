@@ -3483,11 +3483,14 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		broadcastss(tmp2, i == 0 ? _rip_local(temp.round.flags_u) : _rip_local(temp.round.flags_v));
 
 		// const VectorI round_down_const = VectorI::load<true>(g_const.m_round_down);
-		// const VectorI round_down_u = (round_setting_u == round_down_const) & ~at_left;
-		// const VectorI round_down_v = (round_setting_v == round_down_const);
+		// const VectorI round_down_u = ((round_setting_u & round_down_const) != VectorI::zero()) & ~at_left;
+		// const VectorI round_down_v = ((round_setting_v & round_down_const) != VectorI::zero());
+
+		pxor(tmp6, tmp6); // zeroed for the next couple steps.
 
 		movaps(tmp3, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_round_down)]);
-		pcmpeqd(tmp3, tmp2);
+		pand(tmp3, tmp2);
+		pcmpgtd(tmp3, tmp6);
 		if (i == 0)
 		{
 			movaps(tmp4, tmp3);
@@ -3496,16 +3499,18 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		}
 
 		// const VectorI round_up_const = VectorI::load<true>(g_const.m_round_up);
-		// const VectorI round_up_u = (round_setting_u == round_up_const) |
-		//                            ((round_setting_u == round_down_const) & at_left);
-		// const VectorI round_up_v = (round_setting_v == round_up_const);
+		// const VectorI round_up_u = ((round_setting_u & round_up_const) != VectorI::zero()) |
+		//                            (((round_setting_u & round_down_const) != VectorI::zero()) & at_left);
+		// const VectorI round_up_v = ((round_setting_v & round_up_const) != VectorI::zero());
 
 		movaps(tmp4, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_round_up)]);
-		pcmpeqd(tmp4, tmp2);
+		pand(tmp4, tmp2);
+		pcmpgtd(tmp4, tmp6);
 		if (i == 0)
 		{
 			movaps(tmp5, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_round_down)]);
-			pcmpeqd(tmp5, tmp2);
+			pand(tmp5, tmp2);
+			pcmpgtd(tmp5, tmp6);
 			pand(tmp5, tmp1);
 			por(tmp4, tmp5);
 		}
@@ -3551,4 +3556,28 @@ void GSDrawScanlineCodeGenerator::RoundUV(const XYm& u, const XYm& v, const XYm&
 		por(tmp3, tmp6);
 		movaps(uv, tmp3);
 	}
+
+	// const VectorI round_swap_const = VectorI::load<true>(g_const_256b.m_round_swap);
+	// const VectorI round_swap = (round_setting_u & round_swap_const) != VectorI::zero();
+
+	broadcastss(tmp1, _rip_local(temp.round.flags_u));
+	pand(tmp1, ptr[_m_const + offsetof(GSScanlineConstantDataT, m_round_swap)]);
+	pxor(tmp2, tmp2);
+	pcmpgtd(tmp1, tmp2);
+	pcmpeqd(tmp2, tmp2);
+	pxor(tmp2, tmp1);
+
+	// const VectorI tmp_u = u;
+	// const VectorI tmp_v = v;
+	// u = u.blend8(tmp_v, round_swap);
+	// v = v.blend8(tmp_u, round_swap);
+
+	movaps(tmp3, u);
+	movaps(tmp4, v);
+	pand(tmp3, tmp1);
+	pand(tmp4, tmp1);
+	pand(u, tmp2);
+	pand(v, tmp2);
+	por(u, tmp4);
+	por(v, tmp3);
 }

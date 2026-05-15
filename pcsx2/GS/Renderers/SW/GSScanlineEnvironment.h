@@ -294,6 +294,10 @@ struct alignas(64) GSScanlineConstantData256B
 		ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN,
 		ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN,
 	};
+	alignas(32) u32 m_round_swap[8] = {
+		ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP,
+		ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP,
+	};
 	alignas(32) u32 m_quarter_texel[8] = {
 		0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000
 	};
@@ -346,6 +350,9 @@ struct alignas(64) GSScanlineConstantData128B
 	};
 	alignas(16) u32 m_round_down[4] = {
 		ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN, ROUND_UV_DOWN,
+	};
+	alignas(16) u32 m_round_swap[4] = {
+		ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP, ROUND_UV_SWAP,
 	};
 	alignas(16) u32 m_quarter_texel[4] = {
 		0x4000, 0x4000, 0x4000, 0x4000,

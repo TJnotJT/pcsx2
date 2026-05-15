@@ -468,20 +468,22 @@ vec4 round_uv()
 	ivec2 round_flags = ivec2(PSin.rounduv.zw);
 
 	// Being on the top or left pixels converts round down to round up.
-	ivec2 round_down = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & ~topleft;
-	ivec2 round_up = ivec2(equal(round_flags, ivec2(PS_ROUND_UV_UP))) |
-	                 (ivec2(equal(round_flags, ivec2(PS_ROUND_UV_DOWN))) & topleft);
+	ivec2 round_down = ivec2(bvec2(round_flags & ivec2(ROUND_UV_DOWN))) & ~topleft;
+	ivec2 round_up = ivec2(bvec2(round_flags & ivec2(ROUND_UV_UP))) |
+	                 (ivec2(bvec2(round_flags & ivec2(ROUND_UV_DOWN))) & topleft);
 
 	vec2 uv = PSin.t_int.zw; // Unnormalized UVs.
 	vec2 uvi = round(PSin.t_int.zw / 8.0f) * 8.0f; // Nearest half texel.
 	
 	// Round only if close to a half texel.
-	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(PS_ROUND_UV_THRESHOLD)));
+	ivec2 close = ivec2(lessThanEqual(abs(uv - uvi), vec2(ROUND_UV_THRESHOLD)));
 	round_down &= close;
 	round_up &= close;
 
-	uv = mix(uv, uvi - vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_down));
-	uv = mix(uv, uvi + vec2(PS_ROUND_UV_THRESHOLD), bvec2(round_up));
+	uv = mix(uv, uvi - vec2(ROUND_UV_THRESHOLD), bvec2(round_down));
+	uv = mix(uv, uvi + vec2(ROUND_UV_THRESHOLD), bvec2(round_up));
+
+	uv = mix(uv, uv.yx, bvec2(round_flags & ivec2(ROUND_UV_SWAP)));
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else
