@@ -298,72 +298,75 @@ float2x2 get_inverse(const thread float2x2& mat, float det)
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
-// dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
+// dp_mat is derived from the input vertices and is passed in to avoid recomputing.
 void extrapolate_aa1_triangle_edge(thread MainVSOut& v0, thread const MainVSOut& v1, thread const MainVSOut& v2,
 	thread const float2x2& dp_mat, float2 dp, constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
 {
-	// Get texture deltas
-	float2x2 dt;
-	if (FST)
-	{
-		dt = float2x2(v1.ti.zw - v0.ti.zw, v2.ti.zw - v0.ti.zw);
-	}
-	else
-	{
-		dt = float2x2(v1.t.xy - v0.t.xy, v2.t.xy - v0.t.xy);
-	}
-
-	// Get color delta if interpolating
-	float2x4 dc;
-	if (IIP)
-	{
-		dc = float2x4(v1.c - v0.c, v2.c - v0.c);
-	}
-
-	float2 dz = float2(v1.p.z - v0.p.z, v2.p.z - v0.p.z); // Z deltas
-
-	float2 df = float2(v1.t.z - v0.t.z, v2.t.z - v0.t.z); // Fog deltas
-
-	float2 dq = float2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
-
-	// To prevent unstable extrapolation, do not extrapolate if the
-	// minimum perpendicular length of the triangle is < 2 pixels.
-	float dp_det = determinant(dp_mat); // Twice signed triangle area.
-	float len0 = length(dp_mat[0]);
-	float len1 = length(dp_mat[1]);
-	float len2 = length(dp_mat[1] - dp_mat[0]);
-	float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
-
-	// Get the position -> barycentric weight matrix
-	float2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
-
-	float2 weights = min_perp_length < 2 ? 0 : inv_dp_mat * dp;
-
 	v0.p.xy += dp * cb.point_size; // Extrapolate position
 
-	// Extrapolate texture coords
-	if (FST)
+	if (VS_EXPAND_TYPE == VSExpand::TriangleAA1Ext)
 	{
-			v0.ti.zw += dt * weights;
-			v0.ti.xy = v0.ti.zw * cb.texture_scale;
-	}
-	else
-	{
-		v0.t.xy += dt * weights;
-		v0.ti.zw = v0.t.xy / cb.texture_scale;
-		v0.t.w += dot(dq, weights);
-	}
+		// Get texture deltas
+		float2x2 dt;
+		if (FST)
+		{
+			dt = float2x2(v1.ti.zw - v0.ti.zw, v2.ti.zw - v0.ti.zw);
+		}
+		else
+		{
+			dt = float2x2(v1.t.xy - v0.t.xy, v2.t.xy - v0.t.xy);
+		}
 
-	// Extrapolate and clamp color
-	if (IIP)
-	{
-		v0.c += dc * weights;
-		v0.c = clamp(v0.c, 0, 255);
+		// Get color delta if interpolating
+		float2x4 dc;
+		if (IIP)
+		{
+			dc = float2x4(v1.c - v0.c, v2.c - v0.c);
+		}
+
+		float2 dz = float2(v1.p.z - v0.p.z, v2.p.z - v0.p.z); // Z deltas
+
+		float2 df = float2(v1.t.z - v0.t.z, v2.t.z - v0.t.z); // Fog deltas
+
+		float2 dq = float2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
+
+		// To prevent unstable extrapolation, do not extrapolate if the
+		// minimum perpendicular length of the triangle is < 2 pixels.
+		float dp_det = determinant(dp_mat); // Twice signed triangle area.
+		float len0 = length(dp_mat[0]);
+		float len1 = length(dp_mat[1]);
+		float len2 = length(dp_mat[1] - dp_mat[0]);
+		float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
+
+		// Get the position -> barycentric weight matrix
+		float2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
+
+		float2 weights = min_perp_length < 2 ? 0 : inv_dp_mat * dp;
+
+		// Extrapolate texture coords
+		if (FST)
+		{
+				v0.ti.zw += dt * weights;
+				v0.ti.xy = v0.ti.zw * cb.texture_scale;
+		}
+		else
+		{
+			v0.t.xy += dt * weights;
+			v0.ti.zw = v0.t.xy / cb.texture_scale;
+			v0.t.w += dot(dq, weights);
+		}
+
+		// Extrapolate and clamp color
+		if (IIP)
+		{
+			v0.c += dc * weights;
+			v0.c = clamp(v0.c, 0, 255);
+		}
+
+		v0.p.z += dot(dz, weights); // Extrapolate depth
+
+		v0.t.z += dot(df, weights); // Extrapolate fog
 	}
-
-	v0.p.z += dot(dz, weights); // Extrapolate depth
-
-	v0.t.z += dot(df, weights); // Extrapolate fog
 }
 
 vertex MainVSOut vs_main_expand(
@@ -451,6 +454,7 @@ vertex MainVSOut vs_main_expand(
 			return out;
 		}
 		case VSExpand::TriangleAA1:
+		case VSExpand::TriangleAA1Ext:
 		{
 			// Triangles with AA1 are expanded as follows:
 			// - Vertices 0-2: Interior of triangle (1 triangle).

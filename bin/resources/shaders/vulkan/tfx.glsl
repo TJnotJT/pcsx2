@@ -14,6 +14,7 @@
 #define VS_EXPAND_SPRITE 3
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
+#define VS_EXPAND_TRIANGLE_AA1_EXT 6
 #endif
 
 layout(std140, set = 0, binding = 0) uniform cb0
@@ -211,8 +212,8 @@ mat2 get_xy_deltas_unscaled(ProcessedVertex v0, ProcessedVertex v1, ProcessedVer
 vec2 get_aa1_triangle_expand_dir(ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2)
 {
 	mat2 xy_deltas = get_xy_deltas_unscaled(v0, v1, v2);
-	vec2 line_delta = xy_deltas[0];
-	vec2 line_opposite = xy_deltas[1];
+	vec2 line_delta = xy_deltas[0]; // * VertexScale;
+	vec2 line_opposite = xy_deltas[1]; // * VertexScale;
 
 	vec2 line_normal = vec2(line_delta.y, -line_delta.x);
 	vec2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? vec2(0.0f, 1.0f) : vec2(1.0f, 0.0f);
@@ -232,9 +233,12 @@ mat2 get_inverse(mat2 mat, float det)
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
-// dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
+// dp_mat is derived from the input vertices and is passed in to avoid recomputing.
 void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1, ProcessedVertex v2, mat2 dp_mat, vec2 dp)
 {
+	v0.p.xy += dp * PointSize; // Extrapolate position
+
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EXT
 	// Get texture deltas
 	#if VS_TME
 		#if VS_FST
@@ -268,8 +272,6 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 
 	vec2 weights = min_perp_length < 2 ? vec2(0) : inv_dp_mat * dp;
 
-	v0.p.xy += dp * PointSize; // Extrapolate position
-
 	// Extrapolate texture coords
 	#if VS_TME
 		#if VS_FST
@@ -291,6 +293,7 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 	v0.p.z += dot(dz, weights); // Extrapolate depth
 
 	v0.t.z += dot(df, weights); // Extrapolate fog
+#endif
 }
 
 void main()
@@ -358,7 +361,7 @@ void main()
 	vtx.t.y = is_bottom ? lt.t.y : vtx.t.y;
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
-#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1 || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EXT
 
 	// Triangles with AA1 are expanded as follows:
 	// - Vertices 0-2: Interior of triangle (1 triangle).

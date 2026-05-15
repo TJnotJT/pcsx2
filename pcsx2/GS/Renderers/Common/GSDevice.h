@@ -328,7 +328,7 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
-		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1 || expand == VSExpand::TriangleAA1Ext); }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
 
@@ -894,6 +894,7 @@ static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
 		case GSHWDrawConfig::VSExpand::Sprite:
 			return 2;
 		case GSHWDrawConfig::VSExpand::TriangleAA1:
+		case GSHWDrawConfig::VSExpand::TriangleAA1Ext:
 			return 13;
 		default:
 			return 1;

@@ -1167,12 +1167,13 @@ static const char* GetVSExpandName(GSHWDrawConfig::VSExpand vsexpand)
 {
 	switch (vsexpand)
 	{
-		case GSHWDrawConfig::VSExpand::None:        return "None";
-		case GSHWDrawConfig::VSExpand::Point:       return "Point";
-		case GSHWDrawConfig::VSExpand::Line:        return "Line";
-		case GSHWDrawConfig::VSExpand::Sprite:      return "Sprite";
-		case GSHWDrawConfig::VSExpand::LineAA1:     return "LineAA1";
-		case GSHWDrawConfig::VSExpand::TriangleAA1: return "TriangleAA1";
+		case GSHWDrawConfig::VSExpand::None:           return "None";
+		case GSHWDrawConfig::VSExpand::Point:          return "Point";
+		case GSHWDrawConfig::VSExpand::Line:           return "Line";
+		case GSHWDrawConfig::VSExpand::Sprite:         return "Sprite";
+		case GSHWDrawConfig::VSExpand::LineAA1:        return "LineAA1";
+		case GSHWDrawConfig::VSExpand::TriangleAA1:    return "TriangleAA1";
+		case GSHWDrawConfig::VSExpand::TriangleAA1Ext: return "TriangleAA1Ext";
 	}
 	return "Unknown";
 }

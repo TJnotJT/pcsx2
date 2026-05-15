@@ -5494,7 +5494,11 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 				if (draw_aa1)
 				{
 					GL_INS("HW: AA1 triangle expand.");
-					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1;
+					// Only do extrapolation on flat draws since it only appears to benefit UI elements,
+					// and can otherwise cause texture seams.
+					m_conf.vs.expand = m_vt.m_eq.z ? GSHWDrawConfig::VSExpand::TriangleAA1Ext :
+					                                 GSHWDrawConfig::VSExpand::TriangleAA1;
+					m_conf.vs.expand = GSHWDrawConfig::VSExpand::TriangleAA1Ext;
 					m_conf.cb_vs.point_size = GSVector2(16.0f * sx, 16.0f * sy);
 					m_conf.topology = GSHWDrawConfig::Topology::Triangle;
 					m_conf.indices_per_prim = 3;

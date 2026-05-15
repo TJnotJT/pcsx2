@@ -1637,9 +1637,12 @@ float2x2 get_inverse(float2x2 mat, float det)
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
-// dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
+// dp_mat is derived from the input vertices and is passed in to avoid recomputing.
 void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v2, float2x2 dp_mat, float2 dp)
 {
+	v0.p.xy += dp * PointSize; // Extrapolate position
+
+#if VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EXT
 	// Get texture deltas
 	#if VS_TME
 		#if VS_FST
@@ -1673,8 +1676,6 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 
 	float2 weights = min_perp_length < 2 ? 0 : mul(dp, inv_dp_mat);
 
-	v0.p.xy += dp * PointSize; // Extrapolate position
-
 	// Extrapolate texture coords
 	#if VS_TME
 		#if VS_FST
@@ -1696,6 +1697,7 @@ void extrapolate_aa1_triangle_edge(inout VS_OUTPUT v0, VS_OUTPUT v1, VS_OUTPUT v
 	v0.p.z += dot(weights, dz); // Extrapolate depth
 
 	v0.t.z += dot(weights, df); // Extrapolate fog
+#endif
 }
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
@@ -1770,7 +1772,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 	return vtx;
 
-#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
+#elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1 || VS_EXPAND == VS_EXPAND_TRIANGLE_AA1_EXT
 
 	// Triangles with AA1 are expanded as follows:
 	// - Vertices 0-2: Interior of triangle (1 triangle).
