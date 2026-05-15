@@ -5409,32 +5409,6 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	}
 }
 
-// FIXME: Handle both provoking vertex first and this together to avoid multiple unnecessary copies.
-// We need vertices to be deindexed for integer Z because is relies on passing the barycentric
-// coordinates and depth values to the fragment shader, so every triangle/line vertex must be unique.
-void GSRendererHW::HandleZIntegerVertices()
-{
-	if (!g_gs_device->Features().depth_integer ||
-		m_vt.m_primclass == GS_POINT_CLASS ||
-		m_vt.m_primclass == GS_SPRITE_CLASS ||
-		!m_conf.ds_int ||
-		!m_conf.ds_int->IsDepthInteger())
-	{
-		return; // Not using integer depth.
-	}
-
-	// De-index the vertices using the copy buffer
-	while (m_vertex->maxcount < m_index->tail)
-		GrowVertexBuffer();
-	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
-	{
-		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
-		m_index->buff[i] = static_cast<u16>(i);
-	}
-	std::swap(m_vertex->buff, m_vertex->buff_copy);
-	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
-}
-
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt)
 {
 	GL_PUSH("HW: IA");
@@ -9440,8 +9414,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	m_conf.scissor = (date_options.enabled && !date_options.barrier) ? m_conf.drawarea : scissor;
 
 	HandleProvokingVertexFirst();
-
-	HandleZIntegerVertices();
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 

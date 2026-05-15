@@ -66,6 +66,11 @@ public:
 		       !m_optional_extensions.vk_ext_rasterization_order_attachment_access;
 	}
 
+	__fi bool UseVSExpandIndexBuffer() const
+	{
+		return m_features.aa1 || m_features.depth_integer;
+	}
+
 	// Helpers for getting constants
 	__fi u32 GetBufferCopyOffsetAlignment() const
 	{

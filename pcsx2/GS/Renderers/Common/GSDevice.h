@@ -453,7 +453,11 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
-		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+		__fi bool UseVSExpandIndexBuffer() const
+		{
+			return (expand == VSExpand::TriangleAA1 || expand == VSExpand::TriangleZInteger ||
+				expand == VSExpand::LineZInteger);
+		}
 		
 		/// Remove the Z integer expand shader.
 		__fi void RemoveZIntegerExpand()
@@ -1117,12 +1121,6 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 	{
 		case GSHWDrawConfig::VSExpand::Sprite:
 			// Sprite expand does a 2-4 expansion, and relies on the low bit of the vertex ID to figure out if it's the first or second coordinate.
-			return 2;
-		case GSHWDrawConfig::VSExpand::TriangleZInteger:
-			// Triangle Z integer relies on vertex ID modulo 3 to figure out which vertex it is.
-			return 3;
-		case GSHWDrawConfig::VSExpand::LineZInteger:
-			// Line Z integer relies on vertex ID modulo 2 to figure out which vertex it is.
 			return 2;
 		default:
 			return 1;

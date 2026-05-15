@@ -2661,7 +2661,7 @@ bool GSDevice12::CreateBuffers()
 		return false;
 	}
 
-	if (!m_expand_index_stream_buffer.Create(m_features.aa1 ? INDEX_BUFFER_SIZE : 4, false))
+	if (!m_expand_index_stream_buffer.Create(UseVSExpandIndexBuffer() ? INDEX_BUFFER_SIZE : 4, false))
 	{
 		Host::ReportErrorAsync("GS", "Failed to allocate expansion index buffer (VS resource)");
 		return false;

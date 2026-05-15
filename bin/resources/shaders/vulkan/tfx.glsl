@@ -19,12 +19,6 @@
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
 
-#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE               || \
-                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER     || \
-                                        VS_EXPAND == VS_EXPAND_LINE_AA1           || \
-                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER || \
-                                        VS_EXPAND == VS_EXPAND_TRIANGLE_AA1))
-
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -50,12 +44,9 @@ layout(location = 0) out VSOutput
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 
-#if VS_Z_INTEGER
-	flat uvec3 zi;
-	#if VS_NEEDS_BARY
-		vec2 bary;
+	#if VS_Z_INTEGER
+		flat uint z_base;
 	#endif
-#endif
 } vsOut;
 
 #if VS_EXPAND == VS_EXPAND_NONE
@@ -108,6 +99,11 @@ void main()
 
 	#if VS_POINT_SIZE
 		gl_PointSize = PointSize.x;
+	#endif
+
+	#if VS_Z_INTEGER
+		vsOut.z_base = a_z;
+		vsOut.p.z = 0.0f;
 	#endif
 
 	vsOut.c = vec4(a_c);
@@ -203,40 +199,13 @@ ProcessedVertex load_vertex(uint index)
 	vtx.c = a_c;
 	vtx.t.z = a_f.r;
 
-#if VS_Z_INTEGER
-	vtx.z = z;
-#else
-	vtx.z = 0;
-#endif
+	#if VS_Z_INTEGER
+		vtx.z = z;
+	#else
+		vtx.z = 0;
+	#endif
 
 	return vtx;
-}
-
-uvec3 get_triangle_zint(uint i0, uint i1, uint i2)
-{
-	ProcessedVertex raw0 = load_vertex(i0);
-	ProcessedVertex raw1 = load_vertex(i1);
-	ProcessedVertex raw2 = load_vertex(i2);
-	return uvec3(raw0.z, raw1.z, raw2.z);
-}
-
-vec2 get_triangle_bary(uint i)
-{
-	uint index_mod = i % 3;
-	return vec2(index_mod == 0, index_mod == 1);
-}
-
-uvec3 get_line_zint(uint i0, uint i1)
-{
-	ProcessedVertex raw0 = load_vertex(i0);
-	ProcessedVertex raw1 = load_vertex(i1);
-	return uvec3(raw0.z, raw1.z, 0);
-}
-
-vec2 get_line_bary(uint i)
-{
-	uint index_mod = i & 1;
-	return vec2(index_mod == 0, index_mod == 1);
 }
 
 void main()
@@ -252,7 +221,8 @@ void main()
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
 
 #if VS_Z_INTEGER
-	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.z_base = vtx.z;
+	vsOut.p.z = 0.0f;
 #endif
 
 #elif (VS_EXPAND == VS_EXPAND_LINE) || (VS_EXPAND == VS_EXPAND_LINE_AA1)
@@ -285,10 +255,8 @@ void main()
 #endif
 
 #if VS_Z_INTEGER
-	// All vertices of the same primitive must have z in same order
-	vsOut.zi = is_bottom ? uvec3(other.z, vtx.z, 0) : uvec3(vtx.z, other.z, 0);
-	
-	vsOut.bary = is_bottom ? vec2(0, 1) : vec2(1, 0);
+	vsOut.z_base = min(other.z, vtx.z);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z - z_base);
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
@@ -317,7 +285,8 @@ void main()
 	vtx.ti.yw = is_bottom ? lt.ti.yw : vtx.ti.yw;
 
 #if VS_Z_INTEGER
-	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.z_base = vtx.z;
+	vsOut.p.z = 0.0f; // Flat Z
 #endif
 
 #elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1
@@ -337,6 +306,15 @@ void main()
 		vtx = load_vertex(load_index(3 * prim_id + prim_offset));
 		vsOut.inv_cov = 0.0f; // Full coverage
 		vsOut.interior = 1;
+
+		#if VS_Z_INTEGER
+			uint i1 = (prim_offset >= 2) ? prim_offset - 2 : prim_offset + 1;
+			uint i2 = (prim_offset >= 1) ? prim_offset - 1 : prim_offset + 2;
+			ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
+			ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
+			vsOut.z_base = min(vtx.z, min(other.z, opposite.z));
+			vtx.p.z = float(vtx.z - vsOut.z_base);
+		#endif
 	}
 	else
 	{
@@ -386,41 +364,39 @@ void main()
 			// Get the provoking vertex color (last vertex in VK)
 			vtx.c = i0 == 2 ? vtx.c : (i1 == 2 ? other.c : opposite.c);
 		#endif
-	}
 
-#if VS_Z_INTEGER
-	// All vertices of the same primitive must have z in same order.
-	vsOut.zi = get_triangle_zint(load_index(3 * prim_id + 0),
-	                             load_index(3 * prim_id + 1),
-	                             load_index(3 * prim_id + 2));
-	
-	uint index_offset = interior ? prim_offset : (prim_offset - 3) / 6;
-	vsOut.bary = get_triangle_bary(index_offset);
-#endif
+		#if VS_Z_INTEGER
+			vsOut.z_base = min(vtx.z, min(other.z, opposite.z));
+			vtx.p.z = float(vtx.z - vsOut.z_base);
+		#endif
+	}
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
-	vtx = load_vertex(vid);
+	uint vid_base = 3 * (vid / 3);
+	uint i0 = vid - vid_base;
+	uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+	uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
+	vtx = load_vertex(load_index(vid_base + i0));
+	ProcessedVertex other = load_vertex(load_index(vid_base + i1));
+	ProcessedVertex opposite = load_vertex(load_index(vid_base + i2));
 
-	// All vertices of the same primitive must have z in same order.
-	uint vid_base = (vid / 3) * 3;
-	vsOut.zi = get_triangle_zint(vid_base + 0, vid_base + 1, vid_base + 2);
-
-	vsOut.bary = get_triangle_bary(vid);
+	vsOut.z_base = min(vtx.z, min(other.z, opposite.z));
+	vtx.p.z = exp2(-32.0f) * float(vtx.z - vsOut.z_base);
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
-	vtx = load_vertex(vid);
+	vtx = load_vertex(load_index(vid));
 
-	// All vertices of the same primitive must have z in same order.
-	uint vid_base = vid & ~1;
-	vsOut.zi = get_line_zint(vid_base + 0, vid_base + 1);
+	ProcessedVertex other = load_vertex(load_index(vid ^ 1));
 
-	vsOut.bary = get_line_bary(vid);
+	vsOut.z_base = min(vtx.z, other.z);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z - z_base);
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
 	vtx = load_vertex(vid);
-	vsOut.zi = uvec3(vtx.z, 0, 0); // Flat Z
+	vsOut.z_base = vtx.z;
+	vtx.p.z = 0.0f; // Flat Z
 #endif
 
 	gl_Position = vtx.p;
@@ -584,8 +560,6 @@ void main()
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
-#define PS_NEEDS_BARY (PS_Z_INTEGER && (PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS))
-
 #define NEEDS_TEX (PS_TFX != 4)
 
 #if PS_Z_INTEGER
@@ -647,10 +621,7 @@ layout(location = 0) in VSOutput
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 	#if PS_Z_INTEGER
-		flat uvec3 zi;
-		#if PS_NEEDS_BARY
-			vec2 bary;
-		#endif
+		flat uint z_base;
 	#endif
 } vsIn;
 
@@ -1757,63 +1728,6 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 	#endif
 }
 
-// Emulate 64 bit multiplication to avoid using higher feature levels.
-void mul64(uint x, uint y, out uint lo, out uint hi)
-{
-	uint hh = (x >> 16) * (y >> 16);
-	uint hl = (x >> 16) * (y & 0xFFFF);
-	uint lh = (x & 0xFFFF) * (y >> 16);
-	uint ll = (x & 0xFFFF) * (y & 0xFFFF);
-	lo = ll + (hl << 16) + (lh << 16);
-	uint c = ((hl & 0xFFFF) + (lh & 0xFFFF) + (ll >> 16)) >> 16; // carry bit
-	hi = hh + (hl >> 16) + (lh >> 16) + c;
-}
-
-// Interpolate Z using barycentric triangle/line coordinates
-uint interp_zint(vec2 bary, uvec3 z)
-{
-	// Convert weights from floating to 24 bit fixed point.
-	const uint pow24 = 1u << 24;
-	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24);
-	uint w1 = 0;
-	uint w2 = 0;
-
-	// Make sure all weights sum up to 2^24 and are in the correct range
-	w1 = pow24 - w0;
-#if PS_PRIMCLASS == TRIANGLE_CLASS
-	w1 = uint(float(pow24) * bary.y);
-	w1 = min(w1, pow24 - w0);
-	w2 = pow24 - w1 - w0;
-#endif
-
-	// Get the 64 bit products w * z
-	uint z0_lo = 0, z0_hi = 0;
-	uint z1_lo = 0, z1_hi = 0;
-	uint z2_lo = 0, z2_hi = 0;
-
-	mul64(w0, z.x, z0_lo, z0_hi);
-	mul64(w1, z.y, z1_lo, z1_hi);
-#if PS_PRIMCLASS == TRIANGLE_CLASS
-	mul64(w2, z.z, z2_lo, z2_hi);
-#endif
-
-	// Emulate 64 bit addition to avoid using higher feature levels.
-	uint z_lo = z0_lo;
-	uint z_hi = z0_hi;
-
-	z_lo += z1_lo;
-	z_hi += z1_hi + uint(z_lo < z1_lo);
-
-#if PS_PRIMCLASS == TRIANGLE_CLASS
-	z_lo += z2_lo;
-	z_hi += z2_hi + uint(z_lo < z2_lo);
-#endif
-
-	// The weights are 24 bits so get bits 24:55 of the result.
-	// We truncate the lower 23 bits for consistency with zfloor.
-	return (z_hi << 8) + (z_lo >> 24);
-}
-
 #if PS_ROV_COLOR || PS_ROV_DEPTH
 layout(pixel_interlock_ordered) in;
 #endif
@@ -1831,12 +1745,8 @@ layout(early_fragment_tests) in;
 void main()
 {
 #if PS_Z_INTEGER
-	#if PS_NEEDS_BARY
-		// Interpolate integer Z from barycentric coordinates.
-		uint input_z = interp_zint(vsIn.bary, vsIn.zi);
-	#else
-		uint input_z = vsIn.zi.x; // No interpolation
-	#endif
+	// Add base plus interpolated offset.
+	uint input_z = vsIn.z_base + uint(exp2(32.0f) * gl_FragCoord.z);
 #else
 	float input_z = gl_FragCoord.z;
 #endif
