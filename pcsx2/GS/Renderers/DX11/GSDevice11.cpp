@@ -1790,6 +1790,7 @@ void GSDevice11::SetupVS(VSSelector sel, const GSHWDrawConfig::VSConstantBuffer*
 		sm.AddMacro("VS_FST", sel.fst);
 		sm.AddMacro("VS_IIP", sel.iip);
 		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+		sm.AddMacro("VS_Z_INTEGER", sel.zint);
 
 		static constexpr const D3D11_INPUT_ELEMENT_DESC layout[] =
 			{
@@ -1897,6 +1898,9 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
 		sm.AddMacro("PS_ABE", sel.abe);
 		sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
+		sm.AddMacro("PS_Z_RT_SLOT", sel.z_rt_slot);
+		sm.AddMacro("PS_Z_INTEGER", static_cast<u32>(sel.zint));
+		sm.AddMacro("PS_TEX_INTEGER", sel.texint);
 
 		wil::com_ptr_nothrow<ID3D11PixelShader> ps = m_shader_cache.GetPixelShader(m_dev.get(), m_tfx_source, sm.GetPtr(), "ps_main");
 		i = m_ps.try_emplace(sel, std::move(ps)).first;

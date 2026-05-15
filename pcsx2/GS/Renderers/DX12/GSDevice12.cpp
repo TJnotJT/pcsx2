@@ -3181,7 +3181,7 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
 	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-	sm.AddMacro("VS_Z_INTEGER", static_cast<int>(sel.zint));
+	sm.AddMacro("VS_Z_INTEGER", sel.zint);
 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
