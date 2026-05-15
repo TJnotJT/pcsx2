@@ -92,6 +92,8 @@ private:
 
 	void SetFeatures(IDXGIAdapter1* adapter);
 
+	bool UseVSExpandIndexBuffer() const { return m_features.aa1 || m_features.depth_integer; }
+
 	u32 GetSwapChainBufferCount() const;
 	bool CreateSwapChain();
 	bool CreateSwapChainRTV();

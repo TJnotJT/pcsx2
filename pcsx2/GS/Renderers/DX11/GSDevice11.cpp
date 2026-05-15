@@ -412,7 +412,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		}
 	}
 
-	if (m_features.aa1)
+	if (UseVSExpandIndexBuffer())
 	{
 		bd.ByteWidth = INDEX_BUFFER_SIZE;
 		bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
