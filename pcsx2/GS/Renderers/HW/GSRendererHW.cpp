@@ -7880,6 +7880,39 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	const int tex_diff = tex->m_from_target ? static_cast<int>(m_cached_ctx.TEX0.TBP0 - tex->m_from_target->m_TEX0.TBP0) : static_cast<int>(m_cached_ctx.TEX0.TBP0 - tex->m_TEX0.TBP0);
 	const int frame_diff = rt ? static_cast<int>(m_cached_ctx.FRAME.Block() - rt->m_TEX0.TBP0) : 0;
 
+	// Needs to be called everywhere we return early except tex is fb, or read only depth.
+	auto HandleBarrierHazard = [&](bool src_empty) {
+		if (rt && m_conf.tex == m_conf.rt)
+		{
+			m_conf.ps.tex_hazard = 1;
+			if (m_prim_overlap == PRIM_OVERLAP_NO || src_empty || m_channel_shuffle || !g_gs_device->Features().feedback_loops())
+				m_conf.require_one_barrier = true;
+			else
+				m_conf.require_full_barrier = true;
+		}
+		else if (ds && m_conf.tex == m_conf.ds)
+		{
+			// This might be hit again if it's called when there's no match.
+			if (g_gs_device->Features().test_and_sample_depth && (m_cached_ctx.ZBUF.ZMSK || m_cached_ctx.TEST.ZTST == ZTST_NEVER))
+			{
+				// No barrier, depth can be read safely.
+			}
+			// TODO: Add gpu copies for depth on VK/DX12 that doesn't rely on feedback loops.
+			else if (g_gs_device->Features().feedback_loops())
+			{
+				m_conf.ps.tex_hazard = 2;
+				if (m_prim_overlap == PRIM_OVERLAP_NO || src_empty || m_channel_shuffle)
+					m_conf.require_one_barrier = true;
+				else
+					m_conf.require_full_barrier = true;
+			}
+			else
+			{
+				m_conf.tex = nullptr;
+			}
+		}
+	};
+
 	// Detect framebuffer read that will need special handling
 	const GSTextureCache::Target* src_target = nullptr;
 	if (!m_downscale_source || !tex->m_from_target)
@@ -7908,6 +7941,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				// If the two don't overlap, there's no need to copy.
 				if (m_r.rintersect(src_rect).rempty())
 				{
+					HandleBarrierHazard(true);
 					unscaled_size = rt->GetUnscaledSize();
 					scale = rt->GetScale();
 					return;
@@ -7919,12 +7953,9 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		// Be careful of single page channel shuffles where depth is the source but it's not going to the same place, we can't read this directly.
 		else if (ds && m_conf.tex == m_conf.ds && (!m_channel_shuffle || (rt && static_cast<int>(m_cached_ctx.FRAME.Block() - rt->m_TEX0.TBP0) == static_cast<int>(m_cached_ctx.ZBUF.Block() - ds->m_TEX0.TBP0))))
 		{
-			// GL, Vulkan (in General layout), DirectX11 (binding dsv as read only) no support for DirectX12 yet!
-			const bool can_read_current_depth_buffer = g_gs_device->Features().test_and_sample_depth;
-
 			// If this is our current Z buffer, we might not be able to read it directly if it's being written to.
 			// Rather than leaving the backend to do it, we'll check it here.
-			if (can_read_current_depth_buffer && (m_cached_ctx.ZBUF.ZMSK || m_cached_ctx.TEST.ZTST == ZTST_NEVER))
+			if (g_gs_device->Features().test_and_sample_depth && (m_cached_ctx.ZBUF.ZMSK || m_cached_ctx.TEST.ZTST == ZTST_NEVER))
 			{
 				// Safe to read!
 				GL_CACHE("HW: Source is depth buffer, not writing, safe to read.");
@@ -7940,6 +7971,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				// If the two don't overlap, there's no need to copy.
 				if (m_r.rintersect(src_rect).rempty())
 				{
+					HandleBarrierHazard(true);
 					unscaled_size = ds->GetUnscaledSize();
 					scale = ds->GetScale();
 					return;
@@ -7957,6 +7989,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		else
 		{
 			// No match.
+			HandleBarrierHazard(false);
 			return;
 		}
 	}
@@ -8012,7 +8045,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				}
 
 				m_conf.cb_ps.ChannelShuffleOffset = GSVector2((horizontal_offset - m_r.x) * tex->GetScale(), (vertical_offset - m_r.y) * tex->GetScale());
-				m_conf.ps.channel_fb = 1;
+				m_conf.ps.tex_hazard = 1;
 				target_region = false;
 				source_region.bits = 0;
 
