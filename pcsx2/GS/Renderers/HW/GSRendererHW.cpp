@@ -5983,6 +5983,13 @@ void GSRendererHW::EmulateDATESelectMethod(DATEOptions& date_options, GSTextureC
 		GL_PERF("DATE: Fast with FBA, all pixels will be >= 128");
 		date_options.stencil_one = !m_cached_ctx.TEST.DATM;
 	}
+	else if (m_conf.ds_int)
+	{
+		// Integer depth requires full barriers anyway.
+		GL_PERF("DATE: Accuract with integer depth");
+		m_conf.require_full_barrier = true;
+		date_options.barrier = true;
+	}
 	else if (m_conf.colormask.wa && !complex_alpha_test && !(m_cached_ctx.FRAME.FBMSK & 0x80000000))
 	{
 		// Performance note: check alpha range with GetAlphaMinMax()

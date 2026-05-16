@@ -659,6 +659,11 @@ struct alignas(16) GSHWDrawConfig
 			{
 				rov_depth = PS_ROV_DEPTH::READ_ONLY;
 			}
+
+			if (zint == PS_Z_INTEGER::READ_WRITE)
+			{
+				zint = PS_Z_INTEGER::READ_ONLY;
+			}
 		}
 
 		__fi bool HasColorOutput() const

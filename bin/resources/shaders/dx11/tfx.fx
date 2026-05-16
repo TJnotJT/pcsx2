@@ -1669,10 +1669,10 @@ if (bad)
 		#endif
 	#else
 		output_real.depth = input_z;
-	#endif
-	#if SW_DEPTH && PS_NO_COLOR1 && DX12 && !PS_Z_INTEGER
-		// Output color clone for feedback.
-		output_real.depth_color = input_z;
+		#if SW_DEPTH && PS_NO_COLOR1 && DX12
+			// Output color clone for feedback.
+			output_real.depth_color = input_z;
+		#endif
 	#endif
 #elif PS_RETURN_DEPTH_ROV
 	// ROV depth write
