@@ -104,6 +104,11 @@ public:
 
 	bool UseEnhancedBarriers() const { return m_enhanced_barriers; }
 
+	bool UseVSExpandIndexBuffer() const
+	{
+		return m_features.aa1 || m_features.depth_integer;
+	}
+
 	/// Returns the current command list, commands can be recorded directly.
 	const D3D12CommandList& GetCommandList() const
 	{

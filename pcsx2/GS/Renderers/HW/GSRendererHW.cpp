@@ -5409,32 +5409,6 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	}
 }
 
-// FIXME: Handle both provoking vertex first and this together to avoid multiple unnecessary copies.
-// We need vertices to be deindexed for integer Z because is relies on passing the barycentric
-// coordinates and depth values to the fragment shader, so every triangle/line vertex must be unique.
-void GSRendererHW::HandleZIntegerVertices()
-{
-	if (!g_gs_device->Features().depth_integer ||
-		m_vt.m_primclass == GS_POINT_CLASS ||
-		m_vt.m_primclass == GS_SPRITE_CLASS ||
-		!m_conf.ds_int ||
-		!m_conf.ds_int->IsDepthInteger())
-	{
-		return; // Not using integer depth.
-	}
-
-	// De-index the vertices using the copy buffer
-	while (m_vertex->maxcount < m_index->tail)
-		GrowVertexBuffer();
-	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
-	{
-		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
-		m_index->buff[i] = static_cast<u16>(i);
-	}
-	std::swap(m_vertex->buff, m_vertex->buff_copy);
-	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
-}
-
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt)
 {
 	GL_PUSH("HW: IA");
@@ -9441,8 +9415,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	HandleProvokingVertexFirst();
 
-	HandleZIntegerVertices();
-
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback &&
@@ -11042,9 +11014,6 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 // Do the depth integer setup if needed for the draw.
 void GSRendererHW::EmulateDepthInteger()
 {
-	// The primclass should be set to INVALID (not zero) by default.
-	m_conf.ps.primclass = GS_INVALID_CLASS;
-
 	if (!m_conf.ds_int)
 		return;
 
@@ -11064,7 +11033,6 @@ void GSRendererHW::EmulateDepthInteger()
 	pxAssert(g_gs_device->Features().depth_integer);
 
 	m_conf.vs.zint = true;
-	m_conf.ps.primclass = m_vt.m_primclass;
 
 	// Setup for pixel shader.
 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];

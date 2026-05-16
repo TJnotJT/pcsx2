@@ -598,7 +598,8 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 	{
 		if (IsDepthColor())
 		{
-			alignas(16) VkClearColorValue cv = {{m_clear_value.depth, 0.0f, 0.0f, 0.0f}};
+			alignas(16) VkClearColorValue cv;
+			GSVector4::store<true>(cv.float32, GetUNormClearColor());
 			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
 			vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
 		}
