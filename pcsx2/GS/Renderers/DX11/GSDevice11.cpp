@@ -2999,8 +2999,8 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
-	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass1 = draw_rt && (config.ps.IsFeedbackLoopRT() || tex_is_fb);
+	const bool rt_feedbackloop_pass2 = draw_rt && (config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb);
 	if (draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy) || tex_is_fb) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2))))
 	{
