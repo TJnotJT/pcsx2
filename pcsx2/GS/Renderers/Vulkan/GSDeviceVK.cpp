@@ -2762,7 +2762,8 @@ bool GSDeviceVK::CheckFeatures()
 
 	m_features.depth_feedback = m_features.feedback_loops();
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
-	m_features.depth_integer = m_features.test_and_sample_depth && m_device_features.independentBlend && m_features.depth_feedback;
+	m_features.depth_integer = GSConfig.HWZIntegerMode != GSHardwareZIntegerMode::Disabled &&
+		m_features.vs_expand && m_features.feedback_loops();
 
 	DevCon.WriteLn("Optional features:%s%s%s%s%s", m_features.primitive_id ? " primitive_id" : "",
 		m_features.texture_barrier ? " texture_barrier" : "", m_features.framebuffer_fetch ? " framebuffer_fetch" : "",
@@ -3922,7 +3923,8 @@ bool GSDeviceVK::CreateBuffers()
 		return false;
 	}
 
-	if (!m_expand_index_stream_buffer.Create(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, m_features.aa1 ? INDEX_BUFFER_SIZE : 4))
+	if (!m_expand_index_stream_buffer.Create(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		UseVSExpandIndexBuffer() ? INDEX_BUFFER_SIZE : 4))
 	{
 		Host::ReportErrorAsync("GS", "Failed to allocate expansion index buffer (VS resource)");
 		return false;
@@ -3990,7 +3992,7 @@ bool GSDeviceVK::CreatePipelineLayouts()
 		dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
 		plb.AddPushConstants(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GSHWDrawConfig::VSPushConstants));
 	}
-	if (m_features.aa1)
+	if (UseVSExpandIndexBuffer())
 		dslb.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
 	if ((m_tfx_ubo_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
 		return false;
@@ -4973,7 +4975,7 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_IIP", sel.iip);
 	AddMacro(ss, "VS_POINT_SIZE", sel.point_size);
 	AddMacro(ss, "VS_EXPAND", static_cast<int>(sel.expand));
-	AddMacro(ss, "VS_Z_INTEGER", static_cast<int>(sel.zint));
+	AddMacro(ss, "VS_Z_INTEGER", sel.zint);
 	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
 	ss << m_tfx_source;
 
@@ -5058,7 +5060,6 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	AddMacro(ss, "PS_Z_RT_SLOT", sel.z_rt_slot);
 	AddMacro(ss, "PS_Z_INTEGER", static_cast<u32>(sel.zint));
-	AddMacro(ss, "PS_PRIMCLASS", sel.primclass);
 	AddMacro(ss, "PS_TEX_INTEGER", sel.texint);
 	ss << m_tfx_source;
 
@@ -5268,7 +5269,7 @@ bool GSDeviceVK::CreatePersistentDescriptorSets()
 		dsub.AddBufferDescriptorWrite(m_tfx_ubo_descriptor_set, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			m_vertex_stream_buffer.GetBuffer(), 0, VERTEX_BUFFER_SIZE);
 	}
-	if (m_features.aa1)
+	if (UseVSExpandIndexBuffer())
 	{
 		dsub.AddBufferDescriptorWrite(m_tfx_ubo_descriptor_set, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			m_expand_index_stream_buffer.GetBuffer(), 0, INDEX_BUFFER_SIZE);

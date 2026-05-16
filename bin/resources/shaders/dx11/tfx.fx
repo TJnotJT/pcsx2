@@ -56,14 +56,6 @@
 #define PS_ROV_DEPTH_READ_ONLY 2
 #endif
 
-#ifndef POINT_CLASS
-#define POINT_CLASS 0
-#define LINE_CLASS 1
-#define TRIANGLE_CLASS 2
-#define SPRITE_CLASS 3
-#define INVALID_CLASS 7
-#endif
-
 #ifndef PS_Z_INTEGER_NONE
 #define PS_Z_INTEGER_NONE 0
 #define PS_Z_INTEGER_READ_WRITE 1
@@ -135,7 +127,6 @@
 #define PS_ROV_DEPTH 0
 #define PS_Z_RT_SLOT 0
 #define PS_Z_INTEGER 0
-#define PS_PRIMCLASS 0
 #define PS_TEX_INTEGER 0
 #endif
 
@@ -150,12 +141,6 @@
 #define VS_EXPAND_LINE_Z_INTEGER 7
 #define VS_EXPAND_TRIANGLE_Z_INTEGER 8
 #endif
-
-#define VS_NEEDS_BARY (VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE               || \
-                                        VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER     || \
-                                        VS_EXPAND == VS_EXPAND_LINE_AA1           || \
-                                        VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER || \
-                                        VS_EXPAND == VS_EXPAND_TRIANGLE_AA1))
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
@@ -215,10 +200,7 @@ struct VS_OUTPUT
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 
 #if VS_Z_INTEGER
-	nointerpolation uint3 zi : COLOR3;
-	#if VS_NEEDS_BARY
-		float2 bary : COLOR4;
-	#endif
+	nointerpolation uint z_base : COLOR3;
 #endif
 };
 
@@ -237,10 +219,7 @@ struct PS_INPUT
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 
 #if PS_Z_INTEGER
-	nointerpolation uint3 zi : COLOR3;
-	#if PS_PRIMCLASS == LINE_CLASS || PS_PRIMCLASS == TRIANGLE_CLASS
-		float2 bary : COLOR4;
-	#endif
+	nointerpolation uint z_base : COLOR3;
 #endif
 
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
@@ -1387,64 +1366,6 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 	}
 }
 
-// Emulate 64 bit multiplication to avoid using higher feature levels.
-void mul64(uint x, uint y, out uint lo, out uint hi)
-{
-	uint hh = (x >> 16) * (y >> 16);
-	uint hl = (x >> 16) * (y & 0xFFFF);
-	uint lh = (x & 0xFFFF) * (y >> 16);
-	uint ll = (x & 0xFFFF) * (y & 0xFFFF);
-	lo = ll + (hl << 16) + (lh << 16);
-	uint c = ((hl & 0xFFFF) + (lh & 0xFFFF) + (ll >> 16)) >> 16; // carry bit
-	hi = hh + (hl >> 16) + (lh >> 16) + c;
-}
-
-// Interpolate Z using barycentric triangle/line coordinates
-uint interp_zint(float2 bary, uint3 z)
-{
-	// Convert weights from floating to 24 bit fixed point.
-	const uint pow24 = 1u << 24;
-	uint w0 = clamp(uint(float(pow24) * bary.x), 0, pow24);
-	uint w1 = 0;
-	uint w2 = 0;
-
-	// Make sure all weights sum up to 2^24 and are in the correct range
-#if PS_PRIMCLASS == LINE_CLASS
-	w1 = pow24 - w0;
-#elif PS_PRIMCLASS == TRIANGLE_CLASS
-	w1 = uint(float(pow24) * bary.y);
-	w1 = min(w1, pow24 - w0);
-	w2 = pow24 - w1 - w0;
-#endif
-
-	// Get the 64 bit products w * z
-	uint z0_lo = 0, z0_hi = 0;
-	uint z1_lo = 0, z1_hi = 0;
-	uint z2_lo = 0, z2_hi = 0;
-
-	mul64(w0, z.x, z0_lo, z0_hi);
-	mul64(w1, z.y, z1_lo, z1_hi);
-#if PS_PRIMCLASS == TRIANGLE_CLASS
-	mul64(w2, z.z, z2_lo, z2_hi);
-#endif
-
-	// Emulate 64 bit addition to avoid using higher feature levels.
-	uint z_lo = z0_lo;
-	uint z_hi = z0_hi;
-
-	z_lo += z1_lo;
-	z_hi += z1_hi + uint(z_lo < z1_lo);
-
-#if PS_PRIMCLASS == TRIANGLE_CLASS
-	z_lo += z2_lo;
-	z_hi += z2_hi + uint(z_lo < z2_lo);
-#endif
-
-	// The weights are 24 bits so get bits 24:55 of the result.
-	// We truncate the lower 23 bits here as the behavior is consistent with ZFLOOR.
-	return (z_hi << 8) + (z_lo >> 24);
-}
-
 #if PS_ROV_EARLYDEPTHSTENCIL
 [earlydepthstencil]
 #endif
@@ -1476,18 +1397,14 @@ void ps_main(PS_INPUT input)
 #endif
 
 #if PS_Z_INTEGER
-	#if (PS_PRIMCLASS == TRIANGLE_CLASS || PS_PRIMCLASS == LINE_CLASS)
-		// Interpolate integer Z from barycentric coordinates.
-		uint input_z = interp_zint(input.bary, input.zi);
-	#else
-		uint input_z = input.zi.x; // No interpolation
-	#endif
+	// Add base plus interpolated offset.
+	uint input_z = input.z_base + uint(exp2(32.0f) * input.p.z);
 #else
 	float input_z = input.p.z;
 #endif
 
-	// Must floor before depth testing.
 #if !PS_Z_INTEGER && PS_ZFLOOR
+	// Must floor before depth testing.
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
@@ -1745,7 +1662,7 @@ if (bad)
 #endif
 
 #if PS_RETURN_DEPTH
-	// Standard depth write
+	// Non-ROV depth write
 	#if PS_Z_INTEGER
 		#if ZWRITE_FOR_ZINT
 			output_real.depth = input_z;
@@ -1822,7 +1739,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.p.xy = output.p.xy * float2(VertexScale.x, -VertexScale.y) - float2(VertexOffset.x, -VertexOffset.y);
 	output.p.z *= exp2(-32.0f);		// integer->float depth
 
-	if(VS_TME)
+	if (VS_TME)
 	{
 		float2 uv = input.uv - TextureOffset;
 		float2 st = input.st - TextureOffset;
@@ -1858,9 +1775,10 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.inv_cov = 0.0f;
 	output.interior = 0;
 	
-#if VS_Z_INTEGER
-	output.zi = uint3(input.z, 0, 0);
-#endif
+	#if VS_Z_INTEGER
+		output.z_base = input.z;
+		output.p.z = 0.0f; // Flat Z by default
+	#endif
 
 	return output;
 }
@@ -1903,33 +1821,6 @@ VS_INPUT load_vertex(uint index)
 	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
 
 	return vert;
-}
-
-uint3 get_triangle_zint(uint i0, uint i1, uint i2)
-{
-	VS_INPUT raw0 = load_vertex(i0);
-	VS_INPUT raw1 = load_vertex(i1);
-	VS_INPUT raw2 = load_vertex(i2);
-	return uint3(raw0.z, raw1.z, raw2.z);
-}
-
-float2 get_triangle_bary(uint i)
-{
-	uint index_mod = i % 3;
-	return float2(index_mod == 0, index_mod == 1);
-}
-
-uint3 get_line_zint(uint i0, uint i1)
-{
-	VS_INPUT raw0 = load_vertex(i0);
-	VS_INPUT raw1 = load_vertex(i1);
-	return uint3(raw0.z, raw1.z, 0);
-}
-
-float2 get_line_bary(uint i)
-{
-	uint index_mod = i & 1;
-	return float2(index_mod == 0, index_mod == 1);
 }
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
@@ -1977,9 +1868,9 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 #endif
 
 #if VS_Z_INTEGER
-	// All vertices of the same primitive must have z in same order
-	vtx.zi = is_bottom ? uint3(other.zi.x, vtx.zi.x, 0) : uint3(vtx.zi.x, other.zi.x, 0);
-	vtx.bary = is_bottom ? float2(0, 1) : float2(1, 0);
+	uint z_base = min(vtx.z_base, other.z_base);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z_base - z_base);
+	vtx.z_base = z_base;
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
@@ -2029,6 +1920,17 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 		vtx = vs_main(load_vertex(load_index(3 * prim_id + prim_offset)));
 		vtx.inv_cov = 0.0f; // Full coverage
 		vtx.interior = 1;
+
+		#if VS_Z_INTEGER
+			uint i1 = (prim_offset >= 2) ? prim_offset - 2 : prim_offset + 1;
+			uint i2 = (prim_offset >= 1) ? prim_offset - 1 : prim_offset + 2;
+			VS_OUTPUT other = vs_main(load_vertex(load_index(3 * prim_id + i1)));
+			VS_OUTPUT opposite = vs_main(load_vertex(load_index(3 * prim_id + i2)));
+
+			uint z_base = min(vtx.z_base, min(other.z_base, opposite.z_base));
+			vtx.p.z = exp2(-32.0f) * float(vtx.z_base - z_base);
+			vtx.z_base = z_base;
+		#endif
 	}
 	else
 	{
@@ -2078,41 +1980,41 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 			// Get the provoking vertex color (first vertex in DX)
 			vtx.c = i0 == 0 ? vtx.c : (i1 == 0 ? other.c : opposite.c);
 		#endif
-	}
 
-#if VS_Z_INTEGER
-	// All vertices of the same primitive must have z in same order.
-	vtx.zi = get_triangle_zint(load_index(3 * prim_id + 0),
-	                           load_index(3 * prim_id + 1),
-	                           load_index(3 * prim_id + 2));
-	
-	uint index_offset = interior ? prim_offset : (prim_offset - 3) / 6;
-	vtx.bary = get_triangle_bary(index_offset);
-#endif
+		#if VS_Z_INTEGER
+			uint z_base = min(vtx.z_base, min(other.z_base, opposite.z_base));
+			vtx.p.z = exp2(-32.0f) * float(vtx.z_base - z_base);
+			vtx.z_base = z_base;
+		#endif
+	}
 
 	return vtx;
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_TRIANGLE_Z_INTEGER)
 
-	VS_OUTPUT vtx = vs_main(load_vertex(vid));
-
-	// All vertices of the same primitive must have z in same order.
-	uint vid_base = (vid / 3) * 3;
-	vtx.zi = get_triangle_zint(vid_base + 0, vid_base + 1, vid_base + 2);
+	uint vid_base = 3 * (vid / 3);
+	uint i0 = vid - vid_base;
+	uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+	uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
 	
-	vtx.bary = get_triangle_bary(vid);
+	VS_OUTPUT vtx = vs_main(load_vertex(load_index(vid_base + i0)));
+	VS_OUTPUT other = vs_main(load_vertex(load_index(vid_base + i1)));
+	VS_OUTPUT opposite = vs_main(load_vertex(load_index(vid_base + i2)));
+
+	uint z_base = min(vtx.z_base, min(other.z_base, opposite.z_base));
+	vtx.p.z = exp2(-32.0f) * float(vtx.z_base - z_base);
+	vtx.z_base = z_base;
 
 	return vtx;
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_LINE_Z_INTEGER)
 
-	VS_OUTPUT vtx = vs_main(load_vertex(vid));
+	VS_OUTPUT vtx = vs_main(load_vertex(load_index(vid)));
+	VS_OUTPUT other = vs_main(load_vertex(load_index(vid ^ 1)));
 
-	// All vertices of the same primitive must have z in same order
-	uint vid_base = vid & ~1;
-	vtx.zi = get_line_zint(vid_base + 0, vid_base + 1);
-	
-	vtx.bary = get_line_bary(vid);
+	uint z_base = min(vtx.z_base, other.z_base);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z_base - z_base);
+	vtx.z_base = z_base;
 
 	return vtx;
 

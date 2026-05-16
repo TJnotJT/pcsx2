@@ -379,7 +379,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, g_vs_vb_index, m_vertex_stream_buffer->GetGLBufferId(), 0, VERTEX_BUFFER_SIZE);
 		}
 
-		if (m_features.aa1)
+		if (UseVSExpandIndexBuffer())
 		{
 			glGenVertexArrays(1, &m_dummy_vao);
 			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, g_vs_ib_index, m_expand_index_stream_buffer->GetGLBufferId(), 0, INDEX_BUFFER_SIZE);
@@ -463,6 +463,13 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_convert.dss_write->EnableDepth();
 		m_convert.dss_write->SetDepth(GL_ALWAYS, true);
 	}
+
+	// ****************************************************************
+	// feedback
+	// ****************************************************************
+	// Make sure we only point sample RT and DS.
+	glBindSampler(3, m_convert.pt);
+	glBindSampler(4, m_convert.pt);
 
 	// ****************************************************************
 	// present
@@ -885,6 +892,8 @@ bool GSDeviceOGL::CheckFeatures()
 	
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
 
+	m_features.depth_integer = GSConfig.HWZIntegerMode != GSHardwareZIntegerMode::Disabled && m_features.vs_expand;
+
 	return true;
 }
 
@@ -1292,7 +1301,12 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 
 			const GSVector4 c_unorm = T->GetUNormClearColor();
 
-			if (T->IsIntegerFormat())
+			if (T->IsDepthInteger())
+			{
+				u32 c[4] = { static_cast<u32>(c_unorm.x), 0, 0, 0 };
+				glClearBufferuiv(GL_COLOR, 0, c);
+			}
+			else if (T->IsIntegerFormat())
 			{
 				if (T->IsUnsignedFormat())
 					glClearBufferuiv(GL_COLOR, 0, c_unorm.U32);
@@ -1505,7 +1519,8 @@ std::string GSDeviceOGL::GetVSSource(VSSelector sel)
 	std::string macro = fmt::format("#define VS_FST {}\n", static_cast<u32>(sel.fst))
 		+ fmt::format("#define VS_IIP {}\n", static_cast<u32>(sel.iip))
 		+ fmt::format("#define VS_POINT_SIZE {}\n", static_cast<u32>(sel.point_size))
-	  + fmt::format("#define VS_EXPAND {}\n", static_cast<int>(sel.expand));
+		+ fmt::format("#define VS_EXPAND {}\n", static_cast<u32>(sel.expand))
+		+ fmt::format("#define VS_Z_INTEGER {}\n", static_cast<u32>(sel.zint));
 
 	std::string src = GenGlslHeader("vs_main", GL_VERTEX_SHADER, macro);
 	src += m_shader_tfx_vgs;
@@ -1575,7 +1590,10 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_ZTST {}\n", sel.ztst)
 		+ fmt::format("#define PS_AA1 {}\n", static_cast<u32>(sel.aa1))
 		+ fmt::format("#define PS_ABE {}\n", sel.abe)
-		+ fmt::format("#define PS_ANISOTROPIC_FILTERING {}", sel.sw_aniso)
+		+ fmt::format("#define PS_ANISOTROPIC_FILTERING {}\n", sel.sw_aniso)
+		+ fmt::format("#define PS_Z_RT_SLOT {}\n", sel.z_rt_slot)
+		+ fmt::format("#define PS_Z_INTEGER {}\n", static_cast<u32>(sel.zint))
+		+ fmt::format("#define PS_TEX_INTEGER {}\n", sel.texint)
 	;
 
 	std::string src = GenGlslHeader("ps_main", GL_FRAGMENT_SHADER, macro);
@@ -2480,13 +2498,20 @@ void GSDeviceOGL::OMSetDepthStencilState(GSDepthStencilOGL* dss)
 	dss->SetupStencil();
 }
 
-void GSDeviceOGL::OMSetColorMaskState(OMColorMaskSelector sel)
+void GSDeviceOGL::OMSetColorMaskState(OMColorMaskSelector sel, bool ds_as_rt_mask)
 {
 	if (sel.wrgba != GLState::wrgba)
 	{
 		GLState::wrgba = sel.wrgba;
 
 		glColorMaski(0, sel.wr, sel.wg, sel.wb, sel.wa);
+	}
+
+	if (GLState::ds_as_rt_mask != ds_as_rt_mask)
+	{
+		GLState::ds_as_rt_mask = ds_as_rt_mask;
+
+		glColorMaski(1, ds_as_rt_mask, ds_as_rt_mask, ds_as_rt_mask, ds_as_rt_mask);
 	}
 }
 
@@ -2682,9 +2707,10 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	if (config.pal)
 		CommitClear(config.pal, true);
 
-	const GSVector2i rtsize = (config.rt ? config.rt : config.ds)->GetSize();
+	const GSVector2i rtsize = (config.rt ? config.rt : (config.ds ? config.ds : config.ds_int))->GetSize();
 	GSTexture* colclip_rt = g_gs_device->GetColorClipTexture();
 	GSTexture* draw_rt_clone = nullptr;
+	GSTexture* draw_ds_as_rt_clone = nullptr;
 	GSTexture* draw_ds_clone = nullptr;
 	GSTexture* primid_texture = nullptr;
 
@@ -2804,7 +2830,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
 		PSSetShaderResource(2, colclip_rt ? colclip_rt : config.rt);
 	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier) && config.ps.IsFeedbackLoopDepth())
-		PSSetShaderResource(4, m_features.depth_feedback ? config.ds : m_ds_as_rt);
+		PSSetShaderResource(4, config.ds_int ? config.ds_int : (m_features.depth_feedback ? config.ds : m_ds_as_rt));
 
 	SetupSampler(config.sampler);
 
@@ -2822,7 +2848,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	SetupPipeline(psel);
 
 	bool rt_hazard_barrier = config.tex && config.tex == config.rt;
-	if (config.tex && config.tex == config.ds)
+	if (config.tex && (config.tex == config.ds || config.tex == config.ds_int))
 	{
 		if (m_features.test_and_sample_depth && !config.depth.zwe && !config.ps.IsFeedbackLoopDepth() && !config.alpha_second_pass.ps.IsFeedbackLoopDepth())
 		{
@@ -2891,7 +2917,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(3, primid_texture);
 	}
 
-	if (m_ds_as_rt)
+	if (config.ds_int || m_ds_as_rt)
 	{
 		// We must clear the blend equation of any dual source blending factors or
 		// it may interact badly with MRTs, even if blending is disabled.
@@ -2911,7 +2937,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	}
 
 	GSTexture* draw_rt = colclip_rt ? colclip_rt : config.rt;
-	GSTexture* draw_ds_as_rt = m_ds_as_rt;
+	GSTexture* draw_ds_as_rt = config.ds_int ? config.ds_int : m_ds_as_rt;
+	const bool ds_as_rt_mask = config.ds_int ? (config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE) : (m_ds_as_rt != nullptr);
 	GSTexture* draw_ds = config.ds;
 
 	// Clear texture binding when it's bound to RT or DS.
@@ -2944,8 +2971,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool tex_is_fb = config.tex && config.tex == draw_rt;
-	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT() || tex_is_fb;
-	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb;
+	const bool rt_feedbackloop_pass1 = draw_rt && (config.ps.IsFeedbackLoopRT() || tex_is_fb);
+	const bool rt_feedbackloop_pass2 = draw_rt && (config.alpha_second_pass.ps.IsFeedbackLoopRT() || tex_is_fb);
 	if (draw_rt && !m_features.texture_barrier && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy) || tex_is_fb) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2))))
 	{
@@ -2959,8 +2986,8 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("GL: Failed to allocate temp texture for RT copy.");
 	}
 
-	const bool ds_feedbackloop_pass1 = config.ps.IsFeedbackLoopDepth();
-	const bool ds_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass1 = draw_ds && config.ps.IsFeedbackLoopDepth();
+	const bool ds_feedbackloop_pass2 = draw_ds && config.alpha_second_pass.ps.IsFeedbackLoopDepth();
 	if (draw_ds && !m_features.texture_barrier && m_features.depth_feedback &&
 		(config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) && (ds_feedbackloop_pass1 || ds_feedbackloop_pass2))
 	{
@@ -2971,8 +2998,20 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("GL: Failed to allocate temp texture for DS copy.");
 	}
 
+	const bool ds_as_rt_feedbackloop_pass1 = draw_ds_as_rt && config.ps.IsFeedbackLoopDepth();
+	const bool ds_as_rt_feedbackloop_pass2 = draw_ds_as_rt && config.alpha_second_pass.ps.IsFeedbackLoopDepth();
+	if (draw_ds_as_rt && !m_features.texture_barrier &&
+		(config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) && (ds_as_rt_feedbackloop_pass1 || ds_as_rt_feedbackloop_pass2))
+	{
+		// Requires a copy of the DS.
+		draw_ds_as_rt_clone = CreateTexture(rtsize.x, rtsize.y, 1, draw_ds_as_rt->GetFormat(), true);
+
+		if (!draw_ds_as_rt_clone)
+			Console.Warning("GL: Failed to allocate temp texture for DS as RT copy.");
+	}
+
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, &config.scissor);
-	OMSetColorMaskState(config.colormask);
+	OMSetColorMaskState(config.colormask, ds_as_rt_mask);
 	SetupOM(config.depth);
 
 	// Clear stencil as close as possible to the RT bind, to avoid framebuffer swaps.
@@ -2982,9 +3021,11 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
 
-	SendHWDraw(config, rt_feedbackloop_pass1 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass1 ? draw_ds_clone : nullptr, draw_ds,
+	SendHWDraw(config, rt_feedbackloop_pass1 ? draw_rt_clone : nullptr, draw_rt,
+		ds_as_rt_feedbackloop_pass1 ? draw_ds_as_rt_clone : nullptr, draw_ds_as_rt,
+		ds_feedbackloop_pass1 ? draw_ds_clone : nullptr, draw_ds,
 		config.require_one_barrier, config.require_full_barrier);
-
+	
 	if (config.blend_multi_pass.enable)
 	{
 		if (config.blend.IsEffective(config.colormask))
@@ -3030,7 +3071,9 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		}
 		const bool one_barrier = config.alpha_second_pass.require_one_barrier && m_features.feedback_loops();
 		SetupOM(config.alpha_second_pass.depth);
-		SendHWDraw(config, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt, ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds,
+		SendHWDraw(config, rt_feedbackloop_pass2 ? draw_rt_clone : nullptr, draw_rt,
+			ds_as_rt_feedbackloop_pass2 ? draw_ds_as_rt_clone : nullptr, draw_ds_as_rt,
+			ds_feedbackloop_pass2 ? draw_ds_clone : nullptr, draw_ds,
 			one_barrier, config.alpha_second_pass.require_full_barrier);
 	}
 
@@ -3052,7 +3095,9 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 }
 
 void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
-	GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
+	GSTexture* draw_rt_clone, GSTexture* draw_rt,
+	GSTexture* draw_ds_as_rt_clone, GSTexture* draw_ds_as_rt,
+	GSTexture* draw_ds_clone, GSTexture* draw_ds,
 	const bool one_barrier, const bool full_barrier)
 {
 #ifdef PCSX2_DEVBUILD
@@ -3070,14 +3115,19 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
 			if (config.tex && config.tex == draw_rt)
 				PSSetShaderResource(0, draw_rt_clone);
 		}
-		if (draw_ds_clone)
+		if (draw_ds_as_rt_clone)
+		{
+			CopyRect(draw_ds_as_rt, draw_ds_as_rt_clone, drawarea, drawarea.left, drawarea.top);
+			PSSetShaderResource(4, draw_ds_as_rt_clone);
+		}
+		else if (draw_ds_clone)
 		{
 			CopyRect(draw_ds, draw_ds_clone, drawarea, drawarea.left, drawarea.top);
 			PSSetShaderResource(4, draw_ds_clone);
 		}
 	};
 
-	const GSVector4i rtsize(0, 0, (draw_rt ? draw_rt : draw_ds)->GetWidth(), (draw_rt ? draw_rt : draw_ds)->GetHeight());
+	const GSVector4i rtsize((draw_rt ? draw_rt : (draw_ds_as_rt ? draw_ds_as_rt : draw_ds))->GetRect());
 
 	if (full_barrier)
 	{

@@ -210,7 +210,6 @@ private:
 
 	void ResetStates();
 	void HandleProvokingVertexFirst();
-	void HandleZIntegerVertices();
 	void SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt);
 	void EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	u32 EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);

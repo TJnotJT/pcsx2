@@ -1403,7 +1403,8 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	m_features.vs_expand = !GSConfig.DisableVertexShaderExpand;
 	m_features.depth_feedback = false;
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
-	m_features.depth_integer = m_features.vs_expand && m_features.feedback_loops();
+	m_features.depth_integer = GSConfig.HWZIntegerMode != GSHardwareZIntegerMode::Disabled &&
+		m_features.vs_expand && m_features.feedback_loops();
 
 	m_features.dxt_textures = SupportsTextureFormat(DXGI_FORMAT_BC1_UNORM) &&
 	                          SupportsTextureFormat(DXGI_FORMAT_BC2_UNORM) &&
@@ -2661,7 +2662,7 @@ bool GSDevice12::CreateBuffers()
 		return false;
 	}
 
-	if (!m_expand_index_stream_buffer.Create(m_features.aa1 ? INDEX_BUFFER_SIZE : 4, false))
+	if (!m_expand_index_stream_buffer.Create(UseVSExpandIndexBuffer() ? INDEX_BUFFER_SIZE : 4, false))
 	{
 		Host::ReportErrorAsync("GS", "Failed to allocate expansion index buffer (VS resource)");
 		return false;
@@ -3181,7 +3182,7 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
 	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-	sm.AddMacro("VS_Z_INTEGER", static_cast<int>(sel.zint));
+	sm.AddMacro("VS_Z_INTEGER", sel.zint);
 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
@@ -3263,7 +3264,6 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	sm.AddMacro("PS_Z_RT_SLOT", sel.z_rt_slot);
 	sm.AddMacro("PS_Z_INTEGER", static_cast<u32>(sel.zint));
-	sm.AddMacro("PS_PRIMCLASS", sel.primclass);
 	sm.AddMacro("PS_TEX_INTEGER", sel.texint);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
