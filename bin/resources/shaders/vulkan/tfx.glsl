@@ -313,7 +313,7 @@ void main()
 			ProcessedVertex other = load_vertex(load_index(3 * prim_id + i1));
 			ProcessedVertex opposite = load_vertex(load_index(3 * prim_id + i2));
 			vsOut.z_base = min(vtx.z, min(other.z, opposite.z));
-			vtx.p.z = float(vtx.z - vsOut.z_base);
+			vtx.p.z = exp2(-32.0f) * float(vtx.z - vsOut.z_base);
 		#endif
 	}
 	else
@@ -367,7 +367,7 @@ void main()
 
 		#if VS_Z_INTEGER
 			vsOut.z_base = min(vtx.z, min(other.z, opposite.z));
-			vtx.p.z = float(vtx.z - vsOut.z_base);
+			vtx.p.z = exp2(-32.0f) * float(vtx.z - vsOut.z_base);
 		#endif
 	}
 
