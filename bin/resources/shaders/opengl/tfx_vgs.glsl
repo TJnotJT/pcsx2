@@ -103,7 +103,7 @@ void vs_main()
 
 	#if VS_Z_INTEGER
 		VSout.z_base = i_z;
-		VSout.p.z = 0.0f; // Flat Z by default
+		gl_Position.z = 0.0f; // Flat Z by default
 	#endif
 }
 

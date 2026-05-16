@@ -103,7 +103,7 @@ void main()
 
 	#if VS_Z_INTEGER
 		vsOut.z_base = a_z;
-		vsOut.p.z = 0.0f; // Flat Z by default
+		gl_Position.z = 0.0f; // Flat Z by default
 	#endif
 
 	vsOut.c = vec4(a_c);
