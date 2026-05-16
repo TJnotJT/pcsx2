@@ -256,7 +256,7 @@ void main()
 
 #if VS_Z_INTEGER
 	vsOut.z_base = min(other.z, vtx.z);
-	vtx.p.z = exp2(-32.0f) * float(vtx.z - z_base);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z - vsOut.z_base);
 #endif
 
 	// Lines will be run as (0 1 2) (1 2 3)
