@@ -594,28 +594,18 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 {
 	TransitionToLayout(cmdbuf, Layout::ClearDst);
 
-	if (IsDepthStencil())
+	const alignas(16) VkClearValue cv = GetVkClearValue();
+	if (IsDepthStencil() && !IsDepthColor())
 	{
-		if (IsDepthColor())
-		{
-			alignas(16) VkClearColorValue cv;
-			GSVector4::store<true>(cv.float32, GetUNormClearColor());
-			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
-			vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
-		}
-		else
-		{
-			const VkClearDepthStencilValue cv = {m_clear_value.depth};
-			const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 1u, 0u, 1u};
-			vkCmdClearDepthStencilImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
-		}
+		// DepthStencil clear
+		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 1u, 0u, 1u};
+		vkCmdClearDepthStencilImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv.depthStencil, 1, &srr);
 	}
-	else if (IsRenderTarget())
+	else if (IsRenderTarget() || IsDepthColor())
 	{
-		alignas(16) VkClearColorValue cv;
-		GSVector4::store<true>(cv.float32, GetUNormClearColor());
-		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
-		vkCmdClearColorImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+		// RT clear
+		const VkImageSubresourceRange srr = { VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u };
+		vkCmdClearColorImage(cmdbuf, GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv.color, 1, &srr);
 	}
 	else
 	{
@@ -623,6 +613,35 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 	}
 
 	SetState(GSTexture::State::Dirty);
+}
+
+VkClearValue GSTextureVK::GetVkClearValue() const
+{
+	VkClearValue cv{};
+	if (IsDepthStencil())
+	{
+		if (IsDepthColor())
+		{
+			cv.color.float32[0] = m_clear_value.depth;
+		}
+		else
+		{
+			cv.depthStencil.depth = m_clear_value.depth;
+			cv.depthStencil.stencil = 1;
+		}
+	}
+	else if (IsRenderTarget())
+	{
+		if (IsDepthInteger())
+		{
+			cv.color.uint32[0] = m_clear_value.color;
+		}
+		else
+		{
+			GSVector4::store<true>(cv.color.float32, GetUNormClearColor());
+		}
+	}
+	return cv;
 }
 
 void GSTextureVK::OverrideImageLayout(Layout new_layout)

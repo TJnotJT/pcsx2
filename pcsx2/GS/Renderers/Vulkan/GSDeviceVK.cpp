@@ -2951,7 +2951,7 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 			// so use an attachment clear
 			VkClearAttachment ca;
 			ca.aspectMask = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-			GSVector4::store<false>(ca.clearValue.color.float32, sTexVK->GetUNormClearColor());
+			ca.clearValue = sTexVK->GetVkClearValue();
 			ca.clearValue.depthStencil.depth = sTexVK->GetClearDepth();
 			ca.clearValue.depthStencil.stencil = 0;
 			ca.colorAttachment = 0;
@@ -3671,16 +3671,8 @@ void GSDeviceVK::OMSetRenderTargets(
 					{
 						VkClearAttachment& ca = cas[num_ca++];
 						ca.aspectMask = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-						if (depth)
-						{
-							ca.colorAttachment = 0;
-							ca.clearValue.depthStencil = { tex->GetClearDepth() };
-						}
-						else
-						{
-							ca.colorAttachment = colorAttachment;
-							GSVector4::store<false>(ca.clearValue.color.float32, tex->GetUNormClearColor());
-						}
+						ca.clearValue = tex->GetVkClearValue();
+						ca.colorAttachment = depth ? 0 : colorAttachment;
 					}
 
 					tex->SetState(GSTexture::State::Dirty);
@@ -6170,9 +6162,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			{
 				alignas(16) VkClearValue cvs[2];
 				u32 cv_count = 0;
-				GSVector4::store<true>(&cvs[cv_count++].color, draw_rt->GetUNormClearColor());
+				cvs[cv_count++] = draw_rt->GetVkClearValue();
 				if (draw_ds)
-					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
+					cvs[cv_count++] = draw_ds->GetVkClearValue();
 
 				BeginClearRenderPass(GetTFXRenderPass(
 						true, false, pipe.ds, false, false, pipe.IsRTFeedbackLoop(), false, pipe.IsTestingAndSamplingDepth(),
@@ -6432,10 +6424,12 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			}
 			if (pipe.ds_as_rt)
 			{
-				GSVector4::store<true>(&cvs[cv_count++].color, draw_ds_as_rt->GetUNormClearColor());
+				cvs[cv_count++] = static_cast<GSTextureVK*>(draw_ds_as_rt)->GetVkClearValue();
 			}
 			if (draw_ds)
-				cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 0};
+			{
+				cvs[cv_count++] = static_cast<GSTextureVK*>(draw_ds)->GetVkClearValue();
+			}
 
 			BeginClearRenderPass(rp, render_area, cvs, cv_count);
 		}
@@ -6546,9 +6540,9 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			{
 				alignas(16) VkClearValue cvs[2];
 				u32 cv_count = 0;
-				GSVector4::store<true>(&cvs[cv_count++].color, draw_rt->GetUNormClearColor());
+				cvs[cv_count++] = draw_rt->GetVkClearValue();
 				if (draw_ds)
-					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
+					cvs[cv_count++] = draw_ds->GetVkClearValue();
 
 				BeginClearRenderPass(GetTFXRenderPass(true, false, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
 					false, pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_LOAD_OP_DONT_CARE,

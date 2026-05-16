@@ -1210,28 +1210,40 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 {
 	pxAssert(IsRenderTargetOrDepthStencil());
 
-	if (IsDepthStencil())
+	if (IsDepthStencil() && !IsDepthColor())
 	{
-		if (IsDepthColor())
-		{
-			GetDepthColor()->TransitionToState(cmdlist, ResourceState::RenderTarget);
-			cmdlist.list4->ClearRenderTargetView(GetDepthColor()->GetWriteDescriptor(),
-				GetUNormClearColor().v, 0, nullptr);
-		}
-		else
-		{
-			TransitionToState(cmdlist, ResourceState::DepthWriteStencil);
-			cmdlist.list4->ClearDepthStencilView(GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH,
-				m_clear_value.depth, 0, 0, nullptr);
-		}
+		TransitionToState(cmdlist, ResourceState::DepthWriteStencil);
+		cmdlist.list4->ClearDepthStencilView(GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH,
+			m_clear_value.depth, 0, 0, nullptr);
 	}
 	else if (IsRenderTarget())
 	{
 		TransitionToState(cmdlist, ResourceState::RenderTarget);
-		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GetUNormClearColor().v, 0, nullptr);
+		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GetDX12ClearValue().v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
+}
+
+GSVector4 GSTexture12::GetDX12ClearValue() const
+{
+	GSVector4 cv{};
+	if (IsDepthStencil())
+	{
+		cv.x = m_clear_value.depth;
+	}
+	else if (IsRenderTarget())
+	{
+		if (IsDepthInteger())
+		{
+			cv.x = static_cast<float>(m_clear_value.color);
+		}
+		else
+		{
+			cv = GetUNormClearColor();
+		}
+	}
+	return cv;
 }
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)

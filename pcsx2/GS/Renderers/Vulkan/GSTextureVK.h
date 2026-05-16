@@ -95,6 +95,7 @@ public:
 	void TransitionToLayout(Layout layout);
 	void CommitClear();
 	void CommitClear(VkCommandBuffer cmdbuf);
+	VkClearValue GetVkClearValue() const;
 
 	// Used when the render pass is changing the image layout, or to force it to
 	// VK_IMAGE_LAYOUT_UNDEFINED, if the existing contents of the image is
