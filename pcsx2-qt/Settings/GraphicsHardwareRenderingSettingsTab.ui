@@ -276,6 +276,7 @@
   <tabstop>anisotropicFiltering</tabstop>
   <tabstop>dithering</tabstop>
   <tabstop>blending</tabstop>
+  <tabstop>intDepth</tabstop>
   <tabstop>mipmapping</tabstop>
   <tabstop>accurateAlphaTest</tabstop>
   <tabstop>hwAA1</tabstop>

@@ -863,6 +863,7 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(OverrideTextureBarriers) &&
 		OpEqu(DepthFeedbackMode) &&
 		OpEqu(HWROVBarriersVK) &&
+		OpEqu(HWZIntegerMode) &&
 
 		OpEqu(CAS_Sharpness) &&
 		OpEqu(ShadeBoost_Brightness) &&
@@ -916,6 +917,8 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(OverrideTextureBarriers) &&
 		   OpEqu(DepthFeedbackMode) &&
 		   OpEqu(HWAA1) &&
+		   ((HWZIntegerMode == GSHardwareZIntegerMode::Disabled) ==
+			   (right.HWZIntegerMode == GSHardwareZIntegerMode::Disabled)) &&
 		   OpEqu(ExclusiveFullscreenControl);
 }
 

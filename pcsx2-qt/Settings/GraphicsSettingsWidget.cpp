@@ -533,7 +533,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog, 
 			   "The higher the setting, the more blending is emulated in the shader accurately, and the higher the speed penalty will be."));
 
 		dialog()->registerWidgetHelp(m_hw.intDepth, tr("Integer Depth"), tr("Disabled"),
-			tr("Enable PS2 integer depth emulation.<br> "
+			tr("Emulate depth using 32 bit integers like the GS.<br> "
 			   "May result in a significant performance penalty and is recommended only with ROV or framebuffer fetch."));
 
 		dialog()->registerWidgetHelp(m_advanced.texturePreloading, tr("Texture Preloading"), tr("Full (Hash Cache)"),
