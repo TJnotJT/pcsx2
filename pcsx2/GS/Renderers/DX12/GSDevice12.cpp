@@ -4366,6 +4366,7 @@ void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
+	GSVector2i rtsize(config.rt ? config.rt->GetSize() : (config.ds_int ? config.ds_int->GetSize() : config.ds->GetSize()));
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
 	GSTexture12* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
 	GSTexture12* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds);
@@ -4389,9 +4390,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
-
-	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
-	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : (config.ds ? config.ds->GetSize() : config.ds_int->GetSize()));
 
 	PipelineSelector& pipe = m_pipeline_selector;
 
@@ -4599,7 +4597,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
 		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
-		config.rt ? config.rt->GetSize() : config.ds->GetSize());
+		rtsize);
 
 	// DX12 equivalent of vkCmdClearAttachments for StencilOne
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
