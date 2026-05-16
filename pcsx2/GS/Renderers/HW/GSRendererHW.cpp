@@ -7901,6 +7901,18 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				return;
 			}
 
+			if (!m_channel_shuffle)
+			{
+				const GSVector4i src_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.y);
+
+				// If the two don't overlap, there's no need to copy.
+				if (m_r.rintersect(src_rect).rempty())
+				{
+					unscaled_size = rt->GetUnscaledSize();
+					scale = rt->GetScale();
+					return;
+				}
+			}
 			GL_CACHE("HW: Source is render target, taking copy.");
 			src_target = rt;
 		}
@@ -7919,6 +7931,19 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				unscaled_size = ds->GetUnscaledSize();
 				scale = ds->GetScale();
 				return;
+			}
+
+			if (!m_channel_shuffle)
+			{
+				const GSVector4i src_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.y);
+
+				// If the two don't overlap, there's no need to copy.
+				if (m_r.rintersect(src_rect).rempty())
+				{
+					unscaled_size = ds->GetUnscaledSize();
+					scale = ds->GetScale();
+					return;
+				}
 			}
 
 			// Can't safely read the depth buffer, so we need to take a copy of it.
@@ -9266,7 +9291,7 @@ bool GSRendererHW::CanUseSwPrimRender(bool no_rt, bool no_ds, bool draw_sprite_t
 			else
 			{
 				// If the target isn't dirty we might have valid data, so let's check their areas overlap, if so we need to read it back for SW.
-				GSVector4i src_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.x);
+				GSVector4i src_rect = GSVector4i(m_vt.m_min.t.x, m_vt.m_min.t.y, m_vt.m_max.t.x, m_vt.m_max.t.y);
 				GSVector4i area = g_texture_cache->TranslateAlignedRectByPage(src_target, m_cached_ctx.TEX0.TBP0, m_cached_ctx.TEX0.PSM, m_cached_ctx.TEX0.TBW, src_rect, false);
 				req_readback = !area.rintersect(src_target->m_drawn_since_read).eq(GSVector4i::zero());
 			}
