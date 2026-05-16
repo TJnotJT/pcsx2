@@ -382,7 +382,7 @@ void main()
 	ProcessedVertex other = load_vertex(load_index(vid ^ 1));
 
 	VSout.z_base = min(vtx.z, other.z);
-	vtx.p.z = exp2(-32.0f) * float(vtx.z - z_base);
+	vtx.p.z = exp2(-32.0f) * float(vtx.z - VSout.z_base);
 
 #elif VS_Z_INTEGER && (VS_EXPAND == VS_EXPAND_POINT_Z_INTEGER)
 	vtx = load_vertex(vid);
