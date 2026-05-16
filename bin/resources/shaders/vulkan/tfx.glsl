@@ -103,7 +103,7 @@ void main()
 
 	#if VS_Z_INTEGER
 		vsOut.z_base = a_z;
-		vsOut.p.z = 0.0f;
+		vsOut.p.z = 0.0f; // Flat Z by default
 	#endif
 
 	vsOut.c = vec4(a_c);
@@ -200,7 +200,7 @@ ProcessedVertex load_vertex(uint index)
 	vtx.t.z = a_f.r;
 
 	#if VS_Z_INTEGER
-		vtx.z = z;
+		vtx.z = a_z;
 	#else
 		vtx.z = 0;
 	#endif
@@ -222,7 +222,7 @@ void main()
 
 #if VS_Z_INTEGER
 	vsOut.z_base = vtx.z;
-	vsOut.p.z = 0.0f;
+	vtx.p.z = 0.0f; // Flat Z
 #endif
 
 #elif (VS_EXPAND == VS_EXPAND_LINE) || (VS_EXPAND == VS_EXPAND_LINE_AA1)
@@ -286,7 +286,7 @@ void main()
 
 #if VS_Z_INTEGER
 	vsOut.z_base = vtx.z;
-	vsOut.p.z = 0.0f; // Flat Z
+	vtx.p.z = 0.0f; // Flat Z
 #endif
 
 #elif VS_EXPAND == VS_EXPAND_TRIANGLE_AA1

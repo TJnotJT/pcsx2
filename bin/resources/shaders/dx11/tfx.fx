@@ -1403,8 +1403,8 @@ void ps_main(PS_INPUT input)
 	float input_z = input.p.z;
 #endif
 
-	// Must floor before depth testing.
 #if !PS_Z_INTEGER && PS_ZFLOOR
+	// Must floor before depth testing.
 	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
@@ -1662,7 +1662,7 @@ if (bad)
 #endif
 
 #if PS_RETURN_DEPTH
-	// Standard depth write
+	// Non-ROV depth write
 	#if PS_Z_INTEGER
 		#if ZWRITE_FOR_ZINT
 			output_real.depth = input_z;

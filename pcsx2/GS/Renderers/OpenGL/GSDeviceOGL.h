@@ -295,6 +295,7 @@ public:
 	__fi bool IsDownloadPBODisabled() const { return m_disable_download_pbo; }
 	__fi u32 GetFBORead() const { return m_fbo_read; }
 	__fi u32 GetFBOWrite() const { return m_fbo_write; }
+	__fi bool UseVSExpandIndexBuffer() const { return m_features.aa1 || m_features.depth_integer; }
 	__fi GLStreamBuffer* GetTextureUploadBuffer() const { return m_texture_upload_buffer.get(); }
 	void CommitClear(GSTexture* t, bool use_write_fbo);
 
@@ -353,7 +354,9 @@ public:
 
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const GSHWDrawConfig& config,
-		GSTexture* draw_rt_clone, GSTexture* draw_rt, GSTexture* draw_ds_clone, GSTexture* draw_ds,
+		GSTexture* draw_rt_clone, GSTexture* draw_rt,
+		GSTexture* draw_ds_as_rt_clone, GSTexture* draw_ds_as_rt,
+		GSTexture* draw_ds_clone, GSTexture* draw_ds,
 		const bool one_barrier, const bool full_barrier);
 	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
 
@@ -375,7 +378,7 @@ public:
 	void OMSetBlendState(bool enable = false, GLenum src_factor = GL_ONE, GLenum dst_factor = GL_ZERO, GLenum op = GL_FUNC_ADD,
 		GLenum src_factor_alpha = GL_ONE, GLenum dst_factor_alpha = GL_ZERO, bool is_constant = false, u8 constant = 0);
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, const GSVector4i* scissor = nullptr);
-	void OMSetColorMaskState(OMColorMaskSelector sel = OMColorMaskSelector());
+	void OMSetColorMaskState(OMColorMaskSelector sel = OMColorMaskSelector(), bool ds_as_rt_write = false);
 	void OMUnbindTexture(GSTextureOGL* tex);
 
 	void SetViewport(const GSVector2i& viewport);

@@ -70,7 +70,7 @@ GSDevice11::GSDevice11()
 	m_features.test_and_sample_depth = false;
 	m_features.depth_feedback = false;
 	m_features.aa1 = false;
-	m_features.depth_integer = true;
+	m_features.depth_integer = false;
 }
 
 GSDevice11::~GSDevice11() = default;
@@ -657,6 +657,7 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 	m_features.test_and_sample_depth = (m_feature_level >= D3D_FEATURE_LEVEL_11_0);
 	m_features.depth_feedback = m_features.feedback_loops();
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
+	m_features.depth_integer = GSConfig.HWZIntegerMode != GSHardwareZIntegerMode::Disabled && m_features.vs_expand;
 
 	m_max_texture_size = (m_feature_level >= D3D_FEATURE_LEVEL_11_0) ?
 	                         D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION :
@@ -3027,7 +3028,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 	const bool ds_as_rt_feedbackloop_pass1 = draw_ds_as_rt && config.ps.IsFeedbackLoopDepth();
 	const bool ds_as_rt_feedbackloop_pass2 = draw_ds_as_rt && config.alpha_second_pass.ps.IsFeedbackLoopDepth();
-	if (draw_ds_as_rt && m_features.depth_feedback && (config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
+	if (draw_ds_as_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(ds_as_rt_feedbackloop_pass1 || ds_as_rt_feedbackloop_pass2))
 	{
 		// Requires a copy of the DS.
