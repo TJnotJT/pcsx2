@@ -2948,8 +2948,8 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		draw_ds = m_state.current_ds;
 	}
 
-	const bool rt_feedbackloop_pass1 = config.ps.IsFeedbackLoopRT();
-	const bool rt_feedbackloop_pass2 = config.alpha_second_pass.ps.IsFeedbackLoopRT();
+	const bool rt_feedbackloop_pass1 = config.IsFeedbackLoopRT(config.ps);
+	const bool rt_feedbackloop_pass2 = config.IsFeedbackLoopRT(config.alpha_second_pass.ps);
 	if (draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.multidraw_fb_copy)) &&
 		(rt_feedbackloop_pass1 || rt_feedbackloop_pass2))))
 	{
@@ -3034,7 +3034,7 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 	const bool one_barrier, const bool full_barrier)
 {
 #ifdef PCSX2_DEVBUILD
-	if ((one_barrier || full_barrier) && !((config.tex && config.tex == draw_rt) || config.ps.IsFeedbackLoopRT() || config.ps.IsFeedbackLoopDepth())) [[unlikely]]
+	if ((one_barrier || full_barrier) && !((config.tex && config.tex == draw_rt) || config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopDepth(config.ps))) [[unlikely]]
 		Console.Warning("D3D11: Possible unnecessary copy detected.");
 #endif
 
@@ -3080,7 +3080,7 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 	}
 
 	if (one_barrier)
-		CopyAndBind(ProcessCopyArea(rtsize, config.drawarea));
+		CopyAndBind(ProcessCopyArea(rtsize, config.tex_hazard ? config.drawarea.runion(config.samplearea) : config.drawarea));
 
 	Draw(config);
 }

@@ -1351,11 +1351,18 @@ GSVector4 GSRendererHW::RealignTargetTextureCoordinate(const GSTextureCache::Sou
 	return half_offset;
 }
 
-GSVector4i GSRendererHW::ComputeBoundingBox(const GSVector2i& rtsize, float rtscale)
+GSVector4i GSRendererHW::ComputeBoundingBoxRT(const GSVector2i& rtsize, float rtscale)
 {
 	const GSVector4 offset = GSVector4(-1.0f, 1.0f); // Round value
 	const GSVector4 box = m_vt.m_min.p.upld(m_vt.m_max.p) + offset.xxyy();
 	return GSVector4i(box * GSVector4(rtscale)).rintersect(GSVector4i(0, 0, rtsize.x, rtsize.y));
+}
+
+GSVector4i GSRendererHW::ComputeBoundingBoxTex(const GSVector2i& texsize, float texscale)
+{
+	const GSVector4 offset = GSVector4(-1.0f, 1.0f); // Round value
+	const GSVector4 box = m_vt.m_min.t.upld(m_vt.m_max.t) + offset.xxyy();
+	return GSVector4i(box * GSVector4(texscale)).rintersect(GSVector4i(0, 0, texsize.x, texsize.y));
 }
 
 void GSRendererHW::MergeSprite(GSTextureCache::Source* tex)
@@ -6154,7 +6161,7 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	m_conf.vs.iip = !IsFlatShaded();
 }
 
-void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
+void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -6197,6 +6204,12 @@ void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt)
 		ComputeDrawlistGetSize(rt->m_scale);
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
+
+		if (m_conf.rt == m_conf.tex && m_drawlist_bbox.size() > 0)
+		{
+			GetPrimitiveOverlapDrawlistTextureBBoxes(tex->GetScale());
+			m_conf.drawlist_bbox_tex = &m_drawlist_bbox_tex;
+		}
 	}
 }
 
@@ -7884,7 +7897,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	auto HandleBarrierHazard = [&](bool src_empty) {
 		if (rt && m_conf.tex == m_conf.rt)
 		{
-			m_conf.ps.tex_hazard = 1;
+			m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_RT;
 			if (m_prim_overlap == PRIM_OVERLAP_NO || src_empty || m_channel_shuffle || !g_gs_device->Features().feedback_loops())
 				m_conf.require_one_barrier = true;
 			else
@@ -7900,7 +7913,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 			// TODO: Add gpu copies for depth on VK/DX12 that doesn't rely on feedback loops.
 			else if (g_gs_device->Features().feedback_loops())
 			{
-				m_conf.ps.tex_hazard = 2;
+				m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_DEPTH;
 				if (m_prim_overlap == PRIM_OVERLAP_NO || src_empty || m_channel_shuffle)
 					m_conf.require_one_barrier = true;
 				else
@@ -8045,7 +8058,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 				}
 
 				m_conf.cb_ps.ChannelShuffleOffset = GSVector2((horizontal_offset - m_r.x) * tex->GetScale(), (vertical_offset - m_r.y) * tex->GetScale());
-				m_conf.ps.tex_hazard = 1;
+				m_conf.tex_hazard = GSHWDrawConfig::TEX_HAZARD_RT;
 				target_region = false;
 				source_region.bits = 0;
 
@@ -8721,7 +8734,7 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 	{
 		m_conf.alpha_second_pass.ps.DisableDepthOutput();
 	}
-	if (m_conf.alpha_second_pass.ps.IsFeedbackLoopRT() || m_conf.alpha_second_pass.ps.IsFeedbackLoopDepth())
+	if (m_conf.IsFeedbackLoopRT(m_conf.alpha_second_pass.ps) || m_conf.IsFeedbackLoopDepth(m_conf.alpha_second_pass.ps))
 	{
 		m_conf.alpha_second_pass.require_one_barrier = m_conf.require_one_barrier;
 		m_conf.alpha_second_pass.require_full_barrier = m_conf.require_full_barrier;
@@ -8967,6 +8980,9 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	const float rtscale = rt_or_ds->GetScale();
 	const GSVector2i rtsize = rt_or_ds->GetTexture()->GetSize();
 	const GSVector2i rt_unscaled_size = rt_or_ds->GetUnscaledSize();
+	
+	const float texscale = tex ? tex->GetScale() : 0.0f;
+	const GSVector2i texsize = tex ? tex->GetTexture()->GetSize() : GSVector2i(0, 0);
 
 	// Vertex shader config
 	float vs_scale_x, vs_scale_y;
@@ -8998,7 +9014,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	}
 
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
-	DetermineBarriers(rt);
+	DetermineBarriers(rt, tex);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();
@@ -9013,7 +9029,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	const GSVector4i hacked_scissor = m_channel_shuffle ? GSVector4i::cxpr(0, 0, 1024, 1024) : m_context->scissor.in;
 	const GSVector4i scissor(GSVector4i(GSVector4(rtscale) * GSVector4(hacked_scissor)).rintersect(GSVector4i::loadh(rtsize)));
 
-	m_conf.drawarea = m_channel_shuffle ? scissor : scissor.rintersect(ComputeBoundingBox(rtsize, rtscale));
+	m_conf.drawarea = m_channel_shuffle ? scissor : scissor.rintersect(ComputeBoundingBoxRT(rtsize, rtscale));
+	m_conf.samplearea = m_channel_shuffle ? scissor : GSVector4i::loadh(texsize).rintersect(ComputeBoundingBoxTex(texsize, texscale));
 	m_conf.scissor = (date_options.enabled && !date_options.barrier) ? m_conf.drawarea : scissor;
 
 	HandleProvokingVertexFirst();

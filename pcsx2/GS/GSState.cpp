@@ -2616,6 +2616,7 @@ void GSState::FlushPrim()
 		m_quad_check_valid_shuffle = false;
 		m_drawlist.clear();
 		m_drawlist_bbox.clear();
+		m_drawlist_bbox_tex.clear();
 
 		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 		{
@@ -4738,6 +4739,66 @@ GSState::PRIM_OVERLAP GSState::PrimitiveOverlap(bool save_drawlist)
 		return PRIM_OVERLAP_UNKNOW; // maybe, maybe not
 
 	return GetPrimitiveOverlapDrawlist(save_drawlist);
+}
+
+template<u32 primclass, u32 fst>
+void GSState::GetPrimitiveOverlapDrawlistTextureBBoxesImpl(float bbox_scale)
+{
+	const auto ProcessBBox = [bbox_scale](GSVector4 bbox) {
+		bbox = bbox * bbox_scale;
+		bbox = bbox + GSVector4(-1.0f, -1.0f, 1.0f, 1.0f);
+		bbox = bbox.floor().xyzw(bbox.ceil());
+		return GSVector4i(bbox);
+	};
+
+	const size_t bboxes = static_cast<u32>(m_drawlist.size());
+
+	m_drawlist_bbox_tex.resize(bboxes);
+
+	const GSVertex* RESTRICT v = m_vertex->buff;
+	const u16* RESTRICT index = m_index->buff;
+	const u32 count = m_index->tail;
+	constexpr int n = GSUtil::GetClassVertexCount(primclass);
+
+	for (u32 i = 0; i < bboxes; i++)
+	{
+		const size_t n_prims = m_drawlist[i];
+		GSVector4 bbox(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+		for (size_t prim = 0; prim < n_prims; prim++)
+		{
+			const size_t prim_base = prim * n;
+			const float q_first = primclass == GS_SPRITE_CLASS ? v[index[prim_base + 1]].RGBAQ.Q : v[index[prim_base]].RGBAQ.Q;
+			GSVector4 tex = GetTexCoordsImpl<fst>(v[index[prim_base]], q_first);
+			bbox = bbox.min(tex).xyzw(bbox.max(tex)); // union
+			for (size_t j = 1; j < n; j++) // unroll
+			{
+				tex = GetTexCoordsImpl<fst>(v[index[prim_base + j]]);
+				bbox = bbox.min(tex).xyzw(bbox.max(tex)); // union
+			}
+		}
+		m_drawlist_bbox_tex[i] = ProcessBBox(bbox);
+	}
+}
+
+void GSState::GetPrimitiveOverlapDrawlistTextureBBoxes(float bbox_scale)
+{
+	switch (m_vt.m_primclass)
+	{
+		case GS_SPRITE_CLASS:
+			if (PRIM->FST)
+				GetPrimitiveOverlapDrawlistTextureBBoxesImpl<GS_SPRITE_CLASS, 1>(bbox_scale);
+			else
+				GetPrimitiveOverlapDrawlistTextureBBoxesImpl<GS_SPRITE_CLASS, 0>(bbox_scale);
+			break;
+		case GS_TRIANGLE_CLASS:
+			if (PRIM->FST)
+				GetPrimitiveOverlapDrawlistTextureBBoxesImpl<GS_TRIANGLE_CLASS, 1>(bbox_scale);
+			else
+				GetPrimitiveOverlapDrawlistTextureBBoxesImpl<GS_TRIANGLE_CLASS, 0>(bbox_scale);
+			break;
+		default:
+			pxFailRel("Unsupported primclass"); // Currently this path is only used for channel shuffles (i.e. sprites).
+	}
 }
 
 bool GSState::SpriteDrawWithoutGaps()

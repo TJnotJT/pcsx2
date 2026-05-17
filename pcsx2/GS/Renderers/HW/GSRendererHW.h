@@ -245,7 +245,7 @@ private:
 
 	void DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, const GSVector2i& rtsize,
 		const GSVector2i& unscaled_size, float& vs_scale_x, float& vs_scale_y);
-	void DetermineBarriers(GSTextureCache::Target* rt);
+	void DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 
 	void SetTCOffset();
 	bool NextDrawColClip() const;
@@ -349,7 +349,8 @@ public:
 	bool VerifyIndices();
 	void ExpandLineIndices();
 	GSVector4 RealignTargetTextureCoordinate(const GSTextureCache::Source* tex);
-	GSVector4i ComputeBoundingBox(const GSVector2i& rtsize, float rtscale);
+	GSVector4i ComputeBoundingBoxRT(const GSVector2i& rtsize, float rtscale);
+	GSVector4i ComputeBoundingBoxTex(const GSVector2i& texsize, float texscale);
 	void MergeSprite(GSTextureCache::Source* tex);
 	float GetTextureScaleFactor() override;
 	GSVector2i GetValidSize(const GSTextureCache::Source* tex = nullptr, const bool is_shuffle = false);
