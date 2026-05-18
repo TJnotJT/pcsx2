@@ -257,18 +257,19 @@ Texture2D<float> DepthTexture : register(t4);
 SamplerState TextureSampler : register(s0);
 
 #if DX12
+	// DX12 UAV slots don't share a namespace with the OM attachments and we set them explicitly.
 	#define RT_UAV_SLOT u0
 	#define DS_UAV_SLOT u1
 #else
-	// DX11 has strange rules about UAV slots in the pixel shader
-	// when an RT is also bound.
-	#if !PS_NO_COLOR && !PS_ROV_COLOR
-		// RT bound to OM and at most depth UAV
-		#define RT_UAV_SLOT ERROR
+	// DX11 UAV slots share the same namespace as the color OM attachments.
+
+	// The RT UAV will always be in the first slot if its used.
+	#define RT_UAV_SLOT u0
+
+	// The depth UAV slot will be in the first slot if there's no color, otherwise the second.
+	#if PS_NO_COLOR
 		#define DS_UAV_SLOT u0
 	#else
-		// No RTs bound to OM
-		#define RT_UAV_SLOT u0
 		#define DS_UAV_SLOT u1
 	#endif
 #endif

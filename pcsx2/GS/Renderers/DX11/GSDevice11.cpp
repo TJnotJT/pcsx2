@@ -2793,8 +2793,12 @@ void GSDevice11::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* rt_
 	if (changed)
 	{
 		u32 num_rtvs = rt ? 1 : 0;
-		u32 num_uavs = (rt_uav_tex ? 1 : 0) + (ds_uav_tex ? 1 : 0);
-		ID3D11UnorderedAccessView* uavs[] = { rt_uav, ds_uav };
+		u32 num_uavs = 0;
+		ID3D11UnorderedAccessView* uavs[2];
+		if (rt_uav)
+			uavs[num_uavs++] = rt_uav;
+		if (ds_uav)
+			uavs[num_uavs++] = ds_uav;
 		ID3D11RenderTargetView* rtvs[] = { rtv };
 		m_ctx->OMSetRenderTargetsAndUnorderedAccessViews(num_rtvs, rtvs, dsv, num_rtvs, num_uavs, uavs, nullptr);
 	}
