@@ -1265,16 +1265,16 @@ void ps_main()
 
 #if PS_ZTST == ZTST_GEQUAL
 	if (input_z < sample_from_depth())
-		discard;
+		DISCARD;
 #elif PS_ZTST == ZTST_GREATER
 	if (input_z <= sample_from_depth())
-		discard;
+		DISCARD;
 #endif
 
 #if PS_SCANMSK & 2
 	// fail depth test on prohibited lines
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
-		discard;
+		DISCARD;
 #endif
 
 #if PS_DATE >= 5
@@ -1303,7 +1303,7 @@ void ps_main()
 #endif
 
 	if (bad) {
-		discard;
+		DISCARD;
 	}
 
 #endif
@@ -1314,7 +1314,7 @@ void ps_main()
 	// the bad alpha value so we must keep it.
 
 	if (gl_PrimitiveID > stencil_ceil) {
-		discard;
+		DISCARD;
 	}
 #endif
 
@@ -1337,7 +1337,7 @@ void ps_main()
 
 #if PS_ATST != PS_ATST_NONE && PS_AFAIL == AFAIL_KEEP
 	if (!atst_pass)
-		discard;
+		DISCARD;
 #endif
 
 #if SW_AD_TO_HW
