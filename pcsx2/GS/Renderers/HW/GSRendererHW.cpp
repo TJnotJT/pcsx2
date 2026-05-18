@@ -7493,12 +7493,16 @@ __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
 	// Same applies in reverse for depth ROV forcing color ROV with feedback.
 	const bool color_write = (m_conf.colormask.wrgba != 0);
 	const bool depth_test = m_cached_ctx.DepthRead();
-	if (m_conf.ds && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.HasDepthOutput()))
+	
+	// Separate flag for DATE since they are many methods and the interaction with ROV is not clear.
+	const bool date = m_cached_ctx.TEST.DATE;
+
+	if (m_conf.ds && rov_color && (m_conf.ps.HasShaderDiscard() || m_conf.ps.HasDepthOutput() || date))
 	{
 		GL_INS("ROV: Color ROV with shader discard/depth write forces depth ROV");
 		rov_depth = true;
 	}
-	else if (m_conf.rt && color_write && rov_depth && (m_conf.ps.HasShaderDiscard() || depth_test))
+	else if (m_conf.rt && color_write && rov_depth && (m_conf.ps.HasShaderDiscard() || depth_test || date))
 	{
 		GL_INS("ROV: Depth ROV with shader discard forces color ROV");
 		rov_color = true;
@@ -7790,7 +7794,7 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 				m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
 				m_conf.depth.date = false; // Don't use stencil with ROV
 				m_conf.depth.date_one = false; // Don't use stencil with ROV
-				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM. FIXME: Make this nicer.
+				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM.
 				m_conf.datm = static_cast<SetDATM>(0); // Not needed
 			}
 		}
