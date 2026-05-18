@@ -7574,7 +7574,8 @@ void GSRendererHW::DetermineROVUsage()
 	bool use_rov_depth = depth_write && multipass_depth;
 
 	// In certain cases, ROV in color or depth will force ROV in the other for correctness.
-	GetForcedROVUsage(use_rov_color, use_rov_depth);
+	if (color_write && depth_write)
+		GetForcedROVUsage(use_rov_color, use_rov_depth);
 
 	// Get the number of barriers that would be used with the current config.
 	u32 barriers = 1; 
@@ -7596,27 +7597,34 @@ void GSRendererHW::DetermineROVUsage()
 	const bool color_is_rov = m_conf.rt && m_conf.rt->IsUnorderedAccess();
 	const bool depth_is_rov = m_conf.ds && m_conf.ds->IsDepthColor();
 
-	const bool color_needs_enabling = use_rov_color && !color_is_rov;
-	const bool depth_needs_enabling = use_rov_depth && !depth_is_rov;
+	// If already a ROV, continue the usage.
+	use_rov_color |= color_is_rov;
+	use_rov_depth |= depth_is_rov;
 
-	const bool needs_enabling = color_needs_enabling || depth_needs_enabling;
-
-	if (!(color_is_rov || depth_is_rov || color_needs_enabling || depth_needs_enabling))
+	if (!(use_rov_color || use_rov_depth))
 	{
-		GL_ROV("ROV: Draw=%05lld | C=%016p | D=%016p | BAR=%d | No action taken.", s_n, m_conf.rt, m_conf.ds, barriers);
+		GL_ROV("No ROV usage: Draw=%05lld | C=%016p | D=%016p | BAR=%d.", s_n, m_conf.rt, m_conf.ds, barriers);
 		return;
 	}
 
-	if (needs_enabling && barriers >= 2)
+	// Check if the heuristic suggested we should enable color/depth ROV.
+	if (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov)
 	{
-		// If already a ROV, just continue the usage.
-		use_rov_color = use_rov_color || color_is_rov;
-		use_rov_depth = use_rov_depth || depth_is_rov;
+		if (barriers < 2)
+		{
+			// Not enough barriers, so only continue whatever ROV is already enabled.
+			use_rov_color = color_is_rov;
+			use_rov_depth = depth_is_rov;
+		}
 
-		GetForcedROVUsage(use_rov_color, use_rov_depth);
+		if (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov)
+		{
+			if (color_write && depth_write)
+				GetForcedROVUsage(use_rov_color, use_rov_depth);
 
-		GL_ROV("ROV change: Draw=%05lld | C=%016p | D=%016p | BAR=%d | C=[%d=>%d] | D=[%d=>%d].",
-			s_n, m_conf.rt, m_conf.ds, barriers, color_is_rov, use_rov_color, depth_is_rov, use_rov_color);
+			GL_ROV("ROV change: Draw=%05lld | C=%016p | D=%016p | BAR=%d | C=[%d=>%d] | D=[%d=>%d].",
+				s_n, m_conf.rt, m_conf.ds, barriers, color_is_rov, use_rov_color, depth_is_rov, use_rov_depth);
+		}
 	}
 
 	GL_INS("ROV: Color ROV %s / depth ROV %s",

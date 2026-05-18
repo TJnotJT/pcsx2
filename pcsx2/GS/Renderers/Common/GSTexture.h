@@ -173,10 +173,6 @@ public:
 	{
 		return m_depth_color_active;
 	}
-	__fi void ResetROVState()
-	{
-		m_depth_color_active = false;
-	}
 	virtual bool IsUnorderedAccess() const
 	{
 		pxFailRel("Not implemented");
@@ -185,6 +181,7 @@ public:
 private:
 	void CreateDepthColor(); // Create the texture for depth color.
 public:
+	void ResetROVState(); // Reset the state for recycling/deleting.
 	void EnterDepthColor(); // Change mode to depth color for ROV use.
 	void ExitDepthColor(const char* debug_caller); // Change mode back to real depth for non-ROV use.
 public:
