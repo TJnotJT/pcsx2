@@ -398,9 +398,8 @@ private:
 
 	std::unordered_map<u32, VkSampler> m_samplers;
 
-	std::array<VkPipeline, static_cast<int>(ShaderConvert::Count)> m_convert{};
+	std::map<u32, VkPipeline> m_convert;
 	std::array<VkPipeline, static_cast<int>(PresentShader::Count)> m_present{};
-	std::array<VkPipeline, 32> m_color_copy{};
 	std::array<VkPipeline, 2> m_merge{};
 	std::array<VkPipeline, NUM_INTERLACE_SHADERS> m_interlace{};
 	VkPipeline m_colclip_setup_pipelines[2][2] = {}; // [depth][feedback_loop]
@@ -468,6 +467,8 @@ private:
 	bool CreatePipelineLayouts();
 	bool CreateRenderPasses();
 
+	VkPipeline CreateConvertPipeline(ShaderConvertKey key);
+
 	bool CompileConvertPipelines();
 	bool CompilePresentPipelines();
 	bool CompileInterlacePipelines();
@@ -483,7 +484,7 @@ private:
 
 protected:
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-		GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear) override;
+		ShaderConvertKey shader, bool linear) override;
 
 public:
 	GSDeviceVK();
@@ -550,8 +551,8 @@ public:
 	void PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 		PresentShader shader, float shaderTime, bool linear) override;
 	void DrawMultiStretchRects(
-		const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvert shader) override;
-	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvert shader);
+		const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader) override;
+	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertKey shader);
 
 	void BeginRenderPassForStretchRect(
 		GSTextureVK* dTex, const GSVector4i& dtex_rc, const GSVector4i& dst_rc, bool allow_discard = true);
