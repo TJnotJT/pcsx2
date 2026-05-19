@@ -133,6 +133,11 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
+	__fi bool IsDepth() const
+	{
+		return (m_type == Type::RenderTarget && m_format == Format::Float32) ||
+		       (m_type == Type::DepthStencil);
+	}
 
 	__fi State GetState() const { return m_state; }
 	__fi void SetState(State state) { m_state = state; }

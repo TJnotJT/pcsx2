@@ -741,7 +741,17 @@ GSTexture* GSDevice::CreateRenderTarget(int w, int h, GSTexture::Format format, 
 	return FetchSurface(GSTexture::Type::RenderTarget, w, h, 1, format, clear, !prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::RenderTarget, size.x, size.y, 1, format, clear, !prefer_reuse);
+}
+
 GSTexture* GSDevice::CreateDepthStencil(int w, int h, GSTexture::Format format, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(GSTexture::Type::DepthStencil, w, h, 1, format, clear, !prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, GSTexture::Format format, bool clear, bool prefer_reuse)
 {
 	return FetchSurface(GSTexture::Type::DepthStencil, w, h, 1, format, clear, !prefer_reuse);
 }
@@ -753,42 +763,108 @@ GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::F
 	return FetchSurface(GSTexture::Type::Texture, w, h, levels, format, false, m_features.prefer_new_textures && !prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateTexture(const GSVector2i& size, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)
+{
+	return CreateTexture(size.x, size.y, mipmap_levels, format, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatible(GSTexture* tex, bool clear, bool prefer_reuse)
+{
+	return CreateCompatible(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatible(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
+{
+	return CreateCompatible(tex, size.x, size.y, clear, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);
+}
+
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear)
+	ShaderConvertKey shader, bool linear)
 {
 	pxAssert((dTex && dTex->IsDepthStencil()) == HasDepthOutput(shader));
-	pxAssert(linear ? SupportsBilinear(shader) : SupportsNearest(shader));
+	pxAssert(!linear || !shader.GetBiln());
 	GL_INS("StretchRect(%d) {%d,%d} %dx%d -> {%d,%d) %dx%d", shader, int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),
 		int(dRect.right - dRect.left), int(dRect.bottom - dRect.top));
-	DoStretchRect(sTex, sRect, dTex, dRect, cms, shader, linear);
+	DoStretchRect(sTex, sRect, dTex, dRect, shader, linear);
 }
 
 void GSDevice::StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	bool red, bool green, bool blue, bool alpha, ShaderConvert shader)
+	ShaderConvertKey shader, bool linear)
 {
-	GSHWDrawConfig::ColorMaskSelector cms;
-
-	cms.wr = red;
-	cms.wg = green;
-	cms.wb = blue;
-	cms.wa = alpha;
-
-	pxAssert(HasVariableWriteMask(shader));
-	GL_INS("ColorCopy Red:%d Green:%d Blue:%d Alpha:%d", cms.wr, cms.wg, cms.wb, cms.wa);
-
-	DoStretchRectWithAssertions(sTex, sRect, dTex, dRect, cms, shader, false);
+	DoStretchRectWithAssertions(sTex, sRect, dTex, dRect, shader, linear);
 }
 
-void GSDevice::StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvert shader, bool linear)
-{
-	DoStretchRectWithAssertions(sTex, sRect, dTex, dRect, GSHWDrawConfig::ColorMaskSelector(ShaderConvertWriteMask(shader)), shader, linear);
-}
-
-void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvert shader, bool linear)
+void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader, bool linear)
 {
 	StretchRect(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, shader, linear);
+}
+
+void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear, u32 dst_bpp)
+{
+	StretchRect(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, GetCopyShader(sTex, dTex, dst_bpp), linear);
+}
+
+void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, GSVector4(dTex->GetRect()), linear, dst_bpp);
+}
+
+void GSDevice::StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
+	ShaderConvertKey shader)
+{
+	StretchRect(sTex, sRect, dTex, dRect, shader, false);
+}
+
+void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader)
+{
+	StretchRect(sTex, dTex, dRect, shader, false);
+}
+
+void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, dRect, false);
+}
+
+void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, false, dst_bpp);
+}
+
+void GSDevice::StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
+	ShaderConvertKey shader)
+{
+	StretchRect(sTex, sRect, dTex, dRect, shader, true);
+}
+
+void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader)
+{
+	StretchRect(sTex, dTex, dRect, shader, true);
+}
+
+void GSDevice::StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, dRect, true);
+}
+
+void GSDevice::StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, true, dst_bpp);
+}
+
+void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 dst_bpp)
+{
+	StretchRect(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, GetCopyShader(sTex, dTex, dst_bpp, red, green, blue, alpha), false);
+}
+
+void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha, u32 dst_bpp)
+{
+	StretchRectCopy(sTex, dTex, GSVector4(dTex->GetRect()), red, green, blue, alpha, dst_bpp);
 }
 
 void GSDevice::DrawMultiStretchRects(
@@ -961,7 +1037,7 @@ void GSDevice::Resize(int width, int height)
 	{
 		const GSVector4 sRect(0, 0, 1, 1);
 		const GSVector4 dRect(0, 0, s.x, s.y);
-		StretchRect(m_current, sRect, dTex, dRect, ShaderConvert::COPY, false);
+		StretchRectCopy(m_current, sRect, dTex, dRect, false);
 		m_current = dTex;
 	}
 }
