@@ -213,19 +213,22 @@ class ShaderConvertKey
 	{
 		struct
 		{
-			u8 shader;
-			u8 mask;
-			bool depth_output : 1;
-			bool depth_input : 1;
-			bool biln : 1;
+			u32 shader : 8;
+			u32 mask : 8;
+			u32 depth_output : 1;
+			u32 depth_input : 1;
+			u32 biln : 1;
 		};
 
 		u32 key;
 	} fields;
 
+	static_assert(sizeof(fields) == 4);
+
 public:
 	ShaderConvertKey(ShaderConvert shader, u8 mask = 0xf, bool depth_output = false, bool depth_input = false, bool biln = false)
 	{
+		fields.key = 0;
 		fields.shader = static_cast<u8>(shader);
 		fields.mask = mask & 0xf;
 		fields.depth_output = depth_output;
@@ -296,9 +299,8 @@ public:
 	size_t GetHash() const
 	{
 		// Remove unused bits.
-		ShaderConvertKey tmp(static_cast<ShaderConvert>(fields.shader));
+		ShaderConvertKey tmp = *this;
 		ShaderConvert shader = static_cast<ShaderConvert>(fields.shader);
-		tmp.fields.key = fields.key;
 		if (!HasVariableWriteMask(shader))
 			tmp.fields.mask = ShaderConvertWriteMask(shader);
 		if (!HasFloat32Output(shader))
