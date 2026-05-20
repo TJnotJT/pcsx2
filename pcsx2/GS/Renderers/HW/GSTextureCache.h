@@ -575,10 +575,10 @@ public:
 		HashCacheEntry* hc_entry, bool new_texture_is_shared);
 
 	/// Converts single color value to depth using the specified shader expression.
-	static float ConvertColorToDepth(u32 c, ShaderConvert convert);
+	static float ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp);
 
 	/// Converts single depth value to colour using the specified shader expression.
-	static u32 ConvertDepthToColor(float d, ShaderConvert convert);
+	static u32 ConvertDepthToColor(float d, u32 src_bpp, u32 dst_bpp);
 
 	/// Copies RGB channels from depth target to a color target.
 	bool CopyRGBFromDepthToColor(Target* dst, Target* depth_src);
@@ -587,7 +587,7 @@ public:
 	bool ShuffleMove(u32 BP, u32 BW, u32 PSM, int sx, int sy, int dx, int dy, int w, int h);
 	bool PageMove(u32 SBP, u32 DBP, u32 BW, u32 PSM, int sx, int sy, int dx, int dy, int w, int h);
 	void CopyPages(Target* src, u32 sbw, u32 src_offset, Target* dst, u32 dbw, u32 dst_offset, u32 num_pages,
-		ShaderConvert shader = ShaderConvert::COPY);
+		ShaderConvert shader = ShaderConvert::RGBA8_COPY);
 
 	void IncAge();
 

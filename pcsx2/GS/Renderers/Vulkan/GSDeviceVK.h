@@ -398,7 +398,7 @@ private:
 
 	std::unordered_map<u32, VkSampler> m_samplers;
 
-	std::map<u32, VkPipeline> m_convert;
+	std::unordered_map<ShaderConvertKey, VkPipeline, ShaderConvertKeyHash> m_convert;
 	std::array<VkPipeline, static_cast<int>(PresentShader::Count)> m_present{};
 	std::array<VkPipeline, 2> m_merge{};
 	std::array<VkPipeline, NUM_INTERLACE_SHADERS> m_interlace{};
@@ -485,7 +485,13 @@ private:
 protected:
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 		ShaderConvertKey shader, bool linear) override;
-
+	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
+		PresentShader shader, bool linear) override;
+	ShaderConvertKey ProcessShaderConvertKey(ShaderConvertKey shader) const
+	{
+		// Depth input handled same as color input.
+		return shader.SetDepthInput(false);
+	}
 public:
 	GSDeviceVK();
 	~GSDeviceVK() override;

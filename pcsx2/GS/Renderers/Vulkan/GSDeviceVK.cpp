@@ -2926,15 +2926,20 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 }
 
 void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	GSHWDrawConfig::ColorMaskSelector cms, ShaderConvertKey shader, bool linear)
+	ShaderConvertKey shader, bool linear)
 {
-	const bool allow_discard = (cms.wrgba == 0xf);
-	VkPipeline state;
-	if (HasVariableWriteMask(shader))
-		state = m_color_copy[GetShaderIndexForMask(shader, cms.wrgba)];
-	else
-		state = dTex ? m_convert.at(ShaderConvertKey()) : m_present[static_cast<int>(shader)];
-	DoStretchRect(static_cast<GSTextureVK*>(sTex), sRect, static_cast<GSTextureVK*>(dTex), dRect, state, linear, allow_discard);
+	pxAssert(dTex);
+	shader = ProcessShaderConvertKey(shader);
+	const bool allow_discard = (shader.GetMask() == 0xf);
+	DoStretchRect(static_cast<GSTextureVK*>(sTex), sRect, static_cast<GSTextureVK*>(dTex), dRect,
+		m_convert.at(shader), linear, allow_discard);
+}
+
+void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
+	PresentShader shader, bool linear)
+{
+	DoStretchRect(static_cast<GSTextureVK*>(sTex), sRect, nullptr, dRect,
+		m_present.at(static_cast<u32>(shader)), linear, true);
 }
 
 void GSDeviceVK::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
@@ -2953,6 +2958,8 @@ void GSDeviceVK::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 void GSDeviceVK::DrawMultiStretchRects(
 	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
 {
+	shader = ProcessShaderConvertKey(shader);
+
 	GSTexture* last_tex = rects[0].src;
 	bool last_linear = rects[0].linear;
 	u8 last_wmask = rects[0].wmask.wrgba;
@@ -3062,7 +3069,7 @@ void GSDeviceVK::DoMultiStretchRects(
 		BeginRenderPassForStretchRect(dTex, rc, rc, false);
 	SetUtilityTexture(rects[0].src, rects[0].linear ? m_linear_sampler : m_point_sampler);
 
-	SetPipeline(m_convert.at(static_cast<u32>(shader)));
+	SetPipeline(m_convert.at(shader.SetMask(rects[0].wmask.wrgba)));
 
 	if (ApplyUtilityState())
 		DrawIndexedPrimitive();
@@ -3218,7 +3225,7 @@ void GSDeviceVK::UpdateCLUTTexture(
 	const GSVector4 dRect(0, 0, dSize, 1);
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert[static_cast<int>(shader)], false, true);
+		m_convert.at(shader), false, true);
 }
 
 void GSDeviceVK::ConvertToIndexedTexture(
@@ -3240,7 +3247,7 @@ void GSDeviceVK::ConvertToIndexedTexture(
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
 	const GSVector4 dRect(0, 0, dTex->GetWidth(), dTex->GetHeight());
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert[static_cast<int>(shader)], false, true);
+		m_convert.at(shader), false, true);
 }
 
 void GSDeviceVK::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
@@ -3262,7 +3269,7 @@ void GSDeviceVK::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
 	//const GSVector4 dRect = GSVector4(dTex->GetRect());
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert[static_cast<int>(shader)], false, true);
+		m_convert.at(shader), false, true);
 }
 
 void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, GSVector4* dRect,
@@ -3312,7 +3319,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			OMSetRenderTargets(dTex, nullptr, darea);
 			SetUtilityTexture(sTex[1], sampler);
 			BeginClearRenderPass(m_utility_color_render_pass_clear, darea, c);
-			SetPipeline(m_convert[static_cast<int>(ShaderConvert::COPY)]);
+			SetPipeline(m_convert.at(ShaderConvert::RGBA8_COPY));
 			DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 			dTex->SetState(GSTexture::State::Dirty);
 			dcleared = true;
@@ -3332,7 +3339,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 		BeginRenderPassForStretchRect(static_cast<GSTextureVK*>(sTex[2]), fbarea, GSVector4i(dRect[2]));
 		if (dcleared)
 		{
-			SetPipeline(m_convert[static_cast<int>(ShaderConvert::YUV)]);
+			SetPipeline(m_convert.at(ShaderConvert::YUV));
 			SetUtilityPushConstants(yuv_constants, sizeof(yuv_constants));
 			DrawStretchRect(full_r, dRect[2], fbsize);
 		}
@@ -3371,7 +3378,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	if (feedback_write_1)
 	{
 		EndRenderPass();
-		SetPipeline(m_convert[static_cast<int>(ShaderConvert::YUV)]);
+		SetPipeline(m_convert.at(ShaderConvert::YUV));
 		SetUtilityTexture(dTex, sampler);
 		SetUtilityPushConstants(yuv_constants, sizeof(yuv_constants));
 		OMSetRenderTargets(sTex[2], nullptr, fbarea);
@@ -4097,7 +4104,16 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 					gpb.SetColorWriteMask(0, needs_mask ? mask : ShaderConvertWriteMask(i));
 
-					VkShaderModule ps = GetUtilityFragmentShader(*shader, shaderName(i));
+					std::string macro;
+					macro += fmt::format("#define HAS_BILN {}\n", biln);
+					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", depth_output);
+					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", HasFloat32Input(i));
+					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", HasFloat32Input(i));
+
+					std::string shader_with_header = macro + *shader;
+
+
+					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shaderName(i));
 					if (ps == VK_NULL_HANDLE)
 						return false;
 
@@ -4109,11 +4125,12 @@ bool GSDeviceVK::CompileConvertPipelines()
 					if (!pipe)
 						return false;
 
-					const u32 key = ShaderConvertKey(i, mask, depth_output, false, biln);
+					const ShaderConvertKey shader(i, mask, depth_output, false, biln);
 
-					m_convert[key] = pipe;
+					m_convert[shader] = pipe;
 
-					Vulkan::SetObjectName(m_device, pipe, "Convert pipeline %d", i);
+					Vulkan::SetObjectName(m_device, pipe,
+						"Convert pipeline (%s, mask=%x, depth=%d, biln=%d)", i, mask, depth_output, biln);
 
 					if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
 					{
@@ -4686,17 +4703,12 @@ void GSDeviceVK::DestroyResources()
 		if (it != VK_NULL_HANDLE)
 			vkDestroyPipeline(m_device, it, nullptr);
 	}
-	for (VkPipeline it : m_color_copy)
-	{
-		if (it != VK_NULL_HANDLE)
-			vkDestroyPipeline(m_device, it, nullptr);
-	}
 	for (VkPipeline it : m_present)
 	{
 		if (it != VK_NULL_HANDLE)
 			vkDestroyPipeline(m_device, it, nullptr);
 	}
-	for (const auto [key, pipe] : m_convert)
+	for (const auto& [shader, pipe] : m_convert)
 	{
 		if (pipe != VK_NULL_HANDLE)
 			vkDestroyPipeline(m_device, pipe, nullptr);
@@ -5669,7 +5681,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	SetUtilityTexture(rt, m_point_sampler);
 	OMSetRenderTargets(nullptr, ds, bbox);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
-	SetPipeline(m_convert.at(ShaderConvertKey(SetDATMShader(datm)));
+	SetPipeline(m_convert.at(SetDATMShader(datm)));
 	BeginClearRenderPass(m_date_setup_render_pass, bbox, 0.0f, 0);
 	if (ApplyUtilityState())
 		DrawPrimitive();

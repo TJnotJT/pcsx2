@@ -97,6 +97,7 @@ static inline const char* ShaderConvertName(ShaderConvert shader)
 		case ShaderConvert::CLUT_4: return "CLUT_4";
 		case ShaderConvert::CLUT_8: return "CLUT_8";
 		case ShaderConvert::YUV: return "YUV";
+		default: return "Unknown";
 	}
 }
 
@@ -244,32 +245,42 @@ public:
 		return fields.depth_input;
 	}
 
-	void SetMask(bool wr, bool wg, bool wb, bool wa)
+	ShaderConvertKey SetMask(bool wr, bool wg, bool wb, bool wa) const
 	{
-		fields.mask = static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) | (static_cast<u8>(wb) << 2)  | (static_cast<u8>(wa) << 3);
+		ShaderConvertKey tmp = *this;
+		tmp.fields.mask = static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) | (static_cast<u8>(wb) << 2)  | (static_cast<u8>(wa) << 3);
+		return tmp;
 	}
 
-	void SetMask(u8 mask)
+	ShaderConvertKey SetMask(u8 mask) const
 	{
-		fields.mask = mask & 0xf;
+		ShaderConvertKey tmp = *this;
+		tmp.fields.mask = mask & 0xf;
+		return tmp;
 	}
 
-	void SetDepthInput(bool depth_input)
+	ShaderConvertKey SetDepthInput(bool depth_input) const
 	{
-		depth_input = depth_input;
+		ShaderConvertKey tmp = *this;
+		tmp.fields.depth_input = depth_input;
+		return tmp;
 	}
 
-	void SetDepthOutput(bool depth_output)
+	ShaderConvertKey SetDepthOutput(bool depth_output) const
 	{
-		depth_output = depth_output;
+		ShaderConvertKey tmp = *this;
+		tmp.fields.depth_output = depth_output;
+		return *this;
 	}
 
-	void SetBiln(bool biln)
+	ShaderConvertKey SetBiln(bool biln)
 	{
-		biln = biln;
+		ShaderConvertKey tmp = *this;
+		tmp.fields.biln = biln;
+		return *this;
 	}
 
-	operator u32() const
+	size_t GetHash() const
 	{
 		// Remove unused bits.
 		ShaderConvertKey tmp(static_cast<ShaderConvert>(fields.shader));
@@ -283,11 +294,35 @@ public:
 			tmp.fields.depth_input = false;
 		if (!SupportsBilinear(shader))
 			tmp.fields.biln = false;
-		return tmp.fields.key;
+		return static_cast<size_t>(tmp.fields.key);
+	}
+
+	__fi bool operator==(const ShaderConvertKey& other) const
+	{
+		return GetHash() == other.GetHash();
+	}
+
+	__fi bool operator<(const ShaderConvertKey& other) const
+	{
+		return GetHash() < other.GetHash();
+	}
+
+	__fi bool operator!=(const ShaderConvertKey& other) const
+	{
+		return GetHash() != other.GetHash();
 	}
 };
 
-static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::Format dst, u32 dst_bpp = 32, u8 mask = 0xf)
+struct ShaderConvertKeyHash
+{
+	__fi size_t operator()(const ShaderConvertKey& shader) const noexcept
+	{
+		return shader.GetHash();
+	}
+};
+
+static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::Format dst,
+	u32 src_bpp = 32, u32 dst_bpp = 32, u8 mask = 0xf)
 {
 	ShaderConvert shader = static_cast<ShaderConvert>(-1);
 	switch (src)
@@ -296,7 +331,8 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 			switch (dst)
 			{
 				case GSTexture::Format::Color:
-					shader = ShaderConvert::RGBA8_COPY; // dst bpp is handled by mask
+					pxAssert(src_bpp == 32 && dst_bpp == 32);
+					shader = ShaderConvert::RGBA8_COPY; // bpp is handled by mask
 					break;
 				case GSTexture::Format::Float32:
 				case GSTexture::Format::DepthStencil:
@@ -309,7 +345,9 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 							shader = ShaderConvert::RGBA8_TO_FLOAT24;
 							break;
 						case 16:
-							shader = ShaderConvert::RGB5A1_TO_FLOAT16;
+							pxAssert(src_bpp == 16 || src_bpp == 32);
+							shader = src_bpp == 16 ? ShaderConvert::RGB5A1_TO_FLOAT16 :
+							                         ShaderConvert::RGBA8_TO_FLOAT16;
 							break;
 						default:
 							pxAssert(false);
@@ -329,13 +367,14 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 					switch (dst_bpp)
 					{
 						case 32:
-							shader = ShaderConvert::FLOAT32_TO_RGBA8:
+							shader = ShaderConvert::FLOAT32_TO_RGBA8;
 							break;
 						case 24:
-							shader = ShaderConvert::FLOAT32_TO_RGB8:
+							shader = ShaderConvert::FLOAT32_TO_RGB8;
 							break;
 						case 16:
-							shader = ShaderConvert::FLOAT16_TO_RGB5A1:
+							pxAssert(src_bpp == 16);
+							shader = ShaderConvert::FLOAT16_TO_RGB5A1;
 							break;
 						default:
 							pxAssert(false);
@@ -347,9 +386,11 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 					switch (dst_bpp)
 					{
 						case 32:
+							pxAssert(src_bpp == 32);
 							shader = ShaderConvert::FLOAT32_COPY;
 							break;
 						case 24:
+							pxAssert(src_bpp == 32);
 							shader = ShaderConvert::FLOAT32_TO_FLOAT24;
 							break;
 						default:
@@ -372,15 +413,17 @@ static inline ShaderConvertKey GetCopyShader(const GSTexture* src, const GSTextu
 	return GetCopyShader(src->GetFormat(), dst->GetFormat(), dst_bpp, mask);
 }
 
-static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::Format dst, u32 dst_bpp = 32, bool red, bool green, bool blue, bool alpha)
+static inline ShaderConvertKey GetCopyShaderMask(GSTexture::Format src, GSTexture::Format dst,
+	u32 src_bpp = 32, u32 dst_bpp = 32, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
 	const u8 mask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
-	return GetCopyShader(src, dst, dst_bpp, mask);
+	return GetCopyShader(src, dst, src_bpp, dst_bpp, mask);
 }
 
-static inline ShaderConvertKey GetCopyShader(const GSTexture* src, const GSTexture* dst, u32 dst_bpp = 32, bool red, bool green, bool blue, bool alpha)
+static inline ShaderConvertKey GetCopyShaderMask(const GSTexture* src, const GSTexture* dst,
+	u32 src_bpp = 32, u32 dst_bpp = 32, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
-	return GetCopyShader(src->GetFormat(), dst->GetFormat(), dst_bpp, red, green, blue, alpha);
+	return GetCopyShaderMask(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, red, green, blue, alpha);
 }
 
 enum class PresentShader
@@ -398,7 +441,7 @@ enum class PresentShader
 
 /// Get the name of a shader
 /// (Can't put methods on an enum class)
-int SetDATMShader(SetDATM datm);
+ShaderConvert SetDATMShader(SetDATM datm);
 const char* shaderName(ShaderConvert value);
 const char* shaderName(PresentShader value);
 
@@ -1276,8 +1319,13 @@ protected:
 	// Entry point to the renderer-specific StretchRect code.
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 		ShaderConvertKey shader, bool linear) = 0;
-	void DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader, bool linear);
-
+	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
+		PresentShader shader, bool linear)
+	{
+		pxFailRel("Not implemented");
+	}
+	void DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, 
+		ShaderConvertKey shader, bool linear);
 public:
 	GSDevice();
 	virtual ~GSDevice();
@@ -1408,24 +1456,42 @@ public:
 
 	virtual void CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY) = 0;
 
-	void StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY), bool linear);
-	void StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY), bool linear);
-	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear, u32 dst_bpp = 32);
-	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 dst_bpp = 32);
+	// StretchRect - all options
+	void StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY), bool linear = false);
+	void StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY), bool linear = false);
+	void StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY), bool linear = false);
+	
+	// StretchRect - infer shader based on formats
+	void StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool linear,
+		u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear,
+		u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp = 32, u32 dst_bpp = 32);
 
+	// StretchRect - nearest filter
 	void StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
 	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp = 32);
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 dst_bpp = 32);
+	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
 
+	// StretchRect - nearest filter, infer shader based on formats
+	void StretchRectCopyNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
+
+	// StretchRect - linear filter
 	void StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
 	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
-	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 dst_bpp = 32);
-	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 dst_bpp = 32);
+	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader = ShaderConvertKey(ShaderConvert::RGBA8_COPY));
 
-	// The versions with separate channel arguments only do nearest.
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 dst_bpp = 32);
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha, u32 dst_bpp = 32);
+	// StretchRect - linear filter, infer shader based on formats 
+	void StretchRectCopyBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
+
+	// StretchRect - nearest filter, infer shader based on formats, specify channel mask
+	void StretchRectCopyMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	/// Performs a screen blit for display. If dTex is null, it assumes you are writing to the system framebuffer/swap chain.
 	virtual void PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, PresentShader shader, float shaderTime, bool linear) = 0;

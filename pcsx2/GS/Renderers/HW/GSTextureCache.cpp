@@ -2372,7 +2372,7 @@ void GSTextureCache::CombineAlignedInsideTargets(Target* target, GSTextureCache:
 
 							if (target->m_type == RenderTarget)
 							{
-								g_gs_device->StretchRectCopyNearest(t->m_texture, source_rect, target->m_texture,
+								g_gs_device->StretchRectCopyMask(t->m_texture, source_rect, target->m_texture,
 									target_drect, valid_color, valid_color, valid_color, valid_alpha);
 							}
 							else
@@ -2866,6 +2866,9 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 			// m_32_bits_fmt gets set on a shuffle or if the format isn't 16bit.
 			// In this case it needs to make sure it isn't part of a shuffle, where it needs to be interpreted as 32bits.
 			const bool fmt_16_bits = (psm_s.bpp == 16 && GSLocalMemory::m_psm[dst_match->m_TEX0.PSM].bpp == 16 && !dst->m_32_bits_fmt);
+
+			u32 src_bpp = fmt_16_bits ? 16 : 32;
+
 			u32 dst_bpp;
 
 			if (type == DepthStencil)
@@ -2909,14 +2912,14 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 						if (type == DepthStencil)
 						{
 							const u32 cc = dst_match->m_texture->GetClearColor();
-							const float cd = ConvertColorToDepth(cc, shader);
+							const float cd = ConvertColorToDepth(cc, src_bpp, dst_bpp);
 							GL_INS("TC: Convert clear color[%08X] to depth[%f]", cc, cd);
 							g_gs_device->ClearDepth(dst->m_texture, cd);
 						}
 						else
 						{
 							const float cd = dst_match->m_texture->GetClearDepth();
-							const u32 cc = ConvertDepthToColor(cd, shader);
+							const u32 cc = ConvertDepthToColor(cd, src_bpp, dst_bpp);
 							GL_INS("TC: Convert clear depth[%f] to color[%08X]", cd, cc);
 							g_gs_device->ClearRenderTarget(dst->m_texture, cc);
 						}
@@ -2924,7 +2927,8 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 					else if (dst_match->m_texture->GetState() == GSTexture::State::Dirty)
 					{
 						dst_match->UnscaleRTAlpha();
-						g_gs_device->StretchRectCopyNearest(dst_match->m_texture, FullSrcRect, dst->m_texture, rescaler.m_dRect, shader, dst_bpp);
+						g_gs_device->StretchRectCopyNearest(dst_match->m_texture, FullSrcRect, dst->m_texture,
+							rescaler.m_dRect, src_bpp, dst_bpp);
 					}
 				}
 
@@ -2988,7 +2992,10 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 			g_gs_device->FilteredDownsampleTexture(dst->m_texture, tex, downsample_factor, clamp_min, dRect);
 		}
 		else
-			g_gs_device->StretchRectCopy(dst->m_texture, FullSrcRect, tex, rescaler.m_dRect, type == RenderTarget && !preserve_scale);
+		{
+			g_gs_device->StretchRectCopy(dst->m_texture, FullSrcRect, tex, rescaler.m_dRect,
+				type == RenderTarget && !preserve_scale);
+		}
 
 		m_target_memory_usage = (m_target_memory_usage - dst->m_texture->GetMemUsage()) + tex->GetMemUsage();
 
@@ -3017,7 +3024,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 	if (type == DepthStencil && dst->m_type == DepthStencil && GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp == 32 && GSLocalMemory::m_psm[TEX0.PSM].trbpp == 24 && dst->m_alpha_max > 0)
 	{
 		rescaler.CalcRescale(dst);
-		GSTexture* tex = g_gs_device->CreateCompatible(dst->m_texture, rescale.m_new_scaled_size, false);
+		GSTexture* tex = g_gs_device->CreateCompatible(dst->m_texture, rescaler.m_new_scaled_size, false);
 		if (!tex)
 			return nullptr;
 		g_gs_device->StretchRectCopyNearest(dst->m_texture, FullSrcRect, tex, rescaler.m_dRect, 24);
@@ -3188,7 +3195,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 
 					g_gs_device->StretchRectCopyNearest(dst_match->m_texture, GSVector4(0, 0, 1, 1),
 						dst->m_texture, GSVector4(dst->GetUnscaledRect()) * GSVector4(dst->GetScale()),
-						GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp);
+						32, GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp);
 
 					dst_match->m_valid_rgb = !used;
 					dst_match->m_was_dst_matched = true;
@@ -3213,7 +3220,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 			std::swap(dst->m_texture, tex);
 			PreloadTarget(TEX0, size, GSVector2i(dst->m_valid.z, dst->m_valid.w), is_frame, preload,
 				preserve_target, draw_rect, dst, src);
-			g_gs_device->StretchRectCopyNearest(tex, GSVector4::cxpr(0.0f, 0.0f, 1.0f, 1.0f), dst->m_texture,
+			g_gs_device->StretchRectCopyMask(tex, GSVector4::cxpr(0.0f, 0.0f, 1.0f, 1.0f), dst->m_texture,
 				GSVector4(dst->m_texture->GetRect()), false, false, false, true);
 			g_gs_device->Recycle(tex);
 			dst->m_valid_rgb = true;
@@ -3701,7 +3708,7 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 							{
 								const GSVector4 src_rect = GSVector4(0, 0, copy_width, copy_height) / (GSVector4(t->m_texture->GetSize()).xyxy());
 								const GSVector4 dst_rect = GSVector4(dst_offset_scaled_width, dst_offset_scaled_height, dst_offset_scaled_width + copy_width, dst_offset_scaled_height + copy_height);
-								g_gs_device->StretchRectCopyNearest(t->m_texture, src_rect, dst->m_texture, dst_rect,
+								g_gs_device->StretchRectCopyMask(t->m_texture, src_rect, dst->m_texture, dst_rect,
 									t->m_valid_rgb, t->m_valid_rgb, t->m_valid_rgb, t->m_valid_alpha_high || t->m_valid_alpha_low);
 							}
 							else
@@ -3764,8 +3771,8 @@ bool GSTextureCache::PreloadTarget(GIFRegTEX0 TEX0, const GSVector2i& size, cons
 							dst->ResizeTexture(t->m_unscaled_size.x, t->m_unscaled_size.y);
 
 							g_gs_device->StretchRectCopyNearest(t->m_texture, GSVector4(0, 0, 1, 1),
-								dst->m_texture, GSVector4(t->GetUnscaledRect()) * GSVector4(dst->GetScale()), shader,
-								GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp);
+								dst->m_texture, GSVector4(t->GetUnscaledRect()) * GSVector4(dst->GetScale()),
+								32, GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp);
 
 							break;
 						}
@@ -4225,46 +4232,43 @@ void GSTextureCache::ScaleTargetForDisplay(Target* t, const GIFRegTEX0& dispfb, 
 	GetTargetSize(t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM, new_width, static_cast<u32>(needed_height));
 }
 
-float GSTextureCache::ConvertColorToDepth(u32 c, ShaderConvert convert)
+float GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
 {
 	const float mult = std::exp2(-32.0f);
-	switch (convert)
+	switch (dst_bpp)
 	{
-		case ShaderConvert::RGB5A1_TO_FLOAT16:
-			return static_cast<float>(((c & 0xF8u) >> 3) | (((c >> 8) & 0xF8u) << 2) | (((c >> 16) & 0xF8u) << 7) |
-			                          (((c >> 24) & 0x80u) << 8)) *
-			       mult;
-
-		case ShaderConvert::RGBA8_TO_FLOAT16:
-			return static_cast<float>(c & 0x0000FFFF) * mult;
-
-		case ShaderConvert::RGBA8_TO_FLOAT24:
-			return static_cast<float>(c & 0x00FFFFFF) * mult;
-
-		case ShaderConvert::RGBA8_TO_FLOAT32:
+		case 32:
 		default:
 			return static_cast<float>(c) * mult;
+
+		case 24:
+			return static_cast<float>(c & 0x00FFFFFF) * mult;
+
+		case 16:
+			pxAssert(src_bpp == 16 || src_bpp == 32);
+			return src_bpp == 16 ?
+				static_cast<float>(((c & 0xF8u) >> 3) | (((c >> 8) & 0xF8u) << 2) |
+					(((c >> 16) & 0xF8u) << 7) | (((c >> 24) & 0x80u) << 8)) * mult :
+				static_cast<float>(c & 0x0000FFFF) * mult;
 	}
 }
 
-u32 GSTextureCache::ConvertDepthToColor(float d, u32 dst_bpp)
+u32 GSTextureCache::ConvertDepthToColor(float d, u32 src_bpp, u32 dst_bpp)
 {
 	const float mult = std::exp2(32.0f);
 	switch (dst_bpp)
 	{
+		default:
+			return static_cast<u32>(d * mult);
+
 		case 16:
 		{
 			const u32 cc = static_cast<u32>(d * mult);
-
-			// Truely awful.
 			const GSVector4i vcc = GSVector4i(
 				GSVector4(GSVector4i(cc & 0x1Fu, (cc >> 5) & 0x1Fu, (cc >> 10) & 0x1Fu, (cc >> 15) & 0x01u)) *
-				GSVector4::cxpr(255.0f / 31.0f));
+					GSVector4::cxpr(255.0f / 31.0f));
 			return (vcc.r | (vcc.g << 8) | (vcc.b << 16) | (vcc.a << 24));
 		}
-
-		default:
-			return static_cast<u32>(d * mult);
 	}
 }
 
@@ -4315,7 +4319,7 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 
 	if (depth_src->m_texture->GetState() == GSTexture::State::Cleared)
 	{
-		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearDepth()));
+		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearDepth(), 32, 32));
 	}
 	else if (depth_src->m_texture->GetState() != GSTexture::State::Invalidated)
 	{
@@ -4332,8 +4336,9 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 		if (dst->m_valid_alpha_low || dst->m_valid_alpha_high)
 		{
 			const GSVector4 copy_rect = GSVector4(tex->GetRect().rintersect(dst->m_texture->GetRect()));
-			g_gs_device->StretchRectCopyNearest(dst->m_texture, copy_rect / GSVector4(GSVector4i(dst->m_texture->GetSize()).xyxy()), tex,
-				copy_rect, false, false, false, true);
+			const GSVector4 dst_dims = GSVector4(GSVector4i(dst->m_texture->GetSize()).xyxy());
+			g_gs_device->StretchRectCopyMask(dst->m_texture, copy_rect / dst_dims,
+				tex, copy_rect, false, false, false, true);
 		}
 
 		g_gs_device->Recycle(dst->m_texture);
@@ -5379,8 +5384,8 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 				const GSVector4 src_rect = GSVector4(scaled_sx, scaled_sy, scaled_sx + scaled_w, scaled_sy + scaled_h);
 				const GSVector4 tmp_rect = src_rect / (GSVector4(tmp_texture->GetSize()).xyxy());
 				const GSVector4 dst_rect = GSVector4(scaled_dx, scaled_dy, (scaled_dx + scaled_w), (scaled_dy + scaled_h));
-				g_gs_device->StretchRectCopyNearest(src->m_texture, tmp_rect, tmp_texture, src_rect, false, false, false, true);
-				g_gs_device->StretchRectCopyNearest(tmp_texture, tmp_rect, dst->m_texture, dst_rect, false, false, false, true);
+				g_gs_device->StretchRectCopyMask(src->m_texture, tmp_rect, tmp_texture, src_rect, false, false, false, true);
+				g_gs_device->StretchRectCopyMask(tmp_texture, tmp_rect, dst->m_texture, dst_rect, false, false, false, true);
 			}
 			else
 			{
@@ -5405,11 +5410,11 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 		if (SPSM == PSMT8H && SPSM == DPSM)
 		{
 			const GSVector4 dst_rect = GSVector4(scaled_dx, scaled_dy, (scaled_dx + scaled_w), (scaled_dy + scaled_h));
-			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, dst_rect, false, false, false, true, shader);
+			g_gs_device->StretchRectCopyMask(src->m_texture, src_rect, dst->m_texture, dst_rect, false, false, false, true);
 		}
 		else if (src->m_type != dst->m_type)
 		{
-			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, scaled_src_rect, dpsm_s.trbpp);
+			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, scaled_src_rect, 32, dpsm_s.trbpp);
 		}
 		else if (src->m_texture->IsDepth())
 		{
@@ -6137,7 +6142,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 	{
 		// TODO: clean up this mess
 
-		ShaderConvert shader = GetCopyShader(dst->m_texture->GetFormat(), GSTexture::Format::Color);
+		ShaderConvertKey shader = GetCopyShader(dst->m_texture->GetFormat(), GSTexture::Format::Color);
 		channel_shuffle = GSRendererHW::GetInstance()->TestChannelShuffle(dst);
 
 		const bool is_8bits = TEX0.PSM == PSMT8 && !channel_shuffle;
@@ -7241,7 +7246,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 				if (t->m_rt_alpha_scale)
 					ps_shader = ShaderConvert::RTA_DECORRECTION;
 				else
-					ps_shader = ShaderConvert::COPY;
+					ps_shader = ShaderConvert::RGBA8_COPY;
 
 				dltex = &m_color_download_texture;
 			}
