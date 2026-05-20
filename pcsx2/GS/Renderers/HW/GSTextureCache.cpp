@@ -5395,13 +5395,8 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 			{
 				const GSVector4i src_rect = GSVector4i(scaled_sx, scaled_sy, scaled_sx + scaled_w, scaled_sy + scaled_h);
 				// Fast memcpy()-like path for color targets.
-				g_gs_device->CopyRect(src->m_texture, tmp_texture,
-					src_rect,
-					scaled_sx, scaled_sy);
-
-				g_gs_device->CopyRect(tmp_texture, dst->m_texture,
-					src_rect,
-					scaled_dx, scaled_dy);
+				g_gs_device->CopyRect(src->m_texture, tmp_texture, src_rect, scaled_sx, scaled_sy);
+				g_gs_device->CopyRect(tmp_texture, dst->m_texture, src_rect, scaled_dx, scaled_dy);
 			}
 		}
 
@@ -5418,7 +5413,8 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 		}
 		else if (src->m_type != dst->m_type)
 		{
-			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, scaled_src_rect, 32, dpsm_s.trbpp);
+			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, scaled_src_rect,
+				dpsm_s.trbpp == 16 ? 16 : 32, dpsm_s.trbpp);
 		}
 		else if (src->m_texture->IsDepth())
 		{
