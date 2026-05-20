@@ -2876,14 +2876,14 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 				GL_CACHE("TC: Lookup Target(Depth) %dx%d, hit Color (0x%x, TBW %d, %s was %s)",
 					rescaler.m_new_size.x, rescaler.m_new_size.y,
 					bp, TEX0.TBW, GSUtil::GetPSMName(TEX0.PSM), GSUtil::GetPSMName(dst_match->m_TEX0.PSM));
-				dst_bpp = fmt_16_bits ? 16 : 32;
+				dst_bpp = fmt_16_bits ? 16 : psm_s.trbpp;
 			}
 			else
 			{
 				GL_CACHE("TC: Lookup Target(Color) %dx%d, hit Depth (0x%x, TBW %d, FBMSK %0x, %s was %s)",
 					rescaler.m_new_size.x, rescaler.m_new_size.y, bp, TEX0.TBW, fbmask,
 					GSUtil::GetPSMName(TEX0.PSM), GSUtil::GetPSMName(dst_match->m_TEX0.PSM));
-				dst_bpp = fmt_16_bits ? 16 : psm_s.trbpp;
+				dst_bpp = fmt_16_bits ? 16 : 32;
 			}
 
 			if (!preserve_target)
@@ -2919,7 +2919,7 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 						else
 						{
 							const float cd = dst_match->m_texture->GetClearDepth();
-							const u32 cc = ConvertDepthToColor(cd, src_bpp, dst_bpp);
+							const u32 cc = ConvertDepthToColor(cd, dst_bpp);
 							GL_INS("TC: Convert clear depth[%f] to color[%08X]", cd, cc);
 							g_gs_device->ClearRenderTarget(dst->m_texture, cc);
 						}
@@ -4239,9 +4239,11 @@ float GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
 	{
 		case 32:
 		default:
+			pxAssert(src_bpp == 32);
 			return static_cast<float>(c) * mult;
 
 		case 24:
+			pxAssert(src_bpp == 32);
 			return static_cast<float>(c & 0x00FFFFFF) * mult;
 
 		case 16:
@@ -4253,8 +4255,9 @@ float GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
 	}
 }
 
-u32 GSTextureCache::ConvertDepthToColor(float d, u32 src_bpp, u32 dst_bpp)
+u32 GSTextureCache::ConvertDepthToColor(float d, u32 dst_bpp)
 {
+	pxAssert(dst_bpp == 32 || dst_bpp == 16);
 	const float mult = std::exp2(32.0f);
 	switch (dst_bpp)
 	{
@@ -4264,10 +4267,11 @@ u32 GSTextureCache::ConvertDepthToColor(float d, u32 src_bpp, u32 dst_bpp)
 		case 16:
 		{
 			const u32 cc = static_cast<u32>(d * mult);
-			const GSVector4i vcc = GSVector4i(
-				GSVector4(GSVector4i(cc & 0x1Fu, (cc >> 5) & 0x1Fu, (cc >> 10) & 0x1Fu, (cc >> 15) & 0x01u)) *
-					GSVector4::cxpr(255.0f / 31.0f));
-			return (vcc.r | (vcc.g << 8) | (vcc.b << 16) | (vcc.a << 24));
+			const u32 r = (cc << 3) & 0x00000FF;
+			const u32 g = (cc << 6) & 0x000F800;
+			const u32 b = (cc << 9) & 0x0F80000;
+			const u32 a = (cc << 16) & 0x80000000;
+			return r | g | b | a;
 		}
 	}
 }
@@ -4319,7 +4323,7 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 
 	if (depth_src->m_texture->GetState() == GSTexture::State::Cleared)
 	{
-		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearDepth(), 32, 32));
+		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearDepth(), 32));
 	}
 	else if (depth_src->m_texture->GetState() != GSTexture::State::Invalidated)
 	{
