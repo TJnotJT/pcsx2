@@ -2812,7 +2812,7 @@ bool GSDevice12::CompileConvertPipelines()
 						TinyString::from_format("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
 							ShaderConvertName(i), mask, depth_output, biln));
 
-					const ShaderConvertKey shader(i, mask, depth_output, false, biln);
+					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
 
 					m_convert[shader] = pipe;
 

@@ -4331,7 +4331,7 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 		// Update RGB bits only.
 		g_gs_device->StretchRectCopyNearest(
 			depth_src->m_texture, convert_rect / GSVector4(depth_src->GetUnscaledSize()).xyxy(),
-			tex, convert_rect * GSVector4(dst->GetScale()), 24);
+			tex, convert_rect * GSVector4(dst->GetScale()), 32, 24);
 	}
 
 	// Copy in alpha if we're a new texture.

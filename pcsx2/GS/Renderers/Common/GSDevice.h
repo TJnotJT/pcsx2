@@ -215,8 +215,8 @@ class ShaderConvertKey
 		{
 			u32 shader : 8;
 			u32 mask : 8;
-			u32 depth_output : 1;
 			u32 depth_input : 1;
+			u32 depth_output : 1;
 			u32 biln : 1;
 		};
 
@@ -226,13 +226,13 @@ class ShaderConvertKey
 	static_assert(sizeof(fields) == 4);
 
 public:
-	ShaderConvertKey(ShaderConvert shader, u8 mask = 0xf, bool depth_output = false, bool depth_input = false, bool biln = false)
+	ShaderConvertKey(ShaderConvert shader, u8 mask = 0xf, bool depth_input = false, bool depth_output = false, bool biln = false)
 	{
 		fields.key = 0;
 		fields.shader = static_cast<u8>(shader);
 		fields.mask = mask & 0xf;
-		fields.depth_output = depth_output;
 		fields.depth_input = depth_input;
+		fields.depth_output = depth_output;
 		fields.biln = biln;
 	}
 
@@ -420,23 +420,24 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 			break;
 	}
 
-	return ShaderConvertKey(shader, mask);
+	return ShaderConvertKey(shader, mask, src == GSTexture::Format::DepthStencil,
+		dst == GSTexture::Format::DepthStencil);
 }
 
-static inline ShaderConvertKey GetCopyShader(const GSTexture* src, const GSTexture* dst, u32 dst_bpp = 32, u8 mask = 0xf)
+static inline ShaderConvertKey GetCopyShader(const GSTexture* src, const GSTexture* dst, u32 src_bpp, u32 dst_bpp, u8 mask = 0xf)
 {
-	return GetCopyShader(src->GetFormat(), dst->GetFormat(), dst_bpp, mask);
+	return GetCopyShader(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, mask);
 }
 
 static inline ShaderConvertKey GetCopyShaderMask(GSTexture::Format src, GSTexture::Format dst,
-	u32 src_bpp = 32, u32 dst_bpp = 32, bool red = true, bool green = true, bool blue = true, bool alpha = true)
+	u32 src_bpp, u32 dst_bpp, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
 	const u8 mask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
 	return GetCopyShader(src, dst, src_bpp, dst_bpp, mask);
 }
 
 static inline ShaderConvertKey GetCopyShaderMask(const GSTexture* src, const GSTexture* dst,
-	u32 src_bpp = 32, u32 dst_bpp = 32, bool red = true, bool green = true, bool blue = true, bool alpha = true)
+	u32 src_bpp, u32 dst_bpp, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
 	return GetCopyShaderMask(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, red, green, blue, alpha);
 }

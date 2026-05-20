@@ -807,7 +807,14 @@ void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey sh
 void GSDevice::StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool linear, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRect(sTex, sRect, dTex, dRect, GetCopyShader(sTex, dTex, src_bpp, dst_bpp), linear);
+	ShaderConvertKey shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
+	if (SupportsBilinear(shader.GetShader()) && linear)
+	{
+		// Bilinear is emulated in the shader.
+		shader.SetBiln(true);
+		linear = false;
+	}
+	StretchRect(sTex, sRect, dTex, dRect, shader, linear);
 }
 
 void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear, u32 src_bpp, u32 dst_bpp)

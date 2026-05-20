@@ -438,7 +438,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
 
-					const ShaderConvertKey shader(i, 0xf, depth_output, false, biln);
+					const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
 
 					GLProgram& prog = m_convert.ps[shader];
 

@@ -4131,12 +4131,12 @@ bool GSDeviceVK::CompileConvertPipelines()
 					if (!pipe)
 						return false;
 
-					const ShaderConvertKey shader(i, mask, depth_output, false, biln);
+					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
 
 					m_convert[shader] = pipe;
 
-					Vulkan::SetObjectName(m_device, pipe,
-						"Convert pipeline (%s, mask=%x, depth=%d, biln=%d)", i, mask, depth_output, biln);
+					Vulkan::SetObjectName(m_device, pipe, "Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+						ShaderConvertName(i), mask, depth_output, biln);
 
 					if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
 					{
