@@ -169,6 +169,19 @@ static inline bool HasStencilOutput(ShaderConvert shader)
 	}
 }
 
+static inline bool HasIntegerOutput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::FLOAT32_TO_16_BITS:
+		case ShaderConvert::FLOAT32_TO_32_BITS:
+		case ShaderConvert::RGBA8_TO_16_BITS:
+			return true;
+		default:
+			return false;
+	}
+}
+
 static inline bool SupportsBilinear(ShaderConvert shader)
 {
 	switch (shader)
@@ -177,9 +190,9 @@ static inline bool SupportsBilinear(ShaderConvert shader)
 		case ShaderConvert::RGBA8_TO_FLOAT24:
 		case ShaderConvert::RGBA8_TO_FLOAT16:
 		case ShaderConvert::RGB5A1_TO_FLOAT16:
-			return false;
-		default:
 			return true;
+		default:
+			return false;
 	}
 }
 

@@ -4032,10 +4032,11 @@ bool GSDeviceVK::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(vs);
 
-	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count;
+		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		bool needs_mask = HasVariableWriteMask(i);
-		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0xf; mask++)
+		for (u32 mask = needs_mask ? 0 : 0xf; mask < 0x10; mask++)
 		{
 			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
 			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
@@ -4106,16 +4107,21 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
-					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", depth_output);
-					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", HasFloat32Input(i));
-					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", HasFloat32Input(i));
+					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(HasIntegerOutput(i)));
+					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
+					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(depth_output));
+					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));
+					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(HasFloat32Output(i)));
 
 					std::string shader_with_header = macro + *shader;
 
-
 					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shaderName(i));
 					if (ps == VK_NULL_HANDLE)
+					{
+						Console.Warning(macro);
 						return false;
+					}
 
 					ScopedGuard ps_guard([this, &ps]() { vkDestroyShaderModule(m_device, ps, nullptr); });
 					gpb.SetFragmentShader(ps);
