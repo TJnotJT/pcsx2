@@ -2796,7 +2796,7 @@ bool GSDevice12::CompileConvertPipelines()
 						return false;
 
 					D3D12::SetObjectName(pipe.get(),
-						TinyString::from_format("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+						TinyString::from_format("Convert pipeline ({}, mask={:x}, depth={}, biln={})",
 							ShaderConvertName(i), mask, depth_output, biln));
 
 					m_convert[shader] = pipe;

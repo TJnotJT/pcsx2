@@ -7932,7 +7932,7 @@ void GSTextureCache::Target::Update(bool cannot_scale)
 		// No need to sort here, it's all the one texture.
 		const ShaderConvertKey shader = (m_type == RenderTarget) ?
 			(m_rt_alpha_scale ? ShaderConvert::RTA_CORRECTION : ShaderConvert::RGBA8_COPY) :
-			GetCopyShader(GSTexture::Format::Color, m_texture->GetFormat(), GSLocalMemory::m_psm[m_TEX0.PSM].trbpp);
+			GetCopyShader(GSTexture::Format::Color, m_texture->GetFormat(), bpp, bpp, linear);
 
 		g_gs_device->DrawMultiStretchRects(drects, ndrects, m_texture, shader);
 	}
