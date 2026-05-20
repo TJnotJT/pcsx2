@@ -4009,14 +4009,14 @@ bool GSDeviceVK::CreateRenderPasses()
 
 bool GSDeviceVK::CompileConvertPipelines()
 {
-	const std::optional<std::string> shader = ReadShaderSource("shaders/vulkan/convert.glsl");
-	if (!shader)
+	const std::optional<std::string> source = ReadShaderSource("shaders/vulkan/convert.glsl");
+	if (!source)
 	{
 		Host::ReportErrorAsync("GS", "Failed to read shaders/vulkan/convert.glsl.");
 		return false;
 	}
 
-	VkShaderModule vs = GetUtilityVertexShader(*shader);
+	VkShaderModule vs = GetUtilityVertexShader(*source);
 	if (vs == VK_NULL_HANDLE)
 		return false;
 	ScopedGuard vs_guard([this, &vs]() { vkDestroyShaderModule(m_device, vs, nullptr); });
@@ -4044,47 +4044,29 @@ bool GSDeviceVK::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
+					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
+					GSTexture::Format format = shader.GetOutputFormat();
 					VkRenderPass rp;
-					switch (i)
+
+					if (IsDATMConvertShader(i))
 					{
-						case ShaderConvert::RGBA8_TO_16_BITS:
-						case ShaderConvert::FLOAT32_TO_16_BITS:
-						{
-							rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::UInt16), VK_FORMAT_UNDEFINED,
-								VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-						}
-						break;
-						case ShaderConvert::FLOAT32_TO_32_BITS:
-						{
-							rp = GetRenderPass(LookupNativeFormat(GSTexture::Format::UInt32), VK_FORMAT_UNDEFINED,
-								VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-						}
-						break;
-						case ShaderConvert::DATM_0:
-						case ShaderConvert::DATM_1:
-						case ShaderConvert::DATM_0_RTA_CORRECTION:
-						case ShaderConvert::DATM_1_RTA_CORRECTION:
-						{
-							rp = m_date_setup_render_pass;
-						}
-						break;
-						case ShaderConvert::FLOAT32_COPY:
-						{
-							rp = GetRenderPass(
-								LookupNativeFormat(depth_output ? GSTexture::Format::Invalid : GSTexture::Format::Float32),
-								LookupNativeFormat(depth_output ? GSTexture::Format::DepthStencil : GSTexture::Format::Invalid),
-								VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-						}
-						break;
-						default:
-						{
-							rp = GetRenderPass(
-								LookupNativeFormat(depth_output ? GSTexture::Format::Invalid : GSTexture::Format::Color),
-								LookupNativeFormat(depth_output ? GSTexture::Format::DepthStencil : GSTexture::Format::Invalid),
-								VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-						}
-						break;
+						rp = m_date_setup_render_pass;
 					}
+					else if (depth_output)
+					{
+						rp = GetRenderPass(
+							LookupNativeFormat(GSTexture::Format::Invalid),
+							LookupNativeFormat(GSTexture::Format::DepthStencil),
+							VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+					}
+					else
+					{
+						rp = GetRenderPass(
+							LookupNativeFormat(format),
+							LookupNativeFormat(GSTexture::Format::Invalid),
+							VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+					}
+
 					if (!rp)
 						return false;
 
@@ -4108,13 +4090,13 @@ bool GSDeviceVK::CompileConvertPipelines()
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
 					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(HasIntegerOutput(i)));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(GetIntegerOutputBpp(i) ? 1 : 0));
 					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
 					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(depth_output));
 					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));
 					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(HasFloat32Output(i)));
 
-					std::string shader_with_header = macro + *shader;
+					std::string shader_with_header = macro + *source;
 
 					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shaderName(i));
 					if (ps == VK_NULL_HANDLE)
@@ -4130,8 +4112,6 @@ bool GSDeviceVK::CompileConvertPipelines()
 					
 					if (!pipe)
 						return false;
-
-					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
 
 					m_convert[shader] = pipe;
 
@@ -4149,7 +4129,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 								pxAssert(!arr[ds][fbl]);
 
 								gpb.SetRenderPass(GetTFXRenderPass(true, ds != 0, is_setup, false, fbl != 0, false,
-														VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+									VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 									0);
 								arr[ds][fbl] = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
 								if (!arr[ds][fbl])
@@ -4181,9 +4161,9 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 	for (u32 datm = 0; datm < 4; datm++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%d", datm));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%d", datm));
 		VkShaderModule ps =
-			GetUtilityFragmentShader(*shader, entry_point.c_str());
+			GetUtilityFragmentShader(*source, entry_point.c_str());
 		if (ps == VK_NULL_HANDLE)
 			return false;
 

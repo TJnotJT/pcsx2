@@ -430,7 +430,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
 					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", HasStencilOutput(i));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", HasIntegerOutput(i));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) ? 1 : 0);
 					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
 					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", depth_output);
 					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", HasFloat32Input(i));
@@ -610,7 +610,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		for (size_t i = 0; i < std::size(m_date.primid_ps); i++)
 		{
 			const std::string ps(GetShaderSource(
-				fmt::format("ps_stencil_image_init_{}", i),
+				fmt::format("ps_primid_image_init_{}", i),
 				GL_FRAGMENT_SHADER, *convert_glsl));
 			m_shader_cache.GetProgram(&m_date.primid_ps[i], m_convert.vs, ps);
 			m_date.primid_ps[i].SetFormattedName("PrimID Destination Alpha Init %d", i);

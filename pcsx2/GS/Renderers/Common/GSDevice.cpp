@@ -782,7 +782,8 @@ void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRe
 {
 	pxAssert((dTex && dTex->IsDepthStencil()) == HasFloat32Output(shader.GetShader()));
 	pxAssert(!linear || !shader.GetBiln());
-	GL_INS("StretchRect(%d) {%d,%d} %dx%d -> {%d,%d) %dx%d", shader, int(sRect.left), int(sRect.top),
+	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.GetShader()),
+		int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),
 		int(dRect.right - dRect.left), int(dRect.bottom - dRect.top));
 	DoStretchRect(sTex, sRect, dTex, dRect, shader, linear);

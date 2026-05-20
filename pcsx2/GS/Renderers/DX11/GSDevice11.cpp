@@ -225,7 +225,10 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		return false;
 	}
 
-	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
+
+	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count;
+		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
 		for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
@@ -233,19 +236,22 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 			for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 			{
+				const char* entry_point = shaderName(i);
+				std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+
 				ShaderMacro sm;
 				sm.AddMacro("HAS_BILN", biln);
 				sm.AddMacro("HAS_STENCIL_OUTPUT", HasStencilOutput(i));
-				sm.AddMacro("HAS_INTEGER_OUTPUT", HasIntegerOutput(i));
+				sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) ? 1 : 0);
 				sm.AddMacro("HAS_DEPTH_INPUT", 0);
 				sm.AddMacro("HAS_DEPTH_OUTPUT", depth_output);
 				sm.AddMacro("HAS_FLOAT32_INPUT", HasFloat32Input(i));
 				sm.AddMacro("HAS_FLOAT32_OUTPUT", HasFloat32Input(i));
+				sm.AddMacro(entry_point_macro.c_str(), "1");
 
 				const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
 
-				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr(),
-					shaderName(static_cast<ShaderConvert>(i)));
+				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr());
 				if (!m_convert.ps.at(shader))
 					return false;
 			}
@@ -568,7 +574,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	for (size_t i = 0; i < std::size(m_date.primid_init_ps); i++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%zu", i));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%zu", i));
 		m_date.primid_init_ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, nullptr, entry_point.c_str());
 		if (!m_date.primid_init_ps[i])
 			return false;

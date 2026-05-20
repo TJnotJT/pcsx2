@@ -2035,7 +2035,7 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, GSVector4::unorm8(c));
 		SetUtilityRootSignature();
-		SetPipeline(m_convert.at(ShaderConvertKey(ShaderConvert::RGBA8_COPY)).get());
+		SetPipeline(m_convert.at(ShaderConvert::RGBA8_COPY).get());
 		DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 		dTex->SetState(GSTexture::State::Dirty);
 		dcleared = true;
@@ -2601,6 +2601,7 @@ static void AddUtilityVertexAttributes(D3D12::GraphicsPipelineBuilder& gpb)
 GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityVertexShader(const std::string& source, const char* entry_point)
 {
 	ShaderMacro sm_model;
+	sm_model.AddMacro("VERTEX_SHADER", "1");
 	return m_shader_cache.GetVertexShader(source, sm_model.GetPtr(), entry_point);
 }
 
@@ -2706,14 +2707,14 @@ bool GSDevice12::CreateRootSignatures()
 
 bool GSDevice12::CompileConvertPipelines()
 {
-	std::optional<std::string> shader = ReadShaderSource("shaders/dx11/convert.fx");
-	if (!shader)
+	std::optional<std::string> source = ReadShaderSource("shaders/dx11/convert.fx");
+	if (!source)
 	{
 		Host::ReportErrorAsync("GS", "Failed to read shaders/dx11/convert.fx.");
 		return false;
 	}
 
-	m_convert_vs = GetUtilityVertexShader(*shader, "vs_main");
+	m_convert_vs = GetUtilityVertexShader(*source, "vs_main");
 	if (!m_convert_vs)
 		return false;
 
@@ -2724,10 +2725,12 @@ bool GSDevice12::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(m_convert_vs.get());
 
+	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
+
 	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		bool needs_mask = HasVariableWriteMask(i);
-		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0xf; mask++)
+		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0x10; mask++)
 		{
 			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
 			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
@@ -2735,42 +2738,21 @@ bool GSDevice12::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					switch (i)
+					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
+
+					GSTexture::Format format = shader.GetOutputFormat();
+					DXGI_FORMAT dxgi_format;
+					LookupNativeFormat(format, nullptr, nullptr, &dxgi_format, nullptr);
+
+					if (IsDATMConvertShader(i) || depth_output)
 					{
-						case ShaderConvert::RGBA8_TO_16_BITS:
-						case ShaderConvert::FLOAT32_TO_16_BITS:
-						{
-							gpb.SetRenderTarget(0, DXGI_FORMAT_R16_UINT);
-							gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
-						}
-						break;
-						case ShaderConvert::FLOAT32_TO_32_BITS:
-						{
-							gpb.SetRenderTarget(0, DXGI_FORMAT_R32_UINT);
-							gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
-						}
-						break;
-						case ShaderConvert::DATM_0:
-						case ShaderConvert::DATM_1:
-						case ShaderConvert::DATM_0_RTA_CORRECTION:
-						case ShaderConvert::DATM_1_RTA_CORRECTION:
-						{
-							gpb.ClearRenderTargets();
-							gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
-						}
-						break;
-						case ShaderConvert::FLOAT32_COPY:
-						{
-							depth_output ? gpb.ClearRenderTargets() : gpb.SetRenderTarget(0, DXGI_FORMAT_R32_FLOAT);
-							gpb.SetDepthStencilFormat(depth_output ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-						}
-						break;
-						default:
-						{
-							depth_output ? gpb.ClearRenderTargets() : gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
-							gpb.SetDepthStencilFormat(depth_output ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-						}
-						break;
+						gpb.ClearRenderTargets();
+						gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
+					}
+					else
+					{
+						gpb.SetRenderTarget(0, dxgi_format);
+						gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
 					}
 
 					if (IsDATMConvertShader(i))
@@ -2788,16 +2770,21 @@ bool GSDevice12::CompileConvertPipelines()
 
 					gpb.SetColorWriteMask(0, needs_mask ? mask : ShaderConvertWriteMask(i));
 
+					const char* entry_point = shaderName(i);
+					std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+
 					ShaderMacro sm;
+					sm.AddMacro("PIXEL_SHADER", "1");
 					sm.AddMacro("HAS_BILN", biln);
 					sm.AddMacro("HAS_STENCIL_OUTPUT", HasStencilOutput(i));
-					sm.AddMacro("HAS_INTEGER_OUTPUT", HasIntegerOutput(i));
+					sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) ? 1 : 0);
 					sm.AddMacro("HAS_DEPTH_INPUT", 0);
 					sm.AddMacro("HAS_DEPTH_OUTPUT", depth_output);
 					sm.AddMacro("HAS_FLOAT32_INPUT", HasFloat32Input(i));
 					sm.AddMacro("HAS_FLOAT32_OUTPUT", HasFloat32Output(i));
+					sm.AddMacro(entry_point_macro.c_str(), "1");
 
-					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*shader, sm.GetPtr(), shaderName(i)));
+					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shaderName(i)));
 					if (!ps)
 						return false;
 
@@ -2811,8 +2798,6 @@ bool GSDevice12::CompileConvertPipelines()
 					D3D12::SetObjectName(pipe.get(),
 						TinyString::from_format("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
 							ShaderConvertName(i), mask, depth_output, biln));
-
-					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
 
 					m_convert[shader] = pipe;
 
@@ -2840,8 +2825,15 @@ bool GSDevice12::CompileConvertPipelines()
 
 	for (u32 datm = 0; datm < 4; datm++)
 	{
-		const std::string entry_point(StringUtil::StdStringFromFormat("ps_stencil_image_init_%d", datm));
-		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, entry_point.c_str()));
+		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%d", datm));
+
+		const std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+
+		ShaderMacro sm;
+		sm.AddMacro("PIXEL_SHADER", "1");
+		sm.AddMacro(entry_point_macro.c_str(), "1");
+
+		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), entry_point.c_str()));
 		if (!ps)
 			return false;
 

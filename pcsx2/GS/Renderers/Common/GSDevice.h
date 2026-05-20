@@ -122,6 +122,30 @@ static inline int GetShaderIndexForMask(ShaderConvert shader, int mask)
 	return index;
 }
 
+static inline bool HasColorOutput(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::RGBA8_COPY:
+		case ShaderConvert::RTA_CORRECTION:
+		case ShaderConvert::RTA_DECORRECTION:
+		case ShaderConvert::TRANSPARENCY_FILTER:
+		case ShaderConvert::FLOAT32_TO_RGBA8:
+		case ShaderConvert::FLOAT32_TO_RGB8:
+		case ShaderConvert::FLOAT16_TO_RGB5A1:
+		case ShaderConvert::DOWNSAMPLE_COPY:
+		case ShaderConvert::RGBA_TO_8I:
+		case ShaderConvert::RGB5A1_TO_8I:
+		case ShaderConvert::CLUT_4:
+		case ShaderConvert::CLUT_8:
+		case ShaderConvert::YUV:
+		case ShaderConvert::COLCLIP_RESOLVE:
+			return true;
+		default:
+			return false;
+	}
+}
+
 static inline bool HasFloat32Output(ShaderConvert shader)
 {
 	switch (shader)
@@ -169,17 +193,23 @@ static inline bool HasStencilOutput(ShaderConvert shader)
 	}
 }
 
-static inline bool HasIntegerOutput(ShaderConvert shader)
+static inline int GetIntegerOutputBpp(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::FLOAT32_TO_16_BITS:
 		case ShaderConvert::FLOAT32_TO_32_BITS:
+			return 32;
+		case ShaderConvert::FLOAT32_TO_16_BITS:
 		case ShaderConvert::RGBA8_TO_16_BITS:
-			return true;
+			return 16;
 		default:
-			return false;
+			return 0;
 	}
+}
+
+static inline bool HasColorClipOutput(ShaderConvert shader)
+{
+	return (shader == ShaderConvert::COLCLIP_INIT);
 }
 
 static inline bool SupportsBilinear(ShaderConvert shader)
@@ -294,6 +324,23 @@ public:
 		ShaderConvertKey tmp = *this;
 		tmp.fields.biln = biln;
 		return *this;
+	}
+
+	GSTexture::Format GetOutputFormat() const
+	{
+		const ShaderConvert shader = GetShader();
+		if (fields.depth_output)
+			return GSTexture::Format::DepthStencil;
+		else if (int bpp = GetIntegerOutputBpp(shader))
+			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
+		else if (HasFloat32Output(shader))
+			return GSTexture::Format::Float32;
+		else if (HasColorOutput(shader))
+			return GSTexture::Format::Color;
+		else if (HasColorClipOutput(shader))
+			return GSTexture::Format::ColorClip;
+		else
+			return GSTexture::Format::Invalid;
 	}
 
 	size_t GetHash() const
