@@ -3027,7 +3027,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 		GSTexture* tex = g_gs_device->CreateCompatible(dst->m_texture, rescaler.m_new_scaled_size, false);
 		if (!tex)
 			return nullptr;
-		g_gs_device->StretchRectCopyNearest(dst->m_texture, FullSrcRect, tex, rescaler.m_dRect, 24);
+		g_gs_device->StretchRectCopyNearest(dst->m_texture, FullSrcRect, tex, rescaler.m_dRect, 32, 24);
 		g_gs_device->Recycle(dst->m_texture);
 
 		dst->m_texture = tex;
