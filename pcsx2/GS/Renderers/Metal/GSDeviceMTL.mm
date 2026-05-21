@@ -411,26 +411,33 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 	              || depth   != m_current_render.depth_target
 	              || stencil != m_current_render.stencil_target
 	              || rt1     != m_current_render.has.rt1_depth;
-	GSVector4 color_clear;
-	float depth_clear;
-	// Depth and stencil might be the same, so do all invalidation checks before resetting invalidation
-#define CHECK_CLEAR(tex, load_action, clear, ClearGetter) \
-	if (tex) \
-	{ \
-		if (tex->GetState() == GSTexture::State::Invalidated) \
-		{ \
-			load_action = MTLLoadActionDontCare; \
-		} \
-		else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare) \
-		{ \
-			clear = tex->ClearGetter(); \
-			load_action = MTLLoadActionClear; \
-		} \
-	}
+	GSVector4 color_clear, depth_clear;
 
-	CHECK_CLEAR(mc, color_load, color_clear, GetUNormClearColor)
-	CHECK_CLEAR(md, depth_load, depth_clear, GetClearDepth)
-#undef CHECK_CLEAR
+	// Depth and stencil might be the same, so do all invalidation checks before resetting invalidation
+	const auto CheckClear = [](GSTextureMTL* tex) {
+		if (tex)
+		{
+			if (tex->GetState() == GSTexture::State::Invalidated)
+			{
+				return { MTLLoadActionDontCare, GSVector4(0.0f) };
+			}
+			else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
+			{
+				return {
+					MTLLoadActionClear,
+					tex->IsDepthLike() ? GSVector4(tex->GetClearDepth()) : tex->GetUNormClearColor();
+				};
+			}
+		}
+		else
+		{
+			return { MTLLoadActionDontCare, GSVector4(0.0f) };
+		}
+	};
+
+	std::tie(color_load, color_clear) = CheckClear(mc);
+	std::tie(depth_load, depth_clear) = CheckClear(md);
+
 	// Stencil and depth are one texture, stencil clears aren't supported
 	if (ms && ms->GetState() == GSTexture::State::Invalidated)
 		stencil_load = MTLLoadActionDontCare;
@@ -480,7 +487,7 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 		md->m_last_write = m_current_draw;
 		desc.depthAttachment.texture = md->GetTexture();
 		if (depth_load == MTLLoadActionClear)
-			desc.depthAttachment.clearDepth = depth_clear;
+			desc.depthAttachment.clearDepth = depth_clear.x;
 		desc.depthAttachment.loadAction = depth_load;
 	}
 	if (ms)
@@ -496,7 +503,7 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 		MTLRenderPassColorAttachmentDescriptor* color1 = desc.colorAttachments[1];
 		color1.texture = GetRT1DepthTexture(md);
 		if (m_features.framebuffer_fetch)
-			color1.clearColor = MTLClearColorMake(depth_load == MTLLoadActionClear ? depth_clear : -1, 0, 0, 0);
+			color1.clearColor = MTLClearColorMake(depth_load == MTLLoadActionClear ? depth_clear.x : -1, 0, 0, 0);
 	}
 
 	EndRenderPass();
