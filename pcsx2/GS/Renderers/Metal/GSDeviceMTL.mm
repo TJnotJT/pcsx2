@@ -524,7 +524,7 @@ static constexpr MTLPixelFormat ConvertPixelFormat(GSTexture::Format format)
 {
 	switch (format)
 	{
-		case GSTexture::Format::Float32:      return MTLPixelFormatR32Float;
+		case GSTexture::Format::DepthColor:   return MTLPixelFormatR32Float;
 		case GSTexture::Format::PrimID:       return MTLPixelFormatR32Float;
 		case GSTexture::Format::UInt32:       return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt16:       return MTLPixelFormatR16Uint;
@@ -625,7 +625,7 @@ void GSDeviceMTL::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex,
 
 	// Save 2nd output
 	if (feedback_write_2) // FIXME I'm not sure dRect[1] is always correct
-		DoStretchRect(dTex, full_r, sTex[2], dRect[1], m_convert_pipeline[static_cast<int>(ShaderConvert::YUV)], linear, LoadAction::DontCareIfFull, &cb_yuv, sizeof(cb_yuv));
+		DoStretchRect(dTex, full_r, sTex[2], dRect[1], m_convert_pipeline.at(ShaderConvert::YUV), linear, LoadAction::DontCareIfFull, &cb_yuv, sizeof(cb_yuv));
 
 	if (feedback_write_2_but_blend_bg)
 		ClearRenderTarget(dTex, c);
@@ -1164,72 +1164,93 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		NSString* name = [NSString stringWithFormat:@"ps_interlace%zu", i];
 		m_interlace_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 	}
-	for (size_t i = 0; i < std::size(m_convert_pipeline); i++)
+
+	for (size_t i = 0; i < static_cast<size_t>(ShaderConvert::Count); i++)
 	{
-		ShaderConvert conv = static_cast<ShaderConvert>(i);
-		NSString* name = [NSString stringWithCString:shaderName(conv) encoding:NSUTF8StringEncoding];
-		switch (conv)
+		const ShaderConvert conv = static_cast<ShaderConvert>(i);
+		bool variable_mask = HasVariableWriteMask(conv);
+		for (u32 mask = variable_mask ? 0 : 0xf; mask < 0x10; mask++)
 		{
-			case ShaderConvert::Count:
-			case ShaderConvert::DATM_0:
-			case ShaderConvert::DATM_1:
-			case ShaderConvert::DATM_0_RTA_CORRECTION:
-			case ShaderConvert::DATM_1_RTA_CORRECTION:
-			case ShaderConvert::CLUT_4:
-			case ShaderConvert::CLUT_8:
-			case ShaderConvert::COLCLIP_INIT:
-			case ShaderConvert::COLCLIP_RESOLVE:
-				continue;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::FLOAT32_TO_16_BITS:
-			case ShaderConvert::RGBA8_TO_16_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::DEPTH_COPY:
-			case ShaderConvert::FLOAT32_TO_FLOAT24:
-			case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
-			case ShaderConvert::RGBA8_TO_FLOAT32:
-			case ShaderConvert::RGBA8_TO_FLOAT24:
-			case ShaderConvert::RGBA8_TO_FLOAT16:
-			case ShaderConvert::RGB5A1_TO_FLOAT16:
-			case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
-			case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
-			case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
-			case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
-				pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
-				pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
-				break;
-			case ShaderConvert::COPY:
-			case ShaderConvert::DOWNSAMPLE_COPY:
-			case ShaderConvert::RGBA_TO_8I: // Yes really
-			case ShaderConvert::RGB5A1_TO_8I:
-			case ShaderConvert::RTA_CORRECTION:
-			case ShaderConvert::RTA_DECORRECTION:
-			case ShaderConvert::TRANSPARENCY_FILTER:
-			case ShaderConvert::FLOAT32_TO_RGBA8:
-			case ShaderConvert::FLOAT32_TO_RGB8:
-			case ShaderConvert::FLOAT16_TO_RGB5A1:
-			case ShaderConvert::YUV:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Float32);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
+			u32 supports_depth_input = static_cast<u32>(HasFloat32Input(conv));
+			for (u32 depth_input = 0; depth_input < supports_depth_input + 1; depth_input++)
+			{
+				u32 supports_depth_output = static_cast<u32>(HasFloat32Output(conv));
+				for (u32 depth_output = 0; depth_output < supports_depth_output + 1; depth_output++)
+				{
+					u32 supports_biln = static_cast<u32>(SupportsBilinear(conv));
+					for (u32 biln = 0; biln < 1 + supports_biln; biln++)
+					{
+						const ShaderConvertSelector shader(static_cast<ShaderConvert>(i), mask, depth_input, depth_output, biln);
+						const char* depth_suffix_sep = (supports_depth_input || supports_depth_output) ? "_" : "";
+						const char* depth_input_suffix = supports_depth_input ? (depth_input ? "d" : "c") : "";
+						const char* depth_output_suffix = supports_depth_output ? (depth_output ? "d" : "c") : "";
+						NSString* name = [NSString stringWithFormat:@"%s%s%s%s", shaderName(shader.Shader()), depth_suffix_sep, depth_input_suffix, depth_output_suffix];
+						switch (conv)
+						{
+							case ShaderConvert::Count:
+							case ShaderConvert::DATM_0:
+							case ShaderConvert::DATM_1:
+							case ShaderConvert::DATM_0_RTA_CORRECTION:
+							case ShaderConvert::DATM_1_RTA_CORRECTION:
+							case ShaderConvert::CLUT_4:
+							case ShaderConvert::CLUT_8:
+							case ShaderConvert::COLCLIP_INIT:
+							case ShaderConvert::COLCLIP_RESOLVE:
+								continue;
+							case ShaderConvert::FLOAT32_TO_32_BITS:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+							case ShaderConvert::FLOAT32_TO_16_BITS:
+							case ShaderConvert::RGB5A1_TO_16_BITS:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+							case ShaderConvert::FLOAT32_COPY:
+							case ShaderConvert::FLOAT32_TO_FLOAT24:
+							case ShaderConvert::RGBA8_TO_FLOAT32:
+							case ShaderConvert::RGBA8_TO_FLOAT24:
+							case ShaderConvert::RGBA8_TO_FLOAT16:
+							case ShaderConvert::RGB5A1_TO_FLOAT16:
+								if (depth_output)
+								{
+									pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
+									pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
+								}
+								else
+								{
+									pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::DepthColor);
+									pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								}
+								break;
+							case ShaderConvert::COPY:
+							case ShaderConvert::DOWNSAMPLE_COPY:
+							case ShaderConvert::RGBA_TO_8I: // Yes really
+							case ShaderConvert::RGB5A1_TO_8I:
+							case ShaderConvert::RTA_CORRECTION:
+							case ShaderConvert::RTA_DECORRECTION:
+							case ShaderConvert::TRANSPARENCY_FILTER:
+							case ShaderConvert::FLOAT32_TO_RGBA8:
+							case ShaderConvert::FLOAT32_TO_RGB8:
+							case ShaderConvert::FLOAT16_TO_RGB5A1:
+							case ShaderConvert::YUV:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+						}
+						const u32 scmask = shader.Mask();
+						MTLColorWriteMask mask = MTLColorWriteMaskNone;
+						if (scmask & 1) mask |= MTLColorWriteMaskRed;
+						if (scmask & 2) mask |= MTLColorWriteMaskGreen;
+						if (scmask & 4) mask |= MTLColorWriteMaskBlue;
+						if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
+						pdesc.colorAttachments[0].writeMask = mask;
+						setFnConstantB(m_fn_constants, shader.Biln(), GSMTLConstantIndex_BILN);
+						m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
+					}
+				}
+			}
 		}
-		const u32 scmask = ShaderConvertWriteMask(conv);
-		MTLColorWriteMask mask = MTLColorWriteMaskNone;
-		if (scmask & 1) mask |= MTLColorWriteMaskRed;
-		if (scmask & 2) mask |= MTLColorWriteMaskGreen;
-		if (scmask & 4) mask |= MTLColorWriteMaskBlue;
-		if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
-		pdesc.colorAttachments[0].writeMask = mask;
-		m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 	}
 	pdesc.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
 	pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
@@ -1667,16 +1688,13 @@ void GSDeviceMTL::RenderCopy(GSTexture* sTex, id<MTLRenderPipelineState> pipelin
 }
 
 void GSDeviceMTL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 { @autoreleasepool {
 
-	const LoadAction load_action = (cms.wrgba == 0xf) ? LoadAction::DontCareIfFull : LoadAction::Load;
+	const LoadAction load_action = (shader.Mask() == 0xf) ? LoadAction::DontCareIfFull : LoadAction::Load;
 	id<MTLRenderPipelineState> pipeline;
-	if (HasVariableWriteMask(shader))
-		pipeline = m_convert_pipeline_copy_mask[GetShaderIndexForMask(shader, cms.wrgba)];
-	else
-		pipeline = m_convert_pipeline[static_cast<int>(shader)];
-	pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader)).c_str());
+	pipeline = m_convert_pipeline.at(shader);
+	pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
 
 	DoStretchRect(sTex, sRect, dTex, dRect, pipeline, linear, load_action, nullptr, 0);
 }}
@@ -1715,7 +1733,7 @@ void GSDeviceMTL::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture
 	}
 }}
 
-void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvert shader)
+void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 { @autoreleasepool {
 	BeginStretchRect(@"MultiStretchRect", dTex, MTLLoadActionLoad);
 
@@ -1737,13 +1755,11 @@ void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_r
 		const u32 end = i * 4;
 		const u32 vertex_count = end - start;
 		const u32 index_count = vertex_count + (vertex_count >> 1); // 6 indices per 4 vertices
-		pxAssert(HasVariableWriteMask(shader) || wmask == 0xf);
-		id<MTLRenderPipelineState> new_pipeline = wmask == 0xf ? m_convert_pipeline[static_cast<int>(shader)]
-		                                                       : m_convert_pipeline_copy_mask[GetShaderIndexForMask(shader, wmask)];
+		id<MTLRenderPipelineState> new_pipeline = m_convert_pipeline.at(shader.SetMask(wmask));
 		if (new_pipeline != pipeline)
 		{
 			pipeline = new_pipeline;
-			pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader)).c_str());
+			pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
 			MRESetPipeline(pipeline);
 		}
 		MRESetSampler(linear ? SamplerSelector::Linear() : SamplerSelector::Point());
@@ -1790,7 +1806,7 @@ void GSDeviceMTL::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, 
 void GSDeviceMTL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, u32 SBW, u32 SPSM, GSTexture* dTex, u32 DBW, u32 DPSM)
 { @autoreleasepool {
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
-	id<MTLRenderPipelineState> pipeline = m_convert_pipeline[static_cast<int>(shader)];
+	id<MTLRenderPipelineState> pipeline = m_convert_pipeline.at(shader);
 	if (!pipeline)
 		[NSException raise:@"StretchRect Missing Pipeline" format:@"No pipeline for %d", static_cast<int>(shader)];
 
@@ -1803,7 +1819,7 @@ void GSDeviceMTL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 off
 void GSDeviceMTL::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
 { @autoreleasepool {
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
-	id<MTLRenderPipelineState> pipeline = m_convert_pipeline[static_cast<int>(shader)];
+	id<MTLRenderPipelineState> pipeline = m_convert_pipeline.at(shader);
 	if (!pipeline)
 		[NSException raise:@"StretchRect Missing Pipeline" format:@"No pipeline for %d", static_cast<int>(shader)];
 
@@ -1847,7 +1863,7 @@ void GSDeviceMTL::BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea)
 			return;
 		if (m_ds_as_rt_gstexture)
 			Recycle(m_ds_as_rt_gstexture);
-		m_ds_as_rt_gstexture = CreateRenderTarget(needed_width, needed_height, GSTexture::Format::Float32, false, true);
+		m_ds_as_rt_gstexture = CreateRenderTarget(needed_width, needed_height, GSTexture::Format::DepthColor, false, true);
 		m_ds_as_rt_texture = static_cast<GSTextureMTL*>(m_ds_as_rt_gstexture)->GetTexture();
 		@autoreleasepool
 		{

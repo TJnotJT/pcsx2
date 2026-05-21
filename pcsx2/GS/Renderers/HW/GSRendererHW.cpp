@@ -3009,8 +3009,11 @@ void GSRendererHW::Draw()
 		{
 			GL_CACHE("HW: Pre-draw resolve of colclip! Address: %x", FRAME.TBP0);
 			GSTexture* colclip_texture = g_gs_device->GetColorClipTexture();
-			g_gs_device->StretchRect(colclip_texture, GSVector4(m_conf.colclip_update_area) / GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy()), old_rt->m_texture, GSVector4(m_conf.colclip_update_area),
-				ShaderConvert::COLCLIP_RESOLVE, false);
+			const GSVector4 colclip_texture_dims = GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy());
+			g_gs_device->StretchRectNearest(
+				colclip_texture, GSVector4(m_conf.colclip_update_area) / colclip_texture_dims,
+				old_rt->m_texture, GSVector4(m_conf.colclip_update_area),
+				ShaderConvert::COLCLIP_RESOLVE);
 
 			g_gs_device->Recycle(colclip_texture);
 
@@ -4211,7 +4214,7 @@ void GSRendererHW::Draw()
 							static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 						GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRectAutoNearest(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect));
 					}
 
 					g_texture_cache->InvalidateTemporaryZ();
@@ -4227,7 +4230,7 @@ void GSRendererHW::Draw()
 					sRect = sRect.min(GSVector4(1.0f));
 					dRect = dRect.min_u32(GSVector4i(ds->m_unscaled_size.x * ds->m_scale, ds->m_unscaled_size.y * ds->m_scale).xyxy());
 
-					g_gs_device->StretchRect(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRectAutoNearest(ds->m_texture, sRect, g_texture_cache->GetTemporaryZ(), GSVector4(dRect));
 					z_address_info.rect_since = GSVector4i::zero();
 					g_texture_cache->SetTemporaryZInfo(z_address_info);
 				}
@@ -4253,7 +4256,7 @@ void GSRendererHW::Draw()
 				const int new_height = std::min(2048, std::max(t_size.y, static_cast<int>(vertical_size))) * ds->m_scale;
 				const int new_width = std::min(2048, std::max(t_size.x, static_cast<int>(horizontal_size))) * ds->m_scale;
 
-				if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_width, new_height, GSTexture::Format::DepthStencil, true))
+				if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_width, new_height, true))
 				{
 					GSVector4 sRect = GSVector4(static_cast<float>(z_horizontal_offset) / static_cast<float>(ds->m_unscaled_size.x), static_cast<float>(z_vertical_offset) / static_cast<float>(ds->m_unscaled_size.y), 1.0f , 1.0f);
 
@@ -4274,7 +4277,7 @@ void GSRendererHW::Draw()
 
 					if (m_cached_ctx.TEST.ZTST > ZTST_ALWAYS || !dRect.rintersect(GSVector4i(GSVector4(m_r) * ds->m_scale)).eq(dRect))
 					{
-						g_gs_device->StretchRect(ds->m_texture, sRect, tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRectAutoNearest(ds->m_texture, sRect, tex, GSVector4(dRect));
 					}
 					g_texture_cache->SetTemporaryZ(tex);
 					g_texture_cache->SetTemporaryZInfo(ds->m_TEX0.TBP0, page_offset, rt_page_offset);
@@ -4862,10 +4865,9 @@ void GSRendererHW::Draw()
 
 				if (z_width != new_w || z_height != new_h)
 				{
-					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, GSTexture::Format::DepthStencil, true))
+					if (GSTexture* tex = g_gs_device->CreateDepthStencil(new_w * ds->m_scale, new_h * ds->m_scale, true))
 					{
-						const GSVector4i dRect = GSVector4i(0, 0, g_texture_cache->GetTemporaryZ()->GetWidth(), g_texture_cache->GetTemporaryZ()->GetHeight());
-						g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), tex, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+						g_gs_device->StretchRectAutoNearest(g_texture_cache->GetTemporaryZ(), tex);
 						g_texture_cache->InvalidateTemporaryZ();
 						g_texture_cache->SetTemporaryZ(tex);
 					}
@@ -5171,7 +5173,7 @@ void GSRendererHW::Draw()
 						static_cast<float>((real_rect.w + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d rt_vert_offset %d z_horz_offset %d rt_horz_offset %d", s_n, z_vertical_offset, vertical_offset, z_horizontal_offset, horizontal_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRectAutoNearest(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect));
 				}
 				else if (m_temp_z_full_copy)
 				{
@@ -5183,7 +5185,7 @@ void GSRendererHW::Draw()
 						static_cast<float>((ds->m_valid.w + vertical_offset + (1.0f / ds->m_scale)) * ds->m_scale) / static_cast<float>(g_texture_cache->GetTemporaryZ()->GetHeight()));
 
 					GL_CACHE("HW: RT in RT Z copy back draw %lld z_vert_offset %d z_offset %d", s_n, z_vertical_offset, vertical_offset);
-					g_gs_device->StretchRect(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect), ShaderConvert::DEPTH_COPY, false);
+					g_gs_device->StretchRectAutoNearest(g_texture_cache->GetTemporaryZ(), sRect, ds->m_texture, GSVector4(dRect));
 				}
 
 				m_temp_z_full_copy = false;
@@ -5212,8 +5214,11 @@ void GSRendererHW::Draw()
 		if (writeback_colclip_texture)
 		{
 			GSTexture* colclip_texture = g_gs_device->GetColorClipTexture();
-			g_gs_device->StretchRect(colclip_texture, GSVector4(m_conf.colclip_update_area) / GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy()), rt->m_texture, GSVector4(m_conf.colclip_update_area),
-				ShaderConvert::COLCLIP_RESOLVE, false);
+			const GSVector4 colclip_texture_dims = GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy());
+			g_gs_device->StretchRectNearest(
+				colclip_texture, GSVector4(m_conf.colclip_update_area) / colclip_texture_dims,
+				rt->m_texture, GSVector4(m_conf.colclip_update_area),
+				ShaderConvert::COLCLIP_RESOLVE);
 		}
 
 		const u64 frame = g_perfmon.GetFrame();
@@ -6025,8 +6030,7 @@ void GSRendererHW::EmulateDATEGetConfig(DATEOptions& date_options, bool scale_rt
 	if (date_stencil_needs_ds)
 	{
 		const bool need_barrier = m_conf.require_one_barrier || (m_conf.require_full_barrier && features.feedback_loops());
-		if ((temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(),
-			GSTexture::Format::DepthStencil, false)), temp_ds))
+		if ((temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), false)), temp_ds))
 		{
 			m_conf.ds = temp_ds.get();
 		}
@@ -6990,8 +6994,11 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 			if (colclip_texture->GetSize() != rt->m_texture->GetSize())
 			{
 				GL_CACHE("HW: Pre-Blend resolve of colclip due to size change! Address: %x", rt->m_TEX0.TBP0);
-				g_gs_device->StretchRect(colclip_texture, GSVector4(m_conf.colclip_update_area) / GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy()), rt->m_texture, GSVector4(m_conf.colclip_update_area),
-					ShaderConvert::COLCLIP_RESOLVE, false);
+				const GSVector4 colclip_texture_dims = GSVector4(GSVector4i(colclip_texture->GetSize()).xyxy());
+				g_gs_device->StretchRectNearest(
+					colclip_texture, GSVector4(m_conf.colclip_update_area) / colclip_texture_dims,
+					rt->m_texture, GSVector4(m_conf.colclip_update_area),
+					ShaderConvert::COLCLIP_RESOLVE);
 
 				g_gs_device->Recycle(colclip_texture);
 
@@ -7577,7 +7584,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 	// Depth + bilinear filtering isn't done yet. But if the game has just set a Z24 swizzle on a colour texture, we can
 	// just pretend it's not a depth format, since in the texture cache, it's not.
 	// Other games worth testing: Area 51, Burnout
-	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthStencil())
+	if (psm.depth && m_vt.IsLinear() && tex->GetTexture()->IsDepthLike())
 		GL_INS("HW: WARNING: Depth + bilinear filtering not supported");
 
 	// Performance note:
@@ -7676,7 +7683,7 @@ __ri void GSRendererHW::EmulateTextureSampler(const GSTextureCache::Target* rt, 
 		}
 
 		// Depth format
-		if (tex->m_texture->IsDepthStencil())
+		if (tex->m_texture->IsDepthLike())
 		{
 			// Require a float conversion if the texure is a depth format
 			m_conf.ps.depth_fmt = (psm.bpp == 16) ? 2 : 1;
@@ -8098,10 +8105,8 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 
 	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
 		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
-
-	src_copy.reset(src_target->m_texture->IsDepthStencil() ?
-	                   g_gs_device->CreateDepthStencil(scaled_copy_size.x, scaled_copy_size.y, src_target->m_texture->GetFormat(), false) :
-	                   g_gs_device->CreateRenderTarget(scaled_copy_size.x, scaled_copy_size.y, src_target->m_texture->GetFormat(), true, true));
+	const bool clear = src_target->m_texture->IsDepthStencil();
+	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
 	if (!src_copy) [[unlikely]]
 	{
 		Console.Error("HW: Failed to allocate %dx%d texture for hazard copy", scaled_copy_size.x, scaled_copy_size.y);
@@ -8117,8 +8122,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		{
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
-			g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-				src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+			g_gs_device->StretchRectAutoNearest(src_target->m_texture, src_rect, src_copy.get(), dst_rect);
 		}
 		else
 		{
@@ -8150,8 +8154,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		const GSVector4 src_rect = GSVector4(copy_range) / GSVector4(src_unscaled_size).xyxy();
 		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
 
-		g_gs_device->StretchRect(src_target->m_texture, src_rect, src_copy.get(), dst_rect,
-			src_target->m_texture->IsDepthStencil() ? ShaderConvert::DEPTH_COPY : ShaderConvert::COPY, false);
+		g_gs_device->StretchRectAutoNearest(src_target->m_texture, src_rect, src_copy.get(), dst_rect);
 	}
 	m_conf.tex = src_copy.get();
 }
@@ -10014,7 +10017,7 @@ bool GSRendererHW::OI_BlitFMV(GSTextureCache::Target* _rt, GSTextureCache::Sourc
 				th = new_height;
 				const GSVector4 sRect(m_vt.m_min.t.x / tw, m_vt.m_min.t.y / th, m_vt.m_max.t.x / tw, m_vt.m_max.t.y / th);
 				const GSVector4i r_full_new(0, 0, tw, th);
-				g_gs_device->StretchRect(tex->m_texture, sRect, rt, dRect, ShaderConvert::COPY, m_vt.IsRealLinear());
+				g_gs_device->StretchRectAuto(tex->m_texture, sRect, rt, dRect, m_vt.IsRealLinear());
 				g_gs_device->CopyRect(rt, tex->m_texture, r_full_new, 0, 0);
 				g_gs_device->Recycle(rt);
 			}

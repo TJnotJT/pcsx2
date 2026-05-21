@@ -414,40 +414,65 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	{
 		GL_PUSH("GSDeviceOGL::Convert");
 
-
-
 		m_convert.vs = GetShaderSource("vs_main", GL_VERTEX_SHADER, *convert_glsl);
 
-		for (size_t i = 0; i < std::size(m_convert.ps); i++)
+		for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
+			i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 		{
-			const char* name = shaderName(static_cast<ShaderConvert>(i));
-			const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl));
-			if (!m_shader_cache.GetProgram(&m_convert.ps[i], m_convert.vs, ps))
-				return false;
-			m_convert.ps[i].SetFormattedName("Convert pipe %s", name);
+			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
+			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
+			{
+				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
+				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
+				{
+					const char* name = shaderName(static_cast<ShaderConvert>(i));
 
-			if (static_cast<ShaderConvert>(i) == ShaderConvert::RGBA_TO_8I || static_cast<ShaderConvert>(i) == ShaderConvert::RGB5A1_TO_8I)
-			{
-				m_convert.ps[i].RegisterUniform("SBW");
-				m_convert.ps[i].RegisterUniform("DBW");
-				m_convert.ps[i].RegisterUniform("PSM");
-				m_convert.ps[i].RegisterUniform("ScaleFactor");
-			}
-			else if (static_cast<ShaderConvert>(i) == ShaderConvert::YUV)
-			{
-				m_convert.ps[i].RegisterUniform("EMOD");
-			}
-			else if (static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_4 || static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_8)
-			{
-				m_convert.ps[i].RegisterUniform("offset");
-				m_convert.ps[i].RegisterUniform("scale");
-			}
-			else if (static_cast<ShaderConvert>(i) == ShaderConvert::DOWNSAMPLE_COPY)
-			{
-				m_convert.ps[i].RegisterUniform("ClampMin");
-				m_convert.ps[i].RegisterUniform("DownsampleFactor");
-				m_convert.ps[i].RegisterUniform("Weight");
-				m_convert.ps[i].RegisterUniform("StepMultiplier");
+					std::string macro;
+					macro += fmt::format("#define HAS_BILN {}\n", biln);
+					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
+					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
+					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", depth_output);
+					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));
+					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(HasFloat32Output(i)));
+
+					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
+
+					const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
+
+					GLProgram& prog = m_convert.ps[shader];
+
+					if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
+						return false;
+
+					prog.SetFormattedName("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+						ShaderConvertName(i), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+						static_cast<int>(shader.Biln()));
+
+					if (static_cast<ShaderConvert>(i) == ShaderConvert::RGBA_TO_8I || static_cast<ShaderConvert>(i) == ShaderConvert::RGB5A1_TO_8I)
+					{
+						prog.RegisterUniform("SBW");
+						prog.RegisterUniform("DBW");
+						prog.RegisterUniform("PSM");
+						prog.RegisterUniform("ScaleFactor");
+					}
+					else if (static_cast<ShaderConvert>(i) == ShaderConvert::YUV)
+					{
+						prog.RegisterUniform("EMOD");
+					}
+					else if (static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_4 || static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_8)
+					{
+						prog.RegisterUniform("offset");
+						prog.RegisterUniform("scale");
+					}
+					else if (static_cast<ShaderConvert>(i) == ShaderConvert::DOWNSAMPLE_COPY)
+					{
+						prog.RegisterUniform("ClampMin");
+						prog.RegisterUniform("DownsampleFactor");
+						prog.RegisterUniform("Weight");
+						prog.RegisterUniform("StepMultiplier");
+					}
+				}
 			}
 		}
 
@@ -586,7 +611,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		for (size_t i = 0; i < std::size(m_date.primid_ps); i++)
 		{
 			const std::string ps(GetShaderSource(
-				fmt::format("ps_stencil_image_init_{}", i),
+				fmt::format("ps_primid_image_init_{}", i),
 				GL_FRAGMENT_SHADER, *convert_glsl));
 			m_shader_cache.GetProgram(&m_date.primid_ps[i], m_convert.vs, ps);
 			m_date.primid_ps[i].SetFormattedName("PrimID Destination Alpha Init %d", i);
@@ -942,7 +967,7 @@ void GSDeviceOGL::DestroyResources()
 	for (GLProgram& prog : m_present)
 		prog.Destroy();
 
-	for (GLProgram& prog : m_convert.ps)
+	for (auto& [key, prog] : m_convert.ps)
 		prog.Destroy();
 	delete m_convert.dss;
 	delete m_convert.dss_write;
@@ -1271,7 +1296,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 	{
 		glDisable(GL_SCISSOR_TEST);
 
-		if (T->GetType() == GSTexture::Type::DepthStencil)
+		if (T->IsDepthStencil())
 		{
 			const float d = T->GetClearDepth();
 			if (GLState::depth_mask)
@@ -1290,7 +1315,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 			const u32 old_color_mask = GLState::wrgba;
 			OMSetColorMaskState();
 
-			const GSVector4 c_unorm = T->GetUNormClearColor();
+			const GSVector4 c_unorm = T->IsDepthColor() ? GSVector4(T->GetClearDepth()) : T->GetUNormClearColor();
 
 			if (T->IsIntegerFormat())
 			{
@@ -1598,7 +1623,7 @@ void GSDeviceOGL::BlitRect(GSTexture* sTex, const GSVector4i& r, const GSVector2
 
 	const GSVector4 float_r(r);
 
-	m_convert.ps[static_cast<int>(ShaderConvert::COPY)].Bind();
+	m_convert.ps.at(ShaderConvert::COPY).Bind();
 	OMSetDepthStencilState(m_convert.dss);
 	OMSetBlendState();
 	OMSetColorMaskState();
@@ -1656,9 +1681,11 @@ void GSDeviceOGL::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r
 }
 
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	OMColorMaskSelector cms, ShaderConvert shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
-	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps[static_cast<int>(shader)], false, cms, linear);
+	const u8 mask = shader.Mask();
+	shader = ProcessShaderConvertSelector(shader);  // Removes mask and depth input.
+	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps.at(shader), false, OMColorMaskSelector(mask), linear);
 }
 
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
@@ -1754,7 +1781,7 @@ void GSDeviceOGL::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, 
 	CommitClear(sTex, false);
 
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
-	GLProgram& prog = m_convert.ps[static_cast<int>(shader)];
+	GLProgram& prog = m_convert.ps.at(shader);
 	prog.Bind();
 	prog.Uniform3ui(0, offsetX, offsetY, dOffset);
 	prog.Uniform1f(1, sScale);
@@ -1776,7 +1803,7 @@ void GSDeviceOGL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 off
 	CommitClear(sTex, false);
 
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
-	GLProgram& prog = m_convert.ps[static_cast<int>(shader)];
+	GLProgram& prog = m_convert.ps.at(shader);
 	prog.Bind();
 	prog.Uniform1ui(0, SBW);
 	prog.Uniform1ui(1, DBW);
@@ -1800,7 +1827,7 @@ void GSDeviceOGL::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u3
 	CommitClear(sTex, false);
 
 	constexpr ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
-	GLProgram& prog = m_convert.ps[static_cast<int>(shader)];
+	GLProgram& prog = m_convert.ps.at(shader);
 	prog.Bind();
 	prog.Uniform2iv(0, clamp_min.v);
 	prog.Uniform1i(1, downsample_factor);
@@ -1846,18 +1873,20 @@ void GSDeviceOGL::DrawStretchRect(const GSVector4& sRect, const GSVector4& dRect
 }
 
 void GSDeviceOGL::DrawMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvert shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
+	shader = ProcessShaderConvertSelector(shader);
+
 	IASetVAO(m_vao);
 	IASetPrimitiveTopology(GL_TRIANGLE_STRIP);
-	OMSetDepthStencilState(HasDepthOutput(shader) ? m_convert.dss_write : m_convert.dss);
+	OMSetDepthStencilState(shader.DepthOutput() ? m_convert.dss_write : m_convert.dss);
 	OMSetBlendState(false);
 	OMSetColorMaskState();
 	if (!dTex->IsDepthStencil())
 		OMSetRenderTargets(dTex, nullptr, nullptr);
 	else
 		OMSetRenderTargets(nullptr, nullptr, dTex);
-	m_convert.ps[static_cast<int>(shader)].Bind();
+	m_convert.ps.at(shader).Bind();
 
 	const GSVector2 ds(static_cast<float>(dTex->GetWidth()), static_cast<float>(dTex->GetHeight()));
 	GSTexture* last_tex = rects[0].src;
@@ -1968,8 +1997,8 @@ void GSDeviceOGL::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex,
 	if (feedback_write_2 || feedback_write_1)
 	{
 		// Write result to feedback loop
-		m_convert.ps[static_cast<int>(ShaderConvert::YUV)].Bind();
-		m_convert.ps[static_cast<int>(ShaderConvert::YUV)].Uniform2i(0, EXTBUF.EMODA, EXTBUF.EMODC);
+		m_convert.ps.at(ShaderConvert::YUV).Bind();
+		m_convert.ps.at(ShaderConvert::YUV).Uniform2i(0, EXTBUF.EMODA, EXTBUF.EMODC);
 	}
 
 	// Save 2nd output
@@ -2100,7 +2129,7 @@ void GSDeviceOGL::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GS
 		constexpr GLint clear_color = 0;
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
-	m_convert.ps[SetDATMShader(datm)].Bind();
+	m_convert.ps.at(SetDATMShader(datm)).Bind();
 
 	// om
 

@@ -34,7 +34,7 @@ public:
 		ColorHDR,     ///< High dynamic range (RGBA16F) color texture
 		ColorClip,    ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
-		Float32,      ///< For treating depth texture as RT
+		DepthColor,      ///< For treating depth texture as RT
 		UNorm8,       ///< A8UNorm texture for paletted textures and the OSD font
 		UInt16,       ///< UInt16 texture for reading back 16-bit depth
 		UInt32,       ///< UInt32 texture for reading back 24 and 32-bit depth
@@ -129,9 +129,17 @@ public:
 	{
 		return (m_type == Type::DepthStencil);
 	}
+	__fi bool IsDepthColor() const
+	{
+		return (m_type == Type::RenderTarget && m_format == Format::DepthColor);
+	}
 	__fi bool IsTexture() const
 	{
 		return (m_type == Type::Texture);
+	}
+	__fi bool IsDepthLike() const
+	{
+		return IsDepthStencil() || IsDepthColor();
 	}
 
 	__fi State GetState() const { return m_state; }

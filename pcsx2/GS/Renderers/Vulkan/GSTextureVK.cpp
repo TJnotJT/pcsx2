@@ -547,6 +547,13 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 1u, 0u, 1u};
 		vkCmdClearDepthStencilImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
 	}
+	else if (IsDepthColor())
+	{
+		alignas(16) VkClearColorValue cv;
+		GSVector4::store<true>(cv.float32, GSVector4(m_clear_value.depth));
+		const VkImageSubresourceRange srr = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
+		vkCmdClearColorImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &srr);
+	}
 	else
 	{
 		alignas(16) VkClearColorValue cv;
