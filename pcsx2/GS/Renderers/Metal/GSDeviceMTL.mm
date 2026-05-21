@@ -524,7 +524,7 @@ static constexpr MTLPixelFormat ConvertPixelFormat(GSTexture::Format format)
 {
 	switch (format)
 	{
-		case GSTexture::Format::DepthColor:      return MTLPixelFormatR32Float;
+		case GSTexture::Format::DepthColor:   return MTLPixelFormatR32Float;
 		case GSTexture::Format::PrimID:       return MTLPixelFormatR32Float;
 		case GSTexture::Format::UInt32:       return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt16:       return MTLPixelFormatR16Uint;

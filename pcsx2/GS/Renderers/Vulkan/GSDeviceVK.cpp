@@ -2817,7 +2817,7 @@ VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
 		VK_FORMAT_R8_UNORM, // UNorm8
 		VK_FORMAT_R16_UINT, // UInt16
 		VK_FORMAT_R32_UINT, // UInt32
-		VK_FORMAT_R32_SFLOAT, // Int32
+		VK_FORMAT_R32_SFLOAT, // PrimID
 		VK_FORMAT_BC1_RGBA_UNORM_BLOCK, // BC1
 		VK_FORMAT_BC2_UNORM_BLOCK, // BC2
 		VK_FORMAT_BC3_UNORM_BLOCK, // BC3
@@ -2825,8 +2825,8 @@ VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
 	}};
 
 	return (format != GSTexture::Format::DepthStencil || m_features.stencil_buffer) ?
-	           s_format_mapping[static_cast<int>(format)] :
-	           VK_FORMAT_D32_SFLOAT;
+		s_format_mapping[static_cast<int>(format)] :
+		VK_FORMAT_D32_SFLOAT;
 }
 
 GSTexture* GSDeviceVK::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format)
