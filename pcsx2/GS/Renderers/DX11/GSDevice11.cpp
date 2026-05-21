@@ -249,8 +249,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
 				sm.AddMacro(entry_point_macro.c_str(), "1");
 
-				const u32 mask = HasVariableWriteMask(i) ? 0xf : ShaderConvertWriteMask(i);
-				const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
+				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
 				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr());
 				if (!m_convert.ps.at(shader))

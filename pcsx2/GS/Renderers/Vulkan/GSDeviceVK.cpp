@@ -4044,8 +4044,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					const ShaderConvertSelector shader(i, variable_mask ? mask : ShaderConvertWriteMask(i),
-						false, depth_output, biln);
+					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
 					GSTexture::Format format = shader.OutputFormat();
 					VkRenderPass rp;
 

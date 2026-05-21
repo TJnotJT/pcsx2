@@ -5,6 +5,8 @@
 
 using namespace metal;
 
+constant bool BILN [[function_constant(GSMTLConstantIndex_BILN)]];
+
 struct ConvertVSIn
 {
 	vector_float2 position  [[attribute(0)]];

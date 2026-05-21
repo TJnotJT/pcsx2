@@ -1168,8 +1168,8 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	for (size_t i = 0; i < ShaderConvert::Count; i++)
 	{
 		const ShaderConvert conv = static_cast<ShaderConvert>(i);
-		bool needs_mask = HasVariableWriteMask(conv);
-		for (u32 mask = needs_mask ? 0 : 0xf; mask < 0x10; mask++)
+		bool variable_mask = HasVariableWriteMask(conv);
+		for (u32 mask = variable_mask ? 0 : 0xf; mask < 0x10; mask++)
 		{
 			u32 supports_depth_input = static_cast<u32>(HasFloat32Input(conv));
 			for (u32 depth_input = 0; depth_input < supports_depth_input + 1; depth_input++)
@@ -1180,8 +1180,11 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 					u32 supports_biln = static_cast<u32>(SupportsBilinear(conv));
 					for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 					{
-						NSString* name = [NSString stringWithFormat:@"Convert pipeline (%s, mask=%x, depth_in=%d, depth_out=%d, biln=%d)",
-							ShaderConvertName(i), mask, depth_input, depth_output, biln];
+						const ShaderConvertSelector shader(i, mask, depth_input, depth_output, biln);
+						const char* depth_suffix_sep = (supports_depth_input || supports_depth_output) ? "_" : "";
+						const char* depth_input_suffix = supports_depth_input ? (depth_input ? "d" : "c") : "";
+						const char* depth_output_suffix = supports_depth_output ? (depth_output ? "d" : "c") : "";
+						NSString name = [NSString stringWithFormat:@"%s%s%s%s", name, depth_suffix_sep, depth_input_suffix, depth_output_suffix];
 						switch (conv)
 						{
 							case ShaderConvert::Count:
@@ -1239,13 +1242,14 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 								break;
 						}
-						const u32 scmask = ShaderConvertWriteMask(conv);
+						const u32 scmask = shader.Mask();
 						MTLColorWriteMask mask = MTLColorWriteMaskNone;
 						if (scmask & 1) mask |= MTLColorWriteMaskRed;
 						if (scmask & 2) mask |= MTLColorWriteMaskGreen;
 						if (scmask & 4) mask |= MTLColorWriteMaskBlue;
 						if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
 						pdesc.colorAttachments[0].writeMask = mask;
+						setFnConstantB(m_fn_constants, shader.Biln(), GSMTLConstantIndex_BILN);
 						m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 					}
 				}
@@ -1688,16 +1692,13 @@ void GSDeviceMTL::RenderCopy(GSTexture* sTex, id<MTLRenderPipelineState> pipelin
 }
 
 void GSDeviceMTL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	GSHWDrawConfig::ColorMaskSelector cms, ShaderConvert shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 { @autoreleasepool {
 
-	const LoadAction load_action = (cms.wrgba == 0xf) ? LoadAction::DontCareIfFull : LoadAction::Load;
+	const LoadAction load_action = (shader.Mask() == 0xf) ? LoadAction::DontCareIfFull : LoadAction::Load;
 	id<MTLRenderPipelineState> pipeline;
-	if (HasVariableWriteMask(shader))
-		pipeline = m_convert_pipeline_copy_mask[GetShaderIndexForMask(shader, cms.wrgba)];
-	else
-		pipeline = m_convert_pipeline[static_cast<int>(shader)];
-	pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader)).c_str());
+	pipeline = m_convert_pipeline.at(shader);
+	pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
 
 	DoStretchRect(sTex, sRect, dTex, dRect, pipeline, linear, load_action, nullptr, 0);
 }}
@@ -1736,7 +1737,7 @@ void GSDeviceMTL::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture
 	}
 }}
 
-void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvert shader)
+void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 { @autoreleasepool {
 	BeginStretchRect(@"MultiStretchRect", dTex, MTLLoadActionLoad);
 
@@ -1758,13 +1759,11 @@ void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_r
 		const u32 end = i * 4;
 		const u32 vertex_count = end - start;
 		const u32 index_count = vertex_count + (vertex_count >> 1); // 6 indices per 4 vertices
-		pxAssert(HasVariableWriteMask(shader) || wmask == 0xf);
-		id<MTLRenderPipelineState> new_pipeline = wmask == 0xf ? m_convert_pipeline[static_cast<int>(shader)]
-		                                                       : m_convert_pipeline_copy_mask[GetShaderIndexForMask(shader, wmask)];
+		id<MTLRenderPipelineState> new_pipeline = m_convert_pipeline.at(shader.SetMask(wmask));
 		if (new_pipeline != pipeline)
 		{
 			pipeline = new_pipeline;
-			pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader)).c_str());
+			pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
 			MRESetPipeline(pipeline);
 		}
 		MRESetSampler(linear ? SamplerSelector::Linear() : SamplerSelector::Point());
@@ -1811,7 +1810,7 @@ void GSDeviceMTL::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, 
 void GSDeviceMTL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, u32 SBW, u32 SPSM, GSTexture* dTex, u32 DBW, u32 DPSM)
 { @autoreleasepool {
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
-	id<MTLRenderPipelineState> pipeline = m_convert_pipeline[static_cast<int>(shader)];
+	id<MTLRenderPipelineState> pipeline = m_convert_pipeline.at(shader);
 	if (!pipeline)
 		[NSException raise:@"StretchRect Missing Pipeline" format:@"No pipeline for %d", static_cast<int>(shader)];
 
@@ -1824,7 +1823,7 @@ void GSDeviceMTL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 off
 void GSDeviceMTL::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
 { @autoreleasepool {
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
-	id<MTLRenderPipelineState> pipeline = m_convert_pipeline[static_cast<int>(shader)];
+	id<MTLRenderPipelineState> pipeline = m_convert_pipeline.at(shader);
 	if (!pipeline)
 		[NSException raise:@"StretchRect Missing Pipeline" format:@"No pipeline for %d", static_cast<int>(shader)];
 
