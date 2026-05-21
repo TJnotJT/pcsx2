@@ -1270,19 +1270,6 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	}
 
 	pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
-	for (size_t i = 0; i < std::size(m_convert_pipeline_copy_mask); i++)
-	{
-		MTLColorWriteMask mask = MTLColorWriteMaskNone;
-		if (i & 1) mask |= MTLColorWriteMaskRed;
-		if (i & 2) mask |= MTLColorWriteMaskGreen;
-		if (i & 4) mask |= MTLColorWriteMaskBlue;
-		if (i & 8) mask |= MTLColorWriteMaskAlpha;
-		NSString* name = [NSString stringWithFormat:@"copy_%s%s%s%s%s",
-		                  i & 1 ? "r" : "", i & 2 ? "g" : "", i & 4 ? "b" : "", i & 8 ? "a" : "", i & 16 ? "_rta" : ""];
-		pdesc.colorAttachments[0].writeMask = mask;
-		m_convert_pipeline_copy_mask[i] = MakePipeline(pdesc, vs_convert, i & 16 ? ps_copy_rta_correct : ps_copy, name);
-	}
-
 	pdesc.colorAttachments[0].blendingEnabled = YES;
 	pdesc.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
 	pdesc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
