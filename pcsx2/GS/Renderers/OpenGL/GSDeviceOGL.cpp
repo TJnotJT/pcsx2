@@ -1295,7 +1295,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 	{
 		glDisable(GL_SCISSOR_TEST);
 
-		if (T->GetType() == GSTexture::Type::DepthStencil)
+		if (T->IsDepthStencil())
 		{
 			const float d = T->GetClearDepth();
 			if (GLState::depth_mask)
@@ -1314,7 +1314,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 			const u32 old_color_mask = GLState::wrgba;
 			OMSetColorMaskState();
 
-			const GSVector4 c_unorm = T->GetUNormClearColor();
+			const GSVector4 c_unorm = IsDepthColor() ? GSVector4(T->GetClearDepth()) : T->GetUNormClearColor();
 
 			if (T->IsIntegerFormat())
 			{

@@ -129,14 +129,17 @@ public:
 	{
 		return (m_type == Type::DepthStencil);
 	}
+	__fi bool IsDepthColor() const
+	{
+		return (m_type == Type::RenderTarget && m_format == Format::DepthColor);
+	}
 	__fi bool IsTexture() const
 	{
 		return (m_type == Type::Texture);
 	}
 	__fi bool IsDepthLike() const
 	{
-		return (m_type == Type::RenderTarget && m_format == Format::DepthColor) ||
-		       (m_type == Type::DepthStencil);
+		return IsDepthStencil() || IsDepthColor();
 	}
 
 	__fi State GetState() const { return m_state; }
