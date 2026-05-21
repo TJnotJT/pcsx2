@@ -625,7 +625,7 @@ void GSDeviceMTL::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex,
 
 	// Save 2nd output
 	if (feedback_write_2) // FIXME I'm not sure dRect[1] is always correct
-		DoStretchRect(dTex, full_r, sTex[2], dRect[1], m_convert_pipeline[static_cast<int>(ShaderConvert::YUV)], linear, LoadAction::DontCareIfFull, &cb_yuv, sizeof(cb_yuv));
+		DoStretchRect(dTex, full_r, sTex[2], dRect[1], m_convert_pipeline.at(ShaderConvert::YUV), linear, LoadAction::DontCareIfFull, &cb_yuv, sizeof(cb_yuv));
 
 	if (feedback_write_2_but_blend_bg)
 		ClearRenderTarget(dTex, c);
@@ -1164,72 +1164,93 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		NSString* name = [NSString stringWithFormat:@"ps_interlace%zu", i];
 		m_interlace_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 	}
-	for (size_t i = 0; i < std::size(m_convert_pipeline); i++)
+
+	for (size_t i = 0; i < ShaderConvert::Count; i++)
 	{
-		ShaderConvert conv = static_cast<ShaderConvert>(i);
-		NSString* name = [NSString stringWithCString:shaderName(conv) encoding:NSUTF8StringEncoding];
-		switch (conv)
+		const ShaderConvert conv = static_cast<ShaderConvert>(i);
+		bool needs_mask = HasVariableWriteMask(conv);
+		for (u32 mask = needs_mask ? 0 : 0xf; mask < 0x10; mask++)
 		{
-			case ShaderConvert::Count:
-			case ShaderConvert::DATM_0:
-			case ShaderConvert::DATM_1:
-			case ShaderConvert::DATM_0_RTA_CORRECTION:
-			case ShaderConvert::DATM_1_RTA_CORRECTION:
-			case ShaderConvert::CLUT_4:
-			case ShaderConvert::CLUT_8:
-			case ShaderConvert::COLCLIP_INIT:
-			case ShaderConvert::COLCLIP_RESOLVE:
-				continue;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::FLOAT32_TO_16_BITS:
-			case ShaderConvert::RGBA8_TO_16_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::DEPTH_COPY:
-			case ShaderConvert::FLOAT32_TO_FLOAT24:
-			case ShaderConvert::FLOAT32_COLOR_TO_DEPTH:
-			case ShaderConvert::RGBA8_TO_FLOAT32:
-			case ShaderConvert::RGBA8_TO_FLOAT24:
-			case ShaderConvert::RGBA8_TO_FLOAT16:
-			case ShaderConvert::RGB5A1_TO_FLOAT16:
-			case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
-			case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
-			case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
-			case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
-				pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
-				pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
-				break;
-			case ShaderConvert::COPY:
-			case ShaderConvert::DOWNSAMPLE_COPY:
-			case ShaderConvert::RGBA_TO_8I: // Yes really
-			case ShaderConvert::RGB5A1_TO_8I:
-			case ShaderConvert::RTA_CORRECTION:
-			case ShaderConvert::RTA_DECORRECTION:
-			case ShaderConvert::TRANSPARENCY_FILTER:
-			case ShaderConvert::FLOAT32_TO_RGBA8:
-			case ShaderConvert::FLOAT32_TO_RGB8:
-			case ShaderConvert::FLOAT16_TO_RGB5A1:
-			case ShaderConvert::YUV:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::DepthColor);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
+			u32 supports_depth_input = static_cast<u32>(HasFloat32Input(conv));
+			for (u32 depth_input = 0; depth_input < supports_depth_input + 1; depth_input++)
+			{
+				u32 supports_depth_output = static_cast<u32>(HasFloat32Output(conv));
+				for (u32 depth_output = 0; depth_output < supports_depth_output + 1; depth_output++)
+				{
+					u32 supports_biln = static_cast<u32>(SupportsBilinear(conv));
+					for (u32 biln = 0; biln < 1 + supports_biln; biln++)
+					{
+						NSString* name = [NSString stringWithFormat:@"Convert pipeline (%s, mask=%x, depth_in=%d, depth_out=%d, biln=%d)",
+							ShaderConvertName(i), mask, depth_input, depth_output, biln];
+						switch (conv)
+						{
+							case ShaderConvert::Count:
+							case ShaderConvert::DATM_0:
+							case ShaderConvert::DATM_1:
+							case ShaderConvert::DATM_0_RTA_CORRECTION:
+							case ShaderConvert::DATM_1_RTA_CORRECTION:
+							case ShaderConvert::CLUT_4:
+							case ShaderConvert::CLUT_8:
+							case ShaderConvert::COLCLIP_INIT:
+							case ShaderConvert::COLCLIP_RESOLVE:
+								continue;
+							case ShaderConvert::FLOAT32_TO_32_BITS:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+							case ShaderConvert::FLOAT32_TO_16_BITS:
+							case ShaderConvert::RGBA8_TO_16_BITS:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+							case ShaderConvert::FLOAT32_COPY:
+							case ShaderConvert::FLOAT32_TO_FLOAT24:
+							case ShaderConvert::RGBA8_TO_FLOAT32:
+							case ShaderConvert::RGBA8_TO_FLOAT24:
+							case ShaderConvert::RGBA8_TO_FLOAT16:
+							case ShaderConvert::RGB5A1_TO_FLOAT16:
+							case ShaderConvert::RGBA8_TO_FLOAT32_BILN:
+							case ShaderConvert::RGBA8_TO_FLOAT24_BILN:
+							case ShaderConvert::RGBA8_TO_FLOAT16_BILN:
+							case ShaderConvert::RGB5A1_TO_FLOAT16_BILN:
+								if (depth_output)
+								{
+									pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
+									pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
+								}
+								else
+								{
+									pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::DepthColor);
+									pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								}
+								break;
+							case ShaderConvert::RGBA8_COPY:
+							case ShaderConvert::DOWNSAMPLE_COPY:
+							case ShaderConvert::RGBA_TO_8I: // Yes really
+							case ShaderConvert::RGB5A1_TO_8I:
+							case ShaderConvert::RTA_CORRECTION:
+							case ShaderConvert::RTA_DECORRECTION:
+							case ShaderConvert::TRANSPARENCY_FILTER:
+							case ShaderConvert::FLOAT32_TO_RGBA8:
+							case ShaderConvert::FLOAT32_TO_RGB8:
+							case ShaderConvert::FLOAT16_TO_RGB5A1:
+							case ShaderConvert::YUV:
+								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
+								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+								break;
+						}
+						const u32 scmask = ShaderConvertWriteMask(conv);
+						MTLColorWriteMask mask = MTLColorWriteMaskNone;
+						if (scmask & 1) mask |= MTLColorWriteMaskRed;
+						if (scmask & 2) mask |= MTLColorWriteMaskGreen;
+						if (scmask & 4) mask |= MTLColorWriteMaskBlue;
+						if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
+						pdesc.colorAttachments[0].writeMask = mask;
+						m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
+					}
+				}
+			}
 		}
-		const u32 scmask = ShaderConvertWriteMask(conv);
-		MTLColorWriteMask mask = MTLColorWriteMaskNone;
-		if (scmask & 1) mask |= MTLColorWriteMaskRed;
-		if (scmask & 2) mask |= MTLColorWriteMaskGreen;
-		if (scmask & 4) mask |= MTLColorWriteMaskBlue;
-		if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
-		pdesc.colorAttachments[0].writeMask = mask;
-		m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 	}
 	pdesc.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
 	pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
