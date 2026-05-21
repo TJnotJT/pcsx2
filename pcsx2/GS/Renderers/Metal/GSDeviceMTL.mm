@@ -419,14 +419,14 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 		{
 			if (tex->GetState() == GSTexture::State::Invalidated)
 			{
-				return { MTLLoadActionDontCare, GSVector4(0.0f) };
+				return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionDontCare, GSVector4(0.0f));
 			}
 			else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
 			{
-				return {
+				return std::make_pair<MTLLoadAction, GSVector4>(
 					MTLLoadActionClear,
-					tex->IsDepthLike() ? GSVector4(tex->GetClearDepth()) : tex->GetUNormClearColor();
-				};
+					tex->IsDepthLike() ? GSVector4(tex->GetClearDepth()) : tex->GetUNormClearColor()
+				);
 			}
 		}
 		else
