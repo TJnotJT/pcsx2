@@ -4100,10 +4100,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shaderName(i));
 					if (ps == VK_NULL_HANDLE)
-					{
-						Console.Warning(macro);
 						return false;
-					}
 
 					ScopedGuard ps_guard([this, &ps]() { vkDestroyShaderModule(m_device, ps, nullptr); });
 					gpb.SetFragmentShader(ps);

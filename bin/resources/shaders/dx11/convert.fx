@@ -100,7 +100,7 @@ uint rgba8_to_uint(float4 c)
 
 uint rgb5a1_to_uint(float4 c)
 {
-	uint4 i = uint4(c * 255.5f) & 0xf8;
+	uint4 i = uint4(c * 255.5f) & uint4(0xf8, 0xf8, 0xf8, 0x80);
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 

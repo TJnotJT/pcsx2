@@ -441,7 +441,6 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 					const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
 
 					GLProgram& prog = m_convert.ps[shader];
-					Console.WriteLnFmt("{}", macro);
 
 					if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
 						return false;

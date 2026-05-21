@@ -55,13 +55,13 @@ vec4 sample_c(vec2 uv)
 
 uint rgba8_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & 255;
+	uvec4 i = uvec4(c * 255.5f) & 0xff;
 	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
 }
 
 uint rgb5a1_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & 248;
+	uvec4 i = uvec4(c * 255.5f) & uvec4(0xf8, 0xf8, 0xf8, 0x80);
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
