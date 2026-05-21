@@ -8107,7 +8107,7 @@ bool GSTextureCache::Target::ResizeTexture(int new_unscaled_width, int new_unsca
 		{
 			// Can't do partial copies in DirectX for depth textures, and it's probably not ideal in other
 			// APIs either. So use a fullscreen quad setting depth instead.
-			g_gs_device->StretchRectCopyNearest(m_texture, tex, GSVector4(rc));
+			g_gs_device->StretchRectCopyBiln(m_texture, tex, GSVector4(rc));
 		}
 		else
 		{
