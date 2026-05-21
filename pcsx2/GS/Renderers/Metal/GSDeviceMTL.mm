@@ -524,7 +524,7 @@ static constexpr MTLPixelFormat ConvertPixelFormat(GSTexture::Format format)
 {
 	switch (format)
 	{
-		case GSTexture::Format::Float32:      return MTLPixelFormatR32Float;
+		case GSTexture::Format::DepthColor:      return MTLPixelFormatR32Float;
 		case GSTexture::Format::PrimID:       return MTLPixelFormatR32Float;
 		case GSTexture::Format::UInt32:       return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt16:       return MTLPixelFormatR16Uint;
@@ -1218,7 +1218,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
 			case ShaderConvert::FLOAT32_DEPTH_TO_COLOR:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Float32);
+				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::DepthColor);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
 		}
@@ -1847,7 +1847,7 @@ void GSDeviceMTL::BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea)
 			return;
 		if (m_ds_as_rt_gstexture)
 			Recycle(m_ds_as_rt_gstexture);
-		m_ds_as_rt_gstexture = CreateRenderTarget(needed_width, needed_height, GSTexture::Format::Float32, false, true);
+		m_ds_as_rt_gstexture = CreateRenderTarget(needed_width, needed_height, GSTexture::Format::DepthColor, false, true);
 		m_ds_as_rt_texture = static_cast<GSTextureMTL*>(m_ds_as_rt_gstexture)->GetTexture();
 		@autoreleasepool
 		{

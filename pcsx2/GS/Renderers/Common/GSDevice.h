@@ -334,7 +334,7 @@ public:
 		else if (int bpp = GetIntegerOutputBpp(shader))
 			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
 		else if (HasFloat32Output(shader))
-			return GSTexture::Format::Float32;
+			return GSTexture::Format::DepthColor;
 		else if (HasColorOutput(shader))
 			return GSTexture::Format::Color;
 		else if (HasColorClipOutput(shader))
@@ -396,7 +396,7 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 					pxAssert(src_bpp == 32 && dst_bpp == 32);
 					shader = ShaderConvert::RGBA8_COPY; // bpp is handled by mask
 					break;
-				case GSTexture::Format::Float32:
+				case GSTexture::Format::DepthColor:
 				case GSTexture::Format::DepthStencil:
 					switch (dst_bpp)
 					{
@@ -421,7 +421,7 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 					break;
 			}
 			break;
-		case GSTexture::Format::Float32:
+		case GSTexture::Format::DepthColor:
 		case GSTexture::Format::DepthStencil:
 			switch (dst)
 			{
@@ -443,7 +443,7 @@ static inline ShaderConvertKey GetCopyShader(GSTexture::Format src, GSTexture::F
 							break;
 					}
 					break;
-				case GSTexture::Format::Float32:
+				case GSTexture::Format::DepthColor:
 				case GSTexture::Format::DepthStencil:
 					switch (dst_bpp)
 					{
