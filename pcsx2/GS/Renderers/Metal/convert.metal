@@ -333,12 +333,12 @@ struct DepthOut
 
 fragment DepthOut ps_float32_copy_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
-	return sample_c(input.t);
+	return sample_c(input.t).r;
 }
 
 fragment float ps_float32_copy_dc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
-	return sample_c(input.t);
+	return sample_c(input.t).r;
 }
 
 fragment DepthOut ps_float32_copy_cd(ConvertShaderData data [[stage_in]], ConvertPSRes res)
@@ -354,8 +354,7 @@ fragment float ps_float32_copy_cc(ConvertShaderData data [[stage_in]], ConvertPS
 fragment DepthOut ps_convert_float32_float24_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	// Truncates depth value to 24bits
-	uint val = uint(res.sample(data.t) * 0x1p32) & 0xFFFFFF;
-	return float(val) * 0x1p-32f;
+	return depth_to_uint(sample_c(input.t))
 }
 
 fragment float ps_convert_float32_float24_dc(ConvertShaderData data [[stage_in]], ConvertPSRes res)

@@ -1265,11 +1265,11 @@ void GSDevice11::CommitClear(GSTexture* t)
 	}
 	else
 	{
-		const GSVector4 c_unorm = IsDepthColor() ? GSVector4(T->GetClearDepth()) : T->GetUNormClearColor();
+		const GSVector4 c_unorm = T->IsDepthColor() ? GSVector4(T->GetClearDepth()) : T->GetUNormClearColor();
 		if (T->GetState() == GSTexture::State::Invalidated)
 			m_ctx->DiscardView(static_cast<ID3D11RenderTargetView*>(*T));
 		else
-			m_ctx->ClearRenderTargetView(*T, T->IsDepthColor() ? GSVector4(T->T->GetUNormClearColor().F32);
+			m_ctx->ClearRenderTargetView(*T, c_unorm.F32);
 	}
 
 	T->SetState(GSTexture::State::Dirty);
