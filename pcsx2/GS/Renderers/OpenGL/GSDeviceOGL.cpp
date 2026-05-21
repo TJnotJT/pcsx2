@@ -429,18 +429,19 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
-					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", HasStencilOutput(i));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) ? 1 : 0);
+					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
 					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
 					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", depth_output);
-					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", HasFloat32Input(i));
-					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", HasFloat32Input(i));
+					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));
+					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(HasFloat32Output(i)));
 
 					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
 
 					const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
 
 					GLProgram& prog = m_convert.ps[shader];
+					Console.WriteLnFmt("{}", macro);
 
 					if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
 						return false;

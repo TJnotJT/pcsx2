@@ -4090,7 +4090,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
 					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(GetIntegerOutputBpp(i) ? 1 : 0));
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
 					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
 					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(depth_output));
 					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));

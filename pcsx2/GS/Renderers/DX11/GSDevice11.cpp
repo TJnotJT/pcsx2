@@ -241,12 +241,12 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 				ShaderMacro sm;
 				sm.AddMacro("HAS_BILN", biln);
-				sm.AddMacro("HAS_STENCIL_OUTPUT", HasStencilOutput(i));
-				sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) ? 1 : 0);
+				sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
+				sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
 				sm.AddMacro("HAS_DEPTH_INPUT", 0);
 				sm.AddMacro("HAS_DEPTH_OUTPUT", depth_output);
-				sm.AddMacro("HAS_FLOAT32_INPUT", HasFloat32Input(i));
-				sm.AddMacro("HAS_FLOAT32_OUTPUT", HasFloat32Input(i));
+				sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
+				sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
 				sm.AddMacro(entry_point_macro.c_str(), "1");
 
 				const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
