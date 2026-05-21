@@ -4147,7 +4147,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 	{
 		for (u32 clear = 0; clear < 2; clear++)
 		{
-			m_date_image_setup_render_passes[ds][clear] = GetRenderPass(LookupNativeFormat(GSTexture::Format::PrimID),
+			m_primid_image_setup_render_passes[ds][clear] = GetRenderPass(LookupNativeFormat(GSTexture::Format::PrimID),
 				ds ? LookupNativeFormat(GSTexture::Format::DepthStencil) : VK_FORMAT_UNDEFINED,
 				VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE,
 				ds ? (clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD) :
@@ -4175,13 +4175,13 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 		for (u32 ds = 0; ds < 2; ds++)
 		{
-			gpb.SetRenderPass(m_date_image_setup_render_passes[ds][0], 0);
-			m_date_image_setup_pipelines[ds][datm] =
+			gpb.SetRenderPass(m_primid_image_setup_render_passes[ds][0], 0);
+			m_primid_image_setup_pipelines[ds][datm] =
 				gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
-			if (!m_date_image_setup_pipelines[ds][datm])
+			if (!m_primid_image_setup_pipelines[ds][datm])
 				return false;
 
-			Vulkan::SetObjectName(m_device, m_date_image_setup_pipelines[ds][datm],
+			Vulkan::SetObjectName(m_device, m_primid_image_setup_pipelines[ds][datm],
 				"DATE image clear pipeline (ds=%u, datm=%u)", ds, (datm == 1 || datm == 3));
 		}
 	}
@@ -4710,8 +4710,8 @@ void GSDeviceVK::DestroyResources()
 	{
 		for (u32 datm = 0; datm < 4; datm++)
 		{
-			if (m_date_image_setup_pipelines[ds][datm] != VK_NULL_HANDLE)
-				vkDestroyPipeline(m_device, m_date_image_setup_pipelines[ds][datm], nullptr);
+			if (m_primid_image_setup_pipelines[ds][datm] != VK_NULL_HANDLE)
+				vkDestroyPipeline(m_device, m_primid_image_setup_pipelines[ds][datm], nullptr);
 		}
 	}
 	if (m_fxaa_pipeline != VK_NULL_HANDLE)
@@ -4930,7 +4930,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	if (IsDATEModePrimIDInit(p.ps.date))
 	{
 		// DATE image prepass
-		gpb.SetRenderPass(m_date_image_setup_render_passes[p.ds][0], 0);
+		gpb.SetRenderPass(m_primid_image_setup_render_passes[p.ds][0], 0);
 	}
 	else
 	{
@@ -5705,11 +5705,11 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 		VkClearValue cv[2] = {};
 		cv[1].depthStencil.depth = static_cast<GSTextureVK*>(config.ds)->GetClearDepth();
 		cv[1].depthStencil.stencil = 1;
-		BeginClearRenderPass(m_date_image_setup_render_passes[ds][1], GSVector4i::loadh(rtsize), cv, 2);
+		BeginClearRenderPass(m_primid_image_setup_render_passes[ds][1], GSVector4i::loadh(rtsize), cv, 2);
 	}
 	else
 	{
-		BeginRenderPass(m_date_image_setup_render_passes[ds][0], config.drawarea);
+		BeginRenderPass(m_primid_image_setup_render_passes[ds][0], config.drawarea);
 	}
 
 	// draw the quad to prefill the image
@@ -5721,7 +5721,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 		{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
 		{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
 	};
-	const VkPipeline pipeline = m_date_image_setup_pipelines[ds][static_cast<u8>(config.datm)];
+	const VkPipeline pipeline = m_primid_image_setup_pipelines[ds][static_cast<u8>(config.datm)];
 	SetPipeline(pipeline);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
 	if (ApplyUtilityState())

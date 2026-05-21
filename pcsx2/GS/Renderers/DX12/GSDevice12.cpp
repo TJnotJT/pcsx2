@@ -2848,11 +2848,11 @@ bool GSDevice12::CompileConvertPipelines()
 		for (u32 ds = 0; ds < 2; ds++)
 		{
 			gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-			m_date_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
-			if (!m_date_image_setup_pipelines[ds][datm])
+			m_primid_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
+			if (!m_primid_image_setup_pipelines[ds][datm])
 				return false;
 
-			D3D12::SetObjectName(m_date_image_setup_pipelines[ds][datm].get(),
+			D3D12::SetObjectName(m_primid_image_setup_pipelines[ds][datm].get(),
 				TinyString::from_format("DATE image clear pipeline (ds={}, datm={})", ds, (datm == 1 || datm == 3)));
 		}
 	}
@@ -3051,7 +3051,7 @@ void GSDevice12::DestroyResources()
 	m_convert.clear();
 	m_colclip_setup_pipelines = {};
 	m_colclip_finish_pipelines = {};
-	m_date_image_setup_pipelines = {};
+	m_primid_image_setup_pipelines = {};
 	m_fxaa_pipeline.reset();
 	m_shadeboost_pipeline.reset();
 	m_imgui_pipeline.reset();
@@ -4115,7 +4115,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	};
 	SetUtilityRootSignature();
 	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(m_date_image_setup_pipelines[pipe.ds][static_cast<u8>(config.datm)].get());
+	SetPipeline(m_primid_image_setup_pipelines[pipe.ds][static_cast<u8>(config.datm)].get());
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
 	if (ApplyUtilityState())
 		DrawPrimitive();
