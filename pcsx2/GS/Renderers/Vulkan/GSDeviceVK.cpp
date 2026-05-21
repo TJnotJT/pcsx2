@@ -4088,11 +4088,11 @@ bool GSDeviceVK::CompileConvertPipelines()
 					gpb.SetColorWriteMask(0, shader.Mask());
 
 					std::string macro;
-					macro += fmt::format("#define HAS_BILN {}\n", biln);
+					macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
 					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(HasStencilOutput(i)));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
+					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", IntegerOutputBpp(i) ? 1 : 0);
 					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0);
-					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(depth_output));
+					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
 					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(HasFloat32Input(i)));
 					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(HasFloat32Output(i)));
 

@@ -2774,15 +2774,15 @@ bool GSDevice12::CompileConvertPipelines()
 					std::string entry_point_macro = WrapEntryPointMacro(entry_point);
 
 					ShaderMacro sm;
-					sm.AddMacro("PIXEL_SHADER", "1");
-					sm.AddMacro("HAS_BILN", biln);
+					sm.AddMacro("PIXEL_SHADER", 1);
+					sm.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
 					sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
-					sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
+					sm.AddMacro("HAS_INTEGER_OUTPUT", IntegerOutputBpp(i) ? 1 : 0);
 					sm.AddMacro("HAS_DEPTH_INPUT", 0);
-					sm.AddMacro("HAS_DEPTH_OUTPUT", depth_output);
+					sm.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
 					sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
 					sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
-					sm.AddMacro(entry_point_macro.c_str(), "1");
+					sm.AddMacro(entry_point_macro.c_str(), 1);
 
 					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shaderName(i)));
 					if (!ps)

@@ -193,7 +193,7 @@ static inline bool HasStencilOutput(ShaderConvert shader)
 	}
 }
 
-static inline int GetIntegerOutputBpp(ShaderConvert shader)
+static inline int IntegerOutputBpp(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -328,7 +328,7 @@ public:
 		const ShaderConvert shader = Shader();
 		if (fields.depth_output)
 			return GSTexture::Format::DepthStencil;
-		else if (int bpp = GetIntegerOutputBpp(shader))
+		else if (int bpp = IntegerOutputBpp(shader))
 			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
 		else if (HasFloat32Output(shader))
 			return GSTexture::Format::DepthColor;

@@ -219,8 +219,10 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	const std::optional<std::string> convert_hlsl = ReadShaderSource("shaders/dx11/convert.fx");
 	if (!convert_hlsl.has_value())
 		return false;
+	ShaderMacro sm_vs;
+	sm_vs.AddMacro("VERTEX_SHADER", 1);
 	if (!m_shader_cache.GetVertexShaderAndInputLayout(m_dev.get(), m_convert.vs.put(), m_convert.il.put(),
-			il_convert, std::size(il_convert), *convert_hlsl, nullptr, "vs_main"))
+			il_convert, std::size(il_convert), *convert_hlsl, sm_vs.GetPtr(), "vs_main"))
 	{
 		return false;
 	}
@@ -236,22 +238,23 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 			for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 			{
-				const char* entry_point = shaderName(i);
-				std::string entry_point_macro = WrapEntryPointMacro(entry_point);
-
-				ShaderMacro sm;
-				sm.AddMacro("HAS_BILN", biln);
-				sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
-				sm.AddMacro("HAS_INTEGER_OUTPUT", GetIntegerOutputBpp(i) != 0 ? 1 : 0);
-				sm.AddMacro("HAS_DEPTH_INPUT", 0);
-				sm.AddMacro("HAS_DEPTH_OUTPUT", depth_output);
-				sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
-				sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
-				sm.AddMacro(entry_point_macro.c_str(), "1");
-
 				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
-				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr());
+				const char* entry_point = shaderName(shader.Shader());
+				std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+
+				ShaderMacro sm_ps;
+				sm_ps.AddMacro("PIXEL_SHADER", 1);
+				sm_ps.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
+				sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
+				sm_ps.AddMacro("HAS_INTEGER_OUTPUT", IntegerOutputBpp(i) ? 1 : 0);
+				sm_ps.AddMacro("HAS_DEPTH_INPUT", 0);
+				sm_ps.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
+				sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
+				sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
+				sm_ps.AddMacro(entry_point_macro.c_str(), 1);
+
+				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm_ps.GetPtr(), entry_point);
 				if (!m_convert.ps.at(shader))
 					return false;
 			}
@@ -575,7 +578,11 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	for (size_t i = 0; i < std::size(m_date.primid_init_ps); i++)
 	{
 		const std::string entry_point(StringUtil::StdStringFromFormat("ps_primid_image_init_%zu", i));
-		m_date.primid_init_ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, nullptr, entry_point.c_str());
+		const std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+		ShaderMacro sm_ps;
+		sm_ps.AddMacro("PIXEL_SHADER", 1);
+		sm_ps.AddMacro(entry_point_macro.c_str(), 1);
+		m_date.primid_init_ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm_ps.GetPtr(), entry_point.c_str());
 		if (!m_date.primid_init_ps[i])
 			return false;
 	}
