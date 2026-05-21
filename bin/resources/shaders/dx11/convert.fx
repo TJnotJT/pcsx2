@@ -73,17 +73,23 @@ struct PS_INPUT
 	float4 c : COLOR;
 };
 
+#if HAS_INTEGER_OUTPUT
+	#define OUTPUT_TYPE uint
+	#define OUTPUT_SV SV_Target
+#elif HAS_DEPTH_OUTPUT
+	#define OUTPUT_TYPE float
+	#define OUTPUT_SV SV_Depth
+#elif HAS_FLOAT32_OUTPUT
+	#define OUTPUT_TYPE float
+	#define OUTPUT_SV SV_Target
+#else
+	#define OUTPUT_TYPE float4
+	#define OUTPUT_SV SV_Target
+#endif
+
 struct PS_OUTPUT
 {
-#if HAS_INTEGER_OUTPUT
-	uint o : SV_Target;
-#elif HAS_DEPTH_OUTPUT
-	float o : SV_Depth;
-#elif HAS_FLOAT32_OUTPUT
-	float o : SV_Target;
-#else
-	float4 o : SV_Target;
-#endif
+	OUTPUT_TYPE o : OUTPUT_SV;
 };
 
 uint rgba8_to_uint(float4 c)
@@ -164,20 +170,16 @@ float depth32_to_depth24(float d)
 }
 
 #if defined(__ps_copy__)
-PS_OUTPUT ps_copy(PS_INPUT input)
+OUTPUT_TYPE ps_copy(PS_INPUT input) : OUTPUT_SV
 {
-	PS_OUTPUT output;
-	output.o = sample_c(input.t);
-	return output;
+	return sample_c(input.t);
 }
 #endif
 
 #if defined(__ps_float32_copy__)
-PS_OUTPUT ps_float32_copy(PS_INPUT input)
+OUTPUT_TYPE ps_float32_copy(PS_INPUT input) : OUTPUT_SV
 {
-	PS_OUTPUT output;
-	output.o = sample_c(input.t);
-	return output;
+	return sample_c(input.t);
 }
 #endif
 
@@ -214,12 +216,10 @@ PS_OUTPUT ps_filter_transparency(PS_INPUT input)
 #endif
 
 #if defined(__ps_convert_rgba8_16bits__)
-// Need to be careful with precision here, it can break games like Spider-Man 3 and Dogs Life
-PS_OUTPUT ps_convert_rgba8_16bits(PS_INPUT input)
+OUTPUT_TYPE ps_convert_rgba8_16bits(PS_INPUT input) : OUTPUT_SV
 {
-	PS_OUTPUT output;
-	output.o = rgb5a1_to_uint(sample_c(input.t));
-	return output;
+	// Need to be careful with precision here, it can break games like Spider-Man 3 and Dogs Life
+	return rgb5a1_to_uint(sample_c(input.t));
 }
 #endif
 
@@ -292,42 +292,34 @@ PS_OUTPUT ps_colclip_resolve(PS_INPUT input)
 #endif
 
 #if defined(__ps_convert_float32_32bits__)
-PS_OUTPUT ps_convert_float32_32bits(PS_INPUT input)
+OUTPUT_TYPE ps_convert_float32_32bits(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert a FLOAT32 depth texture into a 32 bits UINT texture
-	PS_OUTPUT output;
-	output.o = depth_to_uint(sample_c(input.t));
-	return output;
+	return depth_to_uint(sample_c(input.t));
 }
 #endif
 
 #if defined(__ps_convert_float32_rgba8__)
-PS_OUTPUT ps_convert_float32_rgba8(PS_INPUT input)
+OUTPUT_TYPE ps_convert_float32_rgba8(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert a FLOAT32 depth texture into a RGBA color texture
-	PS_OUTPUT output;
-	output.o = depth32_to_rgba8(sample_c(input.t));
-	return output;
+	return depth32_to_rgba8(sample_c(input.t));
 }
 #endif
 
 #if defined(__ps_convert_float16_rgb5a1__)
-PS_OUTPUT ps_convert_float16_rgb5a1(PS_INPUT input)
+OUTPUT_TYPE ps_convert_float16_rgb5a1(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert a FLOAT32 (only 16 lsb) depth into a RGB5A1 color texture
-	PS_OUTPUT output;
-	output.o = depth16_to_rgb5a1(sample_c(input.t));
-	return output;
+	return depth16_to_rgb5a1(sample_c(input.t));
 }
 #endif
 
 #if defined(__ps_convert_float32_float24__)
-PS_OUTPUT ps_convert_float32_float24(PS_INPUT input)
+OUTPUT_TYPE ps_convert_float32_float24(PS_INPUT input) : OUTPUT_SV
 {
 	// Truncates depth value to 24bits
-	PS_OUTPUT output;
-	output.o = depth32_to_depth24(sample_c(input.t));
-	return output;
+	return depth32_to_depth24(sample_c(input.t));
 }
 #endif
 
@@ -342,64 +334,54 @@ PS_OUTPUT ps_convert_float32_float24(PS_INPUT input)
 	float depthTR = CONVERT_FN(Texture.Load(int3(coords.zy, 0))); \
 	float depthBL = CONVERT_FN(Texture.Load(int3(coords.xw, 0))); \
 	float depthBR = CONVERT_FN(Texture.Load(int3(coords.zw, 0))); \
-	PS_OUTPUT output; \
-	output.o = lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y); \
-	return output;
+	return lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
 #if defined(__ps_convert_rgba8_float32__)
-PS_OUTPUT ps_convert_rgba8_float32(PS_INPUT input)
+OUTPUT_TYPE ps_convert_rgba8_float32(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert an RGBA texture into a float depth texture
 #if HAS_BILN
 	SAMPLE_RGBA_DEPTH_BILN(rgba8_to_depth32);
 #else
-	PS_OUTPUT output;
-	output.o = rgba8_to_depth32(sample_c(input.t));
-	return output;
+	return rgba8_to_depth32(sample_c(input.t));
 #endif
 }
 #endif
 
 #if defined(__ps_convert_rgba8_float24__)
-PS_OUTPUT ps_convert_rgba8_float24(PS_INPUT input)
+OUTPUT_TYPE ps_convert_rgba8_float24(PS_INPUT input) : OUTPUT_SV
 {
 	// Same as above but without the alpha channel (24 bits Z)
 	// Convert an RGBA texture into a float depth texture
 #if HAS_BILN
 	SAMPLE_RGBA_DEPTH_BILN(rgba8_to_depth24);
 #else
-	PS_OUTPUT output;
-	output.o = rgba8_to_depth24(sample_c(input.t));
-	return output;
+	return rgba8_to_depth24(sample_c(input.t));
 #endif
 }
 #endif
 
 #if defined(__ps_convert_rgba8_float16__)
-PS_OUTPUT ps_convert_rgba8_float16(PS_INPUT input)
+OUTPUT_TYPE ps_convert_rgba8_float16(PS_INPUT input) : OUTPUT_SV
 {
 	// Same as above but without the A/B channels (16 bits Z)
 	// Convert an RGBA texture into a float depth texture
 #if HAS_BILN
 	SAMPLE_RGBA_DEPTH_BILN(rgba8_to_depth16);
 #else
-	PS_OUTPUT output;
-	output.o = rgba8_to_depth16(sample_c(input.t));
-	return output;
+	return rgba8_to_depth16(sample_c(input.t));
 #endif
 }
 #endif
 
 #if defined(__ps_convert_rgb5a1_float16__)
-PS_OUTPUT ps_convert_rgb5a1_float16(PS_INPUT input)
+OUTPUT_TYPE ps_convert_rgb5a1_float16(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
 #if HAS_BILN
 	SAMPLE_RGBA_DEPTH_BILN(rgb5a1_to_depth16);
 #else
-	PS_OUTPUT output;
-	output.o = rgb5a1_to_depth16(sample_c(input.t));
-	return output;
+	return rgb5a1_to_depth16(sample_c(input.t));
 #endif
 }
 #endif
