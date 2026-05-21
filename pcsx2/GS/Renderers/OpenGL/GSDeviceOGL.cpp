@@ -416,7 +416,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		m_convert.vs = GetShaderSource("vs_main", GL_VERTEX_SHADER, *convert_glsl);
 
-		for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count;
+		for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
 			i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 		{
 			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
@@ -1622,7 +1622,7 @@ void GSDeviceOGL::BlitRect(GSTexture* sTex, const GSVector4i& r, const GSVector2
 
 	const GSVector4 float_r(r);
 
-	m_convert.ps.at(ShaderConvert::RGBA8_COPY).Bind();
+	m_convert.ps.at(ShaderConvert::COPY).Bind();
 	OMSetDepthStencilState(m_convert.dss);
 	OMSetBlendState();
 	OMSetColorMaskState();
@@ -1990,7 +1990,7 @@ void GSDeviceOGL::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex,
 	{
 		// 2nd output is enabled and selected. Copy it to destination so we can blend it with 1st output
 		// Note: value outside of dRect must contains the background color (c)
-		StretchRect(sTex[1], sRect[1], dTex, PMODE.SLBG ? dRect[2] : dRect[1], ShaderConvert::RGBA8_COPY, linear);
+		StretchRect(sTex[1], sRect[1], dTex, PMODE.SLBG ? dRect[2] : dRect[1], ShaderConvert::COPY, linear);
 	}
 
 	// Upload constant to select YUV algo

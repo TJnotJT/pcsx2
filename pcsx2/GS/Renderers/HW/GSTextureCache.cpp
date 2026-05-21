@@ -6298,7 +6298,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 
 		// Create a cleared RT if we somehow end up with an empty source rect (because the RT isn't large enough).
 		const bool source_rect_empty = sRect.rempty();
-		const bool use_texture = (shader == ShaderConvert::RGBA8_COPY && !source_rect_empty);
+		const bool use_texture = (shader == ShaderConvert::COPY && !source_rect_empty);
 		GSVector4i region_rect = GSVector4i(0, 0, tw, th);
 
 		// Assuming everything matches up, instead of copying the target, we can just sample it directly.
@@ -6402,7 +6402,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 				}
 				else
 				{
-					if (dst->m_rt_alpha_scale && shader == ShaderConvert::RGBA8_COPY)
+					if (dst->m_rt_alpha_scale && shader == ShaderConvert::COPY)
 						shader = ShaderConvert::RTA_DECORRECTION;
 
 					const GSVector4 sRectF = GSVector4(sRect) / GSVector4(1, 1, sTex->GetWidth(), sTex->GetHeight());
@@ -7246,7 +7246,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 				if (t->m_rt_alpha_scale)
 					ps_shader = ShaderConvert::RTA_DECORRECTION;
 				else
-					ps_shader = ShaderConvert::RGBA8_COPY;
+					ps_shader = ShaderConvert::COPY;
 
 				dltex = &m_color_download_texture;
 			}
@@ -7281,7 +7281,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 
 	const GSVector4 src(GSVector4(r) * GSVector4(t->m_scale) / GSVector4(t->m_texture->GetSize()).xyxy());
 	const GSVector4i drc(0, 0, r.width(), r.height());
-	const bool direct_read = t->m_type == RenderTarget && t->m_scale == 1.0f && ps_shader == ShaderConvert::RGBA8_COPY;
+	const bool direct_read = t->m_type == RenderTarget && t->m_scale == 1.0f && ps_shader == ShaderConvert::COPY;
 
 	if (!PrepareDownloadTexture(drc.z, drc.w, fmt, dltex))
 		return;
@@ -7927,7 +7927,7 @@ void GSTextureCache::Target::Update(bool cannot_scale)
 
 		// No need to sort here, it's all the one texture.
 		const ShaderConvertSelector shader = (m_type == RenderTarget) ?
-			(m_rt_alpha_scale ? ShaderConvert::RTA_CORRECTION : ShaderConvert::RGBA8_COPY) :
+			(m_rt_alpha_scale ? ShaderConvert::RTA_CORRECTION : ShaderConvert::COPY) :
 			GetCopyShader(GSTexture::Format::Color, m_texture->GetFormat(), bpp, bpp, linear);
 
 		g_gs_device->DrawMultiStretchRects(drects, ndrects, m_texture, shader);

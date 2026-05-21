@@ -1224,7 +1224,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 									pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 								}
 								break;
-							case ShaderConvert::RGBA8_COPY:
+							case ShaderConvert::COPY:
 							case ShaderConvert::DOWNSAMPLE_COPY:
 							case ShaderConvert::RGBA_TO_8I: // Yes really
 							case ShaderConvert::RGB5A1_TO_8I:

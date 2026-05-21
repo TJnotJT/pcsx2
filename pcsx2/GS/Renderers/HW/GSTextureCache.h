@@ -587,7 +587,7 @@ public:
 	bool ShuffleMove(u32 BP, u32 BW, u32 PSM, int sx, int sy, int dx, int dy, int w, int h);
 	bool PageMove(u32 SBP, u32 DBP, u32 BW, u32 PSM, int sx, int sy, int dx, int dy, int w, int h);
 	void CopyPages(Target* src, u32 sbw, u32 src_offset, Target* dst, u32 dbw, u32 dst_offset, u32 num_pages,
-		ShaderConvert shader = ShaderConvert::RGBA8_COPY);
+		ShaderConvert shader = ShaderConvert::COPY);
 
 	void IncAge();
 

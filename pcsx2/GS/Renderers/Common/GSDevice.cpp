@@ -43,7 +43,7 @@ const char* shaderName(ShaderConvert value)
 	switch (value)
 	{
 			// clang-format off
-		case ShaderConvert::RGBA8_COPY:             return "ps_copy";
+		case ShaderConvert::COPY:             return "ps_copy";
 		case ShaderConvert::RGBA8_TO_16_BITS:       return "ps_convert_rgba8_16bits";
 		case ShaderConvert::DATM_1:                 return "ps_datm1";
 		case ShaderConvert::DATM_0:                 return "ps_datm0";
@@ -1100,7 +1100,7 @@ bool GSDevice::ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_con
 	{
 		constexpr GSVector4 sRect = GSVector4::cxpr(0, 0, 1, 1);
 		const GSVector4 dRect = GSVector4(orig_tex->GetRect());
-		StretchRectBiln(orig_tex, sRect, new_tex, dRect, ShaderConvert::RGBA8_COPY);
+		StretchRectBiln(orig_tex, sRect, new_tex, dRect, ShaderConvert::COPY);
 	}
 
 	if (orig_tex)

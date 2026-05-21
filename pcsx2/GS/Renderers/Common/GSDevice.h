@@ -20,7 +20,7 @@
 // by scaling GS depth by exp2(-32.0f).
 enum class ShaderConvert
 {
-	RGBA8_COPY = 0,
+	COPY = 0,
 	FLOAT32_COPY,
 	RGBA8_TO_16_BITS,
 	DATM_1,
@@ -73,7 +73,7 @@ static inline const char* ShaderConvertName(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::RGBA8_COPY: return "RGBA8_COPY";
+		case ShaderConvert::COPY: return "COPY";
 		case ShaderConvert::FLOAT32_COPY: return "FLOAT32_COPY";
 		case ShaderConvert::RGBA8_TO_16_BITS: return "RGBA8_TO_16_BITS";
 		case ShaderConvert::DATM_1: return "DATM_1";
@@ -109,7 +109,7 @@ static inline bool HasVariableWriteMask(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::RGBA8_COPY:
+		case ShaderConvert::COPY:
 		case ShaderConvert::RTA_CORRECTION:
 			return true;
 		default:
@@ -130,7 +130,7 @@ static inline bool HasColorOutput(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::RGBA8_COPY:
+		case ShaderConvert::COPY:
 		case ShaderConvert::RTA_CORRECTION:
 		case ShaderConvert::RTA_DECORRECTION:
 		case ShaderConvert::TRANSPARENCY_FILTER:
@@ -398,7 +398,7 @@ static inline ShaderConvertSelector GetCopyShader(GSTexture::Format src, GSTextu
 			{
 				case GSTexture::Format::Color:
 					pxAssert(src_bpp == 32 && dst_bpp == 32);
-					shader = ShaderConvert::RGBA8_COPY; // bpp is handled by mask
+					shader = ShaderConvert::COPY; // bpp is handled by mask
 					break;
 				case GSTexture::Format::DepthColor:
 				case GSTexture::Format::DepthStencil:
@@ -1524,9 +1524,9 @@ public:
 	virtual void CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r, u32 destX, u32 destY) = 0;
 
 	// StretchRect - all options
-	void StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY), bool linear = false);
-	void StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY), bool linear = false);
-	void StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY), bool linear = false);
+	void StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY), bool linear = false);
+	void StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY), bool linear = false);
+	void StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY), bool linear = false);
 	
 	// StretchRect - infer shader based on formats
 	void StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool linear,
@@ -1536,9 +1536,9 @@ public:
 	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	// StretchRect - nearest filter
-	void StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
-	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
-	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
+	void StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
+	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
+	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
 
 	// StretchRect - nearest filter, infer shader based on formats
 	void StretchRectCopyNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
@@ -1546,9 +1546,9 @@ public:
 	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	// StretchRect - linear filter
-	void StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
-	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
-	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
+	void StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
+	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
+	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
 
 	// StretchRect - linear filter, infer shader based on formats 
 	void StretchRectCopyBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
@@ -1565,7 +1565,7 @@ public:
 
 	/// Same as doing StretchRect for each item, except tries to batch together rectangles in as few draws as possible.
 	/// The provided list should be sorted by texture, the implementations only check if it's the same as the last.
-	virtual void DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::RGBA8_COPY));
+	virtual void DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
 
 	/// Sorts a MultiStretchRect list for optimal batching.
 	static void SortMultiStretchRects(MultiStretchRect* rects, u32 num_rects);

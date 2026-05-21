@@ -227,7 +227,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
 
-	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count;
+	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
 		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
@@ -1730,7 +1730,7 @@ void GSDevice11::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	{
 		// 2nd output is enabled and selected. Copy it to destination so we can blend it with 1st output
 		// Note: value outside of dRect must contains the background color (c)
-		StretchRect(sTex[1], sRect[1], dTex, PMODE.SLBG ? dRect[2] : dRect[1], ShaderConvert::RGBA8_COPY, linear);
+		StretchRect(sTex[1], sRect[1], dTex, PMODE.SLBG ? dRect[2] : dRect[1], ShaderConvert::COPY, linear);
 	}
 
 	// Save 2nd output

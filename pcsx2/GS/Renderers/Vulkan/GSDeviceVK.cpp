@@ -3319,7 +3319,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			OMSetRenderTargets(dTex, nullptr, darea);
 			SetUtilityTexture(sTex[1], sampler);
 			BeginClearRenderPass(m_utility_color_render_pass_clear, darea, c);
-			SetPipeline(m_convert.at(ShaderConvert::RGBA8_COPY));
+			SetPipeline(m_convert.at(ShaderConvert::COPY));
 			DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 			dTex->SetState(GSTexture::State::Dirty);
 			dcleared = true;
@@ -4032,7 +4032,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(vs);
 
-	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count;
+	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
 		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		bool needs_mask = HasVariableWriteMask(i);

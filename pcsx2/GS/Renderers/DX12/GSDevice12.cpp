@@ -2035,7 +2035,7 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, GSVector4::unorm8(c));
 		SetUtilityRootSignature();
-		SetPipeline(m_convert.at(ShaderConvert::RGBA8_COPY).get());
+		SetPipeline(m_convert.at(ShaderConvert::COPY).get());
 		DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 		dTex->SetState(GSTexture::State::Dirty);
 		dcleared = true;
@@ -2727,7 +2727,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
 
-	for (ShaderConvert i = ShaderConvert::RGBA8_COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
 		bool needs_mask = HasVariableWriteMask(i);
 		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0x10; mask++)
@@ -3681,7 +3681,7 @@ void GSDevice12::RenderTextureMipmap(
 	cmdlist.list4->RSSetScissorRects(1, &scissor);
 
 	SetUtilityRootSignature();
-	SetPipeline(m_convert.at(ShaderConvert::RGBA8_COPY).get());
+	SetPipeline(m_convert.at(ShaderConvert::COPY).get());
 	DrawStretchRect(GSVector4(0.0f, 0.0f, 1.0f, 1.0f),
 		GSVector4(0.0f, 0.0f, static_cast<float>(dst_width), static_cast<float>(dst_height)),
 		GSVector2i(dst_width, dst_height));
