@@ -14,6 +14,10 @@
 #include "GS/GSExtra.h"
 #include <array>
 
+// Note about formats: RGB5A1 is implemened as RGBA8 unorm in the GPU, though instead
+// of taking all values from 0-255, the channels take the values 0, 8, 16, ..., 240.
+// Depth may be implemented as either D32 float or R32 float and is encoded in the range [0,1]
+// by scaling GS depth by exp2(-32.0f).
 enum class ShaderConvert
 {
 	RGBA8_COPY = 0,
