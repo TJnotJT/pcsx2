@@ -67,7 +67,7 @@ fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 	return res.sample(data.t);
 }
 
-fragment ushort ps_convert_rgba8_16bits(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment ushort ps_convert_rgb5a1_16bits(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 c = res.sample(data.t);
 	uint4 cu = uint4(c * 255.f + 0.5f);

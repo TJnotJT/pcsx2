@@ -215,8 +215,8 @@ PS_OUTPUT ps_filter_transparency(PS_INPUT input)
 }
 #endif
 
-#if defined(__ps_convert_rgba8_16bits__)
-OUTPUT_TYPE ps_convert_rgba8_16bits(PS_INPUT input) : OUTPUT_SV
+#if defined(__ps_convert_rgb5a1_16bits__)
+OUTPUT_TYPE ps_convert_rgb5a1_16bits(PS_INPUT input) : OUTPUT_SV
 {
 	// Need to be careful with precision here, it can break games like Spider-Man 3 and Dogs Life
 	return rgb5a1_to_uint(sample_c(input.t));

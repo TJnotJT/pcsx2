@@ -1202,7 +1202,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 								break;
 							case ShaderConvert::FLOAT32_TO_16_BITS:
-							case ShaderConvert::RGBA8_TO_16_BITS:
+							case ShaderConvert::RGB5A1_TO_16_BITS:
 								pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
 								pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 								break;

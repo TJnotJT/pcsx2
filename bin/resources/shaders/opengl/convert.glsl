@@ -172,8 +172,8 @@ void ps_downsample_copy()
 }
 #endif
 
-#ifdef ps_convert_rgba8_16bits
-void ps_convert_rgba8_16bits()
+#ifdef ps_convert_rgb5a1_16bits
+void ps_convert_rgb5a1_16bits()
 {
 	// Need to be careful with precision here, it can break games like Spider-Man 3 and Dogs Life
 	OUTPUT = rgb5a1_to_uint(sample_c());

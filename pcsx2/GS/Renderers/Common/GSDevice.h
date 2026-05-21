@@ -18,7 +18,7 @@ enum class ShaderConvert
 {
 	COPY = 0,
 	FLOAT32_COPY,
-	RGBA8_TO_16_BITS,
+	RGB5A1_TO_16_BITS,
 	DATM_1,
 	DATM_0,
 	DATM_1_RTA_CORRECTION,
@@ -71,7 +71,7 @@ static inline const char* ShaderConvertName(ShaderConvert shader)
 	{
 		case ShaderConvert::COPY: return "COPY";
 		case ShaderConvert::FLOAT32_COPY: return "FLOAT32_COPY";
-		case ShaderConvert::RGBA8_TO_16_BITS: return "RGBA8_TO_16_BITS";
+		case ShaderConvert::RGB5A1_TO_16_BITS: return "RGB5A1_TO_16_BITS";
 		case ShaderConvert::DATM_1: return "DATM_1";
 		case ShaderConvert::DATM_0: return "DATM_0";
 		case ShaderConvert::DATM_1_RTA_CORRECTION: return "DATM_1_RTA_CORRECTION";
@@ -200,7 +200,7 @@ static inline int GetIntegerOutputBpp(ShaderConvert shader)
 		case ShaderConvert::FLOAT32_TO_32_BITS:
 			return 32;
 		case ShaderConvert::FLOAT32_TO_16_BITS:
-		case ShaderConvert::RGBA8_TO_16_BITS:
+		case ShaderConvert::RGB5A1_TO_16_BITS:
 			return 16;
 		default:
 			return 0;
