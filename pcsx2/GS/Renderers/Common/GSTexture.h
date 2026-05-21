@@ -133,7 +133,7 @@ public:
 	{
 		return (m_type == Type::Texture);
 	}
-	__fi bool IsDepth() const
+	__fi bool IsDepthLike() const
 	{
 		return (m_type == Type::RenderTarget && m_format == Format::DepthColor) ||
 		       (m_type == Type::DepthStencil);

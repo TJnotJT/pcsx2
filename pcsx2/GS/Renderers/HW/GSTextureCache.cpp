@@ -5373,7 +5373,7 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 			return false;
 		}
 
-		if (tmp_texture->IsDepth())
+		if (tmp_texture->IsDepthLike())
 		{
 			const GSVector4 src_rect = GSVector4(scaled_sx, scaled_sy, scaled_sx + scaled_w, scaled_sy + scaled_h);
 			const GSVector4 tmp_rect = src_rect / (GSVector4(tmp_texture->GetSize()).xyxy());
@@ -5416,7 +5416,7 @@ bool GSTextureCache::Move(u32 SBP, u32 SBW, u32 SPSM, int sx, int sy, u32 DBP, u
 			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, scaled_src_rect,
 				dpsm_s.trbpp == 16 ? 16 : 32, dpsm_s.trbpp);
 		}
-		else if (src->m_texture->IsDepth())
+		else if (src->m_texture->IsDepthLike())
 		{
 			const GSVector4 dst_rect = GSVector4(scaled_dx, scaled_dy, (scaled_dx + scaled_w), (scaled_dy + scaled_h));
 			g_gs_device->StretchRectCopyNearest(src->m_texture, src_rect, dst->m_texture, dst_rect);
@@ -8103,7 +8103,7 @@ bool GSTextureCache::Target::ResizeTexture(int new_unscaled_width, int new_unsca
 	if (m_texture->GetState() == GSTexture::State::Dirty)
 	{
 		const GSVector4i rc = require_new_rect ? new_rect : GSVector4i::loadh(size.min(new_size));
-		if (tex->IsDepthStencil())
+		if (tex->IsDepthLike())
 		{
 			// Can't do partial copies in DirectX for depth textures, and it's probably not ideal in other
 			// APIs either. So use a fullscreen quad setting depth instead.
