@@ -807,7 +807,7 @@ void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelect
 	StretchRect(sTex, dTex, GSVector4(dTex->GetRect()), shader, linear);
 }
 
-void GSDevice::StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
+void GSDevice::StretchRectAuto(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool linear, u32 src_bpp, u32 dst_bpp)
 {
 	ShaderConvertSelector shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
@@ -820,14 +820,14 @@ void GSDevice::StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTextur
 	StretchRect(sTex, sRect, dTex, dRect, shader, linear);
 }
 
-void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAuto(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopy(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, linear, src_bpp, dst_bpp);
+	StretchRectAuto(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, linear, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAuto(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopy(sTex, dTex, GSVector4(dTex->GetRect()), linear, src_bpp, dst_bpp);
+	StretchRectAuto(sTex, dTex, GSVector4(dTex->GetRect()), linear, src_bpp, dst_bpp);
 }
 
 void GSDevice::StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
@@ -846,19 +846,19 @@ void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConver
 	StretchRectNearest(sTex, dTex, GSVector4(dTex->GetRect()), shader);
 }
 
-void GSDevice::StretchRectCopyNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopy(sTex, sRect, dTex, dRect, false, src_bpp, dst_bpp);
+	StretchRectAuto(sTex, sRect, dTex, dRect, false, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyNearest(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, src_bpp, dst_bpp);
+	StretchRectAutoNearest(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyNearest(sTex, dTex, GSVector4(dTex->GetRect()), src_bpp, dst_bpp);
+	StretchRectAutoNearest(sTex, dTex, GSVector4(dTex->GetRect()), src_bpp, dst_bpp);
 }
 
 void GSDevice::StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
@@ -877,36 +877,36 @@ void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertSe
 	StretchRectBiln(sTex, dTex, GSVector4(dTex->GetRect()), shader);
 }
 
-void GSDevice::StretchRectCopyBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopy(sTex, sRect, dTex, dRect, true, src_bpp, dst_bpp);
+	StretchRectAuto(sTex, sRect, dTex, dRect, true, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyBiln(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, src_bpp, dst_bpp);
+	StretchRectAutoBiln(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyBiln(sTex, dTex, GSVector4(dTex->GetRect()), src_bpp, dst_bpp);
+	StretchRectAutoBiln(sTex, dTex, GSVector4(dTex->GetRect()), src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
+void GSDevice::StretchRectAutoMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool red, bool green, bool blue, bool alpha, u32 src_bpp, u32 dst_bpp)
 {
 	StretchRect(sTex, sRect, dTex, dRect, GetCopyShaderMask(sTex, dTex, src_bpp, dst_bpp, red, green, blue, alpha), false);
 }
 
-void GSDevice::StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp, u32 dst_bpp)
+void GSDevice::StretchRectAutoMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyMask(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, red, green, blue, alpha, src_bpp, dst_bpp);
+	StretchRectAutoMask(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, red, green, blue, alpha, src_bpp, dst_bpp);
 }
 
-void GSDevice::StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha,
+void GSDevice::StretchRectAutoMask(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha,
 	u32 src_bpp, u32 dst_bpp)
 {
-	StretchRectCopyMask(sTex, dTex, GSVector4(dTex->GetRect()), red, green, blue, alpha, src_bpp, dst_bpp);
+	StretchRectAutoMask(sTex, dTex, GSVector4(dTex->GetRect()), red, green, blue, alpha, src_bpp, dst_bpp);
 }
 
 void GSDevice::DrawMultiStretchRects(
@@ -1071,7 +1071,7 @@ void GSDevice::Resize(int width, int height)
 	{
 		const GSVector4 sRect(0, 0, 1, 1);
 		const GSVector4 dRect(0, 0, s.x, s.y);
-		StretchRectCopyNearest(m_current, sRect, dTex, dRect);
+		StretchRectAutoNearest(m_current, sRect, dTex, dRect);
 		m_current = dTex;
 	}
 }
@@ -1125,7 +1125,7 @@ void GSDevice::BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea)
 	m_ds_as_rt = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::DepthColor, false, true);
 	const GSVector4 dRect(drawarea);
 	const GSVector4 sRect(dRect.x / w, dRect.y / h, dRect.z / w, dRect.w / h);
-	StretchRectCopyNearest(ds, sRect, m_ds_as_rt, dRect);
+	StretchRectAutoNearest(ds, sRect, m_ds_as_rt, dRect);
 }
 
 void GSDevice::EndDSAsRT()

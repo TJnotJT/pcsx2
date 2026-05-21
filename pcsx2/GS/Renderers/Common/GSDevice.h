@@ -1525,11 +1525,11 @@ public:
 	void StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY), bool linear = false);
 	
 	// StretchRect - infer shader based on formats
-	void StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool linear,
+	void StretchRectAuto(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool linear,
 		u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear,
+	void StretchRectAuto(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool linear,
 		u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAuto(GSTexture* sTex, GSTexture* dTex, bool linear, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	// StretchRect - nearest filter
 	void StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
@@ -1537,9 +1537,9 @@ public:
 	void StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
 
 	// StretchRect - nearest filter, infer shader based on formats
-	void StretchRectCopyNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoNearest(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	// StretchRect - linear filter
 	void StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
@@ -1547,14 +1547,14 @@ public:
 	void StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader = ShaderConvertSelector(ShaderConvert::COPY));
 
 	// StretchRect - linear filter, infer shader based on formats 
-	void StretchRectCopyBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	// StretchRect - nearest filter, infer shader based on formats, specify channel mask
-	void StretchRectCopyMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
-	void StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
+	void StretchRectAutoMask(GSTexture* sTex, GSTexture* dTex, bool red, bool green, bool blue, bool alpha, u32 src_bpp = 32, u32 dst_bpp = 32);
 
 	/// Performs a screen blit for display. If dTex is null, it assumes you are writing to the system framebuffer/swap chain.
 	virtual void PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, PresentShader shader, float shaderTime, bool linear) = 0;
