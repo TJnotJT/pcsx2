@@ -414,7 +414,7 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 	GSVector4 color_clear, depth_clear;
 
 	// Depth and stencil might be the same, so do all invalidation checks before resetting invalidation
-	const auto CheckClear = [](GSTextureMTL* tex) {
+	const auto CheckClear = [](GSTextureMTL* tex, MTLLoadAction load_action) {
 		if (tex)
 		{
 			if (tex->GetState() == GSTexture::State::Invalidated)
@@ -435,14 +435,14 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 		}
 	};
 
-	std::tie(color_load, color_clear) = CheckClear(mc);
-	std::tie(depth_load, depth_clear) = CheckClear(md);
+	std::tie(color_load, color_clear) = CheckClear(mc, color_load);
+	std::tie(depth_load, depth_clear) = CheckClear(md, depth_load);
 
 	// Stencil and depth are one texture, stencil clears aren't supported
 	if (ms && ms->GetState() == GSTexture::State::Invalidated)
 		stencil_load = MTLLoadActionDontCare;
-	needs_new |= mc && color_load   == MTLLoadActionClear;
-	needs_new |= md && depth_load   == MTLLoadActionClear;
+	needs_new |= mc && color_load == MTLLoadActionClear;
+	needs_new |= md && depth_load == MTLLoadActionClear;
 
 	// Reset texture state
 	if (mc) mc->SetState(GSTexture::State::Dirty);
