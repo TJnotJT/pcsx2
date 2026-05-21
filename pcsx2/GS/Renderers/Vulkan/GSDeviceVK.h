@@ -398,7 +398,7 @@ private:
 
 	std::unordered_map<u32, VkSampler> m_samplers;
 
-	std::unordered_map<ShaderConvertKey, VkPipeline, ShaderConvertKeyHash> m_convert;
+	std::unordered_map<ShaderConvertSelector, VkPipeline, ShaderConvertSelectorHash> m_convert;
 	std::array<VkPipeline, static_cast<int>(PresentShader::Count)> m_present{};
 	std::array<VkPipeline, 2> m_merge{};
 	std::array<VkPipeline, NUM_INTERLACE_SHADERS> m_interlace{};
@@ -467,7 +467,7 @@ private:
 	bool CreatePipelineLayouts();
 	bool CreateRenderPasses();
 
-	VkPipeline CreateConvertPipeline(ShaderConvertKey key);
+	VkPipeline CreateConvertPipeline(ShaderConvertSelector key);
 
 	bool CompileConvertPipelines();
 	bool CompilePresentPipelines();
@@ -484,10 +484,10 @@ private:
 
 protected:
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-		ShaderConvertKey shader, bool linear) override;
+		ShaderConvertSelector shader, bool linear) override;
 	virtual void DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
 		PresentShader shader, bool linear) override;
-	ShaderConvertKey ProcessShaderConvertKey(ShaderConvertKey shader) const
+	ShaderConvertSelector ProcessShaderConvertKey(ShaderConvertSelector shader) const
 	{
 		// Depth input handled same as color input.
 		return shader.SetDepthInput(false);
@@ -557,8 +557,8 @@ public:
 	void PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 		PresentShader shader, float shaderTime, bool linear) override;
 	void DrawMultiStretchRects(
-		const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader) override;
-	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertKey shader);
+		const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader) override;
+	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertSelector shader);
 
 	void BeginRenderPassForStretchRect(
 		GSTextureVK* dTex, const GSVector4i& dtex_rc, const GSVector4i& dst_rc, bool allow_discard = true);

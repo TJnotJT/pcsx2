@@ -778,7 +778,7 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 }
 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
-	const GSVector4& dRect, ShaderConvertKey shader, bool linear)
+	const GSVector4& dRect, ShaderConvertSelector shader, bool linear)
 {
 	pxAssert((dTex && dTex->IsDepthStencil()) == HasFloat32Output(shader.GetShader()));
 	pxAssert(!linear || !shader.GetBiln());
@@ -790,17 +790,17 @@ void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRe
 }
 
 void GSDevice::StretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
 	DoStretchRectWithAssertions(sTex, sRect, dTex, dRect, shader, linear);
 }
 
-void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader, bool linear)
+void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader, bool linear)
 {
 	StretchRect(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, shader, linear);
 }
 
-void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader, bool linear)
+void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader, bool linear)
 {
 	StretchRect(sTex, dTex, GSVector4(dTex->GetRect()), shader, linear);
 }
@@ -808,7 +808,7 @@ void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey sh
 void GSDevice::StretchRectCopy(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool linear, u32 src_bpp, u32 dst_bpp)
 {
-	ShaderConvertKey shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
+	ShaderConvertSelector shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
 	if (SupportsBilinear(shader.GetShader()) && linear)
 	{
 		// Bilinear is emulated in the shader.
@@ -829,17 +829,17 @@ void GSDevice::StretchRectCopy(GSTexture* sTex, GSTexture* dTex, bool linear, u3
 }
 
 void GSDevice::StretchRectNearest(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader)
+	ShaderConvertSelector shader)
 {
 	StretchRect(sTex, sRect, dTex, dRect, shader, false);
 }
 
-void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader)
+void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader)
 {
 	StretchRectNearest(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, shader);
 }
 
-void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader)
+void GSDevice::StretchRectNearest(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	StretchRectNearest(sTex, dTex, GSVector4(dTex->GetRect()), shader);
 }
@@ -860,17 +860,17 @@ void GSDevice::StretchRectCopyNearest(GSTexture* sTex, GSTexture* dTex, u32 src_
 }
 
 void GSDevice::StretchRectBiln(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader)
+	ShaderConvertSelector shader)
 {
 	StretchRect(sTex, sRect, dTex, dRect, shader, true);
 }
 
-void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertKey shader)
+void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, ShaderConvertSelector shader)
 {
 	StretchRectBiln(sTex, GSVector4(0, 0, 1, 1), dTex, dRect, shader);
 }
 
-void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertKey shader)
+void GSDevice::StretchRectBiln(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	StretchRectBiln(sTex, dTex, GSVector4(dTex->GetRect()), shader);
 }
@@ -908,7 +908,7 @@ void GSDevice::StretchRectCopyMask(GSTexture* sTex, GSTexture* dTex, bool red, b
 }
 
 void GSDevice::DrawMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	for (u32 i = 0; i < num_rects; i++)
 	{

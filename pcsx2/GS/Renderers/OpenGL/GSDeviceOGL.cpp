@@ -438,7 +438,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
 
-					const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
+					const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
 					GLProgram& prog = m_convert.ps[shader];
 
@@ -1680,7 +1680,7 @@ void GSDeviceOGL::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r
 }
 
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
 	const u8 mask = shader.GetMask();
 	shader = ProcessShaderConvertKey(shader);
@@ -1873,7 +1873,7 @@ void GSDeviceOGL::DrawStretchRect(const GSVector4& sRect, const GSVector4& dRect
 }
 
 void GSDeviceOGL::DrawMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	shader = ProcessShaderConvertKey(shader);
 

@@ -2926,7 +2926,7 @@ void GSDeviceVK::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 }
 
 void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
 	pxAssert(dTex);
 	shader = ProcessShaderConvertKey(shader);
@@ -2956,7 +2956,7 @@ void GSDeviceVK::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture*
 }
 
 void GSDeviceVK::DrawMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	shader = ProcessShaderConvertKey(shader);
 
@@ -3000,7 +3000,7 @@ void GSDeviceVK::DrawMultiStretchRects(
 }
 
 void GSDeviceVK::DoMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertSelector shader)
 {
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 
@@ -4044,7 +4044,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
+					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
 					GSTexture::Format format = shader.GetOutputFormat();
 					VkRenderPass rp;
 

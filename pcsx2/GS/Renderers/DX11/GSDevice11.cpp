@@ -249,7 +249,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
 				sm.AddMacro(entry_point_macro.c_str(), "1");
 
-				const ShaderConvertKey shader(i, 0xf, false, depth_output, biln);
+				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
 				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr());
 				if (!m_convert.ps.at(shader))
@@ -1411,7 +1411,7 @@ void GSDevice11::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 }
 
 void GSDevice11::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
 	const u8 mask = shader.GetMask();
 	shader = ProcessShaderConvertKey(shader);
@@ -1614,7 +1614,7 @@ void GSDevice11::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, m_convert.ps.at(shader).get(), m_merge.cb.get(), nullptr, false);
 }
 
-void GSDevice11::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
+void GSDevice11::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	shader = ProcessShaderConvertKey(shader);
 

@@ -1673,7 +1673,7 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 }
 
 void GSDevice12::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
-	ShaderConvertKey shader, bool linear)
+	ShaderConvertSelector shader, bool linear)
 {
 	pxAssert(dTex);
 	shader = ProcessShaderConvertKey(shader);
@@ -1770,7 +1770,7 @@ void GSDevice12::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 }
 
 void GSDevice12::DrawMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
 {
 	shader = ProcessShaderConvertKey(shader);
 
@@ -1814,7 +1814,7 @@ void GSDevice12::DrawMultiStretchRects(
 }
 
 void GSDevice12::DoMultiStretchRects(
-	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvertKey shader)
+	const MultiStretchRect* rects, u32 num_rects, GSTexture12* dTex, ShaderConvertSelector shader)
 {
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 
@@ -2738,7 +2738,7 @@ bool GSDevice12::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					const ShaderConvertKey shader(i, mask, false, depth_output, biln);
+					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
 
 					GSTexture::Format format = shader.GetOutputFormat();
 					DXGI_FORMAT dxgi_format;
