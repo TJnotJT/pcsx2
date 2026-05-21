@@ -60,83 +60,6 @@ vertex ImGuiShaderData vs_imgui(ImGuiVSIn in [[stage_in]], constant float4& cb [
 	return out;
 }
 
-static uint rgba8_to_uint(float4 c)
-{
-	uint4 i = uint4(c * 255.5f) & 0xff;
-	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
-}
-
-static uint rgb5a1_to_uint(float4 c)
-{
-	uint4 i = uint4(c * 255.5f) & uint4(0xf8, 0xf8, 0xf8, 0x80);
-	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
-}
-
-static uint depth_to_uint(float d)
-{
-	return uint(d * exp2(32.0f));
-}
-
-static float4 uint_to_rgba8(uint i)
-{
-	return float4((i & 0xFF), ((i >> 8) & 0xFF), ((i >> 16) & 0xFF), ((i >> 24) & 0xFF)) / 255.0f;
-}
-
-static float4 uint_to_rgb5a1(uint i)
-{
-	return float4(uint4(i << 3, i >> 2, i >> 7, i >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
-}
-
-static float uint_to_depth32(uint i)
-{
-	return float(i) * exp2(-32.0f);
-}
-
-static float uint_to_depth24(uint i)
-{
-	return float(i & 0xFFFFFFu) * exp2(-32.0f);
-}
-
-static float uint_to_depth16(uint i)
-{
-	return float(i & 0xFFFFu) * exp2(-32.0f);
-}
-
-static float rgba8_to_depth32(float4 val)
-{
-	return uint_to_depth32(rgba8_to_uint(val));
-}
-
-static float rgba8_to_depth24(float4 val)
-{
-	return uint_to_depth24(rgba8_to_uint(val));
-}
-
-static float rgba8_to_depth16(float4 val)
-{
-	return uint_to_depth16(rgba8_to_uint(val));
-}
-
-static float rgb5a1_to_depth16(float4 val)
-{
-	return uint_to_depth16(rgb5a1_to_uint(val));
-}
-
-static float4 depth32_to_rgba8(float d)
-{
-	return uint_to_rgba8(depth_to_uint(d));
-}
-
-static float4 depth16_to_rgb5a1(float d)
-{
-	return uint_to_rgb5a1(depth_to_uint(d));
-}
-
-static float depth32_to_depth24(float d)
-{
-	return uint_to_depth24(depth_to_uint(d));
-}
-
 fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	return res.sample(data.t);
@@ -253,10 +176,11 @@ fragment float ps_convert_float32_depth_to_color(ConvertShaderData data [[stage_
 	return res.sample(data.t);
 }
 
-fragment DepthOut ps_depth_copy(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
+struct DepthOut
 {
-	return res.sample(data.t);
-}
+	float depth [[depth(any)]];
+	DepthOut(float depth): depth(depth) {}
+};
 
 fragment float4 ps_downsample_copy(ConvertShaderData data [[stage_in]],
 	texture2d<float> texture [[texture(GSMTLTextureIndexNonHW)]],
@@ -325,89 +249,160 @@ struct ConvertToDepthRes
 	}
 };
 
-struct DepthOut
-{
-	float depth [[depth(any)]];
-	DepthOut(float depth): depth(depth) {}
-};
-
+// Depth in / depth out
 fragment DepthOut ps_float32_copy_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	return sample_c(input.t).r;
 }
 
+// Depth in / color out
 fragment float ps_float32_copy_dc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	return sample_c(input.t).r;
 }
 
+// Color in / depth out
 fragment DepthOut ps_float32_copy_cd(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	return sample_c(input.t).r;
 }
 
+// Color in / color out
 fragment float ps_float32_copy_cc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	return sample_c(input.t).r;
 }
 
+// Depth in / depth out
 fragment DepthOut ps_convert_float32_float24_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	// Truncates depth value to 24bits
-	return depth_to_uint(sample_c(input.t))
+	return depth32_to_depth24(sample_c(input.t));
 }
 
-fragment float ps_convert_float32_float24_dc(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+// Depth in / color out
+fragment float ps_convert_float32_float24_dc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	// Truncates depth value to 24bits
-	uint val = uint(res.sample(data.t) * 0x1p32) & 0xFFFFFF;
-	return float(val) * 0x1p-32f;
+	return depth32_to_depth24(sample_c(input.t));
 }
 
-fragment DepthOut ps_convert_float32_color_to_depth(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+// Color in / depth out
+fragment DepthOut ps_convert_float32_float24_cd(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
-	return res.sample(data.t).x;
+	// Truncates depth value to 24bits
+	return depth32_to_depth24(sample_c(input.t));
 }
 
-
-fragment DepthOut ps_convert_rgba8_float32(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Color in / color out
+fragment float ps_convert_float32_float24_cc(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
-	return rgba8_to_depth32(res.sample(data.t));
+	// Truncates depth value to 24bits
+	return depth32_to_depth24(sample_c(input.t));
 }
 
-fragment DepthOut ps_convert_rgba8_float24(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Depth out
+fragment DepthOut ps_convert_rgba8_float32_d(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return rgba8_to_depth24(res.sample(data.t));
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth32>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth32(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgba8_float16(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Color out
+fragment float ps_convert_rgba8_float32_c(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return rgba8_to_depth16(res.sample(data.t));
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth32>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth32(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgb5a1_float16(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Depth out
+fragment DepthOut ps_convert_rgba8_float24_d(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return rgb5a1_to_depth16(res.sample(data.t));
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth24>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth24(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgba8_float32_biln(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Color out
+fragment float ps_convert_rgba8_float24_c(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return res.sample_biln<rgba8_to_depth32>(data.t);
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth24>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth24(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgba8_float24_biln(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Depth out
+fragment DepthOut ps_convert_rgba8_float16_d(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return res.sample_biln<rgba8_to_depth24>(data.t);
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth16>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth16(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgba8_float16_biln(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Color out
+fragment float ps_convert_rgba8_float16_c(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return res.sample_biln<rgba8_to_depth16>(data.t);
+	if (BILN)
+	{
+		return res.sample_biln<rgba8_to_depth16>(data.t);
+	}
+	else
+	{
+		return rgba8_to_depth16(res.sample(data.t));
+	}
 }
 
-fragment DepthOut ps_convert_rgb5a1_float16_biln(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+// Depth out
+fragment DepthOut ps_convert_rgb5a1_float16_d(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
 {
-	return res.sample_biln<rgb5a1_to_depth16>(data.t);
+	if (BILN)
+	{
+		return res.sample_biln<rgb5a1_to_depth16>(data.t);
+	}
+	else
+	{
+		return rgb5a1_to_depth16(res.sample(data.t));
+	}
+}
+
+// Color out
+fragment float ps_convert_rgb5a1_float16_c(ConvertShaderData data [[stage_in]], ConvertToDepthRes res)
+{
+	if (BILN)
+	{
+		return res.sample_biln<rgb5a1_to_depth16>(data.t);
+	}
+	else
+	{
+		return rgb5a1_to_depth16(res.sample(data.t));
+	}
 }
 
 fragment float4 ps_convert_rgb5a1_8i(ConvertShaderData data [[stage_in]], DirectReadTextureIn<float> res,
