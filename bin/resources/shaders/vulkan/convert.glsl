@@ -53,6 +53,83 @@ vec4 sample_c(vec2 uv)
 
 #endif
 
+uint rgba8_to_uint(vec4 c)
+{
+	uvec4 i = uvec4(c * 255.5f) & 255;
+	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
+}
+
+uint rgb5a1_to_uint(vec4 c)
+{
+	uvec4 i = uvec4(c * 255.5f) & 248;
+	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
+}
+
+uint depth_to_uint(float d)
+{
+	return uint(d * exp2(32.0f));
+}
+
+vec4 uint_to_rgba8(uint i)
+{
+	return vec4((i & 0xFF), ((i >> 8) & 0xFF), ((i >> 16) & 0xFF), ((i >> 24) & 0xFF)) / 255.0f;
+}
+
+vec4 uint_to_rgb5a1(uint i)
+{
+	return vec4(uvec4(i << 3, i >> 2, i >> 7, i >> 8) & uvec4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
+}
+
+float uint_to_depth32(uint i)
+{
+	return float(i) * exp2(-32.0f);
+}
+
+float uint_to_depth24(uint i)
+{
+	return float(i & 0xFFFFFFu) * exp2(-32.0f);
+}
+
+float uint_to_depth16(uint i)
+{
+	return float(i & 0xFFFFu) * exp2(-32.0f);
+}
+
+float rgba8_to_depth32(vec4 val)
+{
+	return uint_to_depth32(rgba8_to_uint(val));
+}
+
+float rgba8_to_depth24(vec4 val)
+{
+	return uint_to_depth24(rgba8_to_uint(val));
+}
+
+float rgba8_to_depth16(vec4 val)
+{
+	return uint_to_depth16(rgba8_to_uint(val));
+}
+
+float rgb5a1_to_depth16(vec4 val)
+{
+	return uint_to_depth16(rgb5a1_to_uint(val));
+}
+
+vec4 depth32_to_rgba8(float d)
+{
+	return uint_to_rgba8(depth_to_uint(d));
+}
+
+vec4 depth16_to_rgb5a1(float d)
+{
+	return uint_to_rgb5a1(depth_to_uint(d));
+}
+
+float depth32_to_depth24(float d)
+{
+	return uint_to_depth24(depth_to_uint(d));
+}
+
 #ifdef ps_copy
 void ps_copy()
 {
@@ -104,9 +181,7 @@ void ps_filter_transparency()
 // Need to be careful with precision here, it can break games like Spider-Man 3 and Dogs Life
 void ps_convert_rgba8_16bits()
 {
-	uvec4 i = uvec4(sample_c(v_tex) * vec4(255.5f, 255.5f, 255.5f, 255.5f));
-
-	OUTPUT = ((i.x & 0x00F8u) >> 3) | ((i.y & 0x00F8u) << 2) | ((i.z & 0x00f8u) << 7) | ((i.w & 0x80u) << 8);
+	OUTPUT = rgb5a1_to_uint(sample_c(v_tex));
 }
 #endif
 
@@ -174,18 +249,11 @@ void ps_colclip_resolve()
 }
 #endif
 
-#ifdef ps_convert_float32_depth_to_color
-void ps_convert_float32_depth_to_color()
-{
-	OUTPUT = sample_c(v_tex).r;
-}
-#endif
-
 #ifdef ps_convert_float32_32bits
 void ps_convert_float32_32bits()
 {
 	// Convert a vec32 depth texture into a 32 bits UINT texture
-	OUTPUT = uint(exp2(32.0f) * sample_c(v_tex).r);
+	OUTPUT = depth_to_uint(sample_c(v_tex));
 }
 #endif
 
@@ -193,8 +261,7 @@ void ps_convert_float32_32bits()
 void ps_convert_float32_rgba8()
 {
 	// Convert a vec32 depth texture into a RGBA color texture
-	uint d = uint(sample_c(v_tex).r * exp2(32.0f));
-	OUTPUT = vec4(uvec4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24))) / vec4(255.0);
+	OUTPUT = depth32_to_rgba8(sample_c(v_tex));
 }
 #endif
 
@@ -202,41 +269,15 @@ void ps_convert_float32_rgba8()
 void ps_convert_float16_rgb5a1()
 {
 	// Convert a vec32 (only 16 lsb) depth into a RGB5A1 color texture
-	uint d = uint(sample_c(v_tex).r * exp2(32.0f));
-	OUTPUT = vec4(uvec4(d << 3, d >> 2, d >> 7, d >> 8) & uvec4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
+	OUTPUT = depth16_to_rgb5a1(sample_c(v_tex));
 }
 #endif
-
-float rgba8_to_depth32(vec4 unorm)
-{
-	uvec4 c = uvec4(unorm * vec4(255.5f));
-	return float(c.r | (c.g << 8) | (c.b << 16) | (c.a << 24)) * exp2(-32.0f);
-}
-
-float rgba8_to_depth24(vec4 unorm)
-{
-	uvec3 c = uvec3(unorm.rgb * vec3(255.5f));
-	return float(c.r | (c.g << 8) | (c.b << 16)) * exp2(-32.0f);
-}
-
-float rgba8_to_depth16(vec4 unorm)
-{
-	uvec2 c = uvec2(unorm.rg * vec2(255.5f));
-	return float(c.r | (c.g << 8)) * exp2(-32.0f);
-}
-
-float rgb5a1_to_depth16(vec4 unorm)
-{
-	uvec4 c = uvec4(unorm * vec4(255.5f));
-	return float(((c.r & 0xF8u) >> 3) | ((c.g & 0xF8u) << 2) | ((c.b & 0xF8u) << 7) | ((c.a & 0x80u) << 8)) * exp2(-32.0f);
-}
 
 #ifdef ps_convert_float32_float24
 void ps_convert_float32_float24()
 {
 	// Truncates depth value to 24bits
-	uint d = uint(sample_c(v_tex) * exp2(32.0f)) & 0xFFFFFFu;
-	OUTPUT = float(d) * exp2(-32.0f);
+	OUTPUT = depth32_to_depth24(sample_c(v_tex));
 }
 #endif
 
