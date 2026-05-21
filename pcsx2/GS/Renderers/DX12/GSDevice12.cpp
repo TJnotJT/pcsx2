@@ -1677,7 +1677,7 @@ void GSDevice12::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 {
 	pxAssert(dTex);
 	shader = ProcessShaderConvertSelector(shader);
-	const bool allow_discard = (shader.GetMask() == 0xf);
+	const bool allow_discard = (shader.Mask() == 0xf);
 	DoStretchRect(static_cast<GSTexture12*>(sTex), sRect, static_cast<GSTexture12*>(dTex), dRect,
 		m_convert.at(shader).get(), linear, allow_discard);
 }
@@ -2729,7 +2729,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
-		bool needs_mask = HasVariableWriteMask(i);
+		bool variable_mask = HasVariableWriteMask(i);
 		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0x10; mask++)
 		{
 			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
@@ -2738,9 +2738,10 @@ bool GSDevice12::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
+					const ShaderConvertSelector shader(i, variable_mask ? mask : ShaderConvertWriteMask(i),
+						false, depth_output, biln);
 
-					GSTexture::Format format = shader.GetOutputFormat();
+					GSTexture::Format format = shader.OutputFormat();
 					DXGI_FORMAT dxgi_format;
 					LookupNativeFormat(format, nullptr, nullptr, &dxgi_format, nullptr);
 
@@ -2768,7 +2769,7 @@ bool GSDevice12::CompileConvertPipelines()
 						gpb.SetNoStencilState();
 					}
 
-					gpb.SetColorWriteMask(0, needs_mask ? mask : ShaderConvertWriteMask(i));
+					gpb.SetColorWriteMask(0, shader.Mask());
 
 					const char* entry_point = shaderName(i);
 					std::string entry_point_macro = WrapEntryPointMacro(entry_point);
@@ -2797,7 +2798,8 @@ bool GSDevice12::CompileConvertPipelines()
 
 					D3D12::SetObjectName(pipe.get(),
 						TinyString::from_format("Convert pipeline ({}, mask={:x}, depth={}, biln={})",
-							ShaderConvertName(i), mask, depth_output, biln));
+							ShaderConvertName(i), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+							static_cast<int>(shader.Biln())));
 
 					m_convert[shader] = pipe;
 

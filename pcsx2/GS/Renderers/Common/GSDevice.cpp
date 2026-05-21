@@ -782,9 +782,9 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
 	const GSVector4& dRect, ShaderConvertSelector shader, bool linear)
 {
-	pxAssert((dTex && dTex->IsDepthStencil()) == HasFloat32Output(shader.GetShader()));
-	pxAssert(!linear || !shader.GetBiln());
-	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.GetShader()),
+	pxAssert((dTex && dTex->IsDepthStencil()) == HasFloat32Output(shader.Shader()));
+	pxAssert(!linear || !shader.Biln()); // Don't do SW and HW bilinear at the same time.
+	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.Shader()),
 		int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),
 		int(dRect.right - dRect.left), int(dRect.bottom - dRect.top));
@@ -811,7 +811,7 @@ void GSDevice::StretchRectAuto(GSTexture* sTex, const GSVector4& sRect, GSTextur
 	bool linear, u32 src_bpp, u32 dst_bpp)
 {
 	ShaderConvertSelector shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
-	if (SupportsBilinear(shader.GetShader()) && linear)
+	if (SupportsBilinear(shader.Shader()) && linear)
 	{
 		// Bilinear is emulated in the shader.
 		shader.SetBiln(true);

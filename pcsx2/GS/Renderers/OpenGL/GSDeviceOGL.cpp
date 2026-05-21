@@ -438,15 +438,17 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
 
-					const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
+					const u32 mask = HasVariableWriteMask(i) ? 0xf : ShaderConvertWriteMask(i);
+					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
 
 					GLProgram& prog = m_convert.ps[shader];
 
 					if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
 						return false;
 
-					prog.SetFormattedName("Convert pipeline (%s, depth=%d, biln=%d)",
-						ShaderConvertName(i), depth_output, biln);
+					prog.SetFormattedName("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+						ShaderConvertName(i), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+						static_cast<int>(shader.Biln()));
 
 					if (static_cast<ShaderConvert>(i) == ShaderConvert::RGBA_TO_8I || static_cast<ShaderConvert>(i) == ShaderConvert::RGB5A1_TO_8I)
 					{
@@ -1682,9 +1684,8 @@ void GSDeviceOGL::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderConvertSelector shader, bool linear)
 {
-	const u8 mask = shader.GetMask();
-	shader = ProcessShaderConvertSelector(shader);
-
+	const u8 mask = shader.Mask();
+	shader = ProcessShaderConvertSelector(shader);  // Removes mask and depth input.
 	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps.at(shader), false, OMColorMaskSelector(mask), linear);
 }
 
@@ -1879,7 +1880,7 @@ void GSDeviceOGL::DrawMultiStretchRects(
 
 	IASetVAO(m_vao);
 	IASetPrimitiveTopology(GL_TRIANGLE_STRIP);
-	OMSetDepthStencilState(shader.GetDepthOutput() ? m_convert.dss_write : m_convert.dss);
+	OMSetDepthStencilState(shader.DepthOutput() ? m_convert.dss_write : m_convert.dss);
 	OMSetBlendState(false);
 	OMSetColorMaskState();
 	if (!dTex->IsDepthStencil())

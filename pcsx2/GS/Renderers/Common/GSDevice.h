@@ -243,11 +243,11 @@ class ShaderConvertSelector
 	{
 		struct
 		{
-			u32 shader : 8;
-			u32 mask : 8;
-			u32 depth_input : 1;
-			u32 depth_output : 1;
-			u32 biln : 1;
+			u32 shader : 8; // Main shader
+			u32 mask : 8; // Variable color mask (if needed)
+			u32 depth_input : 1; // Depth texture input
+			u32 depth_output : 1; // Depth texture output
+			u32 biln : 1; // Shader emulated bilinear (only certain shaders; HW bilinear is specified separately)
 		};
 
 		u32 key;
@@ -256,79 +256,76 @@ class ShaderConvertSelector
 	static_assert(sizeof(fields) == 4);
 
 public:
-	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_input = false, bool depth_output = false, bool biln = false)
+	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_input = false,
+		bool depth_output = false, bool biln = false)
 	{
 		fields.key = 0;
-		fields.shader = static_cast<u8>(shader);
-		fields.mask = mask & 0xf;
-		fields.depth_input = depth_input;
-		fields.depth_output = depth_output;
-		fields.biln = biln;
+		fields.shader = static_cast<u8>(shader); // Needs to be set before using setters.
+		*this = SetMask(mask).SetDepthInput(depth_input).SetDepthOutput(depth_output).SetBiln(biln);
 	}
 
-	ShaderConvert GetShader() const
+	ShaderConvert Shader() const
 	{
 		return static_cast<ShaderConvert>(fields.shader);
 	}
 
-	u8 GetMask() const
+	u8 Mask() const
 	{
 		return fields.mask;
 	}
 
-	bool GetBiln() const
+	bool Biln() const
 	{
 		return fields.biln;
 	}
 
-	bool GetDepthOutput() const
+	bool DepthOutput() const
 	{
 		return fields.depth_output;
 	}
 
-	bool GetDepthInput() const
+	bool DepthInput() const
 	{
 		return fields.depth_input;
-	}
-
-	ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
-	{
-		ShaderConvertSelector tmp = *this;
-		tmp.fields.mask = static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) | (static_cast<u8>(wb) << 2)  | (static_cast<u8>(wa) << 3);
-		return tmp;
 	}
 
 	ShaderConvertSelector SetMask(u8 mask) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.mask = mask & 0xf;
+		tmp.fields.mask = HasVariableWriteMask(Shader()) ? (mask & 0xf) : ShaderConvertWriteMask(Shader());
 		return tmp;
+	}
+
+	ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
+	{
+		return SetMask(static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) |
+			(static_cast<u8>(wb) << 2) | (static_cast<u8>(wa) << 3));
 	}
 
 	ShaderConvertSelector SetDepthInput(bool depth_input) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.depth_input = depth_input;
+		tmp.fields.depth_input = HasFloat32Input(Shader()) && depth_input;
 		return tmp;
 	}
 
 	ShaderConvertSelector SetDepthOutput(bool depth_output) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.depth_output = depth_output;
+		tmp.fields.depth_output = HasFloat32Output(Shader()) && depth_output;
 		return *this;
 	}
 
 	ShaderConvertSelector SetBiln(bool biln)
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.biln = biln;
+		tmp.fields.biln = SupportsBilinear(Shader()) && biln;
 		return *this;
 	}
 
-	GSTexture::Format GetOutputFormat() const
+	GSTexture::Format OutputFormat() const
 	{
-		const ShaderConvert shader = GetShader();
+		const ShaderConvert shader = Shader();
 		if (fields.depth_output)
 			return GSTexture::Format::DepthStencil;
 		else if (int bpp = GetIntegerOutputBpp(shader))
@@ -345,18 +342,7 @@ public:
 
 	size_t GetHash() const
 	{
-		// Remove unused bits.
-		ShaderConvertSelector tmp = *this;
-		ShaderConvert shader = static_cast<ShaderConvert>(fields.shader);
-		if (!HasVariableWriteMask(shader))
-			tmp.fields.mask = ShaderConvertWriteMask(shader);
-		if (!HasFloat32Output(shader))
-			tmp.fields.depth_output = false;
-		if (!HasFloat32Input(shader))
-			tmp.fields.depth_input = false;
-		if (!SupportsBilinear(shader))
-			tmp.fields.biln = false;
-		return static_cast<size_t>(tmp.fields.key);
+		return static_cast<size_t>(fields.key);
 	}
 
 	__fi bool operator==(const ShaderConvertSelector& other) const

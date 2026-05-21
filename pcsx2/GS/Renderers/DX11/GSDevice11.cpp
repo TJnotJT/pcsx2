@@ -249,7 +249,8 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
 				sm.AddMacro(entry_point_macro.c_str(), "1");
 
-				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
+				const u32 mask = HasVariableWriteMask(i) ? 0xf : ShaderConvertWriteMask(i);
+				const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
 
 				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm.GetPtr());
 				if (!m_convert.ps.at(shader))
@@ -1414,8 +1415,8 @@ void GSDevice11::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 void GSDevice11::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	ShaderConvertSelector shader, bool linear)
 {
-	const u8 mask = shader.GetMask();
-	shader = ProcessShaderConvertSelector(shader);
+	const u8 mask = shader.Mask();
+	shader = ProcessShaderConvertSelector(shader); // Removes mask and depth output.
 	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps.at(shader).get(), nullptr, m_convert.bs[mask].get(), linear);
 }
 

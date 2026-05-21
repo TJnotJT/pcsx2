@@ -2930,7 +2930,7 @@ void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 {
 	pxAssert(dTex);
 	shader = ProcessShaderConvertSelector(shader);
-	const bool allow_discard = (shader.GetMask() == 0xf);
+	const bool allow_discard = (shader.Mask() == 0xf);
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), sRect, static_cast<GSTextureVK*>(dTex), dRect,
 		m_convert.at(shader), linear, allow_discard);
 }
@@ -4035,8 +4035,8 @@ bool GSDeviceVK::CompileConvertPipelines()
 	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
 		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
 	{
-		bool needs_mask = HasVariableWriteMask(i);
-		for (u32 mask = needs_mask ? 0 : 0xf; mask < 0x10; mask++)
+		bool variable_mask = HasVariableWriteMask(i);
+		for (u32 mask = variable_mask ? 0 : 0xf; mask < 0x10; mask++)
 		{
 			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
 			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
@@ -4044,8 +4044,9 @@ bool GSDeviceVK::CompileConvertPipelines()
 				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
 				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
 				{
-					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
-					GSTexture::Format format = shader.GetOutputFormat();
+					const ShaderConvertSelector shader(i, variable_mask ? mask : ShaderConvertWriteMask(i),
+						false, depth_output, biln);
+					GSTexture::Format format = shader.OutputFormat();
 					VkRenderPass rp;
 
 					if (IsDATMConvertShader(i))
@@ -4085,7 +4086,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 						gpb.SetNoStencilState();
 					}
 
-					gpb.SetColorWriteMask(0, needs_mask ? mask : ShaderConvertWriteMask(i));
+					gpb.SetColorWriteMask(0, shader.Mask());
 
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", biln);
@@ -4113,7 +4114,8 @@ bool GSDeviceVK::CompileConvertPipelines()
 					m_convert[shader] = pipe;
 
 					Vulkan::SetObjectName(m_device, pipe, "Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
-						ShaderConvertName(i), mask, depth_output, biln);
+						ShaderConvertName(i), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+						static_cast<int>(shader.Biln()));
 
 					if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
 					{
