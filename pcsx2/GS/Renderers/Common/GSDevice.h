@@ -520,8 +520,6 @@ enum class PresentShader
 	Count
 };
 
-/// Get the name of a shader
-/// (Can't put methods on an enum class)
 ShaderConvert SetDATMShader(SetDATM datm);
 const char* ShaderEntryPoint(ShaderConvert value);
 const char* ShaderEntryPoint(PresentShader value);
