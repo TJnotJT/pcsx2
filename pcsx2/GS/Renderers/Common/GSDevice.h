@@ -17,7 +17,7 @@
 enum class ShaderConvert
 {
 	COPY = 0,
-	FLOAT32_COPY,
+	DEPTH_COPY,
 	RGB5A1_TO_16_BITS,
 	DATM_1,
 	DATM_0,
@@ -28,16 +28,16 @@ enum class ShaderConvert
 	RTA_CORRECTION,
 	RTA_DECORRECTION,
 	TRANSPARENCY_FILTER,
-	FLOAT32_TO_16_BITS,
-	FLOAT32_TO_32_BITS,
-	FLOAT32_TO_RGBA8,
-	FLOAT32_TO_RGB8,
-	FLOAT16_TO_RGB5A1,
-	RGBA8_TO_FLOAT32,
-	RGBA8_TO_FLOAT24,
-	RGBA8_TO_FLOAT16,
-	RGB5A1_TO_FLOAT16,
-	FLOAT32_TO_FLOAT24,
+	DEPTH32_TO_16_BITS,
+	DEPTH32_TO_32_BITS,
+	DEPTH32_TO_RGBA8,
+	DEPTH32_TO_RGB8,
+	DEPTH16_TO_RGB5A1,
+	RGBA8_TO_DEPTH32,
+	RGBA8_TO_DEPTH24,
+	RGBA8_TO_DEPTH16,
+	RGB5A1_TO_DEPTH16,
+	DEPTH32_TO_DEPTH24,
 	DOWNSAMPLE_COPY,
 	RGBA_TO_8I,
 	RGB5A1_TO_8I,
@@ -71,7 +71,7 @@ static inline constexpr const char* ShaderConvertName(ShaderConvert shader)
 	switch (shader)
 	{
 		ENTRY(COPY);
-		ENTRY(FLOAT32_COPY);
+		ENTRY(DEPTH_COPY);
 		ENTRY(RGB5A1_TO_16_BITS);
 		ENTRY(DATM_1);
 		ENTRY(DATM_0);
@@ -82,16 +82,16 @@ static inline constexpr const char* ShaderConvertName(ShaderConvert shader)
 		ENTRY(RTA_CORRECTION);
 		ENTRY(RTA_DECORRECTION);
 		ENTRY(TRANSPARENCY_FILTER);
-		ENTRY(FLOAT32_TO_16_BITS);
-		ENTRY(FLOAT32_TO_32_BITS);
-		ENTRY(FLOAT32_TO_RGBA8);
-		ENTRY(FLOAT32_TO_RGB8);
-		ENTRY(FLOAT16_TO_RGB5A1);
-		ENTRY(RGBA8_TO_FLOAT32);
-		ENTRY(RGBA8_TO_FLOAT24);
-		ENTRY(RGBA8_TO_FLOAT16);
-		ENTRY(RGB5A1_TO_FLOAT16);
-		ENTRY(FLOAT32_TO_FLOAT24);
+		ENTRY(DEPTH32_TO_16_BITS);
+		ENTRY(DEPTH32_TO_32_BITS);
+		ENTRY(DEPTH32_TO_RGBA8);
+		ENTRY(DEPTH32_TO_RGB8);
+		ENTRY(DEPTH16_TO_RGB5A1);
+		ENTRY(RGBA8_TO_DEPTH32);
+		ENTRY(RGBA8_TO_DEPTH24);
+		ENTRY(RGBA8_TO_DEPTH16);
+		ENTRY(RGB5A1_TO_DEPTH16);
+		ENTRY(DEPTH32_TO_DEPTH24);
 		ENTRY(DOWNSAMPLE_COPY);
 		ENTRY(RGBA_TO_8I);
 		ENTRY(RGB5A1_TO_8I);
@@ -125,9 +125,9 @@ static inline constexpr bool HasColorOutput(ShaderConvert shader)
 		case ShaderConvert::RTA_CORRECTION:
 		case ShaderConvert::RTA_DECORRECTION:
 		case ShaderConvert::TRANSPARENCY_FILTER:
-		case ShaderConvert::FLOAT32_TO_RGBA8:
-		case ShaderConvert::FLOAT32_TO_RGB8:
-		case ShaderConvert::FLOAT16_TO_RGB5A1:
+		case ShaderConvert::DEPTH32_TO_RGBA8:
+		case ShaderConvert::DEPTH32_TO_RGB8:
+		case ShaderConvert::DEPTH16_TO_RGB5A1:
 		case ShaderConvert::DOWNSAMPLE_COPY:
 		case ShaderConvert::RGBA_TO_8I:
 		case ShaderConvert::RGB5A1_TO_8I:
@@ -145,12 +145,12 @@ static inline constexpr bool HasFloat32Output(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::RGBA8_TO_FLOAT32:
-		case ShaderConvert::RGBA8_TO_FLOAT24:
-		case ShaderConvert::RGBA8_TO_FLOAT16:
-		case ShaderConvert::RGB5A1_TO_FLOAT16:
-		case ShaderConvert::FLOAT32_COPY:
-		case ShaderConvert::FLOAT32_TO_FLOAT24:
+		case ShaderConvert::RGBA8_TO_DEPTH32:
+		case ShaderConvert::RGBA8_TO_DEPTH24:
+		case ShaderConvert::RGBA8_TO_DEPTH16:
+		case ShaderConvert::RGB5A1_TO_DEPTH16:
+		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::DEPTH32_TO_DEPTH24:
 			return true;
 		default:
 			return false;
@@ -161,13 +161,13 @@ static inline constexpr bool HasFloat32Input(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::FLOAT32_COPY:
-		case ShaderConvert::FLOAT32_TO_16_BITS:
-		case ShaderConvert::FLOAT32_TO_32_BITS:
-		case ShaderConvert::FLOAT32_TO_RGBA8:
-		case ShaderConvert::FLOAT32_TO_RGB8:
-		case ShaderConvert::FLOAT16_TO_RGB5A1:
-		case ShaderConvert::FLOAT32_TO_FLOAT24:
+		case ShaderConvert::DEPTH_COPY:
+		case ShaderConvert::DEPTH32_TO_16_BITS:
+		case ShaderConvert::DEPTH32_TO_32_BITS:
+		case ShaderConvert::DEPTH32_TO_RGBA8:
+		case ShaderConvert::DEPTH32_TO_RGB8:
+		case ShaderConvert::DEPTH16_TO_RGB5A1:
+		case ShaderConvert::DEPTH32_TO_DEPTH24:
 			return true;
 		default:
 			return false;
@@ -197,9 +197,9 @@ static inline constexpr int IntegerOutputBpp(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::FLOAT32_TO_32_BITS:
+		case ShaderConvert::DEPTH32_TO_32_BITS:
 			return 32;
-		case ShaderConvert::FLOAT32_TO_16_BITS:
+		case ShaderConvert::DEPTH32_TO_16_BITS:
 		case ShaderConvert::RGB5A1_TO_16_BITS:
 			return 16;
 		default:
@@ -216,10 +216,10 @@ static inline constexpr bool SupportsBilinear(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::RGBA8_TO_FLOAT32:
-		case ShaderConvert::RGBA8_TO_FLOAT24:
-		case ShaderConvert::RGBA8_TO_FLOAT16:
-		case ShaderConvert::RGB5A1_TO_FLOAT16:
+		case ShaderConvert::RGBA8_TO_DEPTH32:
+		case ShaderConvert::RGBA8_TO_DEPTH24:
+		case ShaderConvert::RGBA8_TO_DEPTH16:
+		case ShaderConvert::RGB5A1_TO_DEPTH16:
 			return true;
 		default:
 			return false;
@@ -230,7 +230,7 @@ static inline constexpr u32 ShaderConvertWriteMask(ShaderConvert shader)
 {
 	switch (shader)
 	{
-		case ShaderConvert::FLOAT32_TO_RGB8:
+		case ShaderConvert::DEPTH32_TO_RGB8:
 			return 0x7;
 		default:
 			return 0xf;
@@ -278,17 +278,17 @@ static inline constexpr const char* ShaderEntryPoint(ShaderConvert value)
 		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";
 		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
 		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
-		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_32bits";
-		case ShaderConvert::FLOAT32_TO_32_BITS:     return "ps_convert_float32_32bits";
-		case ShaderConvert::FLOAT32_TO_RGBA8:       return "ps_convert_float32_rgba8";
-		case ShaderConvert::FLOAT32_TO_RGB8:        return "ps_convert_float32_rgba8";
-		case ShaderConvert::FLOAT16_TO_RGB5A1:      return "ps_convert_float16_rgb5a1";
-		case ShaderConvert::RGBA8_TO_FLOAT32:       return "ps_convert_rgba8_float32";
-		case ShaderConvert::RGBA8_TO_FLOAT24:       return "ps_convert_rgba8_float24";
-		case ShaderConvert::RGBA8_TO_FLOAT16:       return "ps_convert_rgba8_float16";
-		case ShaderConvert::RGB5A1_TO_FLOAT16:      return "ps_convert_rgb5a1_float16";
-		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
-		case ShaderConvert::FLOAT32_COPY:           return "ps_float32_copy";
+		case ShaderConvert::DEPTH32_TO_16_BITS:     return "ps_convert_depth32_32bits";
+		case ShaderConvert::DEPTH32_TO_32_BITS:     return "ps_convert_depth32_32bits";
+		case ShaderConvert::DEPTH32_TO_RGBA8:       return "ps_convert_depth32_rgba8";
+		case ShaderConvert::DEPTH32_TO_RGB8:        return "ps_convert_depth32_rgba8";
+		case ShaderConvert::DEPTH16_TO_RGB5A1:      return "ps_convert_depth16_rgb5a1";
+		case ShaderConvert::RGBA8_TO_DEPTH32:       return "ps_convert_rgba8_depth32";
+		case ShaderConvert::RGBA8_TO_DEPTH24:       return "ps_convert_rgba8_depth24";
+		case ShaderConvert::RGBA8_TO_DEPTH16:       return "ps_convert_rgba8_depth16";
+		case ShaderConvert::RGB5A1_TO_DEPTH16:      return "ps_convert_rgb5a1_depth16";
+		case ShaderConvert::DEPTH32_TO_DEPTH24:     return "ps_convert_depth32_depth24";
+		case ShaderConvert::DEPTH_COPY:             return "ps_depth_copy";
 		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
 		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
 		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
@@ -502,15 +502,15 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 					switch (dst_bpp)
 					{
 						case 32:
-							shader = ShaderConvert::RGBA8_TO_FLOAT32;
+							shader = ShaderConvert::RGBA8_TO_DEPTH32;
 							break;
 						case 24:
-							shader = ShaderConvert::RGBA8_TO_FLOAT24;
+							shader = ShaderConvert::RGBA8_TO_DEPTH24;
 							break;
 						case 16:
 							pxAssert(src_bpp == 16 || src_bpp == 32);
-							shader = src_bpp == 16 ? ShaderConvert::RGB5A1_TO_FLOAT16 :
-							                         ShaderConvert::RGBA8_TO_FLOAT16;
+							shader = src_bpp == 16 ? ShaderConvert::RGB5A1_TO_DEPTH16 :
+							                         ShaderConvert::RGBA8_TO_DEPTH16;
 							break;
 						default:
 							pxAssert(false);
@@ -530,14 +530,14 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 					switch (dst_bpp)
 					{
 						case 32:
-							shader = ShaderConvert::FLOAT32_TO_RGBA8;
+							shader = ShaderConvert::DEPTH32_TO_RGBA8;
 							break;
 						case 24:
-							shader = ShaderConvert::FLOAT32_TO_RGB8;
+							shader = ShaderConvert::DEPTH32_TO_RGB8;
 							break;
 						case 16:
 							pxAssert(src_bpp == 16);
-							shader = ShaderConvert::FLOAT16_TO_RGB5A1;
+							shader = ShaderConvert::DEPTH16_TO_RGB5A1;
 							break;
 						default:
 							pxAssert(false);
@@ -550,11 +550,11 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 					{
 						case 32:
 							pxAssert(src_bpp == 32);
-							shader = ShaderConvert::FLOAT32_COPY;
+							shader = ShaderConvert::DEPTH_COPY;
 							break;
 						case 24:
 							pxAssert(src_bpp == 32);
-							shader = ShaderConvert::FLOAT32_TO_FLOAT24;
+							shader = ShaderConvert::DEPTH32_TO_DEPTH24;
 							break;
 						default:
 							pxAssert(false);

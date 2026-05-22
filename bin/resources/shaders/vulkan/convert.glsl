@@ -137,8 +137,8 @@ void ps_copy()
 }
 #endif
 
-#ifdef ps_float32_copy
-void ps_float32_copy()
+#ifdef ps_depth_copy
+void ps_depth_copy()
 {
 	OUTPUT = sample_c(v_tex);
 }
@@ -249,32 +249,32 @@ void ps_colclip_resolve()
 }
 #endif
 
-#ifdef ps_convert_float32_32bits
-void ps_convert_float32_32bits()
+#ifdef ps_convert_depth32_32bits
+void ps_convert_depth32_32bits()
 {
 	// Convert a vec32 depth texture into a 32 bits UINT texture
 	OUTPUT = depth_to_uint(sample_c(v_tex));
 }
 #endif
 
-#ifdef ps_convert_float32_rgba8
-void ps_convert_float32_rgba8()
+#ifdef ps_convert_depth32_rgba8
+void ps_convert_depth32_rgba8()
 {
 	// Convert a vec32 depth texture into a RGBA color texture
 	OUTPUT = depth32_to_rgba8(sample_c(v_tex));
 }
 #endif
 
-#ifdef ps_convert_float16_rgb5a1
-void ps_convert_float16_rgb5a1()
+#ifdef ps_convert_depth16_rgb5a1
+void ps_convert_depth16_rgb5a1()
 {
 	// Convert a vec32 (only 16 lsb) depth into a RGB5A1 color texture
 	OUTPUT = depth16_to_rgb5a1(sample_c(v_tex));
 }
 #endif
 
-#ifdef ps_convert_float32_float24
-void ps_convert_float32_float24()
+#ifdef ps_convert_depth32_depth24
+void ps_convert_depth32_depth24()
 {
 	// Truncates depth value to 24bits
 	OUTPUT = depth32_to_depth24(sample_c(v_tex));
@@ -293,8 +293,8 @@ void ps_convert_float32_float24()
 	float depthBR = CONVERT_FN(texelFetch(samp0, coords.zw, 0)); \
 	OUTPUT = mix(mix(depthTL, depthTR, mix_vals.x), mix(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
-#ifdef ps_convert_rgba8_float32
-void ps_convert_rgba8_float32()
+#ifdef ps_convert_rgba8_depth32
+void ps_convert_rgba8_depth32()
 {
 	// Convert an RGBA texture into a float depth texture
 #if HAS_BILN
@@ -305,8 +305,8 @@ void ps_convert_rgba8_float32()
 }
 #endif
 
-#ifdef ps_convert_rgba8_float24
-void ps_convert_rgba8_float24()
+#ifdef ps_convert_rgba8_depth24
+void ps_convert_rgba8_depth24()
 {
 	// Same as above but without the alpha channel (24 bits Z)
 #if HAS_BILN
@@ -317,8 +317,8 @@ void ps_convert_rgba8_float24()
 }
 #endif
 
-#ifdef ps_convert_rgba8_float16
-void ps_convert_rgba8_float16()
+#ifdef ps_convert_rgba8_depth16
+void ps_convert_rgba8_depth16()
 {
 	// Same as above but without the A/B channels (16 bits Z)
 #if HAS_BILN
@@ -329,8 +329,8 @@ void ps_convert_rgba8_float16()
 }
 #endif
 
-#ifdef ps_convert_rgb5a1_float16
-void ps_convert_rgb5a1_float16()
+#ifdef ps_convert_rgb5a1_depth16
+void ps_convert_rgb5a1_depth16()
 {
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
 #if HAS_BILN

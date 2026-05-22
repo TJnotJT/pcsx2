@@ -1186,21 +1186,21 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::COLCLIP_INIT:
 			case ShaderConvert::COLCLIP_RESOLVE:
 				continue;
-			case ShaderConvert::FLOAT32_TO_32_BITS:
+			case ShaderConvert::DEPTH32_TO_32_BITS:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
-			case ShaderConvert::FLOAT32_TO_16_BITS:
+			case ShaderConvert::DEPTH32_TO_16_BITS:
 			case ShaderConvert::RGB5A1_TO_16_BITS:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 				break;
-			case ShaderConvert::FLOAT32_COPY:
-			case ShaderConvert::FLOAT32_TO_FLOAT24:
-			case ShaderConvert::RGBA8_TO_FLOAT32:
-			case ShaderConvert::RGBA8_TO_FLOAT24:
-			case ShaderConvert::RGBA8_TO_FLOAT16:
-			case ShaderConvert::RGB5A1_TO_FLOAT16:
+			case ShaderConvert::DEPTH_COPY:
+			case ShaderConvert::DEPTH32_TO_DEPTH24:
+			case ShaderConvert::RGBA8_TO_DEPTH32:
+			case ShaderConvert::RGBA8_TO_DEPTH24:
+			case ShaderConvert::RGBA8_TO_DEPTH16:
+			case ShaderConvert::RGB5A1_TO_DEPTH16:
 				if (depth_output)
 				{
 					pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
@@ -1219,9 +1219,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			case ShaderConvert::RTA_CORRECTION:
 			case ShaderConvert::RTA_DECORRECTION:
 			case ShaderConvert::TRANSPARENCY_FILTER:
-			case ShaderConvert::FLOAT32_TO_RGBA8:
-			case ShaderConvert::FLOAT32_TO_RGB8:
-			case ShaderConvert::FLOAT16_TO_RGB5A1:
+			case ShaderConvert::DEPTH32_TO_RGBA8:
+			case ShaderConvert::DEPTH32_TO_RGB8:
+			case ShaderConvert::DEPTH16_TO_RGB5A1:
 			case ShaderConvert::YUV:
 				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
 				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;

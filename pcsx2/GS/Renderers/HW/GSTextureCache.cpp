@@ -7237,7 +7237,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 			if (is_depth)
 			{
 				fmt = GSTexture::Format::UInt32;
-				ps_shader = ShaderConvert::FLOAT32_TO_32_BITS;
+				ps_shader = ShaderConvert::DEPTH32_TO_32_BITS;
 				dltex = &m_uint32_download_texture;
 			}
 			else
@@ -7259,7 +7259,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 		case PSMZ16S:
 		{
 			fmt = GSTexture::Format::UInt16;
-			ps_shader = is_depth ? ShaderConvert::FLOAT32_TO_16_BITS : ShaderConvert::RGB5A1_TO_16_BITS;
+			ps_shader = is_depth ? ShaderConvert::DEPTH32_TO_16_BITS : ShaderConvert::RGB5A1_TO_16_BITS;
 			dltex = &m_uint16_download_texture;
 		}
 		break;
