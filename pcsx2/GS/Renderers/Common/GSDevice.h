@@ -65,7 +65,7 @@ enum class ShaderInterlace
 	Count
 };
 
-static inline const char* ShaderConvertName(ShaderConvert shader)
+static inline constexpr const char* ShaderConvertName(ShaderConvert shader)
 {
 	#define ENTRY(x) case ShaderConvert::x: return #x
 	switch (shader)
@@ -98,11 +98,14 @@ static inline const char* ShaderConvertName(ShaderConvert shader)
 		ENTRY(CLUT_4);
 		ENTRY(CLUT_8);
 		ENTRY(YUV);
+		default:
+			pxAssert(false);
+			return nullptr;
 	}
 	#undef ENTRY
 }
 
-static inline bool HasVariableWriteMask(ShaderConvert shader)
+static inline constexpr bool HasVariableWriteMask(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -114,7 +117,7 @@ static inline bool HasVariableWriteMask(ShaderConvert shader)
 	}
 }
 
-static inline bool HasColorOutput(ShaderConvert shader)
+static inline constexpr bool HasColorOutput(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -138,7 +141,7 @@ static inline bool HasColorOutput(ShaderConvert shader)
 	}
 }
 
-static inline bool HasFloat32Output(ShaderConvert shader)
+static inline constexpr bool HasFloat32Output(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -154,7 +157,7 @@ static inline bool HasFloat32Output(ShaderConvert shader)
 	}
 }
 
-static inline bool HasFloat32Input(ShaderConvert shader)
+static inline constexpr bool HasFloat32Input(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -171,7 +174,7 @@ static inline bool HasFloat32Input(ShaderConvert shader)
 	}
 }
 
-static inline bool HasStencilOutput(ShaderConvert shader)
+static inline constexpr bool IsDATMConvertShader(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -185,7 +188,12 @@ static inline bool HasStencilOutput(ShaderConvert shader)
 	}
 }
 
-static inline int IntegerOutputBpp(ShaderConvert shader)
+static inline constexpr bool HasStencilOutput(ShaderConvert shader)
+{
+	return IsDATMConvertShader(shader);
+}
+
+static inline constexpr int IntegerOutputBpp(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -199,12 +207,12 @@ static inline int IntegerOutputBpp(ShaderConvert shader)
 	}
 }
 
-static inline bool HasColorClipOutput(ShaderConvert shader)
+static inline constexpr bool HasColorClipOutput(ShaderConvert shader)
 {
 	return (shader == ShaderConvert::COLCLIP_INIT);
 }
 
-static inline bool SupportsBilinear(ShaderConvert shader)
+static inline constexpr bool SupportsBilinear(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -218,7 +226,7 @@ static inline bool SupportsBilinear(ShaderConvert shader)
 	}
 }
 
-static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
+static inline constexpr u32 ShaderConvertWriteMask(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -229,6 +237,71 @@ static inline u32 ShaderConvertWriteMask(ShaderConvert shader)
 	}
 }
 
+static inline constexpr int GetShaderIndexForMask(ShaderConvert shader, int mask)
+{
+	pxAssert(HasVariableWriteMask(shader));
+	int index = mask;
+	if (shader == ShaderConvert::RTA_CORRECTION)
+		index |= 1 << 4;
+	return index;
+}
+
+static inline constexpr ShaderConvert SetDATMShader(SetDATM datm)
+{
+	switch (datm)
+	{
+	case SetDATM::DATM1_RTA_CORRECTION:
+		return ShaderConvert::DATM_1_RTA_CORRECTION;
+	case SetDATM::DATM0_RTA_CORRECTION:
+		return ShaderConvert::DATM_0_RTA_CORRECTION;
+	case SetDATM::DATM1:
+		return ShaderConvert::DATM_1;
+	case SetDATM::DATM0:
+	default:
+		return ShaderConvert::DATM_0;
+	}
+}
+
+static inline constexpr const char* ShaderEntryPoint(ShaderConvert value)
+{
+	switch (value)
+	{
+		// clang-format off
+		case ShaderConvert::COPY:                   return "ps_copy";
+		case ShaderConvert::RGB5A1_TO_16_BITS:      return "ps_convert_rgb5a1_16bits";
+		case ShaderConvert::DATM_1:                 return "ps_datm1";
+		case ShaderConvert::DATM_0:                 return "ps_datm0";
+		case ShaderConvert::DATM_1_RTA_CORRECTION:  return "ps_datm1_rta_correction";
+		case ShaderConvert::DATM_0_RTA_CORRECTION:  return "ps_datm0_rta_correction";
+		case ShaderConvert::COLCLIP_INIT:           return "ps_colclip_init";
+		case ShaderConvert::COLCLIP_RESOLVE:        return "ps_colclip_resolve";
+		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";
+		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
+		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
+		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_32bits";
+		case ShaderConvert::FLOAT32_TO_32_BITS:     return "ps_convert_float32_32bits";
+		case ShaderConvert::FLOAT32_TO_RGBA8:       return "ps_convert_float32_rgba8";
+		case ShaderConvert::FLOAT32_TO_RGB8:        return "ps_convert_float32_rgba8";
+		case ShaderConvert::FLOAT16_TO_RGB5A1:      return "ps_convert_float16_rgb5a1";
+		case ShaderConvert::RGBA8_TO_FLOAT32:       return "ps_convert_rgba8_float32";
+		case ShaderConvert::RGBA8_TO_FLOAT24:       return "ps_convert_rgba8_float24";
+		case ShaderConvert::RGBA8_TO_FLOAT16:       return "ps_convert_rgba8_float16";
+		case ShaderConvert::RGB5A1_TO_FLOAT16:      return "ps_convert_rgb5a1_float16";
+		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
+		case ShaderConvert::FLOAT32_COPY:           return "ps_float32_copy";
+		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
+		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
+		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
+		case ShaderConvert::CLUT_4:                 return "ps_convert_clut_4";
+		case ShaderConvert::CLUT_8:                 return "ps_convert_clut_8";
+		case ShaderConvert::YUV:                    return "ps_yuv";
+		// clang-format on
+		default:
+			pxAssert(0);
+			return "ShaderConvertUnknownShader";
+	}
+}
+
 class ShaderConvertSelector
 {
 	union
@@ -236,10 +309,10 @@ class ShaderConvertSelector
 		struct
 		{
 			u32 shader : 8; // Main shader
-			u32 mask : 8; // Variable color mask (only certain shaders)
-			u32 depth_input : 1; // Depth texture input
-			u32 depth_output : 1; // Depth texture output
-			u32 biln : 1; // Shader emulated bilinear (only certain shaders; HW bilinear is specified separately)
+			u32 mask : 8; // Variable color mask
+			u32 depth_in : 1; // Depth texture input
+			u32 depth_out : 1; // Depth texture output
+			u32 biln : 1; // Shader bilinear (HW bilinear is specified separately)
 		};
 
 		u32 key;
@@ -248,12 +321,12 @@ class ShaderConvertSelector
 	static_assert(sizeof(fields) == 4);
 
 public:
-	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_input = false,
-		bool depth_output = false, bool biln = false)
+	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_in = false,
+		bool depth_out = false, bool biln = false)
 	{
 		fields.key = 0;
 		fields.shader = static_cast<u8>(shader); // Needs to be set before using setters.
-		*this = SetMask(mask).SetDepthInput(depth_input).SetDepthOutput(depth_output).SetBiln(biln);
+		*this = SetMask(mask).SetDepthInput(depth_in).SetDepthOutput(depth_out).SetBiln(biln);
 	}
 
 	ShaderConvert Shader() const
@@ -278,17 +351,22 @@ public:
 
 	bool DepthOutput() const
 	{
-		return fields.depth_output;
+		return fields.depth_out;
 	}
 
 	bool DepthInput() const
 	{
-		return fields.depth_input;
+		return fields.depth_in;
 	}
 
 	bool StencilOutput() const
 	{
 		return HasStencilOutput(Shader());
+	}
+
+	bool DATMConvertShader() const
+	{
+		return IsDATMConvertShader(Shader());
 	}
 
 	bool Float32Output() const
@@ -321,6 +399,11 @@ public:
 		return ShaderConvertName(Shader());
 	}
 
+	const char* EntryPoint() const
+	{
+		return ShaderEntryPoint(Shader());
+	}
+
 	ShaderConvertSelector SetMask(u8 mask) const
 	{
 		ShaderConvertSelector tmp = *this;
@@ -334,17 +417,17 @@ public:
 			(static_cast<u8>(wb) << 2) | (static_cast<u8>(wa) << 3));
 	}
 
-	ShaderConvertSelector SetDepthInput(bool depth_input) const
+	ShaderConvertSelector SetDepthInput(bool depth_in) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.depth_input = HasFloat32Input(Shader()) && depth_input;
+		tmp.fields.depth_in = HasFloat32Input(Shader()) && depth_in;
 		return tmp;
 	}
 
-	ShaderConvertSelector SetDepthOutput(bool depth_output) const
+	ShaderConvertSelector SetDepthOutput(bool depth_out) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.depth_output = HasFloat32Output(Shader()) && depth_output;
+		tmp.fields.depth_out = HasFloat32Output(Shader()) && depth_out;
 		return tmp;
 	}
 
@@ -358,7 +441,7 @@ public:
 	GSTexture::Format OutputFormat() const
 	{
 		const ShaderConvert shader = Shader();
-		if (fields.depth_output)
+		if (fields.depth_out)
 			return GSTexture::Format::DepthStencil;
 		else if (int bpp = ::IntegerOutputBpp(shader))
 			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
@@ -372,32 +455,32 @@ public:
 			return GSTexture::Format::Invalid;
 	}
 
-	size_t GetHash() const
+private:
+	// Helper variables for packing valid shaders into a contiguous range.
+	static const std::vector<ShaderConvertSelector> SHADERS;
+	static const std::array<u16, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
+	static const u32 NUM_REMAPPED_SHADERS;
+
+public:
+	static constexpr u32 NUM_VARIABLE_WRITE_MASK_SHADERS = 2;
+	static const u32 NUM_TOTAL_SHADERS;
+
+	u32 Index() const
 	{
-		return static_cast<size_t>(fields.key);
+		if (HasVariableWriteMask(Shader()) && !fields.depth_in && !fields.depth_out && !fields.biln)
+			return GetShaderIndexForMask(Shader(), fields.mask) + NUM_REMAPPED_SHADERS;
+		u32 remapped = INDEX_REMAP[(fields.depth_in  << 0) +
+		                           (fields.depth_out << 1) +
+		                           (fields.biln      << 2) +
+		                           (fields.shader    << 3)];
+		pxAssert(remapped < NUM_REMAPPED_SHADERS);
+		return remapped;
 	}
 
-	__fi bool operator==(const ShaderConvertSelector& other) const
+	// Inverse of Index()
+	static ShaderConvertSelector Get(u32 index)
 	{
-		return GetHash() == other.GetHash();
-	}
-
-	__fi bool operator<(const ShaderConvertSelector& other) const
-	{
-		return GetHash() < other.GetHash();
-	}
-
-	__fi bool operator!=(const ShaderConvertSelector& other) const
-	{
-		return GetHash() != other.GetHash();
-	}
-};
-
-struct ShaderConvertSelectorHash
-{
-	__fi size_t operator()(const ShaderConvertSelector& shader) const noexcept
-	{
-		return shader.GetHash();
+		return SHADERS[index];
 	}
 };
 
@@ -520,9 +603,25 @@ enum class PresentShader
 	Count
 };
 
-ShaderConvert SetDATMShader(SetDATM datm);
-const char* ShaderEntryPoint(ShaderConvert value);
-const char* ShaderEntryPoint(PresentShader value);
+static inline constexpr const char* ShaderEntryPoint(PresentShader value)
+{
+	switch (value)
+	{
+		// clang-format off
+		case PresentShader::COPY:               return "ps_copy";
+		case PresentShader::SCANLINE:           return "ps_filter_scanlines";
+		case PresentShader::DIAGONAL_FILTER:    return "ps_filter_diagonal";
+		case PresentShader::TRIANGULAR_FILTER:  return "ps_filter_triangular";
+		case PresentShader::COMPLEX_FILTER:     return "ps_filter_complex";
+		case PresentShader::LOTTES_FILTER:      return "ps_filter_lottes";
+		case PresentShader::SUPERSAMPLE_4xRGSS: return "ps_4x_rgss";
+		case PresentShader::SUPERSAMPLE_AUTO:   return "ps_automagical_supersampling";
+		// clang-format on
+		default:
+			pxAssert(0);
+			return "DisplayShaderUnknownShader";
+	}
+}
 
 enum ChannelFetch
 {

@@ -6298,7 +6298,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 
 		// Create a cleared RT if we somehow end up with an empty source rect (because the RT isn't large enough).
 		const bool source_rect_empty = sRect.rempty();
-		const bool use_texture = (shader == ShaderConvert::COPY && !source_rect_empty);
+		const bool use_texture = (shader.Shader() == ShaderConvert::COPY && !source_rect_empty);
 		GSVector4i region_rect = GSVector4i(0, 0, tw, th);
 
 		// Assuming everything matches up, instead of copying the target, we can just sample it directly.
@@ -6402,7 +6402,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 				}
 				else
 				{
-					if (dst->m_rt_alpha_scale && shader == ShaderConvert::COPY)
+					if (dst->m_rt_alpha_scale && shader.Shader() == ShaderConvert::COPY)
 						shader = ShaderConvert::RTA_DECORRECTION;
 
 					const GSVector4 sRectF = GSVector4(sRect) / GSVector4(1, 1, sTex->GetWidth(), sTex->GetHeight());

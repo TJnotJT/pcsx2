@@ -34,10 +34,6 @@
 static u32 s_debug_scope_depth = 0;
 #endif
 
-static bool IsDATMConvertShader(ShaderConvert i)
-{
-	return (i == ShaderConvert::DATM_0 || i == ShaderConvert::DATM_1 || i == ShaderConvert::DATM_0_RTA_CORRECTION || i == ShaderConvert::DATM_1_RTA_CORRECTION);
-}
 static bool IsDATEModePrimIDInit(u32 flag)
 {
 	return flag == 1 || flag == 2;
@@ -1679,7 +1675,7 @@ void GSDevice12::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 	shader = ProcessShaderConvertSelector(shader); // Removes depth input
 	const bool allow_discard = (shader.Mask() == 0xf);
 	DoStretchRect(static_cast<GSTexture12*>(sTex), sRect, static_cast<GSTexture12*>(dTex), dRect,
-		m_convert.at(shader).get(), linear, allow_discard);
+		GetConvertPipeline(shader), linear, allow_discard);
 }
 
 void GSDevice12::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
@@ -1721,7 +1717,7 @@ void GSDevice12::UpdateCLUTTexture(
 	const GSVector4 dRect(0, 0, dSize, 1);
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
 	DoStretchRect(static_cast<GSTexture12*>(sTex), GSVector4::zero(), static_cast<GSTexture12*>(dTex), dRect,
-		m_convert.at(shader).get(), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDevice12::ConvertToIndexedTexture(
@@ -1743,7 +1739,7 @@ void GSDevice12::ConvertToIndexedTexture(
 	const GSVector4 dRect(0, 0, dTex->GetWidth(), dTex->GetHeight());
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
 	DoStretchRect(static_cast<GSTexture12*>(sTex), GSVector4::zero(), static_cast<GSTexture12*>(dTex), dRect,
-		m_convert.at(shader).get(), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDevice12::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
@@ -1766,7 +1762,7 @@ void GSDevice12::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 	//const GSVector4 dRect = GSVector4(dTex->GetRect());
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
 	DoStretchRect(static_cast<GSTexture12*>(sTex), GSVector4::zero(), static_cast<GSTexture12*>(dTex), dRect,
-		m_convert.at(shader).get(), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDevice12::DrawMultiStretchRects(
@@ -1885,7 +1881,7 @@ void GSDevice12::DoMultiStretchRects(
 	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 	SetUtilityTexture(rects[0].src, rects[0].linear ? m_linear_sampler_cpu : m_point_sampler_cpu);
 
-	SetPipeline(m_convert.at(shader.SetMask(rects[0].wmask.wrgba)).get());
+	SetPipeline(GetConvertPipeline(shader.SetMask(rects[0].wmask.wrgba)));
 
 	if (ApplyUtilityState())
 		DrawIndexedPrimitive();
@@ -2035,7 +2031,7 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, GSVector4::unorm8(c));
 		SetUtilityRootSignature();
-		SetPipeline(m_convert.at(ShaderConvert::COPY).get());
+		SetPipeline(GetConvertPipeline(ShaderConvert::COPY));
 		DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 		dTex->SetState(GSTexture::State::Dirty);
 		dcleared = true;
@@ -2056,7 +2052,7 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 		if (dcleared)
 		{
 			SetUtilityRootSignature();
-			SetPipeline(m_convert.at(ShaderConvert::YUV).get());
+			SetPipeline(GetConvertPipeline(ShaderConvert::YUV));
 			DrawStretchRect(full_r, dRect[2], fbsize);
 		}
 		EndRenderPass();
@@ -2099,7 +2095,7 @@ void GSDevice12::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	{
 		EndRenderPass();
 		SetUtilityRootSignature();
-		SetPipeline(m_convert.at(ShaderConvert::YUV).get());
+		SetPipeline(GetConvertPipeline(ShaderConvert::YUV));
 		SetUtilityTexture(dTex, sampler);
 		OMSetRenderTargets(sTex[2], nullptr, nullptr, fbarea);
 		BeginRenderPass(
@@ -2727,99 +2723,88 @@ bool GSDevice12::CompileConvertPipelines()
 
 	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
 
-	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count; i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	m_convert.resize(ShaderConvertSelector::NUM_TOTAL_SHADERS);
+	for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 	{
-		bool variable_mask = HasVariableWriteMask(i);
-		for (u32 mask = HasVariableWriteMask(i) ? 0 : 0xf; mask < 0x10; mask++)
+		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
+
+		GSTexture::Format format = shader.OutputFormat();
+		DXGI_FORMAT dxgi_format;
+		LookupNativeFormat(format, nullptr, nullptr, &dxgi_format, nullptr);
+
+		if (shader.DATMConvertShader() || shader.DepthOutput())
 		{
-			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
-			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
-			{
-				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
-				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
-				{
-					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
+			gpb.ClearRenderTargets();
+			gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
+		}
+		else
+		{
+			gpb.SetRenderTarget(0, dxgi_format);
+			gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
+		}
 
-					GSTexture::Format format = shader.OutputFormat();
-					DXGI_FORMAT dxgi_format;
-					LookupNativeFormat(format, nullptr, nullptr, &dxgi_format, nullptr);
+		if (shader.DATMConvertShader())
+		{
+			const D3D12_DEPTH_STENCILOP_DESC sos = {
+				D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_REPLACE, D3D12_COMPARISON_FUNC_ALWAYS};
+			gpb.SetStencilState(true, 1, 1, sos, sos);
+			gpb.SetDepthState(false, false, D3D12_COMPARISON_FUNC_ALWAYS);
+		}
+		else
+		{
+			gpb.SetDepthState(shader.DepthOutput(), shader.DepthOutput(), D3D12_COMPARISON_FUNC_ALWAYS);
+			gpb.SetNoStencilState();
+		}
 
-					if (IsDATMConvertShader(i) || depth_output)
-					{
-						gpb.ClearRenderTargets();
-						gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
-					}
-					else
-					{
-						gpb.SetRenderTarget(0, dxgi_format);
-						gpb.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
-					}
+		gpb.SetColorWriteMask(0, shader.Mask());
 
-					if (IsDATMConvertShader(i))
-					{
-						const D3D12_DEPTH_STENCILOP_DESC sos = {
-							D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_REPLACE, D3D12_COMPARISON_FUNC_ALWAYS};
-						gpb.SetStencilState(true, 1, 1, sos, sos);
-						gpb.SetDepthState(false, false, D3D12_COMPARISON_FUNC_ALWAYS);
-					}
-					else
-					{
-						gpb.SetDepthState(depth_output, depth_output, D3D12_COMPARISON_FUNC_ALWAYS);
-						gpb.SetNoStencilState();
-					}
+		const char* entry_point = shader.EntryPoint();
+		std::string entry_point_macro = WrapEntryPointMacro(entry_point);
 
-					gpb.SetColorWriteMask(0, shader.Mask());
+		ShaderMacro sm;
+		sm.AddMacro("PIXEL_SHADER", 1);
+		sm.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
+		sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
+		sm.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
+		sm.AddMacro("HAS_DEPTH_INPUT", 0); // unused
+		sm.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
+		sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
+		sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
+		sm.AddMacro(entry_point_macro.c_str(), 1);
 
-					const char* entry_point = ShaderEntryPoint(i);
-					std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shader.EntryPoint()));
+		if (!ps)
+			return false;
 
-					ShaderMacro sm;
-					sm.AddMacro("PIXEL_SHADER", 1);
-					sm.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
-					sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
-					sm.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
-					sm.AddMacro("HAS_DEPTH_INPUT", 0); // unused
-					sm.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
-					sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
-					sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
-					sm.AddMacro(entry_point_macro.c_str(), 1);
+		gpb.SetPixelShader(ps.get());
 
-					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), ShaderEntryPoint(i)));
-					if (!ps)
-						return false;
-
-					gpb.SetPixelShader(ps.get());
-
-					ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false);
+		ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false);
 					
-					if (!pipe)
-						return false;
+		if (!pipe)
+			return false;
 
-					D3D12::SetObjectName(pipe.get(),
-						TinyString::from_format("Convert pipeline ({}, mask={:x}, depth={}, biln={})",
-							shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
-							static_cast<int>(shader.Biln())));
+		D3D12::SetObjectName(pipe.get(),
+			TinyString::from_format("Convert pipeline ({}, mask={:x}, depth={}, biln={})",
+				shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+				static_cast<int>(shader.Biln())));
 
-					m_convert[shader] = pipe;
+		m_convert[i] = pipe;
 
-					if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
-					{
-						const bool is_setup = i == ShaderConvert::COLCLIP_INIT;
-						std::array<ComPtr<ID3D12PipelineState>, 2>& arr = is_setup ? m_colclip_setup_pipelines : m_colclip_finish_pipelines;
-						for (u32 ds = 0; ds < 2; ds++)
-						{
-							pxAssert(!arr[ds]);
+		if (shader.Shader() == ShaderConvert::COLCLIP_INIT || shader.Shader() == ShaderConvert::COLCLIP_RESOLVE)
+		{
+			const bool is_setup = shader.Shader() == ShaderConvert::COLCLIP_INIT;
+			std::array<ComPtr<ID3D12PipelineState>, 2>& arr = is_setup ? m_colclip_setup_pipelines : m_colclip_finish_pipelines;
+			for (u32 ds = 0; ds < 2; ds++)
+			{
+				pxAssert(!arr[ds]);
 
-							gpb.SetRenderTarget(0, is_setup ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
-							gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-							arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false);
-							if (!arr[ds])
-								return false;
+				gpb.SetRenderTarget(0, is_setup ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
+				gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
+				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false);
+				if (!arr[ds])
+					return false;
 
-							D3D12::SetObjectName(arr[ds].get(), TinyString::from_format("ColorClip {}/copy pipeline (ds={})", is_setup ? "setup" : "finish", ds));
-						}
-					}
-				}
+				D3D12::SetObjectName(arr[ds].get(), TinyString::from_format("ColorClip {}/copy pipeline (ds={})", is_setup ? "setup" : "finish", ds));
 			}
 		}
 	}
@@ -3682,7 +3667,7 @@ void GSDevice12::RenderTextureMipmap(
 	cmdlist.list4->RSSetScissorRects(1, &scissor);
 
 	SetUtilityRootSignature();
-	SetPipeline(m_convert.at(ShaderConvert::COPY).get());
+	SetPipeline(GetConvertPipeline(ShaderConvert::COPY));
 	DrawStretchRect(GSVector4(0.0f, 0.0f, 1.0f, 1.0f),
 		GSVector4(0.0f, 0.0f, static_cast<float>(dst_width), static_cast<float>(dst_height)),
 		GSVector2i(dst_width, dst_height));
@@ -4061,7 +4046,7 @@ void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	OMSetRenderTargets(nullptr, nullptr, ds, bbox);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
 	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(m_convert.at(SetDATMShader(datm)).get());
+	SetPipeline(GetConvertPipeline(SetDATMShader(datm)));
 	// Reference stencil value set on Create()
 	BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,

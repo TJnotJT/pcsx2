@@ -416,63 +416,55 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		m_convert.vs = GetShaderSource("vs_main", GL_VERTEX_SHADER, *convert_glsl);
 
-		for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
-			i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+		m_convert.ps.resize(ShaderConvertSelector::NUM_TOTAL_SHADERS);
+		for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 		{
-			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
-			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
+			const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
+
+			const char* name = shader.EntryPoint();
+
+			std::string macro;
+			macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
+			macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
+			macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
+			macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0); // unused
+			macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
+			macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
+			macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
+
+			const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
+
+			GLProgram& prog = m_convert.ps[i];
+
+			if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
+				return false;
+
+			prog.SetFormattedName("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+				shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+				static_cast<int>(shader.Biln()));
+
+			if (shader.Shader() == ShaderConvert::RGBA_TO_8I || shader.Shader() == ShaderConvert::RGB5A1_TO_8I)
 			{
-				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
-				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
-				{
-					const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
-
-					const char* name = ShaderEntryPoint(shader.Shader());
-
-					std::string macro;
-					macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
-					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
-					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0); // unused
-					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
-					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
-					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
-
-					const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *convert_glsl, macro));
-
-					GLProgram& prog = m_convert.ps[shader];
-
-					if (!m_shader_cache.GetProgram(&prog, m_convert.vs, ps))
-						return false;
-
-					prog.SetFormattedName("Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
-						shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
-						static_cast<int>(shader.Biln()));
-
-					if (static_cast<ShaderConvert>(i) == ShaderConvert::RGBA_TO_8I || static_cast<ShaderConvert>(i) == ShaderConvert::RGB5A1_TO_8I)
-					{
-						prog.RegisterUniform("SBW");
-						prog.RegisterUniform("DBW");
-						prog.RegisterUniform("PSM");
-						prog.RegisterUniform("ScaleFactor");
-					}
-					else if (static_cast<ShaderConvert>(i) == ShaderConvert::YUV)
-					{
-						prog.RegisterUniform("EMOD");
-					}
-					else if (static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_4 || static_cast<ShaderConvert>(i) == ShaderConvert::CLUT_8)
-					{
-						prog.RegisterUniform("offset");
-						prog.RegisterUniform("scale");
-					}
-					else if (static_cast<ShaderConvert>(i) == ShaderConvert::DOWNSAMPLE_COPY)
-					{
-						prog.RegisterUniform("ClampMin");
-						prog.RegisterUniform("DownsampleFactor");
-						prog.RegisterUniform("Weight");
-						prog.RegisterUniform("StepMultiplier");
-					}
-				}
+				prog.RegisterUniform("SBW");
+				prog.RegisterUniform("DBW");
+				prog.RegisterUniform("PSM");
+				prog.RegisterUniform("ScaleFactor");
+			}
+			else if (shader.Shader() == ShaderConvert::YUV)
+			{
+				prog.RegisterUniform("EMOD");
+			}
+			else if (shader.Shader() == ShaderConvert::CLUT_4 || shader.Shader() == ShaderConvert::CLUT_8)
+			{
+				prog.RegisterUniform("offset");
+				prog.RegisterUniform("scale");
+			}
+			else if (shader.Shader() == ShaderConvert::DOWNSAMPLE_COPY)
+			{
+				prog.RegisterUniform("ClampMin");
+				prog.RegisterUniform("DownsampleFactor");
+				prog.RegisterUniform("Weight");
+				prog.RegisterUniform("StepMultiplier");
 			}
 		}
 
@@ -967,8 +959,9 @@ void GSDeviceOGL::DestroyResources()
 	for (GLProgram& prog : m_present)
 		prog.Destroy();
 
-	for (auto& [key, prog] : m_convert.ps)
+	for (auto& prog : m_convert.ps)
 		prog.Destroy();
+
 	delete m_convert.dss;
 	delete m_convert.dss_write;
 
@@ -1623,7 +1616,7 @@ void GSDeviceOGL::BlitRect(GSTexture* sTex, const GSVector4i& r, const GSVector2
 
 	const GSVector4 float_r(r);
 
-	m_convert.ps.at(ShaderConvert::COPY).Bind();
+	GetConvertProgram(ShaderConvert::COPY).Bind();
 	OMSetDepthStencilState(m_convert.dss);
 	OMSetBlendState();
 	OMSetColorMaskState();
@@ -1685,7 +1678,7 @@ void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextu
 {
 	const u8 mask = shader.Mask();
 	shader = ProcessShaderConvertSelector(shader);  // Removes mask and depth input.
-	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps.at(shader), false, OMColorMaskSelector(mask), linear);
+	DoStretchRect(sTex, sRect, dTex, dRect, GetConvertProgram(shader), false, OMColorMaskSelector(mask), linear);
 }
 
 void GSDeviceOGL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
@@ -1781,7 +1774,7 @@ void GSDeviceOGL::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, 
 	CommitClear(sTex, false);
 
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
-	GLProgram& prog = m_convert.ps.at(shader);
+	GLProgram& prog = GetConvertProgram(shader);
 	prog.Bind();
 	prog.Uniform3ui(0, offsetX, offsetY, dOffset);
 	prog.Uniform1f(1, sScale);
@@ -1803,7 +1796,7 @@ void GSDeviceOGL::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 off
 	CommitClear(sTex, false);
 
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
-	GLProgram& prog = m_convert.ps.at(shader);
+	GLProgram& prog = GetConvertProgram(shader);
 	prog.Bind();
 	prog.Uniform1ui(0, SBW);
 	prog.Uniform1ui(1, DBW);
@@ -1827,7 +1820,7 @@ void GSDeviceOGL::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u3
 	CommitClear(sTex, false);
 
 	constexpr ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
-	GLProgram& prog = m_convert.ps.at(shader);
+	GLProgram& prog = GetConvertProgram(shader);
 	prog.Bind();
 	prog.Uniform2iv(0, clamp_min.v);
 	prog.Uniform1i(1, downsample_factor);
@@ -1886,7 +1879,7 @@ void GSDeviceOGL::DrawMultiStretchRects(
 		OMSetRenderTargets(dTex, nullptr, nullptr);
 	else
 		OMSetRenderTargets(nullptr, nullptr, dTex);
-	m_convert.ps.at(shader).Bind();
+	GetConvertProgram(shader).Bind();
 
 	const GSVector2 ds(static_cast<float>(dTex->GetWidth()), static_cast<float>(dTex->GetHeight()));
 	GSTexture* last_tex = rects[0].src;
@@ -1997,8 +1990,8 @@ void GSDeviceOGL::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex,
 	if (feedback_write_2 || feedback_write_1)
 	{
 		// Write result to feedback loop
-		m_convert.ps.at(ShaderConvert::YUV).Bind();
-		m_convert.ps.at(ShaderConvert::YUV).Uniform2i(0, EXTBUF.EMODA, EXTBUF.EMODC);
+		GetConvertProgram(ShaderConvert::YUV).Bind();
+		GetConvertProgram(ShaderConvert::YUV).Uniform2i(0, EXTBUF.EMODA, EXTBUF.EMODC);
 	}
 
 	// Save 2nd output
@@ -2129,7 +2122,7 @@ void GSDeviceOGL::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GS
 		constexpr GLint clear_color = 0;
 		glClearBufferiv(GL_STENCIL, 0, &clear_color);
 	}
-	m_convert.ps.at(SetDATMShader(datm)).Bind();
+	GetConvertProgram(SetDATMShader(datm)).Bind();
 
 	// om
 

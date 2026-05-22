@@ -346,7 +346,7 @@ private:
 
 	std::unordered_map<u32, D3D12DescriptorHandle> m_samplers;
 
-	std::unordered_map<ShaderConvertSelector, ComPtr<ID3D12PipelineState>, ShaderConvertSelectorHash> m_convert{};
+	std::vector<ComPtr<ID3D12PipelineState>> m_convert;
 	std::array<ComPtr<ID3D12PipelineState>, static_cast<int>(PresentShader::Count)> m_present{};
 	std::array<ComPtr<ID3D12PipelineState>, 2> m_merge{};
 	std::array<ComPtr<ID3D12PipelineState>, NUM_INTERLACE_SHADERS> m_interlace{};
@@ -356,6 +356,16 @@ private:
 	ComPtr<ID3D12PipelineState> m_fxaa_pipeline;
 	ComPtr<ID3D12PipelineState> m_shadeboost_pipeline;
 	ComPtr<ID3D12PipelineState> m_imgui_pipeline;
+
+	ID3D12PipelineState* GetConvertPipeline(ShaderConvertSelector shader) const
+	{
+		return m_convert[shader.Index()].get();
+	}
+
+	ID3D12PipelineState* GetConvertPipeline(ShaderConvert shader) const
+	{
+		return m_convert[ShaderConvertSelector(shader).Index()].get();
+	}
 
 	std::unordered_map<u32, ComPtr<ID3DBlob>> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>

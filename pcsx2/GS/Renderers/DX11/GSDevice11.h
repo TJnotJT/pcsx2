@@ -182,13 +182,23 @@ private:
 	{
 		wil::com_ptr_nothrow<ID3D11InputLayout> il;
 		wil::com_ptr_nothrow<ID3D11VertexShader> vs;
-		std::unordered_map<ShaderConvertSelector, wil::com_ptr_nothrow<ID3D11PixelShader>, ShaderConvertSelectorHash> ps;
+		std::vector<wil::com_ptr_nothrow<ID3D11PixelShader>> ps;
 		wil::com_ptr_nothrow<ID3D11SamplerState> ln;
 		wil::com_ptr_nothrow<ID3D11SamplerState> pt;
 		wil::com_ptr_nothrow<ID3D11DepthStencilState> dss;
 		wil::com_ptr_nothrow<ID3D11DepthStencilState> dss_write;
 		std::array<wil::com_ptr_nothrow<ID3D11BlendState>, 16> bs;
 	} m_convert;
+
+	ID3D11PixelShader* GetConvertShader(ShaderConvertSelector shader) const
+	{
+		return m_convert.ps[shader.Index()].get();
+	}
+
+	ID3D11PixelShader* GetConvertShader(ShaderConvert shader) const
+	{
+		return m_convert.ps[ShaderConvertSelector(shader).Index()].get();
+	}
 
 	struct
 	{

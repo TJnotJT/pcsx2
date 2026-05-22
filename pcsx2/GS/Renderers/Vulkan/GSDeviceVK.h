@@ -398,7 +398,7 @@ private:
 
 	std::unordered_map<u32, VkSampler> m_samplers;
 
-	std::unordered_map<ShaderConvertSelector, VkPipeline, ShaderConvertSelectorHash> m_convert;
+	std::vector<VkPipeline> m_convert;
 	std::array<VkPipeline, static_cast<int>(PresentShader::Count)> m_present{};
 	std::array<VkPipeline, 2> m_merge{};
 	std::array<VkPipeline, NUM_INTERLACE_SHADERS> m_interlace{};
@@ -408,6 +408,16 @@ private:
 	VkPipeline m_primid_image_setup_pipelines[2][4] = {}; // [depth][datm]
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
+
+	VkPipeline GetConvertPipeline(ShaderConvertSelector shader) const
+	{
+		return m_convert[shader.Index()];
+	}
+
+	VkPipeline GetConvertPipeline(ShaderConvert shader) const
+	{
+		return m_convert[ShaderConvertSelector(shader).Index()];
+	}
 
 	std::unordered_map<u32, VkShaderModule> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, VkShaderModule, GSHWDrawConfig::PSSelectorHash>

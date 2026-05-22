@@ -229,36 +229,28 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	const auto WrapEntryPointMacro = [](const std::string& s) { return fmt::format("__{}__", s); };
 
-	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
-		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	m_convert.ps.resize(ShaderConvertSelector::NUM_TOTAL_SHADERS);
+	for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 	{
-		u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
-		for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
-		{
-			u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
-			for (u32 biln = 0; biln < 1 + supports_biln; biln++)
-			{
-				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
+		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
 
-				const char* entry_point = ShaderEntryPoint(shader.Shader());
-				std::string entry_point_macro = WrapEntryPointMacro(entry_point);
+		const char* entry_point = shader.EntryPoint();
+		std::string entry_point_macro = WrapEntryPointMacro(entry_point);
 
-				ShaderMacro sm_ps;
-				sm_ps.AddMacro("PIXEL_SHADER", 1);
-				sm_ps.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
-				sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
-				sm_ps.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
-				sm_ps.AddMacro("HAS_DEPTH_INPUT", 0); // unused
-				sm_ps.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
-				sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
-				sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
-				sm_ps.AddMacro(entry_point_macro.c_str(), 1);
+		ShaderMacro sm_ps;
+		sm_ps.AddMacro("PIXEL_SHADER", 1);
+		sm_ps.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
+		sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
+		sm_ps.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
+		sm_ps.AddMacro("HAS_DEPTH_INPUT", 0); // unused
+		sm_ps.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
+		sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
+		sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
+		sm_ps.AddMacro(entry_point_macro.c_str(), 1);
 
-				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm_ps.GetPtr(), entry_point);
-				if (!m_convert.ps.at(shader))
-					return false;
-			}
-		}
+		m_convert.ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm_ps.GetPtr(), entry_point);
+		if (!m_convert.ps[i])
+			return false;
 	}
 
 	shader = ReadShaderSource("shaders/dx11/present.fx");
@@ -1422,7 +1414,7 @@ void GSDevice11::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 {
 	const u8 mask = shader.Mask();
 	shader = ProcessShaderConvertSelector(shader); // Removes mask and depth output.
-	DoStretchRect(sTex, sRect, dTex, dRect, m_convert.ps.at(shader).get(), nullptr, m_convert.bs[mask].get(), linear);
+	DoStretchRect(sTex, sRect, dTex, dRect, GetConvertShader(shader), nullptr, m_convert.bs[mask].get(), linear);
 }
 
 void GSDevice11::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, ID3D11PixelShader* ps, ID3D11Buffer* ps_cb, bool linear)
@@ -1579,7 +1571,7 @@ void GSDevice11::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, u
 
 	const GSVector4 dRect(0, 0, dSize, 1);
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
-	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, m_convert.ps.at(shader).get(), m_merge.cb.get(), nullptr, false);
+	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, GetConvertShader(shader), m_merge.cb.get(), nullptr, false);
 }
 
 void GSDevice11::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, u32 SBW, u32 SPSM, GSTexture* dTex, u32 DBW, u32 DPSM)
@@ -1598,7 +1590,7 @@ void GSDevice11::ConvertToIndexedTexture(GSTexture* sTex, float sScale, u32 offs
 
 	const GSVector4 dRect(0, 0, dTex->GetWidth(), dTex->GetHeight());
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
-	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, m_convert.ps.at(shader).get(), m_merge.cb.get(), nullptr, false);
+	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, GetConvertShader(shader), m_merge.cb.get(), nullptr, false);
 }
 
 void GSDevice11::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
@@ -1618,7 +1610,7 @@ void GSDevice11::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 	UpdateSubresource(m_merge.cb.get(), &cb, &m_merge.cb_uniforms, sizeof(cb));
 
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
-	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, m_convert.ps.at(shader).get(), m_merge.cb.get(), nullptr, false);
+	DoStretchRect(sTex, GSVector4::zero(), dTex, dRect, GetConvertShader(shader), m_merge.cb.get(), nullptr, false);
 }
 
 void GSDevice11::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader)
@@ -1629,7 +1621,7 @@ void GSDevice11::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_re
 	IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
 	VSSetShader(m_convert.vs.get(), nullptr);
-	PSSetShader(m_convert.ps.at(shader).get(), nullptr);
+	PSSetShader(GetConvertShader(shader), nullptr);
 
 	OMSetDepthStencilState(dTex->IsRenderTarget() ? m_convert.dss.get() : m_convert.dss_write.get(), 0);
 	OMSetRenderTargets(dTex->IsRenderTarget() ? dTex : nullptr, dTex->IsDepthStencil() ? dTex : nullptr);
@@ -1743,7 +1735,7 @@ void GSDevice11::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	// Save 2nd output
 	if (feedback_write_2)
 	{
-		DoStretchRect(dTex, full_r, sTex[2], dRect[2], m_convert.ps.at(ShaderConvert::YUV).get(),
+		DoStretchRect(dTex, full_r, sTex[2], dRect[2], GetConvertShader(ShaderConvert::YUV),
 			m_merge.cb.get(), nullptr, linear);
 	}
 
@@ -1759,7 +1751,7 @@ void GSDevice11::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 
 	if (feedback_write_1)
 	{
-		DoStretchRect(dTex, full_r, sTex[2], dRect[2], m_convert.ps.at(ShaderConvert::YUV).get(),
+		DoStretchRect(dTex, full_r, sTex[2], dRect[2], GetConvertShader(ShaderConvert::YUV),
 			m_merge.cb.get(), nullptr, linear);
 	}
 }
@@ -2349,7 +2341,7 @@ void GSDevice11::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 
 	PSSetShaderResource(0, rt);
 	PSSetSamplerState(m_convert.pt.get());
-	PSSetShader(m_convert.ps.at(SetDATMShader(datm)).get(), nullptr);
+	PSSetShader(GetConvertShader(SetDATMShader(datm)), nullptr);
 
 	// draw
 

@@ -182,12 +182,22 @@ private:
 	struct
 	{
 		std::string vs;
-		std::unordered_map<ShaderConvertSelector, GLProgram, ShaderConvertSelectorHash> ps; // program object
+		std::vector<GLProgram> ps; // program object
 		GLuint ln = 0; // sampler object
 		GLuint pt = 0; // sampler object
 		GSDepthStencilOGL* dss = nullptr;
 		GSDepthStencilOGL* dss_write = nullptr;
 	} m_convert;
+
+	GLProgram& GetConvertProgram(ShaderConvertSelector shader)
+	{
+		return m_convert.ps[shader.Index()];
+	}
+
+	GLProgram& GetConvertProgram(ShaderConvert shader)
+	{
+		return m_convert.ps[ShaderConvertSelector(shader).Index()];
+	}
 
 	GLProgram m_present[static_cast<int>(PresentShader::Count)];
 

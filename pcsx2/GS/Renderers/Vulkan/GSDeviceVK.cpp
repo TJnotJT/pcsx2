@@ -52,10 +52,6 @@ enum : u32
 static u32 s_debug_scope_depth = 0;
 #endif
 
-static bool IsDATMConvertShader(ShaderConvert i)
-{
-	return (i == ShaderConvert::DATM_0 || i == ShaderConvert::DATM_1 || i == ShaderConvert::DATM_0_RTA_CORRECTION || i == ShaderConvert::DATM_1_RTA_CORRECTION);
-}
 static bool IsDATEModePrimIDInit(u32 flag)
 {
 	return flag == 1 || flag == 2;
@@ -2932,7 +2928,7 @@ void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 	shader = ProcessShaderConvertSelector(shader); // Removes depth input
 	const bool allow_discard = (shader.Mask() == 0xf);
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), sRect, static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert.at(shader), linear, allow_discard);
+		GetConvertPipeline(shader), linear, allow_discard);
 }
 
 void GSDeviceVK::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, const GSVector4& dRect,
@@ -3069,7 +3065,7 @@ void GSDeviceVK::DoMultiStretchRects(
 		BeginRenderPassForStretchRect(dTex, rc, rc, false);
 	SetUtilityTexture(rects[0].src, rects[0].linear ? m_linear_sampler : m_point_sampler);
 
-	SetPipeline(m_convert.at(shader.SetMask(rects[0].wmask.wrgba)));
+	SetPipeline(GetConvertPipeline(shader.SetMask(rects[0].wmask.wrgba)));
 
 	if (ApplyUtilityState())
 		DrawIndexedPrimitive();
@@ -3225,7 +3221,7 @@ void GSDeviceVK::UpdateCLUTTexture(
 	const GSVector4 dRect(0, 0, dSize, 1);
 	const ShaderConvert shader = (dSize == 16) ? ShaderConvert::CLUT_4 : ShaderConvert::CLUT_8;
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert.at(shader), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDeviceVK::ConvertToIndexedTexture(
@@ -3247,7 +3243,7 @@ void GSDeviceVK::ConvertToIndexedTexture(
 	const ShaderConvert shader = ((SPSM & 0xE) == 0) ? ShaderConvert::RGBA_TO_8I : ShaderConvert::RGB5A1_TO_8I;
 	const GSVector4 dRect(0, 0, dTex->GetWidth(), dTex->GetHeight());
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert.at(shader), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDeviceVK::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect)
@@ -3269,7 +3265,7 @@ void GSDeviceVK::FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32
 	const ShaderConvert shader = ShaderConvert::DOWNSAMPLE_COPY;
 	//const GSVector4 dRect = GSVector4(dTex->GetRect());
 	DoStretchRect(static_cast<GSTextureVK*>(sTex), GSVector4::zero(), static_cast<GSTextureVK*>(dTex), dRect,
-		m_convert.at(shader), false, true);
+		GetConvertPipeline(shader), false, true);
 }
 
 void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, GSVector4* dRect,
@@ -3319,7 +3315,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 			OMSetRenderTargets(dTex, nullptr, darea);
 			SetUtilityTexture(sTex[1], sampler);
 			BeginClearRenderPass(m_utility_color_render_pass_clear, darea, c);
-			SetPipeline(m_convert.at(ShaderConvert::COPY));
+			SetPipeline(GetConvertPipeline(ShaderConvert::COPY));
 			DrawStretchRect(sRect[1], PMODE.SLBG ? dRect[2] : dRect[1], dsize);
 			dTex->SetState(GSTexture::State::Dirty);
 			dcleared = true;
@@ -3339,7 +3335,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 		BeginRenderPassForStretchRect(static_cast<GSTextureVK*>(sTex[2]), fbarea, GSVector4i(dRect[2]));
 		if (dcleared)
 		{
-			SetPipeline(m_convert.at(ShaderConvert::YUV));
+			SetPipeline(GetConvertPipeline(ShaderConvert::YUV));
 			SetUtilityPushConstants(yuv_constants, sizeof(yuv_constants));
 			DrawStretchRect(full_r, dRect[2], fbsize);
 		}
@@ -3378,7 +3374,7 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 	if (feedback_write_1)
 	{
 		EndRenderPass();
-		SetPipeline(m_convert.at(ShaderConvert::YUV));
+		SetPipeline(GetConvertPipeline(ShaderConvert::YUV));
 		SetUtilityTexture(dTex, sampler);
 		SetUtilityPushConstants(yuv_constants, sizeof(yuv_constants));
 		OMSetRenderTargets(sTex[2], nullptr, fbarea);
@@ -4032,112 +4028,99 @@ bool GSDeviceVK::CompileConvertPipelines()
 	gpb.SetNoBlendingState();
 	gpb.SetVertexShader(vs);
 
-	for (ShaderConvert i = ShaderConvert::COPY; i < ShaderConvert::Count;
-		i = static_cast<ShaderConvert>(static_cast<int>(i) + 1))
+	m_convert.resize(ShaderConvertSelector::NUM_TOTAL_SHADERS);
+	for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 	{
-		bool variable_mask = HasVariableWriteMask(i);
-		for (u32 mask = variable_mask ? 0 : 0xf; mask < 0x10; mask++)
+		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
+
+		VkRenderPass rp;
+		if (shader.DATMConvertShader())
 		{
-			u32 supports_depth = static_cast<u32>(HasFloat32Output(i));
-			for (u32 depth_output = 0; depth_output < supports_depth + 1; depth_output++)
-			{
-				u32 supports_biln = static_cast<u32>(SupportsBilinear(i));
-				for (u32 biln = 0; biln < 1 + supports_biln; biln++)
-				{
-					const ShaderConvertSelector shader(i, mask, false, depth_output, biln);
-					GSTexture::Format format = shader.OutputFormat();
-					VkRenderPass rp;
+			rp = m_date_setup_render_pass;
+		}
+		else if (shader.DepthOutput())
+		{
+			rp = GetRenderPass(
+				LookupNativeFormat(GSTexture::Format::Invalid),
+				LookupNativeFormat(GSTexture::Format::DepthStencil),
+				VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+		}
+		else
+		{
+			rp = GetRenderPass(
+				LookupNativeFormat(shader.OutputFormat()),
+				LookupNativeFormat(GSTexture::Format::Invalid),
+				VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+		}
 
-					if (IsDATMConvertShader(i))
-					{
-						rp = m_date_setup_render_pass;
-					}
-					else if (depth_output)
-					{
-						rp = GetRenderPass(
-							LookupNativeFormat(GSTexture::Format::Invalid),
-							LookupNativeFormat(GSTexture::Format::DepthStencil),
-							VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-					}
-					else
-					{
-						rp = GetRenderPass(
-							LookupNativeFormat(format),
-							LookupNativeFormat(GSTexture::Format::Invalid),
-							VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-					}
+		if (!rp)
+			return false;
 
-					if (!rp)
-						return false;
+		gpb.SetRenderPass(rp, 0);
 
-					gpb.SetRenderPass(rp, 0);
+		if (shader.DATMConvertShader())
+		{
+			const VkStencilOpState sos = {
+				VK_STENCIL_OP_KEEP, VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 1u, 1u, 1u};
+			gpb.SetDepthState(false, false, VK_COMPARE_OP_ALWAYS);
+			gpb.SetStencilState(true, sos, sos);
+		}
+		else
+		{
+			gpb.SetDepthState(shader.DepthOutput(), shader.DepthOutput(), VK_COMPARE_OP_ALWAYS);
+			gpb.SetNoStencilState();
+		}
 
-					if (IsDATMConvertShader(i))
-					{
-						const VkStencilOpState sos = {
-							VK_STENCIL_OP_KEEP, VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 1u, 1u, 1u};
-						gpb.SetDepthState(false, false, VK_COMPARE_OP_ALWAYS);
-						gpb.SetStencilState(true, sos, sos);
-					}
-					else
-					{
-						gpb.SetDepthState(depth_output, depth_output, VK_COMPARE_OP_ALWAYS);
-						gpb.SetNoStencilState();
-					}
+		gpb.SetColorWriteMask(0, shader.Mask());
 
-					gpb.SetColorWriteMask(0, shader.Mask());
+		std::string macro;
+		macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
+		macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
+		macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
+		macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0); // unused
+		macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
+		macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
+		macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
 
-					std::string macro;
-					macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
-					macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
-					macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
-					macro += fmt::format("#define HAS_DEPTH_INPUT {}\n", 0); // unused
-					macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
-					macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
-					macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
+		std::string shader_with_header = macro + *source;
 
-					std::string shader_with_header = macro + *source;
+		VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shader.EntryPoint());
+		if (ps == VK_NULL_HANDLE)
+			return false;
 
-					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, ShaderEntryPoint(i));
-					if (ps == VK_NULL_HANDLE)
-						return false;
+		ScopedGuard ps_guard([this, &ps]() { vkDestroyShaderModule(m_device, ps, nullptr); });
+		gpb.SetFragmentShader(ps);
 
-					ScopedGuard ps_guard([this, &ps]() { vkDestroyShaderModule(m_device, ps, nullptr); });
-					gpb.SetFragmentShader(ps);
-
-					VkPipeline pipe = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
+		VkPipeline pipe = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
 					
-					if (!pipe)
+		if (!pipe)
+			return false;
+
+		m_convert[i] = pipe;
+
+		Vulkan::SetObjectName(m_device, pipe, "Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
+			shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
+			static_cast<int>(shader.Biln()));
+
+		if (shader.Shader() == ShaderConvert::COLCLIP_INIT || shader.Shader() == ShaderConvert::COLCLIP_RESOLVE)
+		{
+			const bool is_setup = shader.Shader() == ShaderConvert::COLCLIP_INIT;
+			VkPipeline(&arr)[2][2] = *(is_setup ? &m_colclip_setup_pipelines : &m_colclip_finish_pipelines);
+			for (u32 ds = 0; ds < 2; ds++)
+			{
+				for (u32 fbl = 0; fbl < 2; fbl++)
+				{
+					pxAssert(!arr[ds][fbl]);
+
+					gpb.SetRenderPass(GetTFXRenderPass(true, ds != 0, is_setup, false, fbl != 0, false,
+						VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+						0);
+					arr[ds][fbl] = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
+					if (!arr[ds][fbl])
 						return false;
 
-					m_convert[shader] = pipe;
-
-					Vulkan::SetObjectName(m_device, pipe, "Convert pipeline (%s, mask=%x, depth=%d, biln=%d)",
-						shader.Name(), shader.Mask(), static_cast<int>(shader.DepthOutput()),
-						static_cast<int>(shader.Biln()));
-
-					if (i == ShaderConvert::COLCLIP_INIT || i == ShaderConvert::COLCLIP_RESOLVE)
-					{
-						const bool is_setup = i == ShaderConvert::COLCLIP_INIT;
-						VkPipeline(&arr)[2][2] = *(is_setup ? &m_colclip_setup_pipelines : &m_colclip_finish_pipelines);
-						for (u32 ds = 0; ds < 2; ds++)
-						{
-							for (u32 fbl = 0; fbl < 2; fbl++)
-							{
-								pxAssert(!arr[ds][fbl]);
-
-								gpb.SetRenderPass(GetTFXRenderPass(true, ds != 0, is_setup, false, fbl != 0, false,
-									VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE),
-									0);
-								arr[ds][fbl] = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true), false);
-								if (!arr[ds][fbl])
-									return false;
-
-								Vulkan::SetObjectName(m_device, arr[ds][fbl], "ColorClip %s/copy pipeline (ds=%u, fbl=%u)",
-									is_setup ? "setup" : "finish", i, ds, fbl);
-							}
-						}
-					}
+					Vulkan::SetObjectName(m_device, arr[ds][fbl], "ColorClip %s/copy pipeline (ds=%u, fbl=%u)",
+						is_setup ? "setup" : "finish", i, ds, fbl);
 				}
 			}
 		}
@@ -4692,7 +4675,7 @@ void GSDeviceVK::DestroyResources()
 		if (it != VK_NULL_HANDLE)
 			vkDestroyPipeline(m_device, it, nullptr);
 	}
-	for (const auto& [shader, pipe] : m_convert)
+	for (const auto& pipe : m_convert)
 	{
 		if (pipe != VK_NULL_HANDLE)
 			vkDestroyPipeline(m_device, pipe, nullptr);
@@ -5665,7 +5648,7 @@ void GSDeviceVK::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSV
 	SetUtilityTexture(rt, m_point_sampler);
 	OMSetRenderTargets(nullptr, ds, bbox);
 	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
-	SetPipeline(m_convert.at(SetDATMShader(datm)));
+	SetPipeline(GetConvertPipeline(SetDATMShader(datm)));
 	BeginClearRenderPass(m_date_setup_render_pass, bbox, 0.0f, 0);
 	if (ApplyUtilityState())
 		DrawPrimitive();

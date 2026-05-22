@@ -249,7 +249,7 @@ public:
 
 	// Functions and Pipeline States
 	MRCOwned<id<MTLComputePipelineState>> m_cas_pipeline[2];
-	std::unordered_map<ShaderConvertSelector, MRCOwned<id<MTLRenderPipelineState>>, ShaderConvertSelectorHash> m_convert_pipeline;
+	std::vector<MRCOwned<id<MTLRenderPipelineState>>> m_convert_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_present_pipeline[static_cast<int>(PresentShader::Count)];
 	MRCOwned<id<MTLRenderPipelineState>> m_merge_pipeline[4];
 	MRCOwned<id<MTLRenderPipelineState>> m_interlace_pipeline[NUM_INTERLACE_SHADERS];
@@ -263,6 +263,16 @@ public:
 	MRCOwned<id<MTLRenderPipelineState>> m_fxaa_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_shadeboost_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_imgui_pipeline;
+
+	id<MTLRenderPipelineState> GetConvertPipeline(ShaderConvertSelector shader) const
+	{
+		return m_convert[shader.Index()];
+	}
+
+	id<MTLRenderPipelineState> GetConvertPipeline(ShaderConvert shader) const
+	{
+		return m_convert[ShaderConvertSelector(shader).Index()];
+	}
 
 	MRCOwned<id<MTLFunction>> m_hw_vs[6 << 3];
 	std::unordered_map<PSSelector, MRCOwned<id<MTLFunction>>> m_hw_ps;

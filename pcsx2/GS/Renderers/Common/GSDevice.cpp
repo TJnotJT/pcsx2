@@ -22,82 +22,6 @@
 #include <ostream>
 #include <fstream>
 
-ShaderConvert SetDATMShader(SetDATM datm)
-{
-	switch (datm)
-	{
-		case SetDATM::DATM1_RTA_CORRECTION:
-			return ShaderConvert::DATM_1_RTA_CORRECTION;
-		case SetDATM::DATM0_RTA_CORRECTION:
-			return ShaderConvert::DATM_0_RTA_CORRECTION;
-		case SetDATM::DATM1:
-			return ShaderConvert::DATM_1;
-		case SetDATM::DATM0:
-		default:
-			return ShaderConvert::DATM_0;
-	}
-}
-
-const char* ShaderEntryPoint(ShaderConvert value)
-{
-	switch (value)
-	{
-			// clang-format off
-		case ShaderConvert::COPY:                   return "ps_copy";
-		case ShaderConvert::RGB5A1_TO_16_BITS:      return "ps_convert_rgb5a1_16bits";
-		case ShaderConvert::DATM_1:                 return "ps_datm1";
-		case ShaderConvert::DATM_0:                 return "ps_datm0";
-		case ShaderConvert::DATM_1_RTA_CORRECTION:  return "ps_datm1_rta_correction";
-		case ShaderConvert::DATM_0_RTA_CORRECTION:  return "ps_datm0_rta_correction";
-		case ShaderConvert::COLCLIP_INIT:           return "ps_colclip_init";
-		case ShaderConvert::COLCLIP_RESOLVE:        return "ps_colclip_resolve";
-		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";
-		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
-		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
-		case ShaderConvert::FLOAT32_TO_16_BITS:     return "ps_convert_float32_32bits";
-		case ShaderConvert::FLOAT32_TO_32_BITS:     return "ps_convert_float32_32bits";
-		case ShaderConvert::FLOAT32_TO_RGBA8:       return "ps_convert_float32_rgba8";
-		case ShaderConvert::FLOAT32_TO_RGB8:        return "ps_convert_float32_rgba8";
-		case ShaderConvert::FLOAT16_TO_RGB5A1:      return "ps_convert_float16_rgb5a1";
-		case ShaderConvert::RGBA8_TO_FLOAT32:       return "ps_convert_rgba8_float32";
-		case ShaderConvert::RGBA8_TO_FLOAT24:       return "ps_convert_rgba8_float24";
-		case ShaderConvert::RGBA8_TO_FLOAT16:       return "ps_convert_rgba8_float16";
-		case ShaderConvert::RGB5A1_TO_FLOAT16:      return "ps_convert_rgb5a1_float16";
-		case ShaderConvert::FLOAT32_TO_FLOAT24:     return "ps_convert_float32_float24";
-		case ShaderConvert::FLOAT32_COPY:           return "ps_float32_copy";
-		case ShaderConvert::DOWNSAMPLE_COPY:        return "ps_downsample_copy";
-		case ShaderConvert::RGBA_TO_8I:             return "ps_convert_rgba_8i";
-		case ShaderConvert::RGB5A1_TO_8I:           return "ps_convert_rgb5a1_8i";
-		case ShaderConvert::CLUT_4:                 return "ps_convert_clut_4";
-		case ShaderConvert::CLUT_8:                 return "ps_convert_clut_8";
-		case ShaderConvert::YUV:                    return "ps_yuv";
-			// clang-format on
-		default:
-			pxAssert(0);
-			return "ShaderConvertUnknownShader";
-	}
-}
-
-const char* ShaderEntryPoint(PresentShader value)
-{
-	switch (value)
-	{
-			// clang-format off
-		case PresentShader::COPY:               return "ps_copy";
-		case PresentShader::SCANLINE:           return "ps_filter_scanlines";
-		case PresentShader::DIAGONAL_FILTER:    return "ps_filter_diagonal";
-		case PresentShader::TRIANGULAR_FILTER:  return "ps_filter_triangular";
-		case PresentShader::COMPLEX_FILTER:     return "ps_filter_complex";
-		case PresentShader::LOTTES_FILTER:      return "ps_filter_lottes";
-		case PresentShader::SUPERSAMPLE_4xRGSS: return "ps_4x_rgss";
-		case PresentShader::SUPERSAMPLE_AUTO:   return "ps_automagical_supersampling";
-			// clang-format on
-		default:
-			pxAssert(0);
-			return "DisplayShaderUnknownShader";
-	}
-}
-
 #ifdef PCSX2_DEVBUILD
 
 enum class TextureLabel
@@ -1789,6 +1713,77 @@ void GSHWDrawConfig::DumpConfig(const std::string& path, const GSHWDrawConfig& c
 		fwrite(writer.buffer.data(), 1, writer.buffer.size(), file.get());
 	}
 }
+
+static constexpr u32 NUM_REMAP_INPUTS = static_cast<u32>(ShaderConvert::Count) * 8;
+
+static ShaderConvertSelector GetRemappedShader(u32 idx)
+{
+	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 3);
+	bool depth_in = (idx >> 0) & 1;
+	bool depth_out = (idx >> 1) & 1;
+	bool biln = (idx >> 2) & 1;
+	return ShaderConvertSelector(convert, 0xf, depth_in, depth_out, biln);
+}
+
+static constexpr bool RemapIndexIsValid(u32 idx)
+{
+	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 3);
+	bool depth_in = (idx >> 0) & 1;
+	bool depth_out = (idx >> 1) & 1;
+	bool biln = (idx >> 2) & 1;
+	if (HasVariableWriteMask(convert) && !depth_in && !depth_out && !biln)
+		return false; // Handled as variable write mask
+	if (depth_in && !HasFloat32Input(convert))
+		return false;
+	if (depth_out && !HasFloat32Output(convert))
+		return false;
+	if (biln && !SupportsBilinear(convert))
+		return false;
+	return true;
+}
+
+static constexpr u32 CalcNumRemappedShaders()
+{
+	u32 num = 0;
+	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
+		num += RemapIndexIsValid(i);
+	return num;
+}
+
+static constexpr u32 NUM_REMAPPED_SHADERS = CalcNumRemappedShaders();
+static constexpr u32 NUM_TOTAL_SHADERS = NUM_REMAPPED_SHADERS +
+                                         16 * ShaderConvertSelector::NUM_VARIABLE_WRITE_MASK_SHADERS;
+
+static constexpr std::array<u16, NUM_REMAP_INPUTS> GenRemapArray()
+{
+	std::array<u16, NUM_REMAP_INPUTS> out{};
+	u32 out_idx = 0;
+	const u32 invalid = 0xffffffff;
+	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
+		out[i] = RemapIndexIsValid(i) ? out_idx++ : invalid;
+	return out;
+}
+
+constexpr std::vector<ShaderConvertSelector> GetPackedShaders()
+{
+	std::vector<ShaderConvertSelector> out;
+	out.reserve(NUM_TOTAL_SHADERS);
+	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
+	{
+		if (RemapIndexIsValid(i))
+			out.push_back(GetRemappedShader(i));
+	}
+	for (u32 i = 0; i < 16; i++)
+		out.push_back(ShaderConvertSelector(ShaderConvert::COPY, i));
+	for (u32 i = 0; i < 16; i++)
+		out.push_back(ShaderConvertSelector(ShaderConvert::RTA_CORRECTION, i));
+	return out;
+}
+
+constinit const u32 ShaderConvertSelector::NUM_REMAPPED_SHADERS = ::NUM_REMAPPED_SHADERS;
+constinit const u32 ShaderConvertSelector::NUM_TOTAL_SHADERS = ::NUM_TOTAL_SHADERS;
+constinit const std::array<u16, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_REMAP = GenRemapArray();
+const std::vector<ShaderConvertSelector> ShaderConvertSelector::SHADERS = GetPackedShaders();
 
 // clang-format off
 
