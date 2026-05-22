@@ -810,7 +810,7 @@ void GSDevice::StretchRect(GSTexture* sTex, GSTexture* dTex, ShaderConvertSelect
 void GSDevice::StretchRectAuto(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool linear, u32 src_bpp, u32 dst_bpp)
 {
-	ShaderConvertSelector shader = GetCopyShader(sTex, dTex, src_bpp, dst_bpp);
+	ShaderConvertSelector shader = GetConvertShader(sTex, dTex, src_bpp, dst_bpp);
 	if (SupportsBilinear(shader.Shader()) && linear)
 	{
 		// Bilinear is emulated in the shader.
@@ -895,7 +895,7 @@ void GSDevice::StretchRectAutoBiln(GSTexture* sTex, GSTexture* dTex, u32 src_bpp
 void GSDevice::StretchRectAutoMask(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect,
 	bool red, bool green, bool blue, bool alpha, u32 src_bpp, u32 dst_bpp)
 {
-	StretchRect(sTex, sRect, dTex, dRect, GetCopyShaderMask(sTex, dTex, src_bpp, dst_bpp, red, green, blue, alpha), false);
+	StretchRect(sTex, sRect, dTex, dRect, GetConvertShaderMask(sTex, dTex, src_bpp, dst_bpp, red, green, blue, alpha), false);
 }
 
 void GSDevice::StretchRectAutoMask(GSTexture* sTex, GSTexture* dTex, const GSVector4& dRect, bool red, bool green, bool blue, bool alpha, u32 src_bpp, u32 dst_bpp)

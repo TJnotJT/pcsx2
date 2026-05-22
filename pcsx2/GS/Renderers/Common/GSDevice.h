@@ -400,7 +400,7 @@ struct ShaderConvertSelectorHash
 	}
 };
 
-static inline ShaderConvertSelector GetCopyShader(GSTexture::Format src, GSTexture::Format dst,
+static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTexture::Format dst,
 	u32 src_bpp = 32, u32 dst_bpp = 32, u8 mask = 0xf)
 {
 	ShaderConvert shader = static_cast<ShaderConvert>(-1);
@@ -488,22 +488,22 @@ static inline ShaderConvertSelector GetCopyShader(GSTexture::Format src, GSTextu
 		dst == GSTexture::Format::DepthStencil);
 }
 
-static inline ShaderConvertSelector GetCopyShader(const GSTexture* src, const GSTexture* dst, u32 src_bpp, u32 dst_bpp, u8 mask = 0xf)
+static inline ShaderConvertSelector GetConvertShader(const GSTexture* src, const GSTexture* dst, u32 src_bpp, u32 dst_bpp, u8 mask = 0xf)
 {
-	return GetCopyShader(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, mask);
+	return GetConvertShader(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, mask);
 }
 
-static inline ShaderConvertSelector GetCopyShaderMask(GSTexture::Format src, GSTexture::Format dst,
+static inline ShaderConvertSelector GetConvertShaderMask(GSTexture::Format src, GSTexture::Format dst,
 	u32 src_bpp, u32 dst_bpp, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
 	const u8 mask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
-	return GetCopyShader(src, dst, src_bpp, dst_bpp, mask);
+	return GetConvertShader(src, dst, src_bpp, dst_bpp, mask);
 }
 
-static inline ShaderConvertSelector GetCopyShaderMask(const GSTexture* src, const GSTexture* dst,
+static inline ShaderConvertSelector GetConvertShaderMask(const GSTexture* src, const GSTexture* dst,
 	u32 src_bpp, u32 dst_bpp, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
-	return GetCopyShaderMask(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, red, green, blue, alpha);
+	return GetConvertShaderMask(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, red, green, blue, alpha);
 }
 
 enum class PresentShader

@@ -6142,7 +6142,7 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 	{
 		// TODO: clean up this mess
 
-		ShaderConvertSelector shader = GetCopyShader(dst->m_texture->GetFormat(), GSTexture::Format::Color);
+		ShaderConvertSelector shader = GetConvertShader(dst->m_texture->GetFormat(), GSTexture::Format::Color);
 		channel_shuffle = GSRendererHW::GetInstance()->TestChannelShuffle(dst);
 
 		const bool is_8bits = TEX0.PSM == PSMT8 && !channel_shuffle;
@@ -7928,7 +7928,7 @@ void GSTextureCache::Target::Update(bool cannot_scale)
 		// No need to sort here, it's all the one texture.
 		const ShaderConvertSelector shader = (m_type == RenderTarget) ?
 			(m_rt_alpha_scale ? ShaderConvert::RTA_CORRECTION : ShaderConvert::COPY) :
-			GetCopyShader(GSTexture::Format::Color, m_texture->GetFormat(), bpp, bpp, linear);
+			GetConvertShader(GSTexture::Format::Color, m_texture->GetFormat(), bpp, bpp, linear);
 
 		g_gs_device->DrawMultiStretchRects(drects, ndrects, m_texture, shader);
 	}
