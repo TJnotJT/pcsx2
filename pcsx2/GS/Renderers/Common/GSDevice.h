@@ -113,15 +113,6 @@ static inline bool HasVariableWriteMask(ShaderConvert shader)
 	}
 }
 
-static inline int GetShaderIndexForMask(ShaderConvert shader, int mask)
-{
-	pxAssert(HasVariableWriteMask(shader));
-	int index = mask;
-	if (shader == ShaderConvert::RTA_CORRECTION)
-		index |= 1 << 4;
-	return index;
-}
-
 static inline bool HasColorOutput(ShaderConvert shader)
 {
 	switch (shader)
@@ -279,6 +270,11 @@ public:
 		return fields.biln;
 	}
 
+	bool ColorOutput() const
+	{
+		return HasColorOutput(Shader());
+	}
+
 	bool DepthOutput() const
 	{
 		return fields.depth_output;
@@ -307,6 +303,21 @@ public:
 	int IntegerOutputBpp() const
 	{
 		return ::IntegerOutputBpp(Shader());
+	}
+
+	bool VariableWriteMask() const
+	{
+		return HasVariableWriteMask(Shader());
+	}
+
+	bool ColorClipOutput() const
+	{
+		return HasColorClipOutput(Shader());
+	}
+
+	const char* Name() const
+	{
+		return ShaderConvertName(Shader());
 	}
 
 	ShaderConvertSelector SetMask(u8 mask) const
