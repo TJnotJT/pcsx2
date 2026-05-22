@@ -67,38 +67,39 @@ enum class ShaderInterlace
 
 static inline const char* ShaderConvertName(ShaderConvert shader)
 {
+	#define ENTRY(x) case ShaderConvert::x: return #x
 	switch (shader)
 	{
-		case ShaderConvert::COPY: return "COPY";
-		case ShaderConvert::FLOAT32_COPY: return "FLOAT32_COPY";
-		case ShaderConvert::RGB5A1_TO_16_BITS: return "RGB5A1_TO_16_BITS";
-		case ShaderConvert::DATM_1: return "DATM_1";
-		case ShaderConvert::DATM_0: return "DATM_0";
-		case ShaderConvert::DATM_1_RTA_CORRECTION: return "DATM_1_RTA_CORRECTION";
-		case ShaderConvert::DATM_0_RTA_CORRECTION: return "DATM_0_RTA_CORRECTION";
-		case ShaderConvert::COLCLIP_INIT: return "COLCLIP_INIT";
-		case ShaderConvert::COLCLIP_RESOLVE: return "COLCLIP_RESOLVE";
-		case ShaderConvert::RTA_CORRECTION: return "RTA_CORRECTION";
-		case ShaderConvert::RTA_DECORRECTION: return "RTA_DECORRECTION";
-		case ShaderConvert::TRANSPARENCY_FILTER: return "TRANSPARENCY_FILTER";
-		case ShaderConvert::FLOAT32_TO_16_BITS: return "FLOAT32_TO_16_BITS";
-		case ShaderConvert::FLOAT32_TO_32_BITS: return "FLOAT32_TO_32_BITS";
-		case ShaderConvert::FLOAT32_TO_RGBA8: return "FLOAT32_TO_RGBA8";
-		case ShaderConvert::FLOAT32_TO_RGB8: return "FLOAT32_TO_RGB8";
-		case ShaderConvert::FLOAT16_TO_RGB5A1: return "FLOAT16_TO_RGB5A1";
-		case ShaderConvert::RGBA8_TO_FLOAT32: return "RGBA8_TO_FLOAT32";
-		case ShaderConvert::RGBA8_TO_FLOAT24: return "RGBA8_TO_FLOAT24";
-		case ShaderConvert::RGBA8_TO_FLOAT16: return "RGBA8_TO_FLOAT16";
-		case ShaderConvert::RGB5A1_TO_FLOAT16: return "RGB5A1_TO_FLOAT16";
-		case ShaderConvert::FLOAT32_TO_FLOAT24: return "FLOAT32_TO_FLOAT24";
-		case ShaderConvert::DOWNSAMPLE_COPY: return "DOWNSAMPLE_COPY";
-		case ShaderConvert::RGBA_TO_8I: return "RGBA_TO_8I";
-		case ShaderConvert::RGB5A1_TO_8I: return "RGB5A1_TO_8I";
-		case ShaderConvert::CLUT_4: return "CLUT_4";
-		case ShaderConvert::CLUT_8: return "CLUT_8";
-		case ShaderConvert::YUV: return "YUV";
-		default: return "Unknown";
+		ENTRY(COPY);
+		ENTRY(FLOAT32_COPY);
+		ENTRY(RGB5A1_TO_16_BITS);
+		ENTRY(DATM_1);
+		ENTRY(DATM_0);
+		ENTRY(DATM_1_RTA_CORRECTION);
+		ENTRY(DATM_0_RTA_CORRECTION);
+		ENTRY(COLCLIP_INIT);
+		ENTRY(COLCLIP_RESOLVE);
+		ENTRY(RTA_CORRECTION);
+		ENTRY(RTA_DECORRECTION);
+		ENTRY(TRANSPARENCY_FILTER);
+		ENTRY(FLOAT32_TO_16_BITS);
+		ENTRY(FLOAT32_TO_32_BITS);
+		ENTRY(FLOAT32_TO_RGBA8);
+		ENTRY(FLOAT32_TO_RGB8);
+		ENTRY(FLOAT16_TO_RGB5A1);
+		ENTRY(RGBA8_TO_FLOAT32);
+		ENTRY(RGBA8_TO_FLOAT24);
+		ENTRY(RGBA8_TO_FLOAT16);
+		ENTRY(RGB5A1_TO_FLOAT16);
+		ENTRY(FLOAT32_TO_FLOAT24);
+		ENTRY(DOWNSAMPLE_COPY);
+		ENTRY(RGBA_TO_8I);
+		ENTRY(RGB5A1_TO_8I);
+		ENTRY(CLUT_4);
+		ENTRY(CLUT_8);
+		ENTRY(YUV);
 	}
+	#undef ENTRY
 }
 
 static inline bool HasVariableWriteMask(ShaderConvert shader)
