@@ -176,7 +176,7 @@ OUTPUT_TYPE ps_copy(PS_INPUT input) : OUTPUT_SV
 }
 #endif
 
-#if defined(__ps_float32_copy__)
+#if defined(__ps_depth_copy__)
 OUTPUT_TYPE ps_depth_copy(PS_INPUT input) : OUTPUT_SV
 {
 	return sample_c(input.t);
@@ -291,31 +291,31 @@ PS_OUTPUT ps_colclip_resolve(PS_INPUT input)
 }
 #endif
 
-#if defined(__ps_convert_float32_32bits__)
+#if defined(__ps_convert_depth32_32bits__)
 OUTPUT_TYPE ps_convert_depth32_32bits(PS_INPUT input) : OUTPUT_SV
 {
-	// Convert a FLOAT32 depth texture into a 32 bits UINT texture
+	// Convert a depth texture into a 32 bits UINT texture
 	return depth_to_uint(sample_c(input.t));
 }
 #endif
 
-#if defined(__ps_convert_float32_rgba8__)
+#if defined(__ps_convert_depth32_rgba8__)
 OUTPUT_TYPE ps_convert_depth32_rgba8(PS_INPUT input) : OUTPUT_SV
 {
-	// Convert a FLOAT32 depth texture into a RGBA color texture
+	// Convert a depth texture into a RGBA color texture
 	return depth32_to_rgba8(sample_c(input.t));
 }
 #endif
 
-#if defined(__ps_convert_float16_rgb5a1__)
+#if defined(__ps_convert_depth16_rgb5a1__)
 OUTPUT_TYPE ps_convert_depth16_rgb5a1(PS_INPUT input) : OUTPUT_SV
 {
-	// Convert a FLOAT32 (only 16 lsb) depth into a RGB5A1 color texture
+	// Convert depth (only 16 lsb) into a RGB5A1 color texture
 	return depth16_to_rgb5a1(sample_c(input.t));
 }
 #endif
 
-#if defined(__ps_convert_float32_float24__)
+#if defined(__ps_convert_depth32_depth24__)
 OUTPUT_TYPE ps_convert_depth32_depth24(PS_INPUT input) : OUTPUT_SV
 {
 	// Truncates depth value to 24bits
@@ -336,7 +336,7 @@ OUTPUT_TYPE ps_convert_depth32_depth24(PS_INPUT input) : OUTPUT_SV
 	float depthBR = CONVERT_FN(Texture.Load(int3(coords.zw, 0))); \
 	return lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
-#if defined(__ps_convert_rgba8_float32__)
+#if defined(__ps_convert_rgba8_depth32__)
 OUTPUT_TYPE ps_convert_rgba8_depth32(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert an RGBA texture into a float depth texture
@@ -348,7 +348,7 @@ OUTPUT_TYPE ps_convert_rgba8_depth32(PS_INPUT input) : OUTPUT_SV
 }
 #endif
 
-#if defined(__ps_convert_rgba8_float24__)
+#if defined(__ps_convert_rgba8_depth24__)
 OUTPUT_TYPE ps_convert_rgba8_depth24(PS_INPUT input) : OUTPUT_SV
 {
 	// Same as above but without the alpha channel (24 bits Z)
@@ -361,7 +361,7 @@ OUTPUT_TYPE ps_convert_rgba8_depth24(PS_INPUT input) : OUTPUT_SV
 }
 #endif
 
-#if defined(__ps_convert_rgba8_float16__)
+#if defined(__ps_convert_rgba8_depth16__)
 OUTPUT_TYPE ps_convert_rgba8_depth16(PS_INPUT input) : OUTPUT_SV
 {
 	// Same as above but without the A/B channels (16 bits Z)
@@ -374,7 +374,7 @@ OUTPUT_TYPE ps_convert_rgba8_depth16(PS_INPUT input) : OUTPUT_SV
 }
 #endif
 
-#if defined(__ps_convert_rgb5a1_float16__)
+#if defined(__ps_convert_rgb5a1_depth16__)
 OUTPUT_TYPE ps_convert_rgb5a1_depth16(PS_INPUT input) : OUTPUT_SV
 {
 	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit Z
