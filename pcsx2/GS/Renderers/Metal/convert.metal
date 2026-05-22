@@ -254,13 +254,13 @@ struct ConvertToDepthRes
 // Depth in / depth out
 fragment DepthOut ps_float32_copy_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
-	return res.sample(data.t).r;
+	return res.sample(data.t);
 }
 
 // Depth in / color out
 fragment float ps_float32_copy_dc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
-	return res.sample(data.t).r;
+	return res.sample(data.t);
 }
 
 // Color in / depth out
@@ -270,7 +270,7 @@ fragment DepthOut ps_float32_copy_cd(ConvertShaderData data [[stage_in]], Conver
 }
 
 // Color in / color out
-fragment float ps_float32_copy_cc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
+fragment float ps_float32_copy_cc(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	return res.sample(data.t).r;
 }
@@ -284,14 +284,14 @@ static float depth32_to_depth24(float d)
 fragment DepthOut ps_convert_float32_float24_dd(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	// Truncates depth value to 24bits
-	return depth32_to_depth24(res.sample(data.t).r);
+	return depth32_to_depth24(res.sample(data.t));
 }
 
 // Depth in / color out
 fragment float ps_convert_float32_float24_dc(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	// Truncates depth value to 24bits
-	return depth32_to_depth24(res.sample(data.t).r);
+	return depth32_to_depth24(res.sample(data.t));
 }
 
 // Color in / depth out
