@@ -402,7 +402,26 @@ void GSDeviceMTL::EndRenderPass()
 	}
 }
 
-void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadAction color_load, GSTexture* depth, MTLLoadAction depth_load, GSTexture* stencil, MTLLoadAction stencil_load, bool rt1)
+static std::pair<MTLLoadAction, clear> GetRTLoadInfo(GSTextureMTL* tex, MTLLoadAction load_action) {
+	if (tex)
+	{
+		if (tex->GetState() == GSTexture::State::Invalidated)
+		{
+			return { MTLLoadActionDontCare, GSVector4(0.0f) };
+		}
+		else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
+		{
+			return { MTLLoadActionClear, tex->GetClearForFormat() };
+		}
+	}
+	else
+	{
+		return { MTLLoadActionDontCare, GSVector4(0.0f) };
+	}
+};
+
+void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadAction color_load,
+	GSTexture* depth, MTLLoadAction depth_load, GSTexture* stencil, MTLLoadAction stencil_load, bool rt1)
 {
 	GSTextureMTL* mc = static_cast<GSTextureMTL*>(color);
 	GSTextureMTL* md = static_cast<GSTextureMTL*>(depth);
@@ -411,29 +430,11 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 	              || depth   != m_current_render.depth_target
 	              || stencil != m_current_render.stencil_target
 	              || rt1     != m_current_render.has.rt1_depth;
-	GSVector4 color_clear, depth_clear;
 
 	// Depth and stencil might be the same, so do all invalidation checks before resetting invalidation
-	const auto CheckClear = [](GSTextureMTL* tex, MTLLoadAction load_action) {
-		if (tex)
-		{
-			if (tex->GetState() == GSTexture::State::Invalidated)
-			{
-				return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionDontCare, GSVector4(0.0f));
-			}
-			else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
-			{
-				return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionClear, tex->GetClearForFormat());
-			}
-		}
-		else
-		{
-			return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionDontCare, GSVector4(0.0f));
-		}
-	};
-
-	std::tie(color_load, color_clear) = CheckClear(mc, color_load);
-	std::tie(depth_load, depth_clear) = CheckClear(md, depth_load);
+	GSVector4 color_clear, depth_clear;
+	std::tie(color_load, color_clear) = GetRTLoadInfo(mc, color_load);
+	std::tie(depth_load, depth_clear) = GetRTLoadInfo(md, depth_load);
 
 	// Stencil and depth are one texture, stencil clears aren't supported
 	if (ms && ms->GetState() == GSTexture::State::Invalidated)
