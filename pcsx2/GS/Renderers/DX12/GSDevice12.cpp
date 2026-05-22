@@ -2776,12 +2776,12 @@ bool GSDevice12::CompileConvertPipelines()
 					ShaderMacro sm;
 					sm.AddMacro("PIXEL_SHADER", 1);
 					sm.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
-					sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
-					sm.AddMacro("HAS_INTEGER_OUTPUT", IntegerOutputBpp(i) ? 1 : 0);
-					sm.AddMacro("HAS_DEPTH_INPUT", 0);
+					sm.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
+					sm.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
+					sm.AddMacro("HAS_DEPTH_INPUT", 0); // unused
 					sm.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
-					sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
-					sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
+					sm.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
+					sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
 					sm.AddMacro(entry_point_macro.c_str(), 1);
 
 					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shaderName(i)));

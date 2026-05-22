@@ -246,12 +246,12 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				ShaderMacro sm_ps;
 				sm_ps.AddMacro("PIXEL_SHADER", 1);
 				sm_ps.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
-				sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(HasStencilOutput(i)));
-				sm_ps.AddMacro("HAS_INTEGER_OUTPUT", IntegerOutputBpp(i) ? 1 : 0);
-				sm_ps.AddMacro("HAS_DEPTH_INPUT", 0);
+				sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
+				sm_ps.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
+				sm_ps.AddMacro("HAS_DEPTH_INPUT", 0); // unused
 				sm_ps.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
-				sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(HasFloat32Input(i)));
-				sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(HasFloat32Output(i)));
+				sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
+				sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
 				sm_ps.AddMacro(entry_point_macro.c_str(), 1);
 
 				m_convert.ps[shader] = m_shader_cache.GetPixelShader(m_dev.get(), *convert_hlsl, sm_ps.GetPtr(), entry_point);

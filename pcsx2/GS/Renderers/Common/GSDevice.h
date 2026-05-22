@@ -289,6 +289,26 @@ public:
 		return fields.depth_input;
 	}
 
+	bool StencilOutput() const
+	{
+		return HasStencilOutput(Shader());
+	}
+
+	bool Float32Output() const
+	{
+		return HasFloat32Output(Shader());
+	}
+
+	bool Float32Input() const
+	{
+		return HasFloat32Input(Shader());
+	}
+
+	int IntegerOutputBpp() const
+	{
+		return ::IntegerOutputBpp(Shader());
+	}
+
 	ShaderConvertSelector SetMask(u8 mask) const
 	{
 		ShaderConvertSelector tmp = *this;
@@ -328,7 +348,7 @@ public:
 		const ShaderConvert shader = Shader();
 		if (fields.depth_output)
 			return GSTexture::Format::DepthStencil;
-		else if (int bpp = IntegerOutputBpp(shader))
+		else if (int bpp = ::IntegerOutputBpp(shader))
 			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
 		else if (HasFloat32Output(shader))
 			return GSTexture::Format::DepthColor;
