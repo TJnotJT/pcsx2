@@ -523,8 +523,8 @@ enum class PresentShader
 /// Get the name of a shader
 /// (Can't put methods on an enum class)
 ShaderConvert SetDATMShader(SetDATM datm);
-const char* shaderName(ShaderConvert value);
-const char* shaderName(PresentShader value);
+const char* ShaderEntryPoint(ShaderConvert value);
+const char* ShaderEntryPoint(PresentShader value);
 
 enum ChannelFetch
 {

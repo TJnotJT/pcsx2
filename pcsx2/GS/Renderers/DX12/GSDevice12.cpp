@@ -2770,7 +2770,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 					gpb.SetColorWriteMask(0, shader.Mask());
 
-					const char* entry_point = shaderName(i);
+					const char* entry_point = ShaderEntryPoint(i);
 					std::string entry_point_macro = WrapEntryPointMacro(entry_point);
 
 					ShaderMacro sm;
@@ -2784,7 +2784,7 @@ bool GSDevice12::CompileConvertPipelines()
 					sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
 					sm.AddMacro(entry_point_macro.c_str(), 1);
 
-					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shaderName(i)));
+					ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), ShaderEntryPoint(i)));
 					if (!ps)
 						return false;
 
@@ -2888,7 +2888,7 @@ bool GSDevice12::CompilePresentPipelines()
 	{
 		const int index = static_cast<int>(i);
 
-		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, shaderName(i)));
+		ComPtr<ID3DBlob> ps(GetUtilityPixelShader(*shader, ShaderEntryPoint(i)));
 		if (!ps)
 			return false;
 

@@ -427,7 +427,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 				{
 					const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
-					const char* name = shaderName(shader.Shader());
+					const char* name = ShaderEntryPoint(shader.Shader());
 
 					std::string macro;
 					macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
@@ -507,7 +507,7 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 		for (size_t i = 0; i < std::size(m_present); i++)
 		{
-			const char* name = shaderName(static_cast<PresentShader>(i));
+			const char* name = ShaderEntryPoint(static_cast<PresentShader>(i));
 			const std::string ps(GetShaderSource(name, GL_FRAGMENT_SHADER, *shader));
 			if (!m_shader_cache.GetProgram(&m_present[i], present_vs, ps))
 				return false;

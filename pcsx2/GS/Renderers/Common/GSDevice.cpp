@@ -38,7 +38,7 @@ ShaderConvert SetDATMShader(SetDATM datm)
 	}
 }
 
-const char* shaderName(ShaderConvert value)
+const char* ShaderEntryPoint(ShaderConvert value)
 {
 	switch (value)
 	{
@@ -78,7 +78,7 @@ const char* shaderName(ShaderConvert value)
 	}
 }
 
-const char* shaderName(PresentShader value)
+const char* ShaderEntryPoint(PresentShader value)
 {
 	switch (value)
 	{

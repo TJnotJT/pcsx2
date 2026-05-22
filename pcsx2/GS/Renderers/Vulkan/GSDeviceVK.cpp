@@ -4098,7 +4098,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 
 					std::string shader_with_header = macro + *source;
 
-					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, shaderName(i));
+					VkShaderModule ps = GetUtilityFragmentShader(shader_with_header, ShaderEntryPoint(i));
 					if (ps == VK_NULL_HANDLE)
 						return false;
 
@@ -4228,7 +4228,7 @@ bool GSDeviceVK::CompilePresentPipelines()
 	{
 		const int index = static_cast<int>(i);
 
-		VkShaderModule ps = GetUtilityFragmentShader(*shader, shaderName(i));
+		VkShaderModule ps = GetUtilityFragmentShader(*shader, ShaderEntryPoint(i));
 		if (ps == VK_NULL_HANDLE)
 			return false;
 

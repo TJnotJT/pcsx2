@@ -1189,7 +1189,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 						const char* depth_suffix_sep = (supports_depth_input || supports_depth_output) ? "_" : "";
 						const char* depth_input_suffix = supports_depth_input ? (depth_input ? "d" : "c") : "";
 						const char* depth_output_suffix = supports_depth_output ? (depth_output ? "d" : "c") : "";
-						NSString* name = [NSString stringWithFormat:@"%s%s%s%s", shaderName(shader.Shader()), depth_suffix_sep, depth_input_suffix, depth_output_suffix];
+						NSString* name = [NSString stringWithFormat:@"%s%s%s%s", ShaderEntryPoint(shader.Shader()), depth_suffix_sep, depth_input_suffix, depth_output_suffix];
 						switch (conv)
 						{
 							case ShaderConvert::Count:
@@ -1266,9 +1266,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	for (size_t i = 0; i < std::size(m_present_pipeline); i++)
 	{
 		PresentShader conv = static_cast<PresentShader>(i);
-		NSString* name = [NSString stringWithCString:shaderName(conv) encoding:NSUTF8StringEncoding];
+		NSString* name = [NSString stringWithCString:ShaderEntryPoint(conv) encoding:NSUTF8StringEncoding];
 		pdesc.colorAttachments[0].pixelFormat = layer_px_fmt;
-		m_present_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), [NSString stringWithFormat:@"present_%s", shaderName(conv) + 3]);
+		m_present_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), [NSString stringWithFormat:@"present_%s", ShaderEntryPoint(conv) + 3]);
 	}
 
 	pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
@@ -1690,7 +1690,7 @@ void GSDeviceMTL::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextu
 	const LoadAction load_action = (shader.Mask() == 0xf) ? LoadAction::DontCareIfFull : LoadAction::Load;
 	id<MTLRenderPipelineState> pipeline;
 	pipeline = m_convert_pipeline.at(shader);
-	pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
+	pxAssertRel(pipeline, fmt::format("No pipeline for {}", ShaderEntryPoint(shader.Shader())).c_str());
 
 	DoStretchRect(sTex, sRect, dTex, dRect, pipeline, linear, load_action, nullptr, 0);
 }}
@@ -1755,7 +1755,7 @@ void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_r
 		if (new_pipeline != pipeline)
 		{
 			pipeline = new_pipeline;
-			pxAssertRel(pipeline, fmt::format("No pipeline for {}", shaderName(shader.Shader())).c_str());
+			pxAssertRel(pipeline, fmt::format("No pipeline for {}", ShaderEntryPoint(shader.Shader())).c_str());
 			MRESetPipeline(pipeline);
 		}
 		MRESetSampler(linear ? SamplerSelector::Linear() : SamplerSelector::Point());

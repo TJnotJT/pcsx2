@@ -240,7 +240,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			{
 				const ShaderConvertSelector shader(i, 0xf, false, depth_output, biln);
 
-				const char* entry_point = shaderName(shader.Shader());
+				const char* entry_point = ShaderEntryPoint(shader.Shader());
 				std::string entry_point_macro = WrapEntryPointMacro(entry_point);
 
 				ShaderMacro sm_ps;
@@ -272,7 +272,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	for (size_t i = 0; i < std::size(m_present.ps); i++)
 	{
-		m_present.ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *shader, nullptr, shaderName(static_cast<PresentShader>(i)));
+		m_present.ps[i] = m_shader_cache.GetPixelShader(m_dev.get(), *shader, nullptr, ShaderEntryPoint(static_cast<PresentShader>(i)));
 		if (!m_present.ps[i])
 			return false;
 	}
