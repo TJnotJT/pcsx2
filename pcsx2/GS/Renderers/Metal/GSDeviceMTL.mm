@@ -423,10 +423,7 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 			}
 			else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
 			{
-				return std::make_pair<MTLLoadAction, GSVector4>(
-					MTLLoadActionClear,
-					tex->IsDepthLike() ? GSVector4(tex->GetClearDepth()) : tex->GetUNormClearColor()
-				);
+				return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionClear, tex->GetClearForFormat());
 			}
 		}
 		else

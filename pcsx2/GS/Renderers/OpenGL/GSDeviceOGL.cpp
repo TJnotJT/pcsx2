@@ -1315,7 +1315,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 			const u32 old_color_mask = GLState::wrgba;
 			OMSetColorMaskState();
 
-			const GSVector4 c_unorm = T->IsDepthColor() ? GSVector4(T->GetClearDepth()) : T->GetUNormClearColor();
+			const GSVector4 c_unorm = T->GetClearForFormat();
 
 			if (T->IsIntegerFormat())
 			{

@@ -1156,15 +1156,10 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 		cmdlist.list4->ClearDepthStencilView(
 			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
 	}
-	else if (IsDepthColor())
-	{
-		TransitionToState(cmdlist, ResourceState::RenderTarget);
-		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GSVector4(m_clear_value.depth).v, 0, nullptr);
-	}
 	else
 	{
 		TransitionToState(cmdlist, ResourceState::RenderTarget);
-		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GSVector4::unorm8(m_clear_value.color).v, 0, nullptr);
+		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GetClearForFormat().v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
