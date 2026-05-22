@@ -8105,7 +8105,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 
 	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
 		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
-	const bool clear = src_target->m_texture->IsDepthStencil();
+	const bool clear = src_target->m_texture->IsRenderTarget();
 	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
 	if (!src_copy) [[unlikely]]
 	{
