@@ -431,7 +431,7 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 		}
 		else
 		{
-			return { MTLLoadActionDontCare, GSVector4(0.0f) };
+			return std::make_pair<MTLLoadAction, GSVector4>(MTLLoadActionDontCare, GSVector4(0.0f));
 		}
 	};
 
@@ -1253,7 +1253,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 						if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
 						pdesc.colorAttachments[0].writeMask = mask;
 						setFnConstantB(m_fn_constants, shader.Biln(), GSMTLConstantIndex_BILN);
-						m_convert_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
+						m_convert_pipeline[shader] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 					}
 				}
 			}
