@@ -1250,7 +1250,11 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 						if (scmask & 4) mask |= MTLColorWriteMaskBlue;
 						if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
 						pdesc.colorAttachments[0].writeMask = mask;
-						setFnConstantB(m_fn_constants, shader.Biln(), GSMTLConstantIndex_BILN);
+						setFnConstantB(m_fn_constants, shader.Biln(),         GSMTLConstantIndex_BILN);
+						setFnConstantB(m_fn_constants, !shader.DepthInput(),  GSMTLConstantIndex_COLOR_IN);
+						setFnConstantB(m_fn_constants, shader.DepthInput(),   GSMTLConstantIndex_DEPTH_IN);
+						setFnConstantB(m_fn_constants, !shader.DepthOutput(), GSMTLConstantIndex_COLOR_OUT);
+						setFnConstantB(m_fn_constants, shader.DepthOutput(),  GSMTLConstantIndex_DEPTH_OUT);
 						m_convert_pipeline[shader] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 					}
 				}
