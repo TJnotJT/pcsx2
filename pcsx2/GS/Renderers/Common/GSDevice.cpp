@@ -1753,10 +1753,11 @@ static constexpr u32 CalcNumRemappedShaders()
 static constexpr u32 NUM_REMAPPED_SHADERS = CalcNumRemappedShaders();
 static constexpr u32 NUM_TOTAL_SHADERS = NUM_REMAPPED_SHADERS +
                                          16 * ShaderConvertSelector::NUM_VARIABLE_WRITE_MASK_SHADERS;
+static_assert(NUM_REMAPPED_SHADERS <= 256); // We use u8 for the remap indices.
 
-static constexpr std::array<u16, NUM_REMAP_INPUTS> GenRemapArray()
+static constexpr std::array<u8, NUM_REMAP_INPUTS> GenRemapArray()
 {
-	std::array<u16, NUM_REMAP_INPUTS> out{};
+	std::array<u8, NUM_REMAP_INPUTS> out{};
 	u32 out_idx = 0;
 	const u32 invalid = 0xffffffff;
 	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
@@ -1782,7 +1783,7 @@ constexpr std::vector<ShaderConvertSelector> GetPackedShaders()
 
 constinit const u32 ShaderConvertSelector::NUM_REMAPPED_SHADERS = ::NUM_REMAPPED_SHADERS;
 constinit const u32 ShaderConvertSelector::NUM_TOTAL_SHADERS = ::NUM_TOTAL_SHADERS;
-constinit const std::array<u16, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_REMAP = GenRemapArray();
+constinit const std::array<u8, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_REMAP = GenRemapArray();
 const std::vector<ShaderConvertSelector> ShaderConvertSelector::SHADERS = GetPackedShaders();
 
 // clang-format off

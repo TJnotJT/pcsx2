@@ -458,7 +458,7 @@ public:
 private:
 	// Helper variables for packing valid shaders into a contiguous range.
 	static const std::vector<ShaderConvertSelector> SHADERS;
-	static const std::array<u16, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
+	static const std::array<u8, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
 	static const u32 NUM_REMAPPED_SHADERS;
 
 public:
