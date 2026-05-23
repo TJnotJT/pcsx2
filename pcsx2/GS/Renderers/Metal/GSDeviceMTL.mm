@@ -402,22 +402,20 @@ void GSDeviceMTL::EndRenderPass()
 	}
 }
 
-static std::pair<MTLLoadAction, GSVector4> GetRTLoadInfo(GSTextureMTL* tex, MTLLoadAction load_action) {
+static GSVector4 GetRTLoadInfo(GSTextureMTL* tex, MTLLoadAction *load_action) {
 	if (tex)
 	{
 		if (tex->GetState() == GSTexture::State::Invalidated)
 		{
-			return { MTLLoadActionDontCare, GSVector4(0.0f) };
+			*load_action = MTLLoadActionDontCare;
 		}
-		else if (tex->GetState() == GSTexture::State::Cleared && load_action != MTLLoadActionDontCare)
+		else if (tex->GetState() == GSTexture::State::Cleared && *load_action != MTLLoadActionDontCare)
 		{
-			return { MTLLoadActionClear, tex->GetClearForFormat() };
+			*load_action = MTLLoadActionClear;
+			return tex->GetClearForFormat();
 		}
 	}
-	else
-	{
-		return { MTLLoadActionDontCare, GSVector4(0.0f) };
-	}
+	return {};
 };
 
 void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadAction color_load,
@@ -432,9 +430,8 @@ void GSDeviceMTL::BeginRenderPass(NSString* name, GSTexture* color, MTLLoadActio
 	              || rt1     != m_current_render.has.rt1_depth;
 
 	// Depth and stencil might be the same, so do all invalidation checks before resetting invalidation
-	GSVector4 color_clear, depth_clear;
-	std::tie(color_load, color_clear) = GetRTLoadInfo(mc, color_load);
-	std::tie(depth_load, depth_clear) = GetRTLoadInfo(md, depth_load);
+	GSVector4 color_clear = GetRTLoadInfo(mc, &color_load);
+	GSVector4 depth_clear = GetRTLoadInfo(mc, &depth_load);
 
 	// Stencil and depth are one texture, stencil clears aren't supported
 	if (ms && ms->GetState() == GSTexture::State::Invalidated)
@@ -895,6 +892,25 @@ static bool getDepthFeedback(const GSMTLDevice& dev, bool fbfetch)
 	}
 }
 
+// Some shaders are only used by methods on MTLDevice, which currently use separately-compiled shaders
+static bool ConvertShaderNotNeeded(ShaderConvert shader)
+{
+	switch (shader)
+	{
+		case ShaderConvert::DATM_0:
+		case ShaderConvert::DATM_1:
+		case ShaderConvert::DATM_0_RTA_CORRECTION:
+		case ShaderConvert::DATM_1_RTA_CORRECTION:
+		case ShaderConvert::CLUT_4:
+		case ShaderConvert::CLUT_8:
+		case ShaderConvert::COLCLIP_INIT:
+		case ShaderConvert::COLCLIP_RESOLVE:
+			return true;
+		default:
+			return false;
+	}
+}
+
 bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 { @autoreleasepool {
 	if (!GSDevice::Create(vsync_mode, allow_present_throttle))
@@ -1170,63 +1186,24 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_interlace_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
 	}
 
-	for (size_t i = 0; i < static_cast<size_t>(ShaderConvertSelector::NUM_TOTAL_SHADERS); i++)
+	m_convert_pipeline.resize(ShaderConvertSelector::NUM_TOTAL_SHADERS);
+	for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 	{
 		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
+		if (ConvertShaderNotNeeded(shader.Shader()))
+			continue;
 		NSString* name = [NSString stringWithCString:shader.EntryPoint() encoding:NSUTF8StringEncoding];
-		switch (shader.Shader())
+		if (shader.DepthOutput())
 		{
-			case ShaderConvert::Count:
-			case ShaderConvert::DATM_0:
-			case ShaderConvert::DATM_1:
-			case ShaderConvert::DATM_0_RTA_CORRECTION:
-			case ShaderConvert::DATM_1_RTA_CORRECTION:
-			case ShaderConvert::CLUT_4:
-			case ShaderConvert::CLUT_8:
-			case ShaderConvert::COLCLIP_INIT:
-			case ShaderConvert::COLCLIP_RESOLVE:
-				continue;
-			case ShaderConvert::DEPTH32_TO_32_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt32);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::DEPTH32_TO_16_BITS:
-			case ShaderConvert::RGB5A1_TO_16_BITS:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::UInt16);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
-			case ShaderConvert::DEPTH_COPY:
-			case ShaderConvert::DEPTH32_TO_DEPTH24:
-			case ShaderConvert::RGBA8_TO_DEPTH32:
-			case ShaderConvert::RGBA8_TO_DEPTH24:
-			case ShaderConvert::RGBA8_TO_DEPTH16:
-			case ShaderConvert::RGB5A1_TO_DEPTH16:
-				if (shader.DepthOutput())
-				{
-					pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
-					pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
-				}
-				else
-				{
-					pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::DepthColor);
-					pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				}
-				break;
-			case ShaderConvert::COPY:
-			case ShaderConvert::DOWNSAMPLE_COPY:
-			case ShaderConvert::RGBA_TO_8I: // Yes really
-			case ShaderConvert::RGB5A1_TO_8I:
-			case ShaderConvert::RTA_CORRECTION:
-			case ShaderConvert::RTA_DECORRECTION:
-			case ShaderConvert::TRANSPARENCY_FILTER:
-			case ShaderConvert::DEPTH32_TO_RGBA8:
-			case ShaderConvert::DEPTH32_TO_RGB8:
-			case ShaderConvert::DEPTH16_TO_RGB5A1:
-			case ShaderConvert::YUV:
-				pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
-				pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
-				break;
+			pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
+			pdesc.depthAttachmentPixelFormat = ConvertPixelFormat(GSTexture::Format::DepthStencil);
 		}
+		else
+		{
+			pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(shader.OutputFormat());
+			pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+		}
+
 		const u32 scmask = shader.Mask();
 		MTLColorWriteMask mask = MTLColorWriteMaskNone;
 		if (scmask & 1) mask |= MTLColorWriteMaskRed;
