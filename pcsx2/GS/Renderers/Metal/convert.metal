@@ -6,10 +6,10 @@
 using namespace metal;
 
 constant bool BILN      [[function_constant(GSMTLConstantIndex_BILN)]];
-constant bool COLOR_IN  [[function_constant(GSMTLConstantIndex_COLOR_IN)]];
 constant bool DEPTH_IN  [[function_constant(GSMTLConstantIndex_DEPTH_IN)]];
-constant bool COLOR_OUT [[function_constant(GSMTLConstantIndex_COLOR_OUT)]];
 constant bool DEPTH_OUT [[function_constant(GSMTLConstantIndex_DEPTH_OUT)]];
+constant bool COLOR_IN  = !DEPTH_IN;
+constant bool COLOR_OUT = !DEPTH_OUT;
 
 struct ConvertVSIn
 {
