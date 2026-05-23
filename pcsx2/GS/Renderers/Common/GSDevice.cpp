@@ -1716,7 +1716,7 @@ void GSHWDrawConfig::DumpConfig(const std::string& path, const GSHWDrawConfig& c
 
 static constexpr u32 NUM_REMAP_INPUTS = static_cast<u32>(ShaderConvert::Count) * 8;
 
-static ShaderConvertSelector GetRemappedShader(u32 idx)
+static constexpr ShaderConvertSelector GetRemappedShader(u32 idx)
 {
 	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 3);
 	bool depth_in = (idx >> 0) & 1;
@@ -1765,26 +1765,27 @@ static constexpr std::array<u8, NUM_REMAP_INPUTS> GenRemapArray()
 	return out;
 }
 
-constexpr std::vector<ShaderConvertSelector> GetPackedShaders()
+static constexpr std::array<ShaderConvertSelector, NUM_TOTAL_SHADERS> GetPackedShaders()
 {
-	std::vector<ShaderConvertSelector> out;
-	out.reserve(NUM_TOTAL_SHADERS);
+	std::array<ShaderConvertSelector, NUM_TOTAL_SHADERS> out;
+	u32 append_idx = 0;
 	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
 	{
 		if (RemapIndexIsValid(i))
-			out.push_back(GetRemappedShader(i));
+			out[append_idx++] = GetRemappedShader(i);
 	}
 	for (u32 i = 0; i < 16; i++)
-		out.push_back(ShaderConvertSelector(ShaderConvert::COPY, i));
+		out[append_idx++] = ShaderConvertSelector(ShaderConvert::COPY, i);
 	for (u32 i = 0; i < 16; i++)
-		out.push_back(ShaderConvertSelector(ShaderConvert::RTA_CORRECTION, i));
+		out[append_idx++] = ShaderConvertSelector(ShaderConvert::RTA_CORRECTION, i);
 	return out;
 }
 
 constinit const u32 ShaderConvertSelector::NUM_REMAPPED_SHADERS = ::NUM_REMAPPED_SHADERS;
 constinit const u32 ShaderConvertSelector::NUM_TOTAL_SHADERS = ::NUM_TOTAL_SHADERS;
 constinit const std::array<u8, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_REMAP = GenRemapArray();
-const std::vector<ShaderConvertSelector> ShaderConvertSelector::SHADERS = GetPackedShaders();
+static constexpr auto PACKED_SHADERS = GetPackedShaders();
+const std::span<const ShaderConvertSelector> ShaderConvertSelector::SHADERS = PACKED_SHADERS;
 
 // clang-format off
 

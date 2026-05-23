@@ -1,0 +1,149 @@
+From 4537e836877611eb3058216d47904b67d54234ff Mon Sep 17 00:00:00 2001
+From: TellowKrinkle <tellowkrinkle@gmail.com>
+Date: Fri, 22 May 2026 23:55:59 -0500
+Subject: [PATCH] Less dynamically-initialized globals
+
+---
+ pcsx2/GS/Renderers/Common/GSDevice.cpp | 17 +++++++++--------
+ pcsx2/GS/Renderers/Common/GSDevice.h   | 21 +++++++++++----------
+ 2 files changed, 20 insertions(+), 18 deletions(-)
+
+diff --git a/pcsx2/GS/Renderers/Common/GSDevice.cpp b/pcsx2/GS/Renderers/Common/GSDevice.cpp
+index 4884ce5718..cf539e567f 100644
+--- a/pcsx2/GS/Renderers/Common/GSDevice.cpp
++++ b/pcsx2/GS/Renderers/Common/GSDevice.cpp
+@@ -1716,7 +1716,7 @@ void GSHWDrawConfig::DumpConfig(const std::string& path, const GSHWDrawConfig& c
+ 
+ static constexpr u32 NUM_REMAP_INPUTS = static_cast<u32>(ShaderConvert::Count) * 8;
+ 
+-static ShaderConvertSelector GetRemappedShader(u32 idx)
++static constexpr ShaderConvertSelector GetRemappedShader(u32 idx)
+ {
+ 	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 3);
+ 	bool depth_in = (idx >> 0) & 1;
+@@ -1764,26 +1764,27 @@ static constexpr std::array<u16, NUM_REMAP_INPUTS> GenRemapArray()
+ 	return out;
+ }
+ 
+-constexpr std::vector<ShaderConvertSelector> GetPackedShaders()
++static constexpr std::array<ShaderConvertSelector, NUM_TOTAL_SHADERS> GetPackedShaders()
+ {
+-	std::vector<ShaderConvertSelector> out;
+-	out.reserve(NUM_TOTAL_SHADERS);
++	std::array<ShaderConvertSelector, NUM_TOTAL_SHADERS> out;
++	u32 append_idx = 0;
+ 	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
+ 	{
+ 		if (RemapIndexIsValid(i))
+-			out.push_back(GetRemappedShader(i));
++			out[append_idx++] = GetRemappedShader(i);
+ 	}
+ 	for (u32 i = 0; i < 16; i++)
+-		out.push_back(ShaderConvertSelector(ShaderConvert::COPY, i));
++		out[append_idx++] = ShaderConvertSelector(ShaderConvert::COPY, i);
+ 	for (u32 i = 0; i < 16; i++)
+-		out.push_back(ShaderConvertSelector(ShaderConvert::RTA_CORRECTION, i));
++		out[append_idx++] = ShaderConvertSelector(ShaderConvert::RTA_CORRECTION, i);
+ 	return out;
+ }
+ 
+ constinit const u32 ShaderConvertSelector::NUM_REMAPPED_SHADERS = ::NUM_REMAPPED_SHADERS;
+ constinit const u32 ShaderConvertSelector::NUM_TOTAL_SHADERS = ::NUM_TOTAL_SHADERS;
+ constinit const std::array<u16, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_REMAP = GenRemapArray();
+-const std::vector<ShaderConvertSelector> ShaderConvertSelector::SHADERS = GetPackedShaders();
++static constexpr auto PACKED_SHADERS = GetPackedShaders();
++const std::span<const ShaderConvertSelector> ShaderConvertSelector::SHADERS = PACKED_SHADERS;
+ 
+ // clang-format off
+ 
+diff --git a/pcsx2/GS/Renderers/Common/GSDevice.h b/pcsx2/GS/Renderers/Common/GSDevice.h
+index 6c0ba38061..4f5bd04b80 100644
+--- a/pcsx2/GS/Renderers/Common/GSDevice.h
++++ b/pcsx2/GS/Renderers/Common/GSDevice.h
+@@ -13,6 +13,7 @@
+ #include "GS/GSAlignedClass.h"
+ #include "GS/GSExtra.h"
+ #include <array>
++#include <span>
+ 
+ enum class ShaderConvert
+ {
+@@ -98,6 +99,7 @@ static inline constexpr const char* ShaderConvertName(ShaderConvert shader)
+ 		ENTRY(CLUT_4);
+ 		ENTRY(CLUT_8);
+ 		ENTRY(YUV);
++		case ShaderConvert::Count: break;
+ 	}
+ 	#undef ENTRY
+ 	pxAssert(false);
+@@ -320,15 +322,14 @@ class ShaderConvertSelector
+ 	static_assert(sizeof(fields) == 4);
+ 
+ public:
+-	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_in = false,
++	constexpr ShaderConvertSelector(ShaderConvert shader = ShaderConvert::COPY, u8 mask = 0xf, bool depth_in = false,
+ 		bool depth_out = false, bool biln = false)
++		: fields { static_cast<u32>(shader) }
+ 	{
+-		fields.key = 0;
+-		fields.shader = static_cast<u8>(shader); // Needs to be set before using setters.
+ 		*this = SetMask(mask).SetDepthInput(depth_in).SetDepthOutput(depth_out).SetBiln(biln);
+ 	}
+ 
+-	ShaderConvert Shader() const
++	constexpr ShaderConvert Shader() const
+ 	{
+ 		return static_cast<ShaderConvert>(fields.shader);
+ 	}
+@@ -403,34 +404,34 @@ public:
+ 		return ShaderEntryPoint(Shader());
+ 	}
+ 
+-	ShaderConvertSelector SetMask(u8 mask) const
++	constexpr ShaderConvertSelector SetMask(u8 mask) const
+ 	{
+ 		ShaderConvertSelector tmp = *this;
+ 		tmp.fields.mask = HasVariableWriteMask(Shader()) ? (mask & 0xf) : ShaderConvertWriteMask(Shader());
+ 		return tmp;
+ 	}
+ 
+-	ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
++	constexpr ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
+ 	{
+ 		return SetMask(static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) |
+ 			(static_cast<u8>(wb) << 2) | (static_cast<u8>(wa) << 3));
+ 	}
+ 
+-	ShaderConvertSelector SetDepthInput(bool depth_in) const
++	constexpr ShaderConvertSelector SetDepthInput(bool depth_in) const
+ 	{
+ 		ShaderConvertSelector tmp = *this;
+ 		tmp.fields.depth_in = HasFloat32Input(Shader()) && depth_in;
+ 		return tmp;
+ 	}
+ 
+-	ShaderConvertSelector SetDepthOutput(bool depth_out) const
++	constexpr ShaderConvertSelector SetDepthOutput(bool depth_out) const
+ 	{
+ 		ShaderConvertSelector tmp = *this;
+ 		tmp.fields.depth_out = HasFloat32Output(Shader()) && depth_out;
+ 		return tmp;
+ 	}
+ 
+-	ShaderConvertSelector SetBiln(bool biln)
++	constexpr ShaderConvertSelector SetBiln(bool biln) const
+ 	{
+ 		ShaderConvertSelector tmp = *this;
+ 		tmp.fields.biln = SupportsBilinear(Shader()) && biln;
+@@ -456,7 +457,7 @@ public:
+ 
+ private:
+ 	// Helper variables for packing valid shaders into a contiguous range.
+-	static const std::vector<ShaderConvertSelector> SHADERS;
++	static const std::span<const ShaderConvertSelector> SHADERS;
+ 	static const std::array<u16, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
+ 	static const u32 NUM_REMAPPED_SHADERS;
+ 
+-- 
+2.39.5 (Apple Git-154)
+
