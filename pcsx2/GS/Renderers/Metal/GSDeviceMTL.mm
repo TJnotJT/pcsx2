@@ -1192,7 +1192,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
 		if (ConvertShaderNotNeeded(shader.Shader()))
 			continue;
-		NSString* name = [NSString stringWithCString:shader.EntryPoint() encoding:NSUTF8StringEncoding];
+		NSString* shader_name = [NSString stringWithCString:shader.EntryPoint() encoding:NSUTF8StringEncoding];
 		if (shader.DepthOutput())
 		{
 			pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
@@ -1203,6 +1203,15 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(shader.OutputFormat());
 			pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 		}
+		NSString* name = shader_name;
+		if (shader.VariableWriteMask())
+			name = [name stringWithFormat:@" Mask=%x" shader.Mask()];
+		if (shader.Biln())
+			name = [name stringByAppendingString:@" Biln"];
+		if (HasFloat32Input(shader.Shader()))
+			name = [name stringByAppendingString:shader.DepthInput() ? @" Depth" : @" Float"];
+		if (HasFloat32Output(shader.Shader()))
+			name = [name stringByAppendingString:shader.DepthOutput() ? @" → Depth" : @" → Float"];
 
 		const u32 scmask = shader.Mask();
 		MTLColorWriteMask mask = MTLColorWriteMaskNone;
@@ -1214,7 +1223,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		setFnConstantB(m_fn_constants, shader.Biln(),        GSMTLConstantIndex_BILN);
 		setFnConstantB(m_fn_constants, shader.DepthInput(),  GSMTLConstantIndex_DEPTH_IN);
 		setFnConstantB(m_fn_constants, shader.DepthOutput(), GSMTLConstantIndex_DEPTH_OUT);
-		m_convert_pipeline[shader.Index()] = MakePipeline(pdesc, vs_convert, LoadShader(name), name);
+		m_convert_pipeline[shader.Index()] = MakePipeline(pdesc, vs_convert, LoadShader(shader_name), name);
 	}
 	pdesc.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
 	pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
