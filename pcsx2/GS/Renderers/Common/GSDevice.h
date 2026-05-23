@@ -13,6 +13,7 @@
 #include "GS/GSAlignedClass.h"
 #include "GS/GSExtra.h"
 #include <array>
+#include <span>
 
 enum class ShaderConvert
 {
@@ -98,6 +99,7 @@ static inline constexpr const char* ShaderConvertName(ShaderConvert shader)
 		ENTRY(CLUT_4);
 		ENTRY(CLUT_8);
 		ENTRY(YUV);
+		case ShaderConvert::Count: break;
 	}
 	#undef ENTRY
 	pxAssert(false);
@@ -320,15 +322,14 @@ class ShaderConvertSelector
 	static_assert(sizeof(fields) == 4);
 
 public:
-	ShaderConvertSelector(ShaderConvert shader, u8 mask = 0xf, bool depth_in = false,
-		bool depth_out = false, bool biln = false)
+	constexpr ShaderConvertSelector(ShaderConvert shader = ShaderConvert::COPY, u8 mask = 0xf, bool depth_in = false,
+ 		bool depth_out = false, bool biln = false)
+		: fields { static_cast<u32>(shader) }
 	{
-		fields.key = 0;
-		fields.shader = static_cast<u8>(shader); // Needs to be set before using setters.
 		*this = SetMask(mask).SetDepthInput(depth_in).SetDepthOutput(depth_out).SetBiln(biln);
 	}
 
-	ShaderConvert Shader() const
+	constexpr ShaderConvert Shader() const
 	{
 		return static_cast<ShaderConvert>(fields.shader);
 	}
@@ -403,34 +404,34 @@ public:
 		return ShaderEntryPoint(Shader());
 	}
 
-	ShaderConvertSelector SetMask(u8 mask) const
+	constexpr ShaderConvertSelector SetMask(u8 mask) const
 	{
 		ShaderConvertSelector tmp = *this;
 		tmp.fields.mask = HasVariableWriteMask(Shader()) ? (mask & 0xf) : ShaderConvertWriteMask(Shader());
 		return tmp;
 	}
 
-	ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
+	constexpr ShaderConvertSelector SetMask(bool wr, bool wg, bool wb, bool wa) const
 	{
 		return SetMask(static_cast<u8>(wr) | (static_cast<u8>(wg) << 1) |
 			(static_cast<u8>(wb) << 2) | (static_cast<u8>(wa) << 3));
 	}
 
-	ShaderConvertSelector SetDepthInput(bool depth_in) const
+	constexpr ShaderConvertSelector SetDepthInput(bool depth_in) const
 	{
 		ShaderConvertSelector tmp = *this;
 		tmp.fields.depth_in = HasFloat32Input(Shader()) && depth_in;
 		return tmp;
 	}
 
-	ShaderConvertSelector SetDepthOutput(bool depth_out) const
+	constexpr ShaderConvertSelector SetDepthOutput(bool depth_out) const
 	{
 		ShaderConvertSelector tmp = *this;
 		tmp.fields.depth_out = HasFloat32Output(Shader()) && depth_out;
 		return tmp;
 	}
 
-	ShaderConvertSelector SetBiln(bool biln)
+	constexpr ShaderConvertSelector SetBiln(bool biln) const
 	{
 		ShaderConvertSelector tmp = *this;
 		tmp.fields.biln = SupportsBilinear(Shader()) && biln;
@@ -456,8 +457,8 @@ public:
 
 private:
 	// Helper variables for packing valid shaders into a contiguous range.
-	static const std::vector<ShaderConvertSelector> SHADERS;
-	static const std::array<u16, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
+	static const std::span<const ShaderConvertSelector> SHADERS;
+	static const std::array<u8, static_cast<u32>(ShaderConvert::Count) * 8> INDEX_REMAP;
 	static const u32 NUM_REMAPPED_SHADERS;
 
 public:

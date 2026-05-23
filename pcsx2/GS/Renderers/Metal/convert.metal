@@ -6,10 +6,10 @@
 using namespace metal;
 
 constant bool BILN      [[function_constant(GSMTLConstantIndex_BILN)]];
-constant bool COLOR_IN  [[function_constant(GSMTLConstantIndex_COLOR_IN)]];
 constant bool DEPTH_IN  [[function_constant(GSMTLConstantIndex_DEPTH_IN)]];
-constant bool COLOR_OUT [[function_constant(GSMTLConstantIndex_COLOR_OUT)]];
 constant bool DEPTH_OUT [[function_constant(GSMTLConstantIndex_DEPTH_OUT)]];
+constant bool COLOR_IN  = !DEPTH_IN;
+constant bool COLOR_OUT = !DEPTH_OUT;
 
 struct ConvertVSIn
 {
@@ -220,13 +220,15 @@ static float rgb5a1_to_depth16(half4 unorm)
 	return float(out) * 0x1p-32f;
 }
 
-struct DepthOrColorOut {
+struct DepthOrColorOut
+{
 	float color [[color(0), function_constant(COLOR_OUT)]];
 	float depth [[depth(any), function_constant(DEPTH_OUT)]];
 	DepthOrColorOut(float value): color(value), depth(value) {}
 };
 
-struct ConvertPSDepthOrColorRes {
+struct ConvertPSDepthOrColorRes
+{
 	texture2d<float> color [[texture(GSMTLTextureIndexNonHW), function_constant(COLOR_IN)]];
 	depth2d<float> depth [[texture(GSMTLTextureIndexNonHW), function_constant(DEPTH_IN)]];
 	sampler s [[sampler(0)]];
