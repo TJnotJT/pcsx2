@@ -706,8 +706,8 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
 	const GSVector4& dRect, ShaderConvertSelector shader, bool linear)
 {
-	pxAssert((dTex && dTex->IsDepthLike()) == HasFloat32Output(shader.Shader()));
-	pxAssert(!linear || !shader.Biln()); // Don't do SW and HW bilinear at the same time.
+	pxAssert((dTex && dTex->IsDepthLike()) == shader.Float32Output());
+	pxAssert(!linear || !shader.Biln()); // Don't allow HW bilinear if SW bilinear is required.
 	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.Shader()),
 		int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),
