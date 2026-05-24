@@ -6412,7 +6412,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 				}
 
 				if (BindDrawPipeline(m_pipeline_selector))
-					DrawIndexedPrimitive(p, count);
+					Draw(config, p, count);
 
 				prims -= (*config.drawlist)[n];
 				p += count;

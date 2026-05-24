@@ -4619,7 +4619,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 					}
 
 					if (BindDrawPipeline(pipe))
-						DrawIndexedPrimitive(p, count);
+						Draw(config, p, count);
 
 					prims -= (*config.drawlist)[n];
 					p += count;

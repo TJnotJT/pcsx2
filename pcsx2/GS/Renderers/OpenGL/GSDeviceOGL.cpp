@@ -3102,7 +3102,7 @@ void GSDeviceOGL::SendHWDraw(const GSHWDrawConfig& config,
 					g_perfmon.Put(GSPerfMon::Barriers, 1);
 				}
 
-				DrawIndexedPrimitive(p, count);
+				Draw(config, p, count);
 
 				prims -= (*config.drawlist)[n];
 				p += count;

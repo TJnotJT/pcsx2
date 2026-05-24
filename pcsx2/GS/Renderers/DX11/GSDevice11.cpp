@@ -3093,7 +3093,7 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 					CopyAndBind(ProcessCopyArea(rtsize, original_bbox));
 				}
 
-				DrawIndexedPrimitive(p, count);
+				Draw(config, p, count);
 
 				prims -= (*config.drawlist)[n];
 				p += count;
