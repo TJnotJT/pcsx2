@@ -10383,25 +10383,37 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	std::memset(static_cast<void*>(&config.cb_ps), 0, sizeof(config.cb_ps));
 
 	// Reused between draws, since the draw config is shared, you can't have multiple draws in flight anyway.
-	static GSVertex vertices[4];
-	static constexpr u16 indices[6] = {0, 1, 2, 2, 1, 3};
+	static GSVertex vertices[6];
+	static constexpr u16 indices[6] = {0, 1, 2, 3, 4, 5};
+	const bool sprite_align = (GSConfig.SpriteAlign != GSSpriteAlignMode::Off);
 
-#define V(i, x, y, u, v) \
-	do \
-	{ \
-		vertices[i].XYZ.X = x; \
-		vertices[i].XYZ.Y = y; \
-		vertices[i].U = u; \
-		vertices[i].V = v; \
-	} while (0)
+	const auto EmitVertex = [&](int i, int x, int y, int u, int v) {
+		vertices[i].XYZ.X = x;
+		vertices[i].XYZ.Y = y;
+		if (sprite_align)
+		{
+			// Sprite align shader expects coords in ST.
+			// Center UVs to avoid rounding issues.
+			vertices[i].ST.S = static_cast<float>(u | 8);
+			vertices[i].ST.T = static_cast<float>(v | 8);
+		}
+		else
+		{
+			vertices[i].U = u;
+			vertices[i].V = v;
+		}
+	};
+
+	// Expand as 6 separate vertices in case we need to use sprite align shader.
 
 	const GSVector4i fp_rect = unscaled_rect.sll32<4>();
-	V(0, fp_rect.x, fp_rect.y, fp_rect.x, fp_rect.y); // top-left
-	V(1, fp_rect.z, fp_rect.y, fp_rect.z, fp_rect.y); // top-right
-	V(2, fp_rect.x, fp_rect.w, fp_rect.x, fp_rect.w); // bottom-left
-	V(3, fp_rect.z, fp_rect.w, fp_rect.z, fp_rect.w); // bottom-right
+	EmitVertex(0, fp_rect.x, fp_rect.y, fp_rect.x, fp_rect.y); // top-left
+	EmitVertex(1, fp_rect.z, fp_rect.y, fp_rect.z, fp_rect.y); // top-right
+	EmitVertex(2, fp_rect.x, fp_rect.w, fp_rect.x, fp_rect.w); // bottom-left
 
-#undef V
+	EmitVertex(3, fp_rect.z, fp_rect.w, fp_rect.z, fp_rect.w); // bottom-right
+	EmitVertex(4, fp_rect.x, fp_rect.w, fp_rect.x, fp_rect.w); // bottom-left
+	EmitVertex(5, fp_rect.z, fp_rect.y, fp_rect.z, fp_rect.y); // top-right
 
 	GSTexture* rt_or_ds = rt ? rt : ds;
 	config.rt = rt;
@@ -10431,6 +10443,11 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	config.vs.tme = tex != nullptr;
 	config.vs.iip = true;
 	config.vs.fst = true;
+	if (sprite_align)
+	{
+		config.vs.align_uv = true;
+		config.vs.expand = GSHWDrawConfig::VSExpand::Triangle;
+	}
 	config.ps.key_lo = 0;
 	config.ps.key_hi = 0;
 	config.ps.tfx = tex ? TFX_DECAL : TFX_NONE;
@@ -10448,7 +10465,15 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 
 	const GSVector2i rtsize = rt_or_ds->GetSize();
 	config.cb_vs.vertex_scale = GSVector2(2.0f * rt_scale / (rtsize.x << 4), 2.0f * rt_scale / (rtsize.y << 4));
-	config.cb_vs.vertex_offset = GSVector2(-1.0f / rtsize.x + 1.0f, -1.0f / rtsize.y + 1.0f);
+
+	if (!sprite_align)
+	{
+		config.cb_vs.vertex_offset = GSVector2(-1.0f / rtsize.x + 1.0f, -1.0f / rtsize.y + 1.0f);
+	}
+	else
+	{
+		config.cb_vs.vertex_offset = GSVector2(0.0f, 0.0f);
+	}
 
 	return config;
 }
