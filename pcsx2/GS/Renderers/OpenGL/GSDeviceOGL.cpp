@@ -2742,26 +2742,12 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	// Destination Alpha Setup
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.feedback_loops());
-	switch (config.destination_alpha)
-	{
-		case GSHWDrawConfig::DestinationAlphaMode::Off:
-		case GSHWDrawConfig::DestinationAlphaMode::Full:
-			break; // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking:
-			break; // Done below
-		case GSHWDrawConfig::DestinationAlphaMode::StencilOne:
-			if (need_barrier)
-			{
-				// Cleared after RT bind.
-				break;
-			}
-			[[fallthrough]];
-		case GSHWDrawConfig::DestinationAlphaMode::Stencil:
-			SetupDATE(colclip_rt ? colclip_rt : config.rt, config.ds, config.datm, config.drawarea);
-			break;
-	}
+	
+	// Destination Alpha stencil setup
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil ||
+		(config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne && !need_barrier))
+		SetupDATE(colclip_rt ? colclip_rt : config.rt, config.ds, config.datm, config.drawarea);
 
 	// Destination alpha / AA1 primid setup
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||

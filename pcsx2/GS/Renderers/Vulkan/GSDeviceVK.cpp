@@ -5925,20 +5925,14 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	// Destination Alpha Stencil Setup
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
-	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
-	{
-		// we only need to do the setup here if we don't have barriers, in which case do full DATE.
-		if (!need_barrier)
-		{
-			SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-			config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
-		}
-	}
-	else if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil)
+
+	// Destination Alpha stencil setup
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil ||
+		(config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne && !need_barrier))
 	{
 		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
+		config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
 	}
 
 	// Switch to colclip target for colclip hw rendering
