@@ -4237,6 +4237,22 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
+	// stream buffer in first, in case we need to exec
+	SetVSConstantBuffer(config.cb_vs);
+	SetPSConstantBuffer(config.cb_ps);
+
+	// bind textures before checking the render pass, in case we need to transition them
+	if (config.tex)
+	{
+		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds);
+		PSSetSampler(config.sampler);
+	}
+	if (config.pal)
+		PSSetShaderResource(1, config.pal, true);
+
+	if (config.blend.constant_enable)
+		SetBlendConstants(config.blend.constant);
+
 	// Primitive ID tracking DATE/AA1 setup.
 	GSTexture12* date_image = nullptr;
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking ||
@@ -4292,45 +4308,21 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	// Destination Alpha Setup
+	// Destination Alpha Stencil Setup
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
-	switch (config.destination_alpha)
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
 	{
-		case GSHWDrawConfig::DestinationAlphaMode::Off: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::Full: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking: // Setup is done below
-			break;
-		case GSHWDrawConfig::DestinationAlphaMode::StencilOne: // setup is done below
+		// we only need to do the setup here if we don't have barriers, in which case do full DATE.
+		if (!need_barrier)
 		{
-			// we only need to do the setup here if we don't have barriers, in which case do full DATE.
-			if (!need_barrier)
-			{
-				SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-				config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
-			}
-		}
-		break;
-
-		case GSHWDrawConfig::DestinationAlphaMode::Stencil:
 			SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-			break;
+			config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
+		}
 	}
-
-	// stream buffer in first, in case we need to exec
-	SetVSConstantBuffer(config.cb_vs);
-	SetPSConstantBuffer(config.cb_ps);
-
-	// bind textures before checking the render pass, in case we need to transition them
-	if (config.tex)
+	else if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil)
 	{
-		PSSetShaderResource(0, config.tex, config.tex != config.rt && config.tex != config.ds);
-		PSSetSampler(config.sampler);
+		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
 	}
-	if (config.pal)
-		PSSetShaderResource(1, config.pal, true);
-
-	if (config.blend.constant_enable)
-		SetBlendConstants(config.blend.constant);
 
 	// Switch to colclip target for colclip hw rendering
 	if (pipe.ps.colclip_hw)

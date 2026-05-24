@@ -5925,28 +5925,20 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		}
 	}
 
-	// Destination Alpha Setup
+	// Destination Alpha Stencil Setup
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
-	switch (config.destination_alpha)
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
 	{
-		case GSHWDrawConfig::DestinationAlphaMode::Off: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::Full: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking: // Setup is done below
-			break;
-		case GSHWDrawConfig::DestinationAlphaMode::StencilOne: // setup is done below
+		// we only need to do the setup here if we don't have barriers, in which case do full DATE.
+		if (!need_barrier)
 		{
-			// we only need to do the setup here if we don't have barriers, in which case do full DATE.
-			if (!need_barrier)
-			{
-				SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-				config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
-			}
-		}
-		break;
-
-		case GSHWDrawConfig::DestinationAlphaMode::Stencil:
 			SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-			break;
+			config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
+		}
+	}
+	else if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil)
+	{
+		SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
 	}
 
 	// Switch to colclip target for colclip hw rendering
