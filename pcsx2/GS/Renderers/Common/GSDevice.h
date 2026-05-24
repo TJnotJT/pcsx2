@@ -344,6 +344,11 @@ public:
 		return fields.biln;
 	}
 
+	bool SupportsBilinear() const
+	{
+		return ::SupportsBilinear(Shader());
+	}
+
 	bool ColorOutput() const
 	{
 		return HasColorOutput(Shader());
@@ -434,7 +439,7 @@ public:
 	constexpr ShaderConvertSelector SetBiln(bool biln) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.biln = SupportsBilinear(Shader()) && biln;
+		tmp.fields.biln = ::SupportsBilinear(Shader()) && biln;
 		return tmp;
 	}
 

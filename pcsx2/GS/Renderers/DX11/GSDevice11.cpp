@@ -1414,6 +1414,7 @@ void GSDevice11::DoStretchRect(GSTexture* sTex, const GSVector4& sRect, GSTextur
 {
 	const u8 mask = shader.Mask();
 	shader = ProcessShaderConvertSelector(shader); // Removes mask and depth output.
+	linear &= !shader.SupportsBilinear(); // Don't allow HW bilinear if SW bilinear is needed.
 	DoStretchRect(sTex, sRect, dTex, dRect, GetConvertShader(shader), nullptr, m_convert.bs[mask].get(), linear);
 }
 
