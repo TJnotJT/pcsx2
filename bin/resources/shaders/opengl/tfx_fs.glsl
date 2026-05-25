@@ -1475,9 +1475,10 @@ void ps_main()
 		input_z = sample_from_depth(); // No depth update for triangle edges.
 #endif
 
-// Writing back color (nothing to do for non-ROV)
+// Writing back color (result is already in o_col0 for non-ROV)
 #if PS_RETURN_COLOR_ROV
-	o_col0 = mix(sample_from_rt(), o_col0, bvec4(ColorMask & uvec4(!rov_discard)));
+	bvec4 discard_channels = bvec4(uvec4(rov_discard) | uvec4(equal(FbMask, uvec4(0xFFu))));
+	o_col0 = mix(o_col0, sample_from_rt(), discard_channels);
 
 	imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 #endif

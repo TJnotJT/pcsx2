@@ -308,9 +308,6 @@ cbuffer cb1
 	float4x4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
-	float pad0;
-	float pad1;
-	uint4 ColorMask;
 };
 
 float4 RtLoad(int2 xy)
@@ -1598,7 +1595,7 @@ if (bad)
 		#endif
 	#endif
 #elif PS_RETURN_COLOR_ROV
-	output.c0 = (bool4(ColorMask) & !rov_discard) ? output.c0 : RtLoad(input.p.xy);
+	output.c0 = (rov_discard | (FbMask == 0xFFu)) ? RtLoad(input.p.xy) : output.c0;
 
 	RtWrite(input.p.xy, output.c0);
 #endif

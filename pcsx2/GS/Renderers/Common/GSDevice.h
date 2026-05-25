@@ -1199,7 +1199,6 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
-		GSVector4i ColorMask;
 
 		__fi PSConstantBuffer()
 		{

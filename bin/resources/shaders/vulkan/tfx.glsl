@@ -624,9 +624,6 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	mat4 DitherMatrix;
 	float ScaledScaleFactor;
 	float RcpScaleFactor;
-	float pad0;
-	float pad1;
-	uvec4 ColorMask;
 };
 
 layout(location = 0) in VSOutput
@@ -662,7 +659,7 @@ layout(location = 0) in VSOutput
 #if PS_ROV_DEPTH
 	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
 	float rov_depth_value;
-	vec4 sample_from_depth() { return vec4(rov_depth_value, 0.0f, 0.0f, 0.0f); }
+	float sample_from_depth() { return rov_depth_value; }
 #endif
 
 #if NEEDS_TEX
@@ -678,7 +675,7 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 		#endif
 		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-			vec4 sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0); }
+			float sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r; }
 		#endif
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
@@ -686,13 +683,13 @@ layout(set = 1, binding = 1) uniform texture2D Palette;
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
+			float sample_from_depth() { return subpassLoad(DepthSampler).r; }
 		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
 		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
-			vec4 sample_from_depth() { return subpassLoad(DepthSampler); }
+			float sample_from_depth() { return subpassLoad(DepthSampler).r; }
 		#endif
 	#endif
 #endif
@@ -1751,10 +1748,10 @@ void main()
 #endif
 
 #if PS_ZTST == ZTST_GEQUAL
-	if (input_z < sample_from_depth().r)
+	if (input_z < sample_from_depth())
 		DISCARD;
 #elif PS_ZTST == ZTST_GREATER
-	if (input_z <= sample_from_depth().r)
+	if (input_z <= sample_from_depth())
 		DISCARD;
 #endif
 
@@ -1935,7 +1932,7 @@ void main()
 		// Alpha test with feedback
 		#if PS_AFAIL == AFAIL_FB_ONLY
 			if (!atst_pass)
-				input_z = sample_from_depth().r;
+				input_z = sample_from_depth();
 		#elif PS_AFAIL == AFAIL_ZB_ONLY
 			if (!atst_pass)
 				o_col0 = sample_from_rt();
@@ -1944,7 +1941,7 @@ void main()
 			{
 				o_col0.a = sample_from_rt().a;
 			#if PS_AFAIL == AFAIL_RGB_ONLY_SW_Z
-				input_z = sample_from_depth().r;
+				input_z = sample_from_depth();
 			#endif
 			}
 		#endif
@@ -1956,12 +1953,13 @@ void main()
 	
 	#if PS_AA1 == PS_AA1_TRIANGLE_SW_Z
 		if (!bool(vsIn.interior))
-			input_z = sample_from_depth().r; // No depth update for triangle edges.
+			input_z = sample_from_depth(); // No depth update for triangle edges.
 	#endif
 	
-	// Writing back color (nothing to do for non-ROV)
+	// Writing back color (result is already in o_col0 for non-ROV)
 	#if PS_RETURN_COLOR_ROV
-		o_col0 = mix(sample_from_rt(), o_col0, bvec4(ColorMask & uvec4(!rov_discard)));
+		bvec4 discard_channels = bvec4(uvec4(rov_discard) | uvec4(equal(FbMask, uvec4(0xFFu))));
+		o_col0 = mix(o_col0, sample_from_rt(), discard_channels);
 
 		imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 	#endif
@@ -1970,7 +1968,7 @@ void main()
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = input_z;
 	#elif PS_RETURN_DEPTH_ROV
-		input_z = rov_discard ? sample_from_depth().r : input_z;
+		input_z = rov_discard ? sample_from_depth() : input_z;
 
 		imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 	#endif
