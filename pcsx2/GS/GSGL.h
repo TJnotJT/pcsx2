@@ -50,11 +50,6 @@
 		if (GSConfig.HWROVLogging) \
 			Console.Warning(__VA_ARGS__); \
 		g_gs_device->InsertDebugMessage(GSDevice::DebugMessageCategory::Message, __VA_ARGS__);
-	#define GL_PUSH_ROV(...) \
-		if (GSConfig.HWROVLogging) \
-			Console.Warning(__VA_ARGS__); \
-		g_gs_device->PushDebugGroup(__VA_ARGS__); \
-		GLAutoPop gl_auto_pop;
 #else
 	#define GL_PUSH_(...) (void)(0)
 	#define GL_PUSH(...) (void)(0)
@@ -62,5 +57,4 @@
 	#define GL_INS(...)  (void)(0)
 	#define GL_PERF(...) (void)(0)
 	#define GL_ROV(...) (void)(0)
-	#define GL_PUSH_ROV(...) (void)(0)
 #endif
