@@ -65,7 +65,7 @@
 #define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
 
-#define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)) || PS_COLOR_FEEDBACK)
+#define NEEDS_RT (NEEDS_RT_EARLY || NEEDS_RT_FOR_AFAIL || (!PS_PRIMID_INIT && (PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW)) || PS_ROV_COLOR)
 #define NEEDS_TEX (PS_TFX != 4)
 #define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1)
 #define ZWRITE (SW_DEPTH || PS_ZCLAMP || PS_ZFLOOR)
@@ -168,12 +168,12 @@ in SHADER
 
 #if PS_ROV_COLOR
 	layout(binding = 0, rgba8) uniform restrict coherent image2D RtImageRov;
-	vec4 rov_rt_value = vec4(0.0f);
+	vec4 rov_rt_value;
 #endif
 
 #if PS_ROV_DEPTH
 	layout(binding = 1, r32f) uniform restrict coherent image2D DepthImageRov;
-	float rov_depth_value = 0.0f;
+	float rov_depth_value;
 #endif
 
 #if NEEDS_TEX
@@ -1479,6 +1479,10 @@ void ps_main()
 #if PS_RETURN_COLOR_ROV
 	o_col0 = mix(sample_from_rt(), o_col0, bvec4(ColorMask & uvec4(!rov_discard)));
 
+	#if PS_ROV_DEPTH
+	//o_col0 = vec4(rov_discard, ((uint(exp2(32.0f)*sample_from_depth())>>8) & 0xff) / 255.0f, ((uint(exp2(32.0f)*input_z)>>8) & 0xff) / 255.0f, 1);
+	#endif
+
 	imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
 #endif
 
@@ -1494,7 +1498,7 @@ void ps_main()
 	// Standard depth write.
 	gl_FragDepth = input_z;
 #elif PS_RETURN_DEPTH_ROV
-	input_z = rov_discard ? sample_from_depth().r : input_z;
+	input_z = rov_discard ? sample_from_depth() : input_z;
 
 	imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
 #endif
