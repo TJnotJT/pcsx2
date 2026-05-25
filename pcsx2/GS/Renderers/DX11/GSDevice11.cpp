@@ -1262,20 +1262,10 @@ void GSDevice11::CommitClear(GSTexture* t)
 
 	if (T->IsDepthStencil())
 	{
-		if (T->IsDepthColor())
-		{
-			if (T->GetState() == GSTexture::State::Invalidated)
-				m_ctx->DiscardView(static_cast<ID3D11RenderTargetView*>(*T));
-			else
-				m_ctx->ClearRenderTargetView(*T, GSVector4(T->GetClearDepth(), 0.0f, 0.0f, 0.0f).v);
-		}
+		if (T->GetState() == GSTexture::State::Invalidated)
+			m_ctx->DiscardView(static_cast<ID3D11DepthStencilView*>(*T));
 		else
-		{
-			if (T->GetState() == GSTexture::State::Invalidated)
-				m_ctx->DiscardView(static_cast<ID3D11DepthStencilView*>(*T));
-			else
-				m_ctx->ClearDepthStencilView(*T, D3D11_CLEAR_DEPTH, T->GetClearDepth(), 0);
-		}
+			m_ctx->ClearDepthStencilView(*T, D3D11_CLEAR_DEPTH, T->GetClearDepth(), 0);
 	}
 	else
 	{

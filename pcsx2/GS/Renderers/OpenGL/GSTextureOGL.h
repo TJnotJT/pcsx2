@@ -61,7 +61,7 @@ public:
 
 	bool IsUnorderedAccess() const override
 	{
-		return IsRenderTarget() || IsDepthColor();
+		return IsRenderTarget();
 	}
 };
 

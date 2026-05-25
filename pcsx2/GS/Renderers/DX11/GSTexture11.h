@@ -46,7 +46,7 @@ public:
 
 	virtual bool IsUnorderedAccess() const override
 	{
-		return IsRenderTarget() || IsDepthColor();
+		return IsRenderTarget();
 	}
 };
 

@@ -7777,21 +7777,36 @@ void GSRendererHW::ConvertDepthFormats(GSTextureCache::Target* ds)
 	if (!ds)
 		return;
 
+	const auto CopyDepthTexture = [&](GSTexture* src, GSTexture* dst) {
+		switch (src->GetState())
+		{
+			case GSTexture::State::Cleared:
+				g_gs_device->ClearDepth(dst, src->GetClearDepth());
+				break;
+			case GSTexture::State::Invalidated:
+				//g_gs_device->ClearDepth(dst, 123.0f * 0x1p-32);
+				g_gs_device->InvalidateRenderTarget(dst);
+				break;
+			case GSTexture::State::Dirty:
+				g_gs_device->StretchRectAutoNearest(src, dst);
+				break;
+		}
+	};
+
 	// Convert depth to ROV if needed.
 	if (m_conf.ps.HasDepthROV() && !ds->m_texture->IsDepthColor())
 	{
 		GL_PUSH("HW: Convert depth to depth color for ROV.");
 
-		GSTexture* depth_color = g_gs_device->CreateDepthColor(ds->m_texture->GetSize(), false, true);
-		g_gs_device->StretchRectAutoNearest(ds->m_texture, depth_color);
+		GSTexture* depth_color = g_gs_device->CreateDepthColor(ds->m_texture->GetSize(), true, true);
+
+		CopyDepthTexture(ds->m_texture, depth_color);
 #if PCSX2_DEVBUILD
 		depth_color->SetDebugName(ds->m_texture->GetDebugName());
 #endif
 		g_gs_device->Recycle(ds->m_texture);
 		ds->m_texture = depth_color;
 		m_conf.ds = ds->m_texture;
-
-
 
 		// These stats are counted both as part of ROV and non-ROV stats.
 		g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1.0);
@@ -7804,7 +7819,7 @@ void GSRendererHW::ConvertDepthFormats(GSTextureCache::Target* ds)
 		GL_PUSH("HW: Convert depth color to depth for ROV.");
 
 		GSTexture* depthstencil = g_gs_device->CreateDepthStencil(ds->m_texture->GetSize(), false, true);
-		g_gs_device->StretchRectAutoNearest(ds->m_texture, depthstencil);
+		CopyDepthTexture(ds->m_texture, depthstencil);
 #if PCSX2_DEVBUILD
 		depthstencil->SetDebugName(ds->m_texture->GetDebugName());
 #endif

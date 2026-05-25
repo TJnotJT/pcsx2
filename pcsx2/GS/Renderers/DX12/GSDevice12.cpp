@@ -1898,7 +1898,6 @@ void GSDevice12::BeginRenderPassForStretchRect(
 	}
 	else
 	{
-		pxAssert(!dTex->IsDepthColor());
 		BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
 			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, load_op, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
@@ -2448,8 +2447,6 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
 	GSTexture12* d12DsRt = static_cast<GSTexture12*>(ds_as_rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
-
-	pxAssert(!d12Ds || !d12Ds->IsDepthColor());
 
 	// Check if framebuffer changed
 	if (m_current_render_target != d12Rt || m_current_depth_render_target != d12DsRt ||
@@ -3539,7 +3536,6 @@ void GSDevice12::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	if (!(d12Rt || d12Ds || oldD12Rt || oldD12Ds))
 		return;
 
-	pxAssert(!d12Ds || d12Ds->IsDepthColor());
 	pxAssert(!(d12Rt || d12Ds) || m_features.rov);
 
 	if (d12Rt)

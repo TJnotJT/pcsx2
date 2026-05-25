@@ -3111,7 +3111,6 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 
 	if (dTex->GetType() == GSTexture::Type::DepthStencil)
 	{
-		pxAssert(!dTex->IsDepthColor());
 		if (load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
 			BeginClearRenderPass(m_utility_depth_render_pass_clear, dtex_rc, dTex->GetClearDepth(), 0);
 		else
@@ -3524,8 +3523,6 @@ void GSDeviceVK::OMSetRenderTargets(
 {
 	GSTextureVK* vkRt = static_cast<GSTextureVK*>(rt);
 	GSTextureVK* vkDs = static_cast<GSTextureVK*>(ds);
-
-	pxAssert(!vkDs || !vkDs->IsDepthColor());
 
 	if (m_current_render_target != vkRt || m_current_depth_target != vkDs ||
 		m_current_framebuffer_feedback_loop != feedback_loop ||
@@ -5288,7 +5285,6 @@ void GSDeviceVK::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_r
 	if (!(vkRt || vkDs || oldVkRt || oldVkDs))
 		return;
 
-	pxAssert(!vkDs || vkDs->IsDepthColor());
 	pxAssert(!(vkRt || vkDs) || m_features.rov);
 
 	if (vkRt)
