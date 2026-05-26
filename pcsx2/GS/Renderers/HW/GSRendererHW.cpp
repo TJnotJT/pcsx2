@@ -7786,65 +7786,78 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 	}
 }
 
-static void CopyDepthTexture(GSTexture* src, GSTexture* dst)
+static void CopyDepthTextureROV(GSTexture* src, GSTexture* dst)
 {
-		switch (src->GetState())
-		{
-			case GSTexture::State::Cleared:
-				g_gs_device->ClearDepth(dst, src->GetClearDepth());
-				break;
-			case GSTexture::State::Invalidated:
-				g_gs_device->InvalidateRenderTarget(dst);
-				break;
-			case GSTexture::State::Dirty:
-				g_gs_device->StretchRectAutoNearest(src, dst);
-				break;
-		}
+	switch (src->GetState())
+	{
+		case GSTexture::State::Cleared:
+			g_gs_device->ClearDepth(dst, src->GetClearDepth());
+			break;
+		case GSTexture::State::Invalidated:
+			g_gs_device->InvalidateRenderTarget(dst);
+			break;
+		case GSTexture::State::Dirty:
+			g_gs_device->StretchRectAutoNearest(src, dst);
+			break;
+	}
+
+	// These stats are counted both as part of ROV and non-ROV stats.
+	g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1.0);
+	g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0);
 };
 
-void GSRendererHW::ConvertDepthFormats(GSTextureCache::Target* ds)
+void GSRendererHW::ConvertDepthFormatROV(GSTextureCache::Target* ds)
 {
 	if (!ds)
 		return;
 
-	// Convert depth to ROV if needed.
-	if (m_conf.ps.HasDepthROV() && !ds->m_texture->IsDepthColor())
+	GSTexture* ds_tex_old = m_conf.ds;
+	GSTexture* ds_tex_new = nullptr;
+
+	// Convert depth to depth color or vice versa if needed.
+	bool depth_to_color;
+	if (m_conf.ps.HasDepthROV() && !ds_tex_old->IsDepthColor())
 	{
-		GL_PUSH("HW: Convert depth to depth color for ROV.");
-
-		GSTexture* depth_color = g_gs_device->CreateDepthColor(ds->m_texture->GetSize(), true, true);
-
-		CopyDepthTexture(ds->m_texture, depth_color);
-#if PCSX2_DEVBUILD
-		depth_color->SetDebugName(ds->m_texture->GetDebugName());
-#endif
-		g_gs_device->Recycle(ds->m_texture);
-		ds->m_texture = depth_color;
-		m_conf.ds = ds->m_texture;
-
-		// These stats are counted both as part of ROV and non-ROV stats.
-		g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1.0);
-		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0);
+		depth_to_color = true;
+		ds_tex_new = g_gs_device->CreateDepthColor(ds_tex_old->GetSize(), true, true);
+	}
+	else if (!m_conf.ps.HasDepthROV() && ds_tex_old->IsDepthColor())
+	{
+		depth_to_color = false;
+		ds_tex_new = g_gs_device->CreateDepthStencil(ds->m_texture->GetSize(), false, true);
+	}
+	else
+	{
+		return;
 	}
 
-	// Convert depth ROV to depth if needed.
-	if (!m_conf.ps.HasDepthROV() && ds->m_texture->IsDepthColor())
-	{
-		GL_PUSH("HW: Convert depth color to depth for ROV.");
+	GL_PUSH_("HW: Convert %d for ROV.", depth_to_color ? "DepthStencil -> DepthColor" : "DepthColor -> DepthStencil");
 
-		GSTexture* depthstencil = g_gs_device->CreateDepthStencil(ds->m_texture->GetSize(), false, true);
-		CopyDepthTexture(ds->m_texture, depthstencil);
+	CopyDepthTextureROV(ds_tex_old, ds_tex_new);
+
 #if PCSX2_DEVBUILD
-		depthstencil->SetDebugName(ds->m_texture->GetDebugName());
+	ds_tex_new->SetDebugName(ds->m_texture->GetDebugName());
 #endif
-		g_gs_device->Recycle(ds->m_texture);
-		ds->m_texture = depthstencil;
-		m_conf.ds = ds->m_texture;
 
-		// These stats are counted both as part of ROV and non-ROV stats.
-		g_perfmon.Put(GSPerfMon::DepthCopiesROV, 1.0);
-		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1.0);
+	// Fix up the texture cache.
+	if (ds->m_texture == ds_tex_old)
+	{
+		GL_CACHE("HW: Replaced texture for DS @ 0x%04x", ds->m_TEX0.TBP0);
+		ds->m_texture = ds_tex_new;
 	}
+	else
+	{
+		// Must be the temporary Z.
+		pxAssert(g_texture_cache->GetTemporaryZ() == ds_tex_old);
+		GL_CACHE("HW: Replaced texture for temporary Z @ 0x%04x", g_texture_cache->GetTemporaryZInfo().ZBP);
+		g_texture_cache->SetTemporaryZ(ds_tex_new);
+	}
+
+	g_gs_device->Recycle(ds_tex_old);
+
+	m_conf.ds = ds_tex_new;
+
+	GL_POP();
 }
 
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
@@ -9408,7 +9421,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	// Call before computing the full drawlist in case ROV is used and we don't need it.
 	DetermineROVUsage(rt, ds);
-	ConvertDepthFormats(ds);
+	ConvertDepthFormatROV(ds);
 
 	// Barriers must be determined before indices are modified via HandleProvokingVertexFirst/SetupIA.
 	DetermineBarriers(rt);
