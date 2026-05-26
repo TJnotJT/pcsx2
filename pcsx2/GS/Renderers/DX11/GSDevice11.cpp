@@ -3150,6 +3150,8 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 		}
 	};
 
+	const GSVector4i rtrect = GSVector4i::loadh(&rtsize);
+
 	if (full_barrier)
 	{
 		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
@@ -3163,7 +3165,7 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 			const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
 			const GSVector4i original_bbox = (*config.drawlist_bbox)[n].rintersect(config.drawarea);
-			CopyAndBind(ProcessCopyArea(GSVector4i::loadh(&rtsize), original_bbox));
+			CopyAndBind(ProcessCopyArea(rtrect, original_bbox));
 
 			Draw(config, p, count);
 
@@ -3181,22 +3183,22 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 			const GSVector4i union_rect = config.drawarea.runion(config.samplearea);
 			const u32 size_union = union_rect.width() * union_rect.height();
 			const u32 size_indiv = config.drawarea.width() * config.drawarea.height() +
-			                       config.samplearea.width() * config.samplearea.height();
+				config.samplearea.width() * config.samplearea.height();
 
 			// Do an individual copy if the union is larger than the sum of individual areas.
 			if (size_union > size_indiv)
 			{
-				CopyAndBind(ProcessCopyArea(GSVector4i::loadh(&rtsize), config.drawarea));
-				CopyAndBind(ProcessCopyArea(GSVector4i::loadh(&rtsize), config.samplearea));
+				CopyAndBind(ProcessCopyArea(rtrect, config.drawarea));
+				CopyAndBind(ProcessCopyArea(rtrect, config.samplearea));
 			}
 			else
 			{
-				CopyAndBind(ProcessCopyArea(GSVector4i::loadh(&rtsize), union_rect));
+				CopyAndBind(ProcessCopyArea(rtrect, union_rect));
 			}
 		}
 		else
 		{
-			CopyAndBind(ProcessCopyArea(GSVector4i::loadh(&rtsize), config.drawarea));
+			CopyAndBind(ProcessCopyArea(rtrect, config.drawarea));
 		}
 	}
 

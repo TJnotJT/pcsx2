@@ -1555,11 +1555,11 @@ static void DumpPSSelector(DrawConfigWriter& out, const GSHWDrawConfig::PSSelect
 	out.WriteLn("point_sampler: {}", ps.point_sampler);
 	out.WriteLn("region_rect: {}", ps.region_rect);
 	out.WriteLn("scanmsk: {} ({})", GSUtil::GetSCANMSKName(ps.scanmsk), ps.scanmsk);
-	out.WriteLn("aa1: {} ({})", static_cast<u32>(ps.aa1), GetPSAA1Name(ps.aa1));
+	out.WriteLn("aa1: {} ({})", GetPSAA1Name(ps.aa1), static_cast<u32>(ps.aa1));
 	out.WriteLn("abe: {}", static_cast<u32>(ps.abe));
 	out.WriteLn("sw_aniso: {}", ps.sw_aniso);
 	out.WriteLn("rov_color: {}", ps.rov_color);
-	out.WriteLn("rov_depth: {} ({})", static_cast<u32>(ps.rov_color), GetPSROVDepthname(ps.rov_depth));
+	out.WriteLn("rov_depth: {} ({})", GetPSROVDepthname(ps.rov_depth), static_cast<u32>(ps.rov_depth));
 }
 
 static void DumpVSSelector(DrawConfigWriter& out, const GSHWDrawConfig::VSSelector& vs)
@@ -1683,6 +1683,8 @@ static void DumpConfig(DrawConfigWriter& out, const GSHWDrawConfig& conf,
 	out.WriteLn("topology: {} ({})", GetTopologyName(conf.topology), static_cast<u32>(conf.topology));
 	out.WriteLn("require_one_barrier: {}", conf.require_one_barrier);
 	out.WriteLn("require_full_barrier: {}", conf.require_full_barrier);
+	DumpVector4(out, "drawarea", conf.drawarea);
+	DumpVector4(out, "samplearea", conf.samplearea);
 	out.WriteLn("tex_hazard: {}", GetTexHazardName(conf.tex_hazard));
 
 	out.WriteLn("destination_alpha: {} ({})", GetDestinationAlphaModeName(conf.destination_alpha), static_cast<u32>(conf.destination_alpha));
