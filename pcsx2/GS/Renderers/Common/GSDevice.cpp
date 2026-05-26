@@ -1560,6 +1560,8 @@ static void DumpPSSelector(DrawConfigWriter& out, const GSHWDrawConfig::PSSelect
 	out.WriteLn("sw_aniso: {}", ps.sw_aniso);
 	out.WriteLn("rov_color: {}", ps.rov_color);
 	out.WriteLn("rov_depth: {} ({})", GetPSROVDepthname(ps.rov_depth), static_cast<u32>(ps.rov_depth));
+	out.WriteLn("ztst: {} ({})", GSUtil::GetZTSTName(ps.ztst), static_cast<u32>(ps.ztst));
+	out.WriteLn("zfloor: {}", static_cast<u32>(ps.zfloor));
 }
 
 static void DumpVSSelector(DrawConfigWriter& out, const GSHWDrawConfig::VSSelector& vs)
