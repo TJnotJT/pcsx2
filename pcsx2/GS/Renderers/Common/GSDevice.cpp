@@ -592,7 +592,9 @@ void GSDevice::Recycle(GSTexture* t)
 		return;
 
 	t->SetLastFrameUsed(m_frame);
-		
+
+	t->ClearUnorderedAccess();
+	
 #ifdef PCSX2_DEVBUILD
 	t->SetDebugName("");
 #endif

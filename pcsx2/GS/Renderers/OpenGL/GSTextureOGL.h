@@ -58,11 +58,6 @@ public:
 
 	__fi u32 GetID() { return m_texture_id; }
 	__fi u32 GetGLFormat() { return m_gl_format; }
-
-	bool IsUnorderedAccess() const override
-	{
-		return IsRenderTarget();
-	}
 };
 
 class GSDownloadTextureOGL final : public GSDownloadTexture

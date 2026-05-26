@@ -43,11 +43,6 @@ public:
 	operator ID3D11UnorderedAccessView*();
 
 	ID3D11DepthStencilView* ReadOnlyDepthStencilView();
-
-	virtual bool IsUnorderedAccess() const override
-	{
-		return IsRenderTarget();
-	}
 };
 
 class GSDownloadTexture11 final : public GSDownloadTexture

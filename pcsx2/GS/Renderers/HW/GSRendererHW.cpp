@@ -7576,8 +7576,8 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 	const bool multipass_depth = (full_barrier && m_conf.ps.IsFeedbackLoopDepth()) || two_pass_alpha;
 
 	// If already ROV, just continue the usage.
-	const bool color_is_rov = m_conf.rt && rt->m_texture->IsUnorderedAccess();
-	const bool depth_is_rov = m_conf.ds && ds->m_texture->IsDepthColor();
+	const bool color_is_rov = rt && rt->m_texture->IsUnorderedAccess();
+	const bool depth_is_rov = ds && ds->m_texture->IsDepthColor();
 
 	bool use_rov_color = (color_write && multipass_color) || color_is_rov;
 	bool use_rov_depth = (depth_write && multipass_depth) || depth_is_rov;
@@ -7603,36 +7603,39 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 	const u32 multiplier = m_conf.alpha_second_pass.enable ? 2 : 1; // Alpha second pass doubles the barriers.
 	barriers *= multiplier;
 
-	if (!(use_rov_color || use_rov_depth))
+	// Heuristic: only activate ROV if we save at least one draw call by doing so.
+	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
+
+	if (!color_is_rov && !depth_is_rov && !activate)
 	{
-		GL_ROV("No ROV usage: Draw=%05lld | C=%016p | D=%016p | BAR=%d.", s_n, m_conf.rt, m_conf.ds, barriers);
+		// Not enough barriers or no feedback to activate, and ROV is not already active.
+		GL_ROV("No ROV usage: Draw=%05lld | C=%016p | D=%016p | BAR=%d.",
+			s_n, rt ? rt->m_texture : nullptr, ds ? ds->m_texture : nullptr, barriers);
 		return;
 	}
-
-	// Check if the heuristic suggested we should enable color/depth ROV.
-	if (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov)
+	
+	if (activate)
 	{
-		if (barriers < 2)
-		{
-			// Not enough barriers, so just continue whatever ROV is already enabled.
-			use_rov_color = color_is_rov;
-			use_rov_depth = depth_is_rov;
-		}
-
-		// In certain cases, ROV in color or depth will force ROV in the other for correctness.
-		GetForcedROVUsage(use_rov_color, use_rov_depth);
-
-		if (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov)
-		{
-			GL_ROV("ROV change: Draw=%05lld | C=%016p | D=%016p | BAR=%d | C=[%d=>%d] | D=[%d=>%d].",
-				s_n, m_conf.rt, m_conf.ds, barriers, color_is_rov, use_rov_color, depth_is_rov, use_rov_depth);
-		}
+		GL_ROV("ROV activated: Draw=%05lld | C=%016p | D=%016p | BAR=%d | C=[%d=>%d] | D=[%d=>%d].",
+			s_n, rt ? rt->m_texture : nullptr, ds ? ds->m_texture : nullptr, barriers,
+			color_is_rov, use_rov_color, depth_is_rov, use_rov_depth);
+	}
+	else
+	{
+		GL_ROV("ROV continued: Draw=%05lld | C=%016p | D=%016p | BAR=%d | C=%d | D=%d.",
+			s_n, rt ? rt->m_texture : nullptr, ds ? ds->m_texture : nullptr, barriers,
+			color_is_rov, depth_is_rov);
 	}
 
 	GL_INS("ROV: Color ROV %s / depth ROV %s",
 		use_rov_color ? "enabled" : "disabled", use_rov_depth ? "enabled" : "disabled");
 
-	// Do the actual pipeline config
+	// Set unordered access flag for backends that don't explicitly track resource state (DX11/GL).
+	// Used only for heuristic above. Not used for depth, since we check for depth color instead.
+	if (use_rov_color)
+		rt->m_texture->UseUnorderedAccess();
+
+	// Do the actual pipeline config.
 	ConfigureROV(use_rov_color, use_rov_depth);
 }
 
