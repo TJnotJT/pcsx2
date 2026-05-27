@@ -40,6 +40,12 @@
 #define PS_AA1_TRIANGLE_SW_Z 3
 #endif
 
+#ifndef PS_ROUND_UV_NONE
+#define PS_ROUND_UV_NONE 0
+#define PS_ROUND_UV_NEAREST 1
+#define PS_ROUND_UV_LINEAR 2
+#endif
+
 // TEX_COORD_DEBUG output the uv coordinate as color. It is useful
 // to detect bad sampling due to upscaling
 //#define TEX_COORD_DEBUG
@@ -484,6 +490,10 @@ vec4 round_uv()
 	uv = mix(uv, uvi + vec2(ROUND_UV_THRESHOLD), bvec2(round_up));
 
 	uv = mix(uv, uv.yx, bvec2(round_flags & ivec2(ROUND_UV_SWAP)));
+
+#if PS_ROUND_UV == PS_ROUND_UV_LINEAR
+	uv = trunc(uv); // Truncate to closest subtexel for bilinear.
+#endif
 
 	return vec4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else

@@ -56,4 +56,11 @@ enum class PS_AA1 : uint32_t
 	TRIANGLE_SW_Z = 3, ///< AA1 triangles with software Z discard
 };
 
+enum class PS_ROUND_UV : uint32_t
+{
+	NONE    = 0, // No special rounding.
+	NEAREST = 1, // Rounding for correct nearest sampling.
+	LINEAR  = 2, // Rounding for correct bilinear sampling. 
+};
+
 } // namespace GSShader

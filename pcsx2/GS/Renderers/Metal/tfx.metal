@@ -917,6 +917,11 @@ struct PSMain
 			uv = select(uv, uvi - ROUND_UV_THRESHOLD_MTL, bool2(round_down));
 			uv = select(uv, uvi + ROUND_UV_THRESHOLD_MTL, bool2(round_up));
 
+			if (ROUND_UV == PS_ROUND_UV::LINEAR)
+			{
+				uv = trunc(uv); // Truncate to closest subtexel for bilinear.
+			}
+
 			return float4(uv / 16.0f / cb.wh.xy, uv); // Return normalized and unnormalized coords.
 		}
 		else

@@ -301,10 +301,11 @@ struct alignas(16) GSHWDrawConfig
 		Line,
 		Triangle,
 	};
-	using VSExpand = GSShader::VSExpand;
-	using PS_ATST  = GSShader::PS_ATST;
-	using PS_AFAIL = GSShader::PS_AFAIL;
-	using PS_AA1   = GSShader::PS_AA1;
+	using VSExpand    = GSShader::VSExpand;
+	using PS_ATST     = GSShader::PS_ATST;
+	using PS_AFAIL    = GSShader::PS_AFAIL;
+	using PS_AA1      = GSShader::PS_AA1;
+	using PS_ROUND_UV = GSShader::PS_ROUND_UV;
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -427,7 +428,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 sw_aniso : 5;
 				
 				// Round UV
-				u32 round_uv : 1;
+				PS_ROUND_UV round_uv : 2;
 			};
 
 			struct

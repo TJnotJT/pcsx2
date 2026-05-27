@@ -45,8 +45,6 @@ out SHADER
 
 const float exp_min32 = exp2(-32.0f);
 
-#if VS_EXPAND == VS_EXPAND_NONE
-
 uvec4 extract_round_uv_bits(float q)
 {
 	uint qi = floatBitsToUint(q);
@@ -57,6 +55,8 @@ uvec4 extract_round_uv_bits(float q)
 		(qi >> 28) & 0xF    // Round V flags
 	);
 }
+
+#if VS_EXPAND == VS_EXPAND_NONE
 
 layout(location = 0) in vec2  i_st;
 layout(location = 2) in vec4  i_c;

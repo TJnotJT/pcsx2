@@ -4922,8 +4922,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_AA1", static_cast<u32>(sel.aa1));
 	AddMacro(ss, "PS_ABE", sel.abe);
 	AddMacro(ss, "PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
-
-	AddMacro(ss, "PS_ROUND_UV", sel.round_uv);
+	AddMacro(ss, "PS_ROUND_UV", static_cast<u32>(sel.round_uv));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());

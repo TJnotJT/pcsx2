@@ -51,6 +51,12 @@
 #define PS_AA1_TRIANGLE_SW_Z 3
 #endif
 
+#ifndef PS_ROUND_UV_NONE
+#define PS_ROUND_UV_NONE 0
+#define PS_ROUND_UV_NEAREST 1
+#define PS_ROUND_UV_LINEAR 2
+#endif
+
 #ifndef PS_FST
 #define PS_IIP 0
 #define PS_FST 0
@@ -561,6 +567,10 @@ float4 round_uv(PS_INPUT input)
 	uv = bool2(round_up) ? uvi + ROUND_UV_THRESHOLD : uv;
 
 	uv = bool2(round_flags & ROUND_UV_SWAP) ? uv.yx : uv;
+
+#if PS_ROUND_UV == PS_ROUND_UV_LINEAR
+	uv = trunc(uv); // Truncate to closest subtexel for bilinear.
+#endif
 
 	return float4(uv / 16.0f / WH.xy, uv); // Return normalized and unnormalized coords.
 #else

@@ -5060,13 +5060,13 @@ bool GSState::GetVertexUVRoundingInfoImpl()
 		const bool pow2_dX = IsPow2(abs_dX);
 		const bool pow2_dY = IsPow2(abs_dY);
 
-		// Check if the first/last pixel center correspond to texel boundaries.
+		// Check if the first/last pixel center correspond to half texel boundaries.
 		const auto EndpointsAligned = [](int pos0, int pos1, int tex0, int tex1, int scale) {
 			const int pos0_round = (pos0 + 0xF) & ~0xF;
 			const int pos1_round = pos1 & ~0xF;
 			const int tex0_round = tex0 + (pos0_round - pos0) * scale;
 			const int tex1_round = tex1 + (pos1_round - pos1) * scale;
-			return ((tex0_round | tex1_round) & 0xF) == 0;
+			return ((tex0_round | tex1_round) & 7) == 0;
 		};
 
 		// First condition: dU/dX is an integer and pixel centers correspond to texel boundaries.
