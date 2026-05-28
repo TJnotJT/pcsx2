@@ -3163,7 +3163,9 @@ void GSDevice11::SendHWDraw(const GSHWDrawConfig& config,
 		{
 			const u32 count = (*config.drawlist)[n] * indices_per_prim;
 
-			const GSVector4i original_bbox = (*config.drawlist_bbox)[n].rintersect(config.drawarea);
+			GSVector4i original_bbox = (*config.drawlist_bbox)[n].rintersect(config.drawarea);
+			if (config.tex_hazard != GSHWDrawConfig::TEX_HAZARD_NONE)
+				original_bbox = original_bbox.runion(config.samplearea);
 			CopyAndBind(ProcessCopyArea(rtrect, original_bbox));
 
 			Draw(config, p, count);
