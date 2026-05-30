@@ -2862,7 +2862,7 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		mask.wrgba = 0;
 		mask.wr = true;
 		OMSetColorMaskState(mask);
-		OMSetBlendState(true, GL_ONE, GL_ONE, GL_MIN);
+		OMSetBlendState(true, GL_ONE, GL_ONE, date ? GL_MIN : GL_FUNC_ADD);
 		OMDepthStencilSelector dss = config.depth;
 		dss.zwe = 0; // Don't write depth
 		SetupOM(dss);

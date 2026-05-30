@@ -2936,8 +2936,9 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 
 		OMDepthStencilSelector dss = config.depth;
 		dss.zwe = 0;
+		const u8 blend_op = date ? 3 /* MIN */ : 0 /* ADD */;
 		const OMBlendSelector blend(GSHWDrawConfig::ColorMaskSelector(1),
-			GSHWDrawConfig::BlendState(true, CONST_ONE, CONST_ONE, 3 /* MIN */, CONST_ONE, CONST_ZERO, false, 0));
+			GSHWDrawConfig::BlendState(true, CONST_ONE, CONST_ONE, blend_op, CONST_ONE, CONST_ZERO, false, 0));
 		SetupOM(dss, blend, 0);
 		OMSetRenderTargets(primid_texture, config.ds, &config.scissor, read_only_dsv);
 		SetRenderHWShaderResources(config, nullptr);
