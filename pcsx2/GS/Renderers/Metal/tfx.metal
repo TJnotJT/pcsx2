@@ -374,6 +374,7 @@ vertex MainVSOut vs_main_expand(
 {
 	switch (VS_EXPAND_TYPE)
 	{
+		case VSExpand::Count:
 		case VSExpand::None:
 			return vs_main_run(load_vertex(vertices[vid]), cb);
 		case VSExpand::Point:

@@ -1665,7 +1665,8 @@ void GSDeviceMTL::RenderCopy(GSTexture* sTex, id<MTLRenderPipelineState> pipelin
 	if (sTex)
 		MRESetTexture(sTex, GSMTLTextureIndexNonHW);
 	[m_current_render.encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+	if (sTex)
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
 }
 

@@ -19,6 +19,7 @@ enum class VSExpand : uint8_t
 	TriangleAA1         = 5,
 	TriangleAA1Interior = 6,
 	TriangleAA1Edge     = 7,
+	Count               = 8,
 };
 
 enum class PS_ATST : uint32_t

@@ -1175,6 +1175,7 @@ static const char* GetVSExpandName(GSHWDrawConfig::VSExpand vsexpand)
 		case GSHWDrawConfig::VSExpand::TriangleAA1:         return "TriangleAA1";
 		case GSHWDrawConfig::VSExpand::TriangleAA1Interior: return "TriangleAA1Interior";
 		case GSHWDrawConfig::VSExpand::TriangleAA1Edge:     return "TriangleAA1Edge";
+		default: break;
 	}
 	return "Unknown";
 }

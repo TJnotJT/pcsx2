@@ -265,7 +265,7 @@ public:
 	MRCOwned<id<MTLRenderPipelineState>> m_shadeboost_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_imgui_pipeline;
 
-	MRCOwned<id<MTLFunction>> m_hw_vs[6 << 3];
+	MRCOwned<id<MTLFunction>> m_hw_vs[static_cast<u32>(GSShader::VSExpand::Count) << 3];
 	std::unordered_map<PSSelector, MRCOwned<id<MTLFunction>>> m_hw_ps;
 	std::unordered_map<PipelineSelectorMTL, MRCOwned<id<MTLRenderPipelineState>>> m_hw_pipeline;
 
