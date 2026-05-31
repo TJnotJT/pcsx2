@@ -125,11 +125,12 @@ constant bool PS_ZOUTPUT = PS_ZCLAMP || PS_ZFLOOR || SW_DEPTH;
 constant bool PS_ZOUTPUT_LESS = PS_ZOUTPUT && !SW_DEPTH;
 constant bool PS_ZOUTPUT_ANY  = PS_ZOUTPUT && SW_DEPTH;
 constant bool PS_ZOUTPUT_COLOR = PS_ZOUTPUT_ANY && !DEPTH_FEEDBACK;
-constant bool VS_NEEDS_INDEX_BUFFER = VS_EXPAND_TYPE == VSExpand::TriangleAA1;
-constant bool VS_COVERAGE = VS_EXPAND_TYPE == VSExpand::LineAA1 || VS_EXPAND_TYPE == VSExpand::TriangleAA1;
-constant bool VS_INTERIOR = VS_EXPAND_TYPE == VSExpand::TriangleAA1;
+constant bool VS_TRIANGLE_AA1 = VS_EXPAND_TYPE >= VSExpand::TriangleAA1 && VS_EXPAND_TYPE <= VSExpand::TriangleAA1Edge;
+constant bool VS_NEEDS_INDEX_BUFFER = VS_TRIANGLE_AA1;
+constant bool VS_COVERAGE = VS_EXPAND_TYPE == VSExpand::LineAA1 || VS_TRIANGLE_AA1;
+constant bool VS_INTERIOR = VS_TRIANGLE_AA1;
 constant bool PS_COVERAGE = PS_AA1 != AA1::NONE;
-constant bool PS_INTERIOR = PS_AA1 == AA1::TRIANGLE_SW_Z;
+constant bool PS_INTERIOR = PS_AA1 >= AA1::TRIANGLE && PS_AA1 <= AA1::TRIANGLE_PRIMID_INIT;
 
 struct MainVSIn
 {
@@ -1595,10 +1596,12 @@ struct PSMain
 			return out;
 		}
 
+		// Get the last primitive whose interior overlaps the pixel.
 		if (PS_AA1 == AA1::TRIANGLE_PRIMID_INIT)
 		{
 			// Multiply by 12 because there are 12x as many edge triangles as interior triangles.
 			out.c0 = float(12 * prim_id);
+			return out;
 		}
 
 		ps_blend(C, alpha_blend);
