@@ -4205,6 +4205,58 @@ __forceinline bool AreTrianglesQuadNonAA(const GSVertex* RESTRICT vin, const u16
 	return false;
 }
 
+__forceinline static bool IsTriangleRightTolerance(
+	GSVector4 v0, GSVector4 v1, GSVector4 v2, float tol0, float tol1, TriangleOrdering* out_triangle)
+{
+	const GSVector4 tolv(tol0, tol0, tol1, tol1);
+
+	GSVector4 close01 = (v0 - v1).abs() <= tolv;
+	GSVector4 close02 = (v0 - v2).abs() <= tolv;
+	GSVector4 close12 = (v1 - v2).abs() <= tolv;
+
+	close01 = close01 & close01.zwxy();
+	close02 = close02 & close02.zwxy();
+	close12 = close12 & close12.zwxy();
+
+	GSVector4 vcmp0 = close01.blend32<0xC>(close02);
+	GSVector4 vcmp1 = close12.blend32<0xC>(GSVector4::zero());
+
+	int cmp0 = vcmp0.mask();
+	int cmp1 = vcmp1.mask() & 0x3;
+	if (!cmp0)
+		return false; // Not a right triangle.
+	u8 trianglecmp = triangle_comparison_lut[cmp0];
+	int required_cmp1 = TriangleFinalCmp(trianglecmp);
+	if (cmp1 != required_cmp1)
+		return false;
+	*out_triangle = TriangleFinalOrder(trianglecmp);
+	return true;
+}
+
+// Determines whether the triangle are right and form a quad.
+// Position should be in XY and texture coords in YW.
+bool AreTrianglesQuadTolerance(
+	const GSVector4* RESTRICT t0, const GSVector4* RESTRICT t1, float tol0, float tol1, bool swapuv,
+	TriangleOrdering* RESTRICT out_triangle0, TriangleOrdering* RESTRICT out_triangle1)
+{
+	const auto MaybeSwap = [&](const GSVector4& v) {
+		return swapuv ? v.xywz() : v;
+	};
+
+	if (!IsTriangleRightTolerance(MaybeSwap(t0[0]), MaybeSwap(t0[1]), MaybeSwap(t0[2]), tol0, tol1, out_triangle0) ||
+		!IsTriangleRightTolerance(MaybeSwap(t1[0]), MaybeSwap(t1[1]), MaybeSwap(t1[2]), tol0, tol1, out_triangle1))
+	{
+		return false;
+	}
+
+	// The two triangles are now laid out in one of these four orderings:
+	// b   c | c  b | a     |     a
+	// a     |    a | b   c | c   b
+	// To form a quad we must have a0 == c1 and a1 == c0
+	return (t0[out_triangle0->a] == (t1[out_triangle1->c])).alltrue() &&
+	       (t0[out_triangle0->c] == (t1[out_triangle1->a])).alltrue();
+}
+
 template<bool shuffle_check>
 bool GSState::TrianglesAreQuadsImpl()
 {
@@ -4965,7 +5017,29 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 
 			TriangleOrdering tri0, tri1;
 
+
+#if 0
+			// IN PROGRESS - new methods for determining a quad with error tolerance.
+			GSVector4 quad_verts[6];
+			for (u32 j = 0; j < 6; j++)
+			{
+				const GSVector4 xy = GetXYWindow(vtx[index[i + j]]);
+				const GSVector4 uv = tme ? GetTexCoordsImpl<fst>(vtx[index[i + j]]) : GSVector4::zero();
+				quad_verts[j] = xy.upld(uv);
+			}
+
 			// Check if vertex XYs and UVs form an axis-aligned quad.
+			constexpr float tolerance = 15.0f / 16.0f;
+			const bool quad = AreTrianglesQuadTolerance(
+				quad_verts + 0, quad_verts + 3, tolerance, tolerance, false, &tri0, &tri1);
+			const bool quad_swap_uv = !quad &&
+				AreTrianglesQuadTolerance(quad_verts + 0, quad_verts + 3, tolerance, tolerance, true, &tri0, &tri1);
+
+			if (!quad && !quad_swap_uv)
+			{
+				return false; // No quad
+			}
+#endif
 			if (AreTrianglesQuad<tme, fst, 0>(vtx, idx0, idx1, &tri0, &tri1))
 			{
 				tri_swap_uv.push_back(false);
@@ -4995,6 +5069,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 			// Save the right angle corners.
 			tri_quad_corners.push_back(i + 0 + tri0.b);
 			tri_quad_corners.push_back(i + 3 + tri1.b);
+			tri_swap_uv.push_back(quad_swap_uv);
 		}
 	}
 
