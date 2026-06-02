@@ -1542,6 +1542,9 @@ GSTexture* GSDevice12::CreateSurface(GSTexture::Type type, int width, int height
 	DXGI_FORMAT dxgi_format, srv_format, rtv_format, dsv_format, uav_format;
 	LookupNativeFormat(format, &dxgi_format, &srv_format, &rtv_format, &dsv_format, &uav_format);
 
+	if (type != GSTexture::Type::RWTexture && type != GSTexture::Type::RenderTarget)
+		uav_format = DXGI_FORMAT_UNKNOWN; // We don't need the UAV descriptor.
+
 	std::unique_ptr<GSTexture12> tex(GSTexture12::Create(type, format, width, height, levels,
 		dxgi_format, srv_format, rtv_format, dsv_format, uav_format));
 	if (!tex)

@@ -593,11 +593,17 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			Host::OSD_WARNING_DURATION);
 	}
 
+	m_null_rt = CreateSurface(GSTexture::Type::RenderTarget, 1, 1, 1, GSTexture::Format::Color);
+	if (!m_null_rt)
+		return false;
+
 	return true;
 }
 
 void GSDevice11::Destroy()
 {
+	delete m_null_rt;
+	
 	GSDevice::Destroy();
 	DestroySwapChain();
 	DestroyTimestampQueries();
@@ -686,7 +692,7 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 
 	D3D11_FEATURE_DATA_D3D11_OPTIONS2 options2{};
 	m_dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS2, &options2, sizeof(options2));
-	m_features.rov = GSConfig.HWROV && options2.ROVsSupported;
+	m_features.rov = options2.ROVsSupported;
 
 	// Let the user know if said features are available.
 	Console.WriteLnFmt("D3D11: DXTn Texture Compression: {}", m_features.dxt_textures ? "Supported" : "Not Supported");
@@ -2717,6 +2723,9 @@ void GSDevice11::OMSetBlendState(ID3D11BlendState* bs, u8 bf)
 void GSDevice11::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* rt_uav_tex, GSTexture* ds_uav_tex,
 	const GSVector4i* scissor, ID3D11DepthStencilView* read_only_dsv)
 {
+	if (!(rt || rt_uav_tex) && ds_uav_tex)
+		rt_uav_tex = m_null_rt; // Fill in the first UAV slot with the null RT.
+
 	ID3D11RenderTargetView* rtv = nullptr;
 	ID3D11DepthStencilView* dsv = nullptr;
 	ID3D11UnorderedAccessView* rt_uav = nullptr;
@@ -2736,15 +2745,11 @@ void GSDevice11::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* rt_
 	{
 		CommitClear(rt_uav_tex);
 		rt_uav = *static_cast<GSTexture11*>(rt_uav_tex);
-
-		PSSetShaderResource(TEXTURE_RT, nullptr); // Unbind to avoid conflicts.
 	}
 	if (ds_uav_tex)
 	{
 		CommitClear(ds_uav_tex);
 		ds_uav = *static_cast<GSTexture11*>(ds_uav_tex);
-
-		PSSetShaderResource(TEXTURE_DEPTH, nullptr); // Unbind to avoid conflicts.
 	}
 
 	const bool changed = (m_state.rtv != rtv || m_state.dsv != dsv || m_state.rt_uav != rt_uav || m_state.ds_uav != ds_uav);
@@ -2811,7 +2816,7 @@ void GSDevice11::OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* rt_
 		const GSVector2i size =
 			rt ? rt->GetSize() :
 			ds ? ds->GetSize() :
-			rt_uav_tex ? rt_uav_tex->GetSize() :
+			(rt_uav_tex && rt_uav_tex != m_null_rt) ? rt_uav_tex->GetSize() :
 			ds_uav_tex->GetSize();
 		SetViewport(size);
 		SetScissor(scissor ? *scissor : GSVector4i::loadh(size));
@@ -2882,7 +2887,7 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	GSTexture* draw_rt_clone = nullptr;
 	GSTexture* draw_ds_clone = nullptr;
 	GSTexture* primid_texture = nullptr;
-	
+
 	ScopedGuard recycle_temp_textures([&]() {
 		if (draw_rt_clone)
 			Recycle(draw_rt_clone);

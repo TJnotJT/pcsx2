@@ -256,31 +256,13 @@ Texture2D<float> DepthTexture : register(t4);
 #endif
 SamplerState TextureSampler : register(s0);
 
-#if DX12
-	// DX12 UAV slots don't share a namespace with the OM attachments.
-	#define RT_UAV_SLOT u0
-	#define DS_UAV_SLOT u1
-#else
-	// DX11 UAV slots share the same namespace as the color OM attachments.
-
-	// The RT UAV will always be in the first slot if its used.
-	#define RT_UAV_SLOT u0
-
-	// The depth UAV slot will be in the first slot if there's no color, otherwise the second.
-	#if PS_NO_COLOR
-		#define DS_UAV_SLOT u0
-	#else
-		#define DS_UAV_SLOT u1
-	#endif
-#endif
-
 #if PS_ROV_COLOR
-RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(RT_UAV_SLOT);
+RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
 static float4 rov_rt_value;
 #endif
 
 #if PS_ROV_DEPTH
-RasterizerOrderedTexture2D<float> DepthTextureRov : register(DS_UAV_SLOT);
+RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
 static float rov_depth_value;
 #endif
 

@@ -70,7 +70,7 @@ GSTextureOGL::GSTextureOGL(Type type, int width, int height, int levels, Format 
 			m_int_shift = 2;
 			break;
 
-			// 4 channel normalized
+		// 4 channel normalized
 		case Format::Color:
 		case Format::ColorHQ:
 		case Format::ColorHDR:
@@ -80,7 +80,7 @@ GSTextureOGL::GSTextureOGL(Type type, int width, int height, int levels, Format 
 			m_int_shift = 2;
 			break;
 
-			// 4 channel float
+		// 4 channel float
 		case Format::ColorClip:
 			m_gl_format = GL_RGBA16;
 			m_int_format = GL_RGBA;
@@ -88,7 +88,7 @@ GSTextureOGL::GSTextureOGL(Type type, int width, int height, int levels, Format 
 			m_int_shift = 3;
 			break;
 
-			// Depth buffer
+		// Depth buffer
 		case Format::DepthStencil:
 		{
 			if (!g_gs_device->Features().framebuffer_fetch)

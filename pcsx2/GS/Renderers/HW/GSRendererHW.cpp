@@ -7649,6 +7649,7 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 	// Do the actual config for depth.
 	if (depth_rov)
 	{
+		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable real depth.
 		const bool depth_write = m_cached_ctx.DepthWrite();
 		GL_INS("ROV: Using %s depth ROV", depth_write ? "read/write" : "read-only");
 		ConfigureDepthFeedback(true);
@@ -7849,7 +7850,7 @@ void GSRendererHW::ConvertDepthFormatROV(GSTextureCache::Target* ds)
 		return;
 	}
 
-	GL_PUSH("HW: Convert %d for ROV.", depth_to_color ? "DepthStencil -> DepthColor" : "DepthColor -> DepthStencil");
+	GL_PUSH("HW: Convert %s for ROV.", depth_to_color ? "DepthStencil -> DepthColor" : "DepthColor -> DepthStencil");
 
 	CopyDepthTextureROV(ds_tex_old, ds_tex_new);
 
