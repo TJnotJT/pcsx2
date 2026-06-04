@@ -47,17 +47,31 @@ static const float3x3 rgb2yuv =
 	{-0.419, -0.081, 0.500}
 };
 
-Texture2D Texture;
 SamplerState TextureSampler;
 
 #if HAS_FLOAT32_INPUT
+
+Texture2D Texture;
 
 float sample_c(float2 uv)
 {
 	return Texture.Sample(TextureSampler, uv).r;
 }
 
+#elif HAS_INTEGER_INPUT
+
+Texture2D<uint> Texture;
+
+uint sample_c(float2 uv)
+{
+	uint w, h;
+	Texture.GetDimensions(w, h);
+	return Texture.Load(int3(w * uv.x, h * uv.y, 0));
+}
+
 #else
+
+Texture2D Texture;
 
 float4 sample_c(float2 uv)
 {
@@ -73,18 +87,34 @@ struct PS_INPUT
 	float4 c : COLOR;
 };
 
+#if HAS_INTEGER_INPUT
+	#define DEPTH_INPUT_TYPE uint
+	#define DEPTH_INPUT_SCALE 1
+#else
+	#define DEPTH_INPUT_TYPE float
+	#define DEPTH_INPUT_SCALE exp2(32.0f)
+#endif
+
 #if HAS_INTEGER_OUTPUT
 	#define OUTPUT_TYPE uint
 	#define OUTPUT_SV SV_Target
+	#define DEPTH_OUTPUT_TYPE uint
+	#define DEPTH_OUTPUT_SCALE 1
 #elif HAS_DEPTH_OUTPUT
 	#define OUTPUT_TYPE float
 	#define OUTPUT_SV SV_Depth
+	#define DEPTH_OUTPUT_TYPE float
+	#define DEPTH_OUTPUT_SCALE exp2(-32.0f)
 #elif HAS_FLOAT32_OUTPUT
 	#define OUTPUT_TYPE float
 	#define OUTPUT_SV SV_Target
+	#define DEPTH_OUTPUT_TYPE float
+	#define DEPTH_OUTPUT_SCALE exp2(-32.0f)
 #else
 	#define OUTPUT_TYPE float4
 	#define OUTPUT_SV SV_Target
+	#define DEPTH_OUTPUT_TYPE float
+	#define DEPTH_OUTPUT_SCALE exp2(-32.0f)
 #endif
 
 struct PS_OUTPUT
@@ -104,9 +134,9 @@ uint rgb5a1_to_uint(float4 c)
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
-uint depth_to_uint(float d)
+uint depth_to_uint(DEPTH_INPUT_TYPE d)
 {
-	return uint(d * exp2(32.0f));
+	return uint(d * DEPTH_INPUT_SCALE);
 }
 
 float4 uint_to_rgba8(uint i)
@@ -119,52 +149,52 @@ float4 uint_to_rgb5a1(uint i)
 	return float4(uint4(i << 3, i >> 2, i >> 7, i >> 8) & uint4(0xF8u, 0xF8u, 0xF8u, 0x80u)) / 255.0f;
 }
 
-float uint_to_depth32(uint i)
+OUTPUT_TYPE uint_to_depth32(uint i)
 {
-	return float(i) * exp2(-32.0f);
+	return OUTPUT_TYPE(i) * DEPTH_OUTPUT_SCALE;
 }
 
-float uint_to_depth24(uint i)
+OUTPUT_TYPE uint_to_depth24(uint i)
 {
-	return float(i & 0xFFFFFFu) * exp2(-32.0f);
+	return OUTPUT_TYPE(i & 0xFFFFFFu) * DEPTH_OUTPUT_SCALE;
 }
 
-float uint_to_depth16(uint i)
+OUTPUT_TYPE uint_to_depth16(uint i)
 {
-	return float(i & 0xFFFFu) * exp2(-32.0f);
+	return OUTPUT_TYPE(i & 0xFFFFu) * DEPTH_OUTPUT_SCALE;
 }
 
-float rgba8_to_depth32(float4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth32(float4 val)
 {
 	return uint_to_depth32(rgba8_to_uint(val));
 }
 
-float rgba8_to_depth24(float4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth24(float4 val)
 {
 	return uint_to_depth24(rgba8_to_uint(val));
 }
 
-float rgba8_to_depth16(float4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth16(float4 val)
 {
 	return uint_to_depth16(rgba8_to_uint(val));
 }
 
-float rgb5a1_to_depth16(float4 val)
+DEPTH_OUTPUT_TYPE rgb5a1_to_depth16(float4 val)
 {
 	return uint_to_depth16(rgb5a1_to_uint(val));
 }
 
-float4 depth32_to_rgba8(float d)
+float4 depth32_to_rgba8(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_rgba8(depth_to_uint(d));
 }
 
-float4 depth16_to_rgb5a1(float d)
+float4 depth16_to_rgb5a1(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_rgb5a1(depth_to_uint(d));
 }
 
-float depth32_to_depth24(float d)
+DEPTH_OUTPUT_TYPE depth32_to_depth24(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_depth24(depth_to_uint(d));
 }

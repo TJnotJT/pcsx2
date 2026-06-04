@@ -64,7 +64,7 @@ vertex ImGuiShaderData vs_imgui(ImGuiVSIn in [[stage_in]], constant float4& cb [
 	return out;
 }
 
-fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	return res.sample(data.t);
 }
@@ -130,13 +130,13 @@ fragment float4 ps_primid_rta_init_datm0(float4 p [[position]], DirectReadTextur
 	return tex.read(p).a > (254.5f / 255.f) ? -1 : FLT_MAX;
 }
 
-fragment float4 ps_rta_correction(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_rta_correction(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	float4 in = res.sample(data.t);
 	return float4(in.rgb, in.a / (128.25f / 255.0f));
 }
 
-fragment float4 ps_rta_decorrection(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_rta_decorrection(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	float4 in = res.sample(data.t);
 	return float4(in.rgb, in.a * (128.25f / 255.0f));
@@ -154,7 +154,7 @@ fragment float4 ps_colclip_resolve(float4 p [[position]], DirectReadTextureIn<fl
 	return float4(float3(uint3(in.rgb * 65535.5f) & 255) / 255.f, in.a);
 }
 
-fragment float4 ps_filter_transparency(ConvertShaderData data [[stage_in]], ConvertPSRes res)
+fragment float4 ps_filter_transparency(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
 {
 	float4 c = res.sample(data.t);
 	return float4(c.rgb, 1.0);
@@ -173,6 +173,91 @@ fragment float4 ps_convert_depth32_rgba8(ConvertShaderData data [[stage_in]], Co
 fragment float4 ps_convert_depth16_rgb5a1(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
 {
 	return convert_depth16_rgba8(res.sample(data.t)) / 255.f;
+}
+
+fragment float4 ps_convert_uint32_rgba8(ConvertShaderData data [[stage_in]], ConvertPSRes<uint> res)
+{
+	uint d = res.sample(data.t).r;
+	return float4(uint4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24))) / 255.0f;
+}
+
+fragment float4 ps_convert_uint16_rgb5a1(ConvertShaderData data [[stage_in]], ConvertPSRes<uint> res)
+{
+	uint d = res.sample(data.t).r;
+	return float4(uint4(d << 3, d >> 2, d >> 7, d >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
+}
+
+static uint rgba8_to_uint32(float4 unorm)
+{
+	uint4 c = uint4(unorm * 255.5f);
+	return c.r | (c.g << 8) | (c.b << 16) | (c.a << 24);
+}
+
+static uint rgba8_to_uint24(float4 unorm)
+{
+	uint3 c = uint3(unorm.rgb * 255.5f);
+	return c.r | (c.g << 8) | (c.b << 16);
+}
+
+static uint rgba8_to_uint16(float4 unorm)
+{
+	uint2 c = uint2(unorm.rg * 255.5f);
+	return c.r | (c.g << 8);
+}
+
+static uint rgb5a1_to_uint16(float4 unorm)
+{
+	uint4 c = uint4(unorm * 255.5f);
+	return ((c.r & 0xF8u) >> 3) | ((c.g & 0xF8u) << 2) | ((c.b & 0xF8u) << 7) | ((c.a & 0x80u) << 8);
+}
+
+fragment uint ps_convert_rgba8_uint32(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	return rgba8_to_uint32(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgba8_uint24(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	return rgba8_to_uint24(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgba8_uint16(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	return rgba8_to_uint16(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgb5a1_uint16(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	return rgb5a1_to_uint16(res.sample(data.t));
+}
+
+fragment uint ps_convert_uint32_uint24(ConvertShaderData data [[stage_in]], ConvertPSRes<uint> res)
+{
+	return res.sample(data.t).r & 0xFFFFFFu;
+}
+
+fragment uint ps_convert_rgba8_uint32_biln(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	// Note: Bilinear is not implemented for integer.
+	return rgba8_to_uint32(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgba8_uint24_biln(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	// Note: Bilinear is not implemented for integer.
+	return rgba8_to_uint24(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgba8_uint16_biln(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	// Note: Bilinear is not implemented for integer.
+	return rgba8_to_uint16(res.sample(data.t));
+}
+
+fragment uint ps_convert_rgb5a1_uint16_biln(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+{
+	// Note: Bilinear is not implemented for integer.
+	return rgb5a1_to_uint16(res.sample(data.t));
 }
 
 fragment float ps_convert_float32_depth_to_color(ConvertShaderData data [[stage_in]], ConvertPSDepthRes res)
@@ -495,7 +580,7 @@ fragment float4 ps_convert_clut_8(ConvertShaderData data [[stage_in]],
 	return texture.read(final);
 }
 
-fragment float4 ps_yuv(ConvertShaderData data [[stage_in]], ConvertPSRes res,
+fragment float4 ps_yuv(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
 	constant GSMTLConvertPSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	float4 i = res.sample(data.t);

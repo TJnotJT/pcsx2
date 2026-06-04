@@ -13,15 +13,16 @@ struct ConvertShaderData
 	float2 t;
 };
 
+template <typename Format>
 struct ConvertPSRes
 {
-	texture2d<float> texture [[texture(GSMTLTextureIndexNonHW)]];
+	texture2d<Format> texture [[texture(GSMTLTextureIndexNonHW)]];
 	sampler s [[sampler(0)]];
-	float4 sample(float2 coord)
+	vec<Format, 4> sample(float2 coord)
 	{
 		return texture.sample(s, coord);
 	}
-	float4 sample_level(float2 coord, float lod)
+	vec<Format, 4> sample_level(float2 coord, float lod)
 	{
 		return texture.sample(s, coord, level(lod));
 	}

@@ -29,6 +29,8 @@ static inline constexpr Filter BilnIf(bool biln)
 	return biln ? Biln : Nearest;
 }
 
+// Warning: the order of certain values matters here. In particular, shaders that have a 32, 24, and 16
+// bit versions must be kept contiguously in that order.
 enum class ShaderConvert
 {
 	COPY = 0,
@@ -129,7 +131,7 @@ static inline constexpr bool HasColorOutput(ShaderConvert shader)
 	}
 }
 
-static inline constexpr bool HasFloat32Output(ShaderConvert shader)
+static inline constexpr bool HasDepthLikeOutput(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -145,7 +147,7 @@ static inline constexpr bool HasFloat32Output(ShaderConvert shader)
 	}
 }
 
-static inline constexpr bool HasFloat32Input(ShaderConvert shader)
+static inline constexpr bool HasDepthLikeInput(ShaderConvert shader)
 {
 	switch (shader)
 	{
@@ -262,6 +264,8 @@ class ShaderConvertSelector
 		{
 			u32 shader : 8; // Main shader
 			u32 mask : 8; // Variable color mask
+			u32 integer_in : 1; // Integer texture input
+			u32 integer_out : 1; // Integer texture output
 			u32 depth_out : 1; // Depth texture output
 			u32 filter : 1; // Shader filter (HW filter is specified separately)
 		};
@@ -273,10 +277,10 @@ class ShaderConvertSelector
 
 public:
 	constexpr ShaderConvertSelector(ShaderConvert shader = ShaderConvert::COPY, u8 mask = 0xf,
- 		bool depth_out = false, Filter filter = Filter::Nearest)
+ 		bool integer_in = false, bool integer_out = false, bool depth_out = false, Filter filter = Filter::Nearest)
 		: fields { static_cast<u32>(shader) }
 	{
-		*this = SetMask(mask).SetDepthOutput(depth_out).SetFilter(filter);
+		*this = SetMask(mask).SetIntegerInput(integer_in).SetIntegerOutput(integer_out).SetDepthOutput(depth_out).SetFilter(filter);
 	}
 
 	constexpr ShaderConvert Shader() const
@@ -314,6 +318,11 @@ public:
 		return ::SupportsBilinear(Shader());
 	}
 
+	constexpr bool IntegerInput() const
+	{
+		return fields.integer_in;
+	}
+
 	constexpr bool ColorOutput() const
 	{
 		return HasColorOutput(Shader());
@@ -334,19 +343,29 @@ public:
 		return IsDATMConvertShader(Shader());
 	}
 
-	constexpr bool Float32Output() const
+	constexpr bool DepthLikeOutput() const
 	{
-		return HasFloat32Output(Shader());
+		return HasDepthLikeOutput(Shader());
 	}
 
-	constexpr bool Float32Input() const
+	constexpr bool DepthLikeInput() const
 	{
-		return HasFloat32Input(Shader());
+		return HasDepthLikeInput(Shader());
 	}
 
 	constexpr int IntegerOutputBpp() const
 	{
-		return ::IntegerOutputBpp(Shader());
+		return fields.integer_out ? 32 : ::IntegerOutputBpp(Shader());
+	}
+
+	constexpr bool Float32Input() const
+	{
+		DepthLikeInput() && !IntegerInput();
+	}
+
+	constexpr bool Float32Output() const
+	{
+		return DepthLikeOutput() && !DepthOutput() && !IntegerOutputBpp();
 	}
 
 	constexpr bool VariableWriteMask() const
@@ -381,10 +400,24 @@ public:
 		return SetMask((wr ? 1 : 0) | (wg ? 2 : 0) | (wb ? 4 : 0) | (wa ? 8 : 0));
 	}
 
+	constexpr ShaderConvertSelector SetIntegerInput(bool integer_out) const
+	{
+		ShaderConvertSelector tmp = *this;
+		tmp.fields.integer_out = DepthLikeInput() && integer_out;
+		return tmp;
+	}
+
+	constexpr ShaderConvertSelector SetIntegerOutput(bool integer_out) const
+	{
+		ShaderConvertSelector tmp = *this;
+		tmp.fields.integer_out = DepthLikeOutput() && integer_out;
+		return tmp;
+	}
+
 	constexpr ShaderConvertSelector SetDepthOutput(bool depth_out) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.depth_out = Float32Output() && depth_out;
+		tmp.fields.depth_out = DepthLikeOutput() && depth_out;
 		return tmp;
 	}
 
@@ -401,8 +434,8 @@ public:
 			return GSTexture::Format::DepthStencil;
 		else if (int bpp = IntegerOutputBpp())
 			return bpp == 16 ? GSTexture::Format::UInt16 : GSTexture::Format::UInt32;
-		else if (Float32Output())
-			return GSTexture::Format::DepthColor;
+		else if (DepthLikeOutput())
+			return IntegerOutputBpp() ? GSTexture::Format::DepthInteger : GSTexture::Format::DepthColor;
 		else if (ColorOutput())
 			return GSTexture::Format::Color;
 		else if (ColorClipOutput())
@@ -414,7 +447,7 @@ public:
 private:
 	// Helper variables for packing valid shaders into a contiguous range.
 	static const std::span<const ShaderConvertSelector> SHADERS;
-	static const std::array<u8, static_cast<u32>(ShaderConvert::Count) * 4> INDEX_REMAP;
+	static const std::array<u8, static_cast<u32>(ShaderConvert::Count) * 16> INDEX_REMAP;
 	static const u32 NUM_REMAPPED_SHADERS;
 
 public:
@@ -425,9 +458,11 @@ public:
 	{
 		if (VariableWriteMask() && !fields.depth_out && Nearest())
 			return GetShaderIndexForMask(Shader(), fields.mask) + NUM_REMAPPED_SHADERS;
-		u32 remapped = INDEX_REMAP[(fields.depth_out << 0) +
-		                           (fields.filter    << 1) +
-		                           (fields.shader    << 2)];
+		u32 remapped = INDEX_REMAP[(fields.integer_in  << 0) +
+		                           (fields.integer_out << 1) +
+		                           (fields.depth_out   << 2) +
+		                           (fields.filter      << 3) +
+		                           (fields.shader      << 4)];
 		pxAssert(remapped < NUM_REMAPPED_SHADERS);
 		return remapped;
 	}
@@ -523,7 +558,8 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 			break;
 	}
 
-	return ShaderConvertSelector(shader, mask, dst == GSTexture::Format::DepthStencil);
+	return ShaderConvertSelector(shader, mask, src == GSTexture::Format::DepthInteger,
+		dst == GSTexture::Format::DepthInteger, dst == GSTexture::Format::DepthStencil);
 }
 
 static inline ShaderConvertSelector GetConvertShader(const GSTexture* src, const GSTexture* dst, u32 src_bpp, u32 dst_bpp, u8 mask = 0xf)
@@ -660,11 +696,12 @@ struct alignas(16) GSHWDrawConfig
 		Line,
 		Triangle,
 	};
-	using VSExpand = GSShader::VSExpand;
-	using PS_ATST  = GSShader::PS_ATST;
-	using PS_AFAIL = GSShader::PS_AFAIL;
-	using PS_AA1   = GSShader::PS_AA1;
+	using VSExpand     = GSShader::VSExpand;
+	using PS_ATST      = GSShader::PS_ATST;
+	using PS_AFAIL     = GSShader::PS_AFAIL;
+	using PS_AA1       = GSShader::PS_AA1;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
+	using PS_Z_INTEGER = GSShader::PS_Z_INTEGER;
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -676,21 +713,36 @@ struct alignas(16) GSHWDrawConfig
 				u8 tme : 1;
 				u8 iip : 1;
 				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 3;
-				u8 _free : 1;
+				VSExpand expand : 4;
+				u8 zint : 1;
 			};
-			u8 key;
+			u16 key;
 		};
 		VSSelector(): key(0) {}
-		VSSelector(u8 k): key(k) {}
+		VSSelector(u16 k): key(k) {}
 
 		/// Returns true if the fixed index buffer should be used.
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
-		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+		__fi bool UseVSExpandIndexBuffer() const
+		{
+			return (expand == VSExpand::TriangleAA1 || expand == VSExpand::TriangleZInteger ||
+				expand == VSExpand::LineZInteger);
+		}
+		
+		/// Remove the Z integer expand shader.
+		__fi void RemoveZIntegerExpand()
+		{
+			if ((expand == GSHWDrawConfig::VSExpand::PointZInteger) ||
+				(expand == GSHWDrawConfig::VSExpand::LineZInteger) ||
+				(expand == GSHWDrawConfig::VSExpand::TriangleZInteger))
+			{
+				expand = GSHWDrawConfig::VSExpand::None;
+			}
+		}
 	};
-	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
+	static_assert(sizeof(VSSelector) == 2, "VSSelector is two bytes");
 
 	struct PSSelector
 	{
@@ -789,6 +841,11 @@ struct alignas(16) GSHWDrawConfig
 				// ROVs
 				u32 rov_color : 1;
 				PS_ROV_DEPTH rov_depth : 2;
+
+				// Integer depth
+				u32 z_rt_slot : 2;
+				PS_Z_INTEGER zint : 2;
+				u32 texint : 1;
 			};
 
 			struct
@@ -831,7 +888,8 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth;
+			const bool zint_needs_depth = zint != PS_Z_INTEGER::NONE;
+			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zint_needs_depth;
 		}
 
 		__fi bool HasShaderDiscard() const
@@ -872,6 +930,11 @@ struct alignas(16) GSHWDrawConfig
 			{
 				rov_depth = PS_ROV_DEPTH::READ_ONLY;
 			}
+
+			if (zint == PS_Z_INTEGER::READ_WRITE)
+			{
+				zint = PS_Z_INTEGER::READ_ONLY;
+			}
 		}
 
 		__fi bool HasColorOutput() const
@@ -881,7 +944,8 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasDepthOutput() const
 		{
-			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
+			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE) ||
+				(zint == PS_Z_INTEGER::READ_WRITE);
 		}
 
 		__fi bool HasColorROV() const
@@ -898,8 +962,14 @@ struct alignas(16) GSHWDrawConfig
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
 		}
+		
+		/// Does the pixel shader do SW depth test.
+		__fi bool DepthTest() const
+		{
+			return ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
+		}
 	};
-	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
+	static_assert(sizeof(PSSelector) == 16, "PSSelector is 16 bytes");
 #pragma pack(pop)
 	struct PSSelectorHash
 	{
@@ -1226,6 +1296,7 @@ struct alignas(16) GSHWDrawConfig
 
 	GSTexture* rt;        ///< Render target
 	GSTexture* ds;        ///< Depth stencil
+	GSTexture* ds_int;    ///< Integer depth (actually a R32_UINT RT)
 	GSTexture* tex;       ///< Source texture
 	GSTexture* pal;       ///< Palette texture
 	const GSVertex* verts;///< Vertices to draw
@@ -1389,6 +1460,7 @@ public:
 		bool depth_feedback       : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
 		bool aa1                  : 1; ///< Supports the GS AA1 feature.
 		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
+		bool depth_integer        : 1; ///< Supports 32 bit integer for depth buffer.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
@@ -1612,7 +1684,7 @@ public:
 	void ThrottlePresentation();
 
 	void ClearRenderTarget(GSTexture* t, u32 c);
-	void ClearDepth(GSTexture* t, float d);
+	void ClearDepth(GSTexture* t, u32 d);
 	bool ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy);
 	void InvalidateRenderTarget(GSTexture* t);
 

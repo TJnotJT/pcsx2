@@ -47,6 +47,11 @@ __fi static constexpr bool PreferReusedLabelledTexture()
 }
 #endif
 
+static __fi ShaderConvert GetCopyShader(int type, bool src_int, bool dst_int)
+{
+	return type == GSTextureCache::RenderTarget ? ShaderConvert::COPY : GetDepthCopyShader(src_int, dst_int);
+}
+
 GSTextureCache::GSTextureCache()
 {
 	// In theory 4MB is enough but 9MB is safer for overflow (8MB
@@ -2870,9 +2875,7 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 			const bool fmt_16_bits = (psm_s.bpp == 16 && GSLocalMemory::m_psm[dst_match->m_TEX0.PSM].bpp == 16 && !dst->m_32_bits_fmt);
 
 			u32 src_bpp = fmt_16_bits ? 16 : 32;
-
 			u32 dst_bpp;
-
 			if (type == DepthStencil)
 			{
 				GL_CACHE("TC: Lookup Target(Depth) %dx%d, hit Color (0x%x, TBW %d, %s was %s)",
@@ -2914,15 +2917,15 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 						if (type == DepthStencil)
 						{
 							const u32 cc = dst_match->m_texture->GetClearColor();
-							const float cd = ConvertColorToDepth(cc, src_bpp, dst_bpp);
-							GL_INS("TC: Convert clear color[%08X] to depth[%f]", cc, cd);
+							const u32 cd = ConvertColorToDepth(cc, src_bpp, dst_bpp);
+							GL_INS("TC: Convert clear color[%08X] to depth[%08X]", cc, cd);
 							g_gs_device->ClearDepth(dst->m_texture, cd);
 						}
 						else
 						{
-							const float cd = dst_match->m_texture->GetClearDepth();
+							const u32 cd = dst_match->m_texture->GetClearDepth();
 							const u32 cc = ConvertDepthToColor(cd, dst_bpp);
-							GL_INS("TC: Convert clear depth[%f] to color[%08X]", cd, cc);
+							GL_INS("TC: Convert clear depth[%08X] to color[%08X]", cd, cc);
 							g_gs_device->ClearRenderTarget(dst->m_texture, cc);
 						}
 					}
@@ -3023,7 +3026,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 		rescaler.m_scale = dst->m_scale;
 
 	// Game is changing from 32bit depth to 24bit, meaning any top values in the depth will no longer be valid, I hope no games rely on these values being maintained, else we're screwed.
-	if (type == DepthStencil && dst->m_type == DepthStencil && GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp == 32 && GSLocalMemory::m_psm[TEX0.PSM].trbpp == 24 && dst->m_alpha_max > 0)
+	if (type == DepthStencil && dst->m_type == DepthStencil && GSLocalMemory::m_psm[dst->m_TEX0.PSM].trbpp == 32 && GSLocalMemory::m_psm[TEX0.PSM].trbpp == 24 && dst->m_alpha_max > 0 && !dst->m_texture->IsDepthInteger())
 	{
 		rescaler.CalcRescale(dst);
 		GSTexture* tex = g_gs_device->CreateCompatible(dst->m_texture, rescaler.m_new_scaled_size, false);
@@ -3266,7 +3269,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 				if (dst->m_type == RenderTarget)
 					g_gs_device->ClearRenderTarget(dst->m_texture, 0);
 				else
-					g_gs_device->ClearDepth(dst->m_texture, 0.0f);
+					g_gs_device->ClearDepthOrDepthInteger(dst->m_texture, 0);
 			}
 			else
 			{
@@ -3279,7 +3282,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 }
 
 GSTextureCache::Target* GSTextureCache::CreateTarget(GIFRegTEX0 TEX0, const GSVector2i& size, const GSVector2i& valid_size, float scale, int type,
-	bool used, u32 fbmask, bool is_frame, bool preload, bool preserve_target, const GSVector4i draw_rect, GSTextureCache::Source* src)
+	bool used, u32 fbmask, bool is_frame, bool preload, bool preserve_target, const GSVector4i draw_rect, GSTextureCache::Source* src, bool z_integer)
 {
 	if (type == DepthStencil)
 	{
@@ -3295,7 +3298,7 @@ GSTextureCache::Target* GSTextureCache::CreateTarget(GIFRegTEX0 TEX0, const GSVe
 	if (GSVector4i::loadh(size).rempty())
 		return nullptr;
 
-	Target* dst = Target::Create(TEX0, size.x, size.y, scale, type, true);
+	Target* dst = Target::Create(TEX0, size.x, size.y, scale, type, true, z_integer);
 	if (!dst) [[unlikely]]
 		return nullptr;
 
@@ -4269,19 +4272,18 @@ void GSTextureCache::ScaleTargetForDisplay(Target* t, const GIFRegTEX0& dispfb, 
 	GetTargetSize(t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM, new_width, static_cast<u32>(needed_height));
 }
 
-float GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
+u32 GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
 {
-	const float mult = std::exp2(-32.0f);
 	switch (dst_bpp)
 	{
 		case 32:
 		default:
 			pxAssert(src_bpp == 32);
-			return static_cast<float>(c) * mult;
+			return c;
 
 		case 24:
 			pxAssert(src_bpp == 32);
-			return static_cast<float>(c & 0x00FFFFFF) * mult;
+			return c & 0x00FFFFFF;
 
 		case 16:
 			pxAssert(src_bpp == 16 || src_bpp == 32);
@@ -4291,25 +4293,24 @@ float GSTextureCache::ConvertColorToDepth(u32 c, u32 src_bpp, u32 dst_bpp)
 				const u32 g = (c >>  6) & 0x03E0u;
 				const u32 b = (c >>  9) & 0x7C00u;
 				const u32 a = (c >> 16) & 0x8000u;
-				return static_cast<float>(r | g | b | a) * mult;
+				return r | g | b | a;
 			}
 			else
 			{
-				return static_cast<float>(c & 0x0000ffff) * mult;
+				return c & 0x0000ffff;
 			}
 	}
 }
 
-u32 GSTextureCache::ConvertDepthToColor(float d, u32 dst_bpp)
+u32 GSTextureCache::ConvertDepthToColor(u32 d, u32 dst_bpp)
 {
 	pxAssert(dst_bpp == 32 || dst_bpp == 16);
-	const u32 cc = static_cast<u32>(d * 0x1p32);
 	if (dst_bpp == 16)
 	{
-		const u32 r = (cc <<  3) & 0x000000FF;
-		const u32 g = (cc <<  6) & 0x0000F800;
-		const u32 b = (cc <<  9) & 0x00F80000;
-		const u32 a = (cc << 16) & 0x80000000;
+		const u32 r = (d <<  3) & 0x000000FF;
+		const u32 g = (d <<  6) & 0x0000F800;
+		const u32 b = (d <<  9) & 0x00F80000;
+		const u32 a = (d << 16) & 0x80000000;
 		return r | g | b | a;
 	}
 	else
@@ -7164,15 +7165,25 @@ void GSTextureCache::AgeHashCache()
 	}
 }
 
-GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, int h, float scale, int type, bool clear)
+GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, int h, float scale, int type, bool clear, bool z_integer)
 {
 	pxAssert(type == RenderTarget || type == DepthStencil);
 
 	const int scaled_w = static_cast<int>(std::ceil(static_cast<float>(w) * scale));
 	const int scaled_h = static_cast<int>(std::ceil(static_cast<float>(h) * scale));
-	GSTexture* texture = (type == RenderTarget) ?
-		g_gs_device->CreateRenderTarget(scaled_w, scaled_h, GSTexture::Format::Color, clear, PreferReusedLabelledTexture()) :
-		g_gs_device->CreateDepthStencil(scaled_w, scaled_h, clear, PreferReusedLabelledTexture());
+	GSTexture* texture;
+	if (type == DepthStencil && g_gs_device->Features().depth_integer &&
+		(GSConfig.HWZIntegerMode == GSHardwareZIntegerMode::Always || z_integer))
+	{
+		texture = g_gs_device->CreateRenderTarget(scaled_w, scaled_h, GSTexture::Format::DepthInteger, clear, PreferReusedLabelledTexture());
+	}
+	else
+	{
+		texture = (type == RenderTarget) ?
+			g_gs_device->CreateRenderTarget(scaled_w, scaled_h, GSTexture::Format::Color, clear, PreferReusedLabelledTexture()) :
+			g_gs_device->CreateDepthStencil(scaled_w, scaled_h, GSTexture::Format::DepthStencil,
+				clear, PreferReusedLabelledTexture());
+	}
 	if (!texture)
 		return nullptr;
 
@@ -7286,6 +7297,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 
 	const GIFRegTEX0& TEX0 = t->m_TEX0;
 	const bool is_depth = (t->m_type == DepthStencil);
+	const bool is_int = t->m_texture->IsDepthInteger();
 
 	GSTexture::Format fmt;
 	ShaderConvert ps_shader;

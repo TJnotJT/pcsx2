@@ -437,12 +437,32 @@ void GSDevice::ThrottlePresentation()
 
 void GSDevice::ClearRenderTarget(GSTexture* t, u32 c)
 {
+	pxAssert(t->IsRenderTarget());
 	t->SetClearColor(c);
 }
 
 void GSDevice::ClearDepth(GSTexture* t, float d)
 {
+	pxAssert(t->IsDepthStencil());
 	t->SetClearDepth(d);
+}
+
+void GSDevice::ClearDepthInteger(GSTexture* t, u32 d)
+{
+	pxAssert(t->IsDepthInteger());
+	t->SetClearColor(d);
+}
+
+void GSDevice::ClearDepthOrDepthInteger(GSTexture* t, u32 d)
+{
+	if (t->IsDepthInteger())
+	{
+		ClearDepthInteger(t, d);
+	}
+	else
+	{
+		ClearDepth(t, static_cast<float>(d) * 0x1p-32);
+	}
 }
 
 bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy)
@@ -794,6 +814,21 @@ GSTexture* GSDevice::CreateDepthColor(const GSVector2i& size, bool clear, bool p
 		clear, !prefer_reuse);
 }
 
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, bool clear, bool prefer_reuse)
+{
+	return CreateCompatibleTexture(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
+{
+	return CreateCompatibleTexture(tex, size.x, size.y, clear, prefer_reuse);
+}
+
+GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
+{
+	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);
+}
+
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)
 {
 	pxAssert(mipmap_levels != 0 && (mipmap_levels < 0 || mipmap_levels <= GetMipmapLevelsForSize(w, h)));
@@ -824,9 +859,11 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
 	const GSVector4& dRect, ShaderConvertSelector shader, Filter filter)
 {
-	pxAssert((dTex && dTex->IsDepthLike()) == shader.Float32Output());
+	pxAssert((dTex && dTex->IsFloat32Like()) == shader.Float32Output());
+	pxAssert((dTex && dTex->IsIntegerFormat()) == shader.IntegerOutput());
+	pxAssert((sTex && sTex->IsIntegerFormat()) == HasIntegerInput(shader));
 	pxAssert(!(filter == Biln && shader.SupportsBilinear())); // Don't allow HW bilinear if SW bilinear is required.
-	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.Shader()),
+	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", shader.Name(),
 		int(sRect.left), int(sRect.top),
 		int(sRect.right - sRect.left), int(sRect.bottom - sRect.top), int(dRect.left), int(dRect.top),
 		int(dRect.right - dRect.left), int(dRect.bottom - dRect.top));
@@ -1798,24 +1835,32 @@ void GSHWDrawConfig::DumpConfig(const std::string& path, const GSHWDrawConfig& c
 	}
 }
 
-static constexpr u32 NUM_REMAP_INPUTS = static_cast<u32>(ShaderConvert::Count) * 4;
+static constexpr u32 NUM_REMAP_INPUTS = static_cast<u32>(ShaderConvert::Count) * 16;
 
 static constexpr ShaderConvertSelector GetRemappedShader(u32 idx)
 {
-	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 2);
-	bool depth_out = (idx >> 0) & 1;
-	Filter filter = static_cast<Filter>((idx >> 1) & 1);
-	return ShaderConvertSelector(convert, 0xf, depth_out, filter);
+	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 4);
+	bool integer_in = (idx >> 0) & 1;
+	bool integer_out = (idx >> 1) & 1;
+	bool depth_out = (idx >> 2) & 1;
+	Filter filter = BilnIf((idx >> 3) & 1);
+	return ShaderConvertSelector(convert, 0xf, integer_in, integer_out, depth_out, filter);
 }
 
 static constexpr bool RemapIndexIsValid(u32 idx)
 {
-	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 2);
-	bool depth_out = (idx >> 0) & 1;
-	Filter filter = static_cast<Filter>((idx >> 1) & 1);
+	ShaderConvert convert = static_cast<ShaderConvert>(idx >> 4);
+	bool integer_in = (idx >> 0) & 1;
+	bool integer_out = (idx >> 1) & 1;
+	bool depth_out = (idx >> 2) & 1;
+	Filter filter = BilnIf((idx >> 3) & 1);
 	if (HasVariableWriteMask(convert) && !depth_out && filter == Nearest)
 		return false; // Handled as variable write mask
-	if (depth_out && !HasFloat32Output(convert))
+	if (integer_in && !HasDepthLikeInput(convert))
+		return false;
+	if (integer_out && !HasDepthLikeOutput(convert))
+		return false;
+	if (depth_out && !HasDepthLikeOutput(convert))
 		return false;
 	if (filter == Biln && !SupportsBilinear(convert))
 		return false;
@@ -1838,8 +1883,8 @@ static_assert(NUM_REMAPPED_SHADERS <= 256); // We use u8 for the remap indices.
 static constexpr std::array<u8, NUM_REMAP_INPUTS> GenRemapArray()
 {
 	std::array<u8, NUM_REMAP_INPUTS> out{};
-	u32 out_idx = 0;
-	const u32 invalid = 0xffffffff;
+	u8 out_idx = 0;
+	const u8 invalid = 0xff;
 	for (u32 i = 0; i < NUM_REMAP_INPUTS; i++)
 		out[i] = RemapIndexIsValid(i) ? out_idx++ : invalid;
 	return out;

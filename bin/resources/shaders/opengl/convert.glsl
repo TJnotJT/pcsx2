@@ -25,11 +25,96 @@ void vs_main()
 
 #ifdef FRAGMENT_SHADER
 
+#if defined(ps_datm1) || \
+	defined(ps_datm0) || \
+	defined(ps_datm1_rta_correction) || \
+	defined(ps_datm0_rta_correction) || \
+	defined(ps_convert_rgba8_float32) || \
+	defined(ps_convert_rgba8_float24) || \
+	defined(ps_convert_rgba8_float16) || \
+	defined(ps_convert_rgb5a1_float16) || \
+	defined(ps_convert_rgba8_float32_biln) || \
+	defined(ps_convert_rgba8_float24_biln) || \
+	defined(ps_convert_rgba8_float16_biln) || \
+	defined(ps_convert_rgb5a1_float16_biln) || \
+	defined(ps_convert_float32_color_to_depth) || \
+	defined(ps_convert_float32_float24) || \
+	defined(ps_convert_uint32_float32) || \
+	defined(ps_convert_uint32_float24) || \
+	defined(ps_depth_copy)
+#define HAS_DEPTHSTENCIL_OUTPUT 1
+#else
+#define HAS_DEPTHSTENCIL_OUTPUT 0
+#endif
+
+#if defined(ps_copy_uint) || \
+	defined(ps_convert_uint32_float32) || \
+	defined(ps_convert_uint32_float24) || \
+	defined(ps_convert_uint32_rgba8) || \
+	defined(ps_convert_uint16_rgb5a1) || \
+	defined(ps_convert_uint32_uint24)
+#define HAS_INTEGER_INPUT 1
+#else
+#define HAS_INTEGER_INPUT 0
+#endif
+
+#if	defined(ps_convert_rgba8_16bits) || \
+	defined(ps_copy_uint) || \
+	defined(ps_convert_float32_uint32) || \
+	defined(ps_convert_float32_uint24) || \
+	defined(ps_convert_rgba8_uint32) || \
+	defined(ps_convert_rgba8_uint24) || \
+	defined(ps_convert_rgba8_uint16) || \
+	defined(ps_convert_rgb5a1_uint16) || \
+	defined(ps_convert_rgba8_uint32_biln) || \
+	defined(ps_convert_rgba8_uint24_biln) || \
+	defined(ps_convert_rgba8_uint16_biln) || \
+	defined(ps_convert_rgb5a1_uint16_biln) || \
+	defined(ps_convert_uint32_uint24)
+#define HAS_INTEGER_OUTPUT 1
+#else
+#define HAS_INTEGER_OUTPUT 0
+#endif
+
 in vec4 PSin_p;
 in vec2 PSin_t;
 in vec4 PSin_c;
 
+#if HAS_INTEGER_INPUT
+layout(binding = 0) uniform usampler2D TextureSampler;
+uint sample_c()
+{
+	return texture(TextureSampler, PSin_t).r;
+}
+#if HAS_FLOAT32_INPUT
 layout(binding = 0) uniform sampler2D TextureSampler;
+float sample_c()
+{
+	return texture(TextureSampler, PSin_t).r;
+}
+#else
+layout(binding = 0) uniform sampler2D TextureSampler;
+vec4 sample_c()
+{
+	return texture(TextureSampler, PSin_t);
+}
+#endif
+
+#if HAS_INTEGER_INPUT
+	#define DEPTH_INPUT_TYPE uint
+	#define DEPTH_INPUT_SCALE 1
+#else
+	#define DEPTH_INPUT_TYPE float
+	#define DEPTH_INPUT_SCALE exp2(32.0f)
+#endif
+
+#if HAS_INTEGER_OUTPUT
+	#define DEPTH_OUTPUT_TYPE uint
+	#define DEPTH_OUTPUT_SCALE 1
+#else
+	#define DEPTH_OUTPUT_TYPE float
+	#define DEPTH_OUTPUT_SCALE exp2(-32.0f)
+#endif
 
 #if HAS_INTEGER_OUTPUT
 	layout(location = 0) out uint o_col0;
@@ -46,22 +131,6 @@ layout(binding = 0) uniform sampler2D TextureSampler;
 	#define OUTPUT o_col0
 #endif
 
-#if HAS_FLOAT32_INPUT
-
-float sample_c()
-{
-	return texture(TextureSampler, PSin_t).r;
-}
-
-#else
-
-vec4 sample_c()
-{
-	return texture(TextureSampler, PSin_t);
-}
-
-#endif
-
 uint rgba8_to_uint(vec4 c)
 {
 	uvec4 i = uvec4(c * 255.5f) & 0xFFu;
@@ -74,9 +143,9 @@ uint rgb5a1_to_uint(vec4 c)
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
-uint depth_to_uint(float d)
+uint depth_to_uint(DEPTH_INPUT_TYPE d)
 {
-	return uint(d * exp2(32.0f));
+	return uint(d * DEPTH_INPUT_SCALE);
 }
 
 vec4 uint_to_rgba8(uint i)
@@ -89,52 +158,52 @@ vec4 uint_to_rgb5a1(uint i)
 	return vec4(uvec4(i << 3, i >> 2, i >> 7, i >> 8) & uvec4(0xF8u, 0xF8u, 0xF8u, 0x80u)) / 255.0f;
 }
 
-float uint_to_depth32(uint i)
+DEPTH_OUTPUT_TYPE uint_to_depth32(uint i)
 {
-	return float(i) * exp2(-32.0f);
+	return DEPTH_OUTPUT_TYPE(i) * DEPTH_OUTPUT_SCALE;
 }
 
-float uint_to_depth24(uint i)
+DEPTH_OUTPUT_TYPE uint_to_depth24(uint i)
 {
-	return float(i & 0xFFFFFFu) * exp2(-32.0f);
+	return DEPTH_OUTPUT_TYPE(i & 0xFFFFFFu) * DEPTH_OUTPUT_SCALE;
 }
 
-float uint_to_depth16(uint i)
+DEPTH_OUTPUT_TYPE uint_to_depth16(uint i)
 {
-	return float(i & 0xFFFFu) * exp2(-32.0f);
+	return DEPTH_OUTPUT_TYPE(i & 0xFFFFu) * DEPTH_OUTPUT_SCALE;
 }
 
-float rgba8_to_depth32(vec4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth32(vec4 val)
 {
 	return uint_to_depth32(rgba8_to_uint(val));
 }
 
-float rgba8_to_depth24(vec4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth24(vec4 val)
 {
 	return uint_to_depth24(rgba8_to_uint(val));
 }
 
-float rgba8_to_depth16(vec4 val)
+DEPTH_OUTPUT_TYPE rgba8_to_depth16(vec4 val)
 {
 	return uint_to_depth16(rgba8_to_uint(val));
 }
 
-float rgb5a1_to_depth16(vec4 val)
+DEPTH_OUTPUT_TYPE rgb5a1_to_depth16(vec4 val)
 {
 	return uint_to_depth16(rgb5a1_to_uint(val));
 }
 
-vec4 depth32_to_rgba8(float d)
+vec4 depth32_to_rgba8(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_rgba8(depth_to_uint(d));
 }
 
-vec4 depth16_to_rgb5a1(float d)
+vec4 depth16_to_rgb5a1(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_rgb5a1(depth_to_uint(d));
 }
 
-float depth32_to_depth24(float d)
+DEPTH_OUTPUT_TYPE depth32_to_depth24(DEPTH_INPUT_TYPE d)
 {
 	return uint_to_depth24(depth_to_uint(d));
 }
@@ -209,6 +278,42 @@ void ps_convert_depth32_depth24()
 {
 	// Truncates depth value to 24bits
 	OUTPUT = depth32_to_depth24(sample_c());
+}
+#endif
+
+#ifdef ps_convert_rgba8_uint32
+void ps_convert_rgba8_uint32()
+{
+	// Convert an RGBA texture into a 32 bit UINT texture
+	o_col0 = rgba8_to_uint32(sample_c());
+}
+#endif
+
+#ifdef ps_convert_rgba8_uint24
+void ps_convert_rgba8_uint24()
+{
+	// Same as above but without the alpha channel (24 bits Z)
+
+	// Convert an RGBA texture into a 32 bit UINT texture
+	o_col0 = rgba8_to_uint24(sample_c());
+}
+#endif
+
+#ifdef ps_convert_rgba8_uint16
+void ps_convert_rgba8_uint16()
+{
+	// Same as above but without the A/B channels (16 bits Z)
+
+	// Convert an RGBA texture into a 32 bit UINT texture
+	o_col0 = rgba8_to_uint16(sample_c());
+}
+#endif
+
+#ifdef ps_convert_rgb5a1_uint16
+void ps_convert_rgb5a1_uint16()
+{
+	// Convert an RGB5A1 (saved as RGBA8) color to a 16 bit UINT
+	o_col0 = rgb5a1_to_uint16(sample_c());
 }
 #endif
 

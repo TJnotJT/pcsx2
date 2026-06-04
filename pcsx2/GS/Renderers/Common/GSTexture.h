@@ -34,7 +34,8 @@ public:
 		ColorHDR,     ///< High dynamic range (RGBA16F) color texture
 		ColorClip,    ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
-		DepthColor,      ///< For treating depth texture as RT
+		DepthColor,   ///< For treating depth texture as RT
+		DepthInteger, ///< For full 32-bit integer depth emulation
 		UNorm8,       ///< A8UNorm texture for paletted textures and the OSD font
 		UInt16,       ///< UInt16 texture for reading back 16-bit depth
 		UInt32,       ///< UInt32 texture for reading back 24 and 32-bit depth
@@ -56,7 +57,7 @@ public:
 	union ClearValue
 	{
 		u32 color;
-		float depth;
+		u32 depth;
 	};
 
 protected:
@@ -141,13 +142,21 @@ public:
 	{
 		return (m_type == Type::RenderTarget && m_format == Format::DepthColor);
 	}
+	__fi bool IsDepthInteger() const
+	{
+		return (m_type == Type::RenderTarget && m_format == Format::DepthInteger);
+	}
 	__fi bool IsTexture() const
 	{
 		return (m_type == Type::Texture);
 	}
 	__fi bool IsDepthLike() const
 	{
-		return IsDepthStencil() || IsDepthColor();
+		return IsDepthStencil() || IsDepthColor() || IsDepthInteger();
+	}
+	__fi bool IsIntegerFormat() const
+	{
+		return m_format == Format::UInt16 || m_format == Format::UInt32 || m_format == Format::DepthInteger;
 	}
 
 	__fi State GetState() const { return m_state; }
@@ -157,19 +166,16 @@ public:
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 
 	__fi u32 GetClearColor() const { return m_clear_value.color; }
-	__fi float GetClearDepth() const { return m_clear_value.depth; }
-	__fi GSVector4 GetUNormClearColor() const { return GSVector4::unorm8(m_clear_value.color); }
-	__fi GSVector4 GetClearForFormat() const
+	__fi u32 GetClearDepth() const
 	{
-		return IsDepthLike() ? GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f) : GetUNormClearColor();
+		return m_clear_value.depth;
 	}
-
 	__fi void SetClearColor(u32 color)
 	{
 		m_state = State::Cleared;
 		m_clear_value.color = color;
 	}
-	__fi void SetClearDepth(float depth)
+	__fi void SetClearDepth(u32 depth)
 	{
 		m_state = State::Cleared;
 		m_clear_value.depth = depth;
