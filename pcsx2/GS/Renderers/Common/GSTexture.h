@@ -54,12 +54,6 @@ public:
 		Invalidated
 	};
 
-	union ClearValue
-	{
-		u32 color;
-		u32 depth;
-	};
-
 protected:
 	GSVector2i m_size{};
 	int m_mipmap_levels = 0;
@@ -72,7 +66,7 @@ protected:
 	u32 m_last_frame_used = 0;
 
 	bool m_needs_mipmaps_generated = true;
-	ClearValue m_clear_value = {};
+	u32 m_clear_value = 0;
 
 	// For GL/DX11 since they don't track layouts.
 	// Used heuristically to decide whether to use ROV for a draw.
@@ -154,6 +148,10 @@ public:
 	{
 		return IsDepthStencil() || IsDepthColor() || IsDepthInteger();
 	}
+	__fi bool IsFloat32Like() const
+	{
+		return IsDepthStencil() || IsDepthColor();
+	}
 	__fi bool IsIntegerFormat() const
 	{
 		return m_format == Format::UInt16 || m_format == Format::UInt32 || m_format == Format::DepthInteger;
@@ -165,21 +163,13 @@ public:
 	__fi u32 GetLastFrameUsed() const { return m_last_frame_used; }
 	void SetLastFrameUsed(u32 frame) { m_last_frame_used = frame; }
 
-	__fi u32 GetClearColor() const { return m_clear_value.color; }
-	__fi u32 GetClearDepth() const
-	{
-		return m_clear_value.depth;
-	}
-	__fi void SetClearColor(u32 color)
+	__fi u32 GetClearValue() const { return m_clear_value; }
+	__fi void SetClearValue(u32 value)
 	{
 		m_state = State::Cleared;
-		m_clear_value.color = color;
+		m_clear_value = value;
 	}
-	__fi void SetClearDepth(u32 depth)
-	{
-		m_state = State::Cleared;
-		m_clear_value.depth = depth;
-	}
+	__fi float GetClearDepth() const { return static_cast<float>(m_clear_value) * 0x1p-32; }
 
 	void GenerateMipmapsIfNeeded();
 	void ClearMipmapGenerationFlag() { m_needs_mipmaps_generated = false; }

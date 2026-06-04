@@ -3911,9 +3911,8 @@ void GSRendererHW::Draw()
 			const int h = ds->m_texture->GetHeight();
 			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) F32 to U32 (alpha curr=%x, alpha draw=%x).",
 				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
-			GSTexture* tmp = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::UInt32, false);
-			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
-			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::FLOAT32_TO_UINT32, false);
+			GSTexture* tmp = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::DepthInteger, false);
+			g_gs_device->StretchRectAuto(ds->m_texture, tmp, Nearest);
 			g_gs_device->Recycle(ds->m_texture);
 			ds->m_texture = tmp;
 		}
@@ -3925,9 +3924,8 @@ void GSRendererHW::Draw()
 			const int h = ds->m_texture->GetHeight();
 			GL_PUSH("HW: Convert Z target @ 0x%x (%d x %d) U32 to F32 (alpha curr=%x, alpha draw=%x).",
 				ds->m_TEX0.TBP0, w, h, ds->m_alpha_max, static_cast<int>(m_vt.m_max.p.z) >> 24);
-			GSTexture* tmp = g_gs_device->CreateDepthStencil(w, h, GSTexture::Format::DepthStencil, false);
-			const GSVector4 dRect(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
-			g_gs_device->StretchRect(ds->m_texture, tmp, dRect, ShaderConvert::UINT32_TO_FLOAT32, false);
+			GSTexture* tmp = g_gs_device->CreateDepthStencil(w, h, false);
+			g_gs_device->StretchRectAuto(ds->m_texture, tmp, Nearest);
 			g_gs_device->Recycle(ds->m_texture);
 			ds->m_texture = tmp;
 		}
@@ -4901,7 +4899,6 @@ void GSRendererHW::Draw()
 
 			ds->ResizeTexture(new_w, new_h);
 
-
 			if (m_using_temp_z)
 			{
 				const int z_width = g_texture_cache->GetTemporaryZ()->GetWidth() / ds->m_scale;
@@ -4909,7 +4906,7 @@ void GSRendererHW::Draw()
 
 				if (z_width != new_w || z_height != new_h)
 				{
-					if (GSTexture* tex = g_gs_device->CreateCompatibleTexture(
+					if (GSTexture* tex = g_gs_device->CreateCompatible(
 						g_texture_cache->GetTemporaryZ(), new_w * ds->m_scale, new_h * ds->m_scale, true))
 					{
 						g_gs_device->StretchRectAuto(g_texture_cache->GetTemporaryZ(), tex, Nearest);
@@ -7842,7 +7839,7 @@ static void CopyDepthTextureROV(GSTexture* src, GSTexture* dst)
 	switch (src->GetState())
 	{
 		case GSTexture::State::Cleared:
-			g_gs_device->ClearDepth(dst, src->GetClearDepth());
+			g_gs_device->ClearRenderTarget(dst, src->GetClearValue());
 			break;
 		case GSTexture::State::Invalidated:
 			g_gs_device->InvalidateRenderTarget(dst);
@@ -7862,27 +7859,33 @@ void GSRendererHW::ConvertDepthFormatROV(GSTextureCache::Target* ds)
 	if (!ds)
 		return;
 
-	GSTexture* ds_tex_old = m_conf.ds;
+	GSTexture* ds_tex_old = m_conf.ds_int ? m_conf.ds_int : m_conf.ds;
 	GSTexture* ds_tex_new = nullptr;
 
-	// Convert depth to depth color or vice versa if needed.
-	bool depth_to_color;
-	if (m_conf.ps.HasDepthROV() && !ds_tex_old->IsDepthColor())
+	// Convert depth to depth color/integer or vice versa if needed.
+	if (m_conf.ps.HasDepthROV())
 	{
-		depth_to_color = true;
-		ds_tex_new = g_gs_device->CreateDepthColor(ds_tex_old->GetSize(), false, true);
+		GSTexture::Format need_fmt = m_conf.ps.HasZInteger() ? GSTexture::Format::DepthInteger : GSTexture::Format::DepthColor;
+		if (ds_tex_old->GetFormat() != need_fmt)
+		{
+			ds_tex_new = g_gs_device->CreateRenderTarget(ds_tex_old->GetSize(), need_fmt, false, true);
+		}
+		else
+		{
+			return;
+		}
 	}
-	else if (!m_conf.ps.HasDepthROV() && ds_tex_old->IsDepthColor())
+	else if (!m_conf.ps.HasDepthROV() && !m_conf.ps.HasZInteger() && !ds_tex_old->IsDepthStencil())
 	{
-		depth_to_color = false;
-		ds_tex_new = g_gs_device->CreateDepthStencil(ds->m_texture->GetSize(), false, true);
+		ds_tex_new = g_gs_device->CreateDepthStencil(ds_tex_old->GetSize(), false, true);
 	}
 	else
 	{
 		return;
 	}
 
-	GL_PUSH("HW: Convert %s for ROV.", depth_to_color ? "DepthStencil -> DepthColor" : "DepthColor -> DepthStencil");
+	GL_PUSH("HW: Convert %s -> %s for ROV.", GSTexture::GetFormatName(ds_tex_old->GetFormat()),
+		GSTexture::GetFormatName(ds_tex_new->GetFormat()));
 
 	CopyDepthTextureROV(ds_tex_old, ds_tex_new);
 
@@ -8646,7 +8649,7 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 	if (m_downscale_source)
 	{
 		// Can't use box filtering on depth (yet), or fractional scales.
-		if (src_target->m_texture->IsDepthStencilOrDepthInteger() || std::floor(src_target->GetScale()) != src_target->GetScale())
+		if (src_target->m_texture->IsDepthLike() || std::floor(src_target->GetScale()) != src_target->GetScale())
 		{
 			GSVector4 src_rect = GSVector4(tmm.coverage) / GSVector4(GSVector4i::loadh(src_unscaled_size).zwzw());
 			const GSVector4 dst_rect = GSVector4(tmm.coverage);
@@ -10275,9 +10278,8 @@ bool GSRendererHW::TryTargetClear(GSTextureCache::Target* rt, GSTextureCache::Ta
 		{
 			const u32 max_z = 0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8);
 			const u32 z = std::min(max_z, m_vertex->buff[1].XYZ.Z);
-			const float d = static_cast<float>(z) * 0x1p-32f;
-			GL_INS("HW: TryTargetClear(): DS at %x <= %f", ds->m_TEX0.TBP0, d);
-			g_gs_device->ClearDepthOrDepthInteger(ds->m_texture, z);
+			GL_INS("HW: TryTargetClear(): DS at %x <= %d", ds->m_TEX0.TBP0, z);
+			g_gs_device->ClearRenderTarget(ds->m_texture, z);
 			ds->m_dirty.clear();
 			ds->m_alpha_max = z >> 24;
 			ds->m_alpha_min = z >> 24;
@@ -11101,7 +11103,7 @@ void GSRendererHW::HandleTemporaryDSForDATE(GSDevice::RecycledTexture& temp_ds, 
 		(!m_conf.ds || !m_conf.ds->IsDepthStencil()))
 	{
 		const bool is_one_barrier = (features.texture_barrier && m_conf.require_full_barrier && (m_prim_overlap == PRIM_OVERLAP_NO || m_conf.ps.shuffle || m_channel_shuffle));
-		temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), GSTexture::Format::DepthStencil, false));
+		temp_ds.reset(g_gs_device->CreateDepthStencil(m_conf.rt->GetWidth(), m_conf.rt->GetHeight(), false));
 		if (temp_ds)
 		{
 			m_conf.ds = temp_ds.get();

@@ -74,6 +74,7 @@ const char* GSTexture::GetFormatName(Format format)
 		case Format::ColorClip:    return "ColorClip";
 		case Format::DepthStencil: return "DepthStencil";
 		case Format::DepthColor:   return "DepthColor";
+		case Format::DepthInteger: return "DepthInteger";
 		case Format::UNorm8:       return "UNorm8";
 		case Format::UInt16:       return "UInt16";
 		case Format::UInt32:       return "UInt32";

@@ -1170,7 +1170,7 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 	{
 		TransitionToState(cmdlist, ResourceState::DepthWriteStencil);
 		cmdlist.list4->ClearDepthStencilView(
-			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
+			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, GetClearDepth(), 0, 0, nullptr);
 	}
 	else if (IsRenderTarget())
 	{
@@ -1183,23 +1183,26 @@ void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 
 GSVector4 GSTexture12::GetDX12ClearValue() const
 {
-	GSVector4 cv{};
 	if (IsDepthStencil())
 	{
-		cv.x = m_clear_value.depth;
+		return GSVector4(GetClearDepth(), 0.0f, 0.0f, 0.0f);
 	}
 	else if (IsRenderTarget())
 	{
 		if (IsDepthInteger())
 		{
-			cv.x = static_cast<float>(m_clear_value.color);
+			return GSVector4(static_cast<float>(GetClearValue()), 0.0f, 0.0f, 0.0f);
 		}
 		else
 		{
-			cv = GetUNormClearColor();
+			return GSVector4::unorm8(GetClearValue());
 		}
 	}
-	return cv;
+	else
+	{
+		pxAssert(false);
+		return GSVector4::zero();
+	}
 }
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)

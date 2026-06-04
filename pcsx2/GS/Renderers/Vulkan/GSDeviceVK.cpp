@@ -2872,6 +2872,7 @@ VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
 		VK_FORMAT_R16G16B16A16_UNORM, // ColorClip
 		VK_FORMAT_D32_SFLOAT_S8_UINT, // DepthStencil
 		VK_FORMAT_R32_SFLOAT, // DepthColor
+		VK_FORMAT_R32_UINT, // DepthInteger
 		VK_FORMAT_R8_UNORM, // UNorm8
 		VK_FORMAT_R16_UINT, // UInt16
 		VK_FORMAT_R32_UINT, // UInt32
@@ -3152,7 +3153,7 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 	else if (dTex->GetFormat() == GSTexture::Format::Color)
 	{
 		if (load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
-			BeginClearRenderPass(m_utility_color_render_pass_clear, dtex_rc, dTex->GetClearColor());
+			BeginClearRenderPass(m_utility_color_render_pass_clear, dtex_rc, dTex->GetClearValue());
 		else
 			BeginRenderPass((load_op == VK_ATTACHMENT_LOAD_OP_DONT_CARE) ? m_utility_color_render_pass_discard :
 																		   m_utility_color_render_pass_load,
@@ -3166,7 +3167,7 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 			VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE);
 		if (load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
 		{
-			BeginClearRenderPass(rp, dtex_rc, dTex->GetClearColor());
+			BeginClearRenderPass(rp, dtex_rc, dTex->GetClearValue());
 		}
 		else
 		{
@@ -3348,9 +3349,9 @@ void GSDeviceVK::DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, 
 
 	// transition everything before starting the new render pass
 	const bool has_input_0 = (sTex[0] &&
-		(sTex[0]->GetState() == GSTexture::State::Dirty || (sTex[0]->GetState() == GSTexture::State::Cleared || sTex[0]->GetClearColor() != 0)));
+		(sTex[0]->GetState() == GSTexture::State::Dirty || (sTex[0]->GetState() == GSTexture::State::Cleared || sTex[0]->GetClearValue() != 0)));
 	const bool has_input_1 = (PMODE.SLBG == 0 || feedback_write_2_but_blend_bg) && sTex[1] &&
-		(sTex[1]->GetState() == GSTexture::State::Dirty || (sTex[1]->GetState() == GSTexture::State::Cleared || sTex[1]->GetClearColor() != 0));
+		(sTex[1]->GetState() == GSTexture::State::Dirty || (sTex[1]->GetState() == GSTexture::State::Cleared || sTex[1]->GetClearValue() != 0));
 	if (has_input_0)
 	{
 		static_cast<GSTextureVK*>(sTex[0])->CommitClear();
@@ -4107,6 +4108,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		{
 			rp = GetRenderPass(
 				LookupNativeFormat(GSTexture::Format::Invalid),
+				LookupNativeFormat(GSTexture::Format::Invalid),
 				LookupNativeFormat(GSTexture::Format::DepthStencil),
 				VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 		}
@@ -4114,6 +4116,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 		{
 			rp = GetRenderPass(
 				LookupNativeFormat(shader.OutputFormat()),
+				LookupNativeFormat(GSTexture::Format::Invalid),
 				LookupNativeFormat(GSTexture::Format::Invalid),
 				VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 		}
@@ -4141,7 +4144,8 @@ bool GSDeviceVK::CompileConvertPipelines()
 		std::string macro;
 		macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
 		macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
-		macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
+		macro += fmt::format("#define HAS_INTEGER_INPUT {}\n", static_cast<int>(shader.IntegerInput()));
+		macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutput()));
 		macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
 		macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
 		macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
@@ -4196,7 +4200,7 @@ bool GSDeviceVK::CompileConvertPipelines()
 	{
 		for (u32 clear = 0; clear < 2; clear++)
 		{
-			m_date_image_setup_render_passes[ds][clear] = GetRenderPass(
+			m_primid_image_setup_render_passes[ds][clear] = GetRenderPass(
 				LookupNativeFormat(GSTexture::Format::PrimID),
 				VK_FORMAT_UNDEFINED,
 				ds ? LookupNativeFormat(GSTexture::Format::DepthStencil) : VK_FORMAT_UNDEFINED,
@@ -6105,7 +6109,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			if (draw_rt->GetState() == GSTexture::State::Cleared)
 			{
 				colclip_rt->SetState(GSTexture::State::Cleared);
-				colclip_rt->SetClearColor(draw_rt->GetClearColor());
+				colclip_rt->SetClearValue(draw_rt->GetClearValue());
 
 				// If depth is cleared, we need to commit it, because we're only going to draw to the active part of the FB.
 				if (draw_ds && draw_ds->GetState() == GSTexture::State::Cleared && !config.drawarea.eq(GSVector4i::loadh(rtsize)))
@@ -6289,13 +6293,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			u32 cv_count = 0;
 			if (draw_rt)
 			{
-				GSVector4 clear_color = draw_rt->GetClearForFormat();
-				if (pipe.ps.colclip_hw)
-				{
-					// Denormalize clear color for hw colclip.
-					clear_color *= GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
-				}
-				GSVector4::store<true>(&cvs[cv_count++].color, clear_color);
+				const float normalize = pipe.ps.colclip_hw ? 65535.0f : 255.0f;
+				GSVector4::store<true>(&cvs[cv_count++].color, GSVector4::rgba32(draw_rt->GetClearValue()) / normalize);
 			}
 			if (pipe.ds_as_rt)
 			{

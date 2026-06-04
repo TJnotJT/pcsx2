@@ -47,11 +47,6 @@ __fi static constexpr bool PreferReusedLabelledTexture()
 }
 #endif
 
-static __fi ShaderConvert GetCopyShader(int type, bool src_int, bool dst_int)
-{
-	return type == GSTextureCache::RenderTarget ? ShaderConvert::COPY : GetDepthCopyShader(src_int, dst_int);
-}
-
 GSTextureCache::GSTextureCache()
 {
 	// In theory 4MB is enough but 9MB is safer for overflow (8MB
@@ -2916,10 +2911,10 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 					{
 						if (type == DepthStencil)
 						{
-							const u32 cc = dst_match->m_texture->GetClearColor();
+							const u32 cc = dst_match->m_texture->GetClearValue();
 							const u32 cd = ConvertColorToDepth(cc, src_bpp, dst_bpp);
 							GL_INS("TC: Convert clear color[%08X] to depth[%08X]", cc, cd);
-							g_gs_device->ClearDepth(dst->m_texture, cd);
+							g_gs_device->ClearRenderTarget(dst->m_texture, cd);
 						}
 						else
 						{
@@ -3266,10 +3261,7 @@ GSTextureCache::Target* GSTextureCache::ProcessTargetAfterLookup(RescaleHelper& 
 				(rescaler.m_scale > 1.0f && GSConfig.UserHacks_HalfPixelOffset >= GSHalfPixelOffset::Native) ? "[clearing] " : "", dst->m_TEX0.TBP0);
 			if (rescaler.m_scale > 1.0f && GSConfig.UserHacks_HalfPixelOffset < GSHalfPixelOffset::Native)
 			{
-				if (dst->m_type == RenderTarget)
-					g_gs_device->ClearRenderTarget(dst->m_texture, 0);
-				else
-					g_gs_device->ClearDepthOrDepthInteger(dst->m_texture, 0);
+				g_gs_device->ClearRenderTarget(dst->m_texture, 0);
 			}
 			else
 			{
@@ -4315,7 +4307,7 @@ u32 GSTextureCache::ConvertDepthToColor(u32 d, u32 dst_bpp)
 	}
 	else
 	{
-		return cc;
+		return d;
 	}
 }
 
@@ -7181,8 +7173,7 @@ GSTextureCache::Target* GSTextureCache::Target::Create(GIFRegTEX0 TEX0, int w, i
 	{
 		texture = (type == RenderTarget) ?
 			g_gs_device->CreateRenderTarget(scaled_w, scaled_h, GSTexture::Format::Color, clear, PreferReusedLabelledTexture()) :
-			g_gs_device->CreateDepthStencil(scaled_w, scaled_h, GSTexture::Format::DepthStencil,
-				clear, PreferReusedLabelledTexture());
+			g_gs_device->CreateDepthStencil(scaled_w, scaled_h, clear, PreferReusedLabelledTexture());
 	}
 	if (!texture)
 		return nullptr;
@@ -8213,10 +8204,7 @@ bool GSTextureCache::Target::ResizeTexture(int new_unscaled_width, int new_unsca
 	else if (m_texture->GetState() == GSTexture::State::Cleared)
 	{
 		// Otherwise just pass the clear through.
-		if (tex->IsDepthLike())
-			g_gs_device->ClearDepth(tex, m_texture->GetClearDepth());
-		else
-			g_gs_device->ClearRenderTarget(tex, m_texture->GetClearColor());
+		g_gs_device->ClearRenderTarget(tex, m_texture->GetClearValue());
 	}
 	else
 	{

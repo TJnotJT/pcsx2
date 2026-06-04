@@ -822,7 +822,7 @@ bool GSHwHack::GSC_Battlefield2(GSRendererHW& r, int& skip)
 
 			if (dst)
 			{
-				g_gs_device->ClearDepthOrDepthInteger(dst->m_texture, r.m_vertex->buff[1].XYZ.Z);
+				g_gs_device->ClearRenderTarget(dst->m_texture, r.m_vertex->buff[1].XYZ.Z);
 			}
 		}
 	}
@@ -1083,7 +1083,7 @@ bool GSHwHack::OI_RozenMaidenGebetGarden(GSRendererHW& r, GSTexture* rt, GSTextu
 			if (GSTextureCache::Target* tmp_ds = g_texture_cache->LookupDrawTarget(TEX0, r.GetTargetSize(), r.GetTextureScaleFactor(), GSTextureCache::DepthStencil))
 			{
 				GL_INS("OI_RozenMaidenGebetGarden ZB clear");
-				g_gs_device->ClearDepthOrDepthInteger(tmp_ds->m_texture, 0);
+				g_gs_device->ClearRenderTarget(tmp_ds->m_texture, 0);
 			}
 
 			return false;
@@ -1205,7 +1205,7 @@ bool GSHwHack::OI_ArTonelico2(GSRendererHW& r, GSTexture* rt, GSTexture* ds, GST
 	if (ds && r.m_vertex->next == 2 && !RPRIM->TME && RFRAME.FBW == 10 && v->XYZ.Z == 0 && RTEST.ZTST == ZTST_ALWAYS)
 	{
 		GL_INS("OI_ArTonelico2");
-		g_gs_device->ClearDepthOrDepthInteger(ds, 0);
+		g_gs_device->ClearRenderTarget(ds, 0);
 	}
 
 	return true;

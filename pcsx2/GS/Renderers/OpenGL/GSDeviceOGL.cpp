@@ -426,7 +426,8 @@ bool GSDeviceOGL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			std::string macro;
 			macro += fmt::format("#define HAS_BILN {}\n", static_cast<int>(shader.Biln()));
 			macro += fmt::format("#define HAS_STENCIL_OUTPUT {}\n", static_cast<int>(shader.StencilOutput()));
-			macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutputBpp() != 0));
+			macro += fmt::format("#define HAS_INTEGER_INPUT {}\n", static_cast<int>(shader.IntegerInput()));
+			macro += fmt::format("#define HAS_INTEGER_OUTPUT {}\n", static_cast<int>(shader.IntegerOutput()));
 			macro += fmt::format("#define HAS_DEPTH_OUTPUT {}\n", static_cast<int>(shader.DepthOutput()));
 			macro += fmt::format("#define HAS_FLOAT32_INPUT {}\n", static_cast<int>(shader.Float32Input()));
 			macro += fmt::format("#define HAS_FLOAT32_OUTPUT {}\n", static_cast<int>(shader.Float32Output()));
@@ -1321,23 +1322,22 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 			const u32 old_color_mask = GLState::wrgba;
 			OMSetColorMaskState();
 
-			const GSVector4 c_unorm = T->GetClearForFormat();
+			const GSVector4 c = T->GetGLClearValue();
 
 			if (T->IsDepthInteger())
 			{
-				u32 c[4] = { static_cast<u32>(c_unorm.x), 0, 0, 0 };
-				glClearBufferuiv(GL_COLOR, 0, c);
+				glClearBufferuiv(GL_COLOR, 0, c.U32);
 			}
 			else if (T->IsIntegerFormat())
 			{
 				if (T->IsUnsignedFormat())
-					glClearBufferuiv(GL_COLOR, 0, c_unorm.U32);
+					glClearBufferuiv(GL_COLOR, 0, c.U32);
 				else
-					glClearBufferiv(GL_COLOR, 0, c_unorm.I32);
+					glClearBufferiv(GL_COLOR, 0, c.I32);
 			}
 			else
 			{
-				glClearBufferfv(GL_COLOR, 0, c_unorm.v);
+				glClearBufferfv(GL_COLOR, 0, c.F32);
 			}
 
 			OMSetColorMaskState(OMColorMaskSelector(old_color_mask));
@@ -3114,21 +3114,30 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 }
 
 void GSDeviceOGL::FeedbackCopyAndBind(const GSHWDrawConfig& config,
-	GSTexture* rt, GSTexture* rt_clone, GSTexture* ds, GSTexture* ds_clone, const GSVector4i& copyarea)
+	GSTexture* rt, GSTexture* rt_clone,
+	GSTexture* ds_as_rt, GSTexture* ds_as_rt_clone,
+	GSTexture* ds, GSTexture* ds_clone, const GSVector4i& copyarea)
 {
 	if (rt_clone)
 	{
 		CopyRect(rt, rt_clone, copyarea, copyarea.left, copyarea.top);
-		PSSetShaderResource(2, rt_clone);
+		PSSetShaderResource(TEXTURE_RT, rt_clone);
 		if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_RT)
 			PSSetShaderResource(0, rt_clone);
+	}
+	if (ds_as_rt_clone)
+	{
+		CopyRect(ds_as_rt, ds_as_rt_clone, copyarea, copyarea.left, copyarea.top);
+		PSSetShaderResource(TEXTURE_DEPTH, ds_as_rt_clone);
+		if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_DEPTH)
+			PSSetShaderResource(TEXTURE_TEXTURE, ds_as_rt_clone);
 	}
 	if (ds_clone)
 	{
 		CopyRect(ds, ds_clone, copyarea, copyarea.left, copyarea.top);
-		PSSetShaderResource(4, ds_clone);
+		PSSetShaderResource(TEXTURE_DEPTH, ds_clone);
 		if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_DEPTH)
-			PSSetShaderResource(0, ds_clone);
+			PSSetShaderResource(TEXTURE_TEXTURE, ds_clone);
 	}
 }
 

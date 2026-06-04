@@ -358,14 +358,19 @@ public:
 		return fields.integer_out ? 32 : ::IntegerOutputBpp(Shader());
 	}
 
+	constexpr int IntegerOutput() const
+	{
+		return IntegerOutputBpp() != 0;
+	}
+
 	constexpr bool Float32Input() const
 	{
-		DepthLikeInput() && !IntegerInput();
+		return DepthLikeInput() && !IntegerInput();
 	}
 
 	constexpr bool Float32Output() const
 	{
-		return DepthLikeOutput() && !DepthOutput() && !IntegerOutputBpp();
+		return DepthLikeOutput() && !IntegerOutput();
 	}
 
 	constexpr bool VariableWriteMask() const
@@ -400,10 +405,10 @@ public:
 		return SetMask((wr ? 1 : 0) | (wg ? 2 : 0) | (wb ? 4 : 0) | (wa ? 8 : 0));
 	}
 
-	constexpr ShaderConvertSelector SetIntegerInput(bool integer_out) const
+	constexpr ShaderConvertSelector SetIntegerInput(bool integer_in) const
 	{
 		ShaderConvertSelector tmp = *this;
-		tmp.fields.integer_out = DepthLikeInput() && integer_out;
+		tmp.fields.integer_in = DepthLikeInput() && integer_in;
 		return tmp;
 	}
 
@@ -487,6 +492,7 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 					pxAssert(src_bpp == 32 && dst_bpp == 32);
 					shader = ShaderConvert::COPY; // bpp is handled by mask
 					break;
+				case GSTexture::Format::DepthInteger:
 				case GSTexture::Format::DepthColor:
 				case GSTexture::Format::DepthStencil:
 					switch (dst_bpp)
@@ -512,6 +518,7 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 					break;
 			}
 			break;
+		case GSTexture::Format::DepthInteger:
 		case GSTexture::Format::DepthColor:
 		case GSTexture::Format::DepthStencil:
 			switch (dst)
@@ -534,6 +541,7 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 							break;
 					}
 					break;
+				case GSTexture::Format::DepthInteger:
 				case GSTexture::Format::DepthColor:
 				case GSTexture::Format::DepthStencil:
 					switch (dst_bpp)
@@ -558,8 +566,10 @@ static inline ShaderConvertSelector GetConvertShader(GSTexture::Format src, GSTe
 			break;
 	}
 
-	return ShaderConvertSelector(shader, mask, src == GSTexture::Format::DepthInteger,
-		dst == GSTexture::Format::DepthInteger, dst == GSTexture::Format::DepthStencil);
+	return ShaderConvertSelector(shader, mask,
+		src == GSTexture::Format::DepthInteger,
+		dst == GSTexture::Format::DepthInteger,
+		dst == GSTexture::Format::DepthStencil);
 }
 
 static inline ShaderConvertSelector GetConvertShader(const GSTexture* src, const GSTexture* dst, u32 src_bpp, u32 dst_bpp, u8 mask = 0xf)
@@ -961,6 +971,16 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool HasDepthROVWrite() const
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
+		}
+
+		__fi bool HasZInteger() const
+		{
+			return zint == PS_Z_INTEGER::READ_ONLY || zint == PS_Z_INTEGER::READ_WRITE;
+		}
+
+		__fi bool HasZIntegerWrite() const
+		{
+			return zint == PS_Z_INTEGER::READ_WRITE;
 		}
 		
 		/// Does the pixel shader do SW depth test.
@@ -1683,8 +1703,7 @@ public:
 	/// Sleeps to the time the next frame can be displayed.
 	void ThrottlePresentation();
 
-	void ClearRenderTarget(GSTexture* t, u32 c);
-	void ClearDepth(GSTexture* t, u32 d);
+	void ClearRenderTarget(GSTexture* t, u32 value);
 	bool ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy);
 	void InvalidateRenderTarget(GSTexture* t);
 
@@ -1695,10 +1714,12 @@ public:
 	GSTexture* CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(int w, int h, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthColor(int w, int h, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateDepthInteger(int w, int h, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
 	GSTexture* CreateRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthColor(const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateDepthInteger(const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(const GSVector2i& size, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
 	GSTexture* CreateCompatible(GSTexture* tex, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateCompatible(GSTexture* tex, const GSVector2i& size, bool clear = true, bool prefer_reuse = true);

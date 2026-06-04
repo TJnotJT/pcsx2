@@ -25,57 +25,6 @@ void vs_main()
 
 #ifdef FRAGMENT_SHADER
 
-#if defined(ps_datm1) || \
-	defined(ps_datm0) || \
-	defined(ps_datm1_rta_correction) || \
-	defined(ps_datm0_rta_correction) || \
-	defined(ps_convert_rgba8_float32) || \
-	defined(ps_convert_rgba8_float24) || \
-	defined(ps_convert_rgba8_float16) || \
-	defined(ps_convert_rgb5a1_float16) || \
-	defined(ps_convert_rgba8_float32_biln) || \
-	defined(ps_convert_rgba8_float24_biln) || \
-	defined(ps_convert_rgba8_float16_biln) || \
-	defined(ps_convert_rgb5a1_float16_biln) || \
-	defined(ps_convert_float32_color_to_depth) || \
-	defined(ps_convert_float32_float24) || \
-	defined(ps_convert_uint32_float32) || \
-	defined(ps_convert_uint32_float24) || \
-	defined(ps_depth_copy)
-#define HAS_DEPTHSTENCIL_OUTPUT 1
-#else
-#define HAS_DEPTHSTENCIL_OUTPUT 0
-#endif
-
-#if defined(ps_copy_uint) || \
-	defined(ps_convert_uint32_float32) || \
-	defined(ps_convert_uint32_float24) || \
-	defined(ps_convert_uint32_rgba8) || \
-	defined(ps_convert_uint16_rgb5a1) || \
-	defined(ps_convert_uint32_uint24)
-#define HAS_INTEGER_INPUT 1
-#else
-#define HAS_INTEGER_INPUT 0
-#endif
-
-#if	defined(ps_convert_rgba8_16bits) || \
-	defined(ps_copy_uint) || \
-	defined(ps_convert_float32_uint32) || \
-	defined(ps_convert_float32_uint24) || \
-	defined(ps_convert_rgba8_uint32) || \
-	defined(ps_convert_rgba8_uint24) || \
-	defined(ps_convert_rgba8_uint16) || \
-	defined(ps_convert_rgb5a1_uint16) || \
-	defined(ps_convert_rgba8_uint32_biln) || \
-	defined(ps_convert_rgba8_uint24_biln) || \
-	defined(ps_convert_rgba8_uint16_biln) || \
-	defined(ps_convert_rgb5a1_uint16_biln) || \
-	defined(ps_convert_uint32_uint24)
-#define HAS_INTEGER_OUTPUT 1
-#else
-#define HAS_INTEGER_OUTPUT 0
-#endif
-
 in vec4 PSin_p;
 in vec2 PSin_t;
 in vec4 PSin_c;
@@ -86,7 +35,7 @@ uint sample_c()
 {
 	return texture(TextureSampler, PSin_t).r;
 }
-#if HAS_FLOAT32_INPUT
+#elif HAS_FLOAT32_INPUT
 layout(binding = 0) uniform sampler2D TextureSampler;
 float sample_c()
 {
@@ -218,7 +167,7 @@ void ps_copy()
 #ifdef ps_depth_copy
 void ps_depth_copy()
 {
-	OUTPUT = sample_c();
+	OUTPUT = uint_to_depth32(depth_to_uint(sample_c()));
 }
 #endif
 
@@ -317,17 +266,31 @@ void ps_convert_rgb5a1_uint16()
 }
 #endif
 
+#if HAS_INTEGER_OUTPUT
+uint lerp_depth(uint a, uint b, float c)
+{
+  uint absdiff = a > b ? a - b : b - a;
+  uint adjust = min(uint(round(float(absdiff) * c)), absdiff);
+  return a > b ? a - adjust : a + adjust;
+}
+#else
+float lerp_depth(float a, float b, float c)
+{
+  return mix(a, b, c);
+}
+#endif
+
 #define SAMPLE_RGBA_DEPTH_BILN(CONVERT_FN) \
 	ivec2 dims = textureSize(TextureSampler, 0); \
 	vec2 top_left_f = PSin_t * vec2(dims) - 0.5f; \
 	ivec2 top_left = ivec2(floor(top_left_f)); \
 	ivec4 coords = clamp(ivec4(top_left, top_left + 1), ivec4(0), dims.xyxy - 1); \
 	vec2 mix_vals = fract(top_left_f); \
-	float depthTL = CONVERT_FN(texelFetch(TextureSampler, coords.xy, 0)); \
-	float depthTR = CONVERT_FN(texelFetch(TextureSampler, coords.zy, 0)); \
-	float depthBL = CONVERT_FN(texelFetch(TextureSampler, coords.xw, 0)); \
-	float depthBR = CONVERT_FN(texelFetch(TextureSampler, coords.zw, 0)); \
-	OUTPUT = mix(mix(depthTL, depthTR, mix_vals.x), mix(depthBL, depthBR, mix_vals.x), mix_vals.y);
+	DEPTH_OUTPUT_TYPE depthTL = CONVERT_FN(texelFetch(TextureSampler, coords.xy, 0)); \
+	DEPTH_OUTPUT_TYPE depthTR = CONVERT_FN(texelFetch(TextureSampler, coords.zy, 0)); \
+	DEPTH_OUTPUT_TYPE depthBL = CONVERT_FN(texelFetch(TextureSampler, coords.xw, 0)); \
+	DEPTH_OUTPUT_TYPE depthBR = CONVERT_FN(texelFetch(TextureSampler, coords.zw, 0)); \
+	OUTPUT = lerp_depth(lerp_depth(depthTL, depthTR, mix_vals.x), lerp_depth(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
 #ifdef ps_convert_rgba8_depth32
 void ps_convert_rgba8_depth32()
