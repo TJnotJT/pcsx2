@@ -34,6 +34,7 @@ DXGI_FORMAT GSTexture11::GetDXGIFormat(Format format)
 		case GSTexture::Format::ColorClip:    return DXGI_FORMAT_R16G16B16A16_UNORM;
 		case GSTexture::Format::DepthStencil: return DXGI_FORMAT_R32G8X24_TYPELESS;
 		case GSTexture::Format::DepthColor:   return DXGI_FORMAT_R32_FLOAT;
+		case GSTexture::Format::DepthInteger: return DXGI_FORMAT_R32_UINT;
 		case GSTexture::Format::UNorm8:       return DXGI_FORMAT_A8_UNORM;
 		case GSTexture::Format::UInt16:       return DXGI_FORMAT_R16_UINT;
 		case GSTexture::Format::UInt32:       return DXGI_FORMAT_R32_UINT;
@@ -192,6 +193,30 @@ ID3D11DepthStencilView* GSTexture11::ReadOnlyDepthStencilView()
 	}
 
 	return m_read_only_dsv.get();
+}
+
+GSVector4 GSTexture11::GetDX11ClearValue()
+{
+	if (IsDepthStencil())
+	{
+		return GSVector4(GetClearDepth(), 0.0f, 0.0f, 0.0f);
+	}
+	else if (IsRenderTarget())
+	{
+		if (IsDepthInteger())
+		{
+			return GSVector4(static_cast<float>(GetClearValue()), 0.0f, 0.0f, 0.0f);
+		}
+		else
+		{
+			return GSVector4::unorm8(GetClearValue());
+		}
+	}
+	else
+	{
+		pxAssert(false);
+		return GSVector4::zero();
+	}
 }
 
 GSDownloadTexture11::GSDownloadTexture11(wil::com_ptr_nothrow<ID3D11Texture2D> tex, u32 width, u32 height, GSTexture::Format format)

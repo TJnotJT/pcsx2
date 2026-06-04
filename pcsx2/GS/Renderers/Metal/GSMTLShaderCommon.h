@@ -13,15 +13,16 @@ struct ConvertShaderData
 	float2 t;
 };
 
+template <typename Format>
 struct ConvertPSRes
 {
-	texture2d<float> texture [[texture(GSMTLTextureIndexNonHW)]];
+	texture2d<Format> texture [[texture(GSMTLTextureIndexNonHW)]];
 	sampler s [[sampler(0)]];
-	float4 sample(float2 coord)
+	vec<Format, 4> sample(float2 coord)
 	{
 		return texture.sample(s, coord);
 	}
-	float4 sample_level(float2 coord, float lod)
+	vec<Format, 4> sample_level(float2 coord, float lod)
 	{
 		return texture.sample(s, coord, level(lod));
 	}
@@ -37,16 +38,24 @@ struct ConvertPSDepthRes
 	}
 };
 
+static inline float4 convert_depth32_rgba8(uint value)
+{
+	return float4(as_type<uchar4>(val));
+}
+
 static inline float4 convert_depth32_rgba8(float value)
 {
-	uint val = uint(value * 0x1p32);
-	return float4(as_type<uchar4>(val));
+	return convert_depth32_rgba8(uint(value * 0x1p32));
+}
+
+static inline float4 convert_depth16_rgba8(uint value)
+{
+	return float4(uint4(val << 3, val >> 2, val >> 7, val >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80));
 }
 
 static inline float4 convert_depth16_rgba8(float value)
 {
-	uint val = uint(value * 0x1p32);
-	return float4(uint4(val << 3, val >> 2, val >> 7, val >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80));
+	return convert_depth16_rgba8(uint(value * 0x1p32));
 }
 
 #ifndef __HAVE_MUL24__

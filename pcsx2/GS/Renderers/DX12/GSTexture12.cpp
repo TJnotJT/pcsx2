@@ -1164,19 +1164,45 @@ void GSTexture12::CommitClear()
 
 void GSTexture12::CommitClear(const D3D12CommandList& cmdlist)
 {
+	pxAssert(IsRenderTargetOrDepthStencil());
+
 	if (IsDepthStencil())
 	{
 		TransitionToState(cmdlist, ResourceState::DepthWriteStencil);
 		cmdlist.list4->ClearDepthStencilView(
-			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, m_clear_value.depth, 0, 0, nullptr);
+			GetWriteDescriptor(), D3D12_CLEAR_FLAG_DEPTH, GetClearDepth(), 0, 0, nullptr);
 	}
-	else
+	else if (IsRenderTarget())
 	{
 		TransitionToState(cmdlist, ResourceState::RenderTarget);
-		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GetClearForFormat().v, 0, nullptr);
+		cmdlist.list4->ClearRenderTargetView(GetWriteDescriptor(), GetDX12ClearValue().v, 0, nullptr);
 	}
 
 	SetState(GSTexture::State::Dirty);
+}
+
+GSVector4 GSTexture12::GetDX12ClearValue() const
+{
+	if (IsDepthStencil())
+	{
+		return GSVector4(GetClearDepth(), 0.0f, 0.0f, 0.0f);
+	}
+	else if (IsRenderTarget())
+	{
+		if (IsDepthInteger())
+		{
+			return GSVector4(static_cast<float>(GetClearValue()), 0.0f, 0.0f, 0.0f);
+		}
+		else
+		{
+			return GSVector4::unorm8(GetClearValue());
+		}
+	}
+	else
+	{
+		pxAssert(false);
+		return GSVector4::zero();
+	}
 }
 
 GSDownloadTexture12::GSDownloadTexture12(u32 width, u32 height, GSTexture::Format format)

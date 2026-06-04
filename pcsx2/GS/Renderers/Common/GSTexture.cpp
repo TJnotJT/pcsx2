@@ -20,7 +20,7 @@ bool GSTexture::Save(const std::string& fn)
 {
 	// Depth textures need special treatment - we have a stencil component.
 	// Just re-use the existing conversion shader instead.
-	if (m_format == Format::DepthStencil || m_format == Format::DepthColor)
+	if (m_format == Format::DepthStencil || m_format == Format::DepthColor || m_format == Format::DepthInteger)
 	{
 		GSTexture* temp = g_gs_device->CreateRenderTarget(GetWidth(), GetHeight(), Format::Color, false);
 		if (!temp)
@@ -74,6 +74,7 @@ const char* GSTexture::GetFormatName(Format format)
 		case Format::ColorClip:    return "ColorClip";
 		case Format::DepthStencil: return "DepthStencil";
 		case Format::DepthColor:   return "DepthColor";
+		case Format::DepthInteger: return "DepthInteger";
 		case Format::UNorm8:       return "UNorm8";
 		case Format::UInt16:       return "UInt16";
 		case Format::UInt32:       return "UInt32";
