@@ -176,7 +176,7 @@ void GSDownloadTextureMTL::CopyFromTexture(
 { @autoreleasepool {
 	GSTextureMTL* const mtlTex = static_cast<GSTextureMTL*>(stex);
 
-	pxAssert(mtlTex->GetFormat() == m_format);
+	pxAssert(GSTexture::AreFormatsEquivalent(mtlTex->GetFormat(), m_format));
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());
 	pxAssert(src.z <= mtlTex->GetWidth() && src.w <= mtlTex->GetHeight());
 	pxAssert(static_cast<u32>(drc.z) <= m_width && static_cast<u32>(drc.w) <= m_height);
