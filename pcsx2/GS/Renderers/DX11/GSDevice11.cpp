@@ -244,7 +244,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		sm_ps.AddMacro("HAS_BILN", static_cast<int>(shader.Biln()));
 		sm_ps.AddMacro("HAS_STENCIL_OUTPUT", static_cast<int>(shader.StencilOutput()));
 		sm_ps.AddMacro("HAS_INTEGER_INPUT", static_cast<int>(shader.IntegerInput()));
-		sm_ps.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutputBpp() != 0));
+		sm_ps.AddMacro("HAS_INTEGER_OUTPUT", static_cast<int>(shader.IntegerOutput()));
 		sm_ps.AddMacro("HAS_DEPTH_OUTPUT", static_cast<int>(shader.DepthOutput()));
 		sm_ps.AddMacro("HAS_FLOAT32_INPUT", static_cast<int>(shader.Float32Input()));
 		sm_ps.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
@@ -1283,7 +1283,7 @@ void GSDevice11::CommitClear(GSTexture* t)
 		if (T->GetState() == GSTexture::State::Invalidated)
 			m_ctx->DiscardView(static_cast<ID3D11RenderTargetView*>(*T));
 		else
-			m_ctx->ClearRenderTargetView(*T, T->GetClearForFormat().F32);
+			m_ctx->ClearRenderTargetView(*T, T->GetDX11ClearValue().F32);
 	}
 
 	T->SetState(GSTexture::State::Dirty);
@@ -2926,11 +2926,11 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 	GSTexture* colclip_rt = g_gs_device->GetColorClipTexture();
 	GSTexture* draw_rt = config.ps.HasColorROV() ? nullptr : config.rt;
 	GSTexture* draw_ds = config.ps.HasDepthROV() ? nullptr : config.ds;
-	GSTexture* draw_ds_as_rt = config.ds_int;
-	const bool ds_as_rt_write = config.ds_int && (config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE);
+	GSTexture* draw_ds_as_rt = config.ps.HasDepthROV() ? nullptr : config.ds_int;
+	const bool ds_as_rt_write = !config.ps.HasDepthROV() && config.ds_int && (config.ps.zint == GSHWDrawConfig::PS_Z_INTEGER::READ_WRITE);
 	const u32 ds_as_rt_slot = ds_as_rt_write ? config.ps.z_rt_slot : 0;
 	GSTexture* draw_rt_rov = config.ps.HasColorROV() ? config.rt : nullptr;
-	GSTexture* draw_ds_rov = config.ps.HasDepthROV() ? config.ds : nullptr;
+	GSTexture* draw_ds_rov = config.ps.HasDepthROV() ? (config.ds_int ? config.ds_int : config.ds) : nullptr;
 	GSTexture* draw_rt_clone = nullptr;
 	GSTexture* draw_ds_clone = nullptr;
 	GSTexture* draw_ds_as_rt_clone = nullptr;

@@ -161,7 +161,7 @@
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
-#ifdef PS_Z_INTEGER
+#if PS_Z_INTEGER
 	#define DEPTH_TYPE uint
 #else
 	#define DEPTH_TYPE float

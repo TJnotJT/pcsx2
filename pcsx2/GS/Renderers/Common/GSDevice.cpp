@@ -435,34 +435,10 @@ void GSDevice::ThrottlePresentation()
 	Threading::SleepUntil(m_last_frame_displayed_time);
 }
 
-void GSDevice::ClearRenderTarget(GSTexture* t, u32 c)
+void GSDevice::ClearRenderTarget(GSTexture* t, u32 value)
 {
-	pxAssert(t->IsRenderTarget());
-	t->SetClearColor(c);
-}
-
-void GSDevice::ClearDepth(GSTexture* t, float d)
-{
-	pxAssert(t->IsDepthStencil());
-	t->SetClearDepth(d);
-}
-
-void GSDevice::ClearDepthInteger(GSTexture* t, u32 d)
-{
-	pxAssert(t->IsDepthInteger());
-	t->SetClearColor(d);
-}
-
-void GSDevice::ClearDepthOrDepthInteger(GSTexture* t, u32 d)
-{
-	if (t->IsDepthInteger())
-	{
-		ClearDepthInteger(t, d);
-	}
-	else
-	{
-		ClearDepth(t, static_cast<float>(d) * 0x1p-32);
-	}
+	pxAssert(t->IsRenderTargetOrDepthStencil());
+	t->SetClearValue(value);
 }
 
 bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const bool full_copy)
@@ -472,10 +448,7 @@ bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const b
 	// Pass it forward if we're clearing the whole thing.
 	if (full_copy)
 	{
-		if (dTex->IsDepthStencil())
-			dTex->SetClearDepth(sTex->GetClearDepth());
-		else
-			dTex->SetClearColor(sTex->GetClearColor());
+		dTex->SetClearValue(sTex->GetClearValue());
 
 		dTex->SetState(GSTexture::State::Cleared);
 
@@ -485,16 +458,8 @@ bool GSDevice::ProcessClearsBeforeCopy(GSTexture* sTex, GSTexture* dTex, const b
 	// Destination is cleared, if it's the same colour and rect, we can just avoid this entirely.
 	if (dTex->GetState() == GSTexture::State::Cleared)
 	{
-		if (dTex->IsDepthStencil())
-		{
-			if (dTex->GetClearDepth() == sTex->GetClearDepth())
-				return true;
-		}
-		else
-		{
-			if (dTex->GetClearColor() == sTex->GetClearColor())
-				return true;
-		}
+		if (dTex->GetClearValue() == sTex->GetClearValue())
+			return true;
 	}
 
 	return false;
@@ -683,24 +648,17 @@ GSTexture* GSDevice::FetchSurface(GSTexture::Type type, int width, int height, i
 
 	switch (type)
 	{
-	case GSTexture::Type::RenderTarget:
-		{
-			if (clear)
-				ClearRenderTarget(t, 0);
-			else
-				InvalidateRenderTarget(t);
-		}
-		break;
-	case GSTexture::Type::DepthStencil:
-		{
-			if (clear)
-				ClearDepth(t, 0.0f);
-			else
-				InvalidateRenderTarget(t);
-		}
-		break;
-	default:
-		break;
+		case GSTexture::Type::RenderTarget:
+		case GSTexture::Type::DepthStencil:
+			{
+				if (clear)
+					ClearRenderTarget(t, 0);
+				else
+					InvalidateRenderTarget(t);
+			}
+			break;
+		default:
+			break;
 	}
 
 	return t;
@@ -814,19 +772,16 @@ GSTexture* GSDevice::CreateDepthColor(const GSVector2i& size, bool clear, bool p
 		clear, !prefer_reuse);
 }
 
-GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, bool clear, bool prefer_reuse)
+GSTexture* GSDevice::CreateDepthInteger(int w, int h, bool clear, bool prefer_reuse)
 {
-	return CreateCompatibleTexture(tex, tex->GetWidth(), tex->GetHeight(), clear, prefer_reuse);
+	return FetchSurface(GSTexture::Type::RenderTarget, w, h, 1, GSTexture::Format::DepthInteger,
+		clear, !prefer_reuse);
 }
 
-GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, const GSVector2i& size, bool clear, bool prefer_reuse)
+GSTexture* GSDevice::CreateDepthInteger(const GSVector2i& size, bool clear, bool prefer_reuse)
 {
-	return CreateCompatibleTexture(tex, size.x, size.y, clear, prefer_reuse);
-}
-
-GSTexture* GSDevice::CreateCompatibleTexture(GSTexture* tex, int w, int h, bool clear, bool prefer_reuse)
-{
-	return FetchSurface(tex->GetType(), w, h, 1, tex->GetFormat(), clear, !prefer_reuse);
+	return FetchSurface(GSTexture::Type::RenderTarget, size.x, size.y, 1, GSTexture::Format::DepthInteger,
+		clear, !prefer_reuse);
 }
 
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse /* = false */)
@@ -861,7 +816,7 @@ void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRe
 {
 	pxAssert((dTex && dTex->IsFloat32Like()) == shader.Float32Output());
 	pxAssert((dTex && dTex->IsIntegerFormat()) == shader.IntegerOutput());
-	pxAssert((sTex && sTex->IsIntegerFormat()) == HasIntegerInput(shader));
+	pxAssert((sTex && sTex->IsIntegerFormat()) == shader.IntegerInput());
 	pxAssert(!(filter == Biln && shader.SupportsBilinear())); // Don't allow HW bilinear if SW bilinear is required.
 	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", shader.Name(),
 		int(sRect.left), int(sRect.top),

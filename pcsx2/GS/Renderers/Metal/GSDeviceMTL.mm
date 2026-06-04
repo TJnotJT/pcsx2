@@ -1210,8 +1210,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			name = [name stringByAppendingString:[NSString stringWithFormat:@" Mask=%x", shader.Mask()]];
 		if (shader.Biln())
 			name = [name stringByAppendingString:@" Biln"];
-		if (shader.Float32Output())
-			name = [name stringByAppendingString:shader.DepthOutput() ? @" → Depth" : @" → Float"];
+		name = [name stringByAppendingString:[NSString stringWithUTF8String:shader.InputFormat()]];
+		name = [name stringByAppendingString:@" → "];
+		name = [name stringByAppendingString:[NSString GSTexture::GetFormatName(shader.OutputFormat())]];
 
 		const u32 scmask = shader.Mask();
 		MTLColorWriteMask mask = MTLColorWriteMaskNone;
@@ -1220,8 +1221,10 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		if (scmask & 4) mask |= MTLColorWriteMaskBlue;
 		if (scmask & 8) mask |= MTLColorWriteMaskAlpha;
 		pdesc.colorAttachments[0].writeMask = mask;
-		setFnConstantB(m_fn_constants, shader.Biln(),        GSMTLConstantIndex_BILN);
-		setFnConstantB(m_fn_constants, shader.DepthOutput(), GSMTLConstantIndex_DEPTH_OUT);
+		setFnConstantB(m_fn_constants, shader.Biln(),          GSMTLConstantIndex_BILN);
+		setFnConstantB(m_fn_constants, shader.IntegerInput(),  GSMTLConstantIndex_INTEGER_IN);
+		setFnConstantB(m_fn_constants, shader.IntegerOutput(), GSMTLConstantIndex_INTEGER_OUT);
+		setFnConstantB(m_fn_constants, shader.DepthOutput(),   GSMTLConstantIndex_DEPTH_OUT);
 		m_convert_pipeline[shader.Index()] = MakePipeline(pdesc, vs_convert, LoadShader(shader_name), name);
 	}
 	pdesc.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
@@ -2306,7 +2309,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 				case GSTexture::State::Cleared:
 				{
 					BeginRenderPass(@"ColorClip Clear", colclip_rt, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
-					GSVector4 color = GSVector4::rgba32(config.rt->GetClearColor()) / GSVector4::cxpr(65535, 65535, 65535, 255);
+					GSVector4 color = GSVector4::rgba32(config.rt->GetClearValue()) / GSVector4::cxpr(65535, 65535, 65535, 255);
 					[m_current_render.encoder setFragmentBytes:&color length:sizeof(color) atIndex:GSMTLBufferIndexUniforms];
 					RenderCopy(nullptr, m_colclip_clear_pipeline, copy_rect);
 					break;

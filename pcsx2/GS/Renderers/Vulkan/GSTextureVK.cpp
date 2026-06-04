@@ -600,11 +600,11 @@ VkClearValue GSTextureVK::GetVkClearValue() const
 	{
 		if (IsDepthColor())
 		{
-			cv.color.float32[0] = m_clear_value.depth;
+			cv.color.float32[0] = GetClearDepth();
 		}
 		else
 		{
-			cv.depthStencil.depth = m_clear_value.depth;
+			cv.depthStencil.depth = GetClearDepth();
 			cv.depthStencil.stencil = 1;
 		}
 	}
@@ -612,11 +612,11 @@ VkClearValue GSTextureVK::GetVkClearValue() const
 	{
 		if (IsDepthInteger())
 		{
-			cv.color.uint32[0] = m_clear_value.color;
+			cv.color.uint32[0] = GetClearValue();
 		}
 		else
 		{
-			GSVector4::store<true>(cv.color.float32, GetUNormClearColor());
+			GSVector4::store<true>(cv.color.float32, GSVector4::unorm8(GetClearValue()));
 		}
 	}
 	return cv;

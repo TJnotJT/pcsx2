@@ -1458,7 +1458,7 @@ void ps_main()
 #if ZWRITE
 	#if PS_Z_INTEGER
 		#if ZWRITE_FOR_ZINT
-			SV_Target1 = input_z;
+			o_col1 = input_z;
 		#endif
 	#else
 		gl_FragDepth = input_z;

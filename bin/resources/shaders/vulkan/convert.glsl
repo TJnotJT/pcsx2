@@ -29,6 +29,14 @@ layout(location = 0) in vec2 v_tex;
 #endif
 
 #if HAS_INTEGER_OUTPUT
+	#define DEPTH_OUTPUT_TYPE uint
+	#define DEPTH_OUTPUT_SCALE 1
+#else
+	#define DEPTH_OUTPUT_TYPE float
+	#define DEPTH_OUTPUT_SCALE exp2(-32.0f)
+#endif
+
+#if HAS_INTEGER_OUTPUT
 	layout(location = 0) out uint o_col0;
 	#define OUTPUT o_col0
 #elif HAS_DEPTH_OUTPUT
@@ -49,14 +57,14 @@ uint sample_c(vec2 uv)
 {
 	return texture(samp0, uv).r;
 }
-#else
+#elif HAS_FLOAT32_INPUT
 layout(set = 0, binding = 0) uniform sampler2D samp0;
-#if HAS_FLOAT32_INPUT
 float sample_c(vec2 uv)
 {
 	return texture(samp0, uv).r;
 }
 #else
+layout(set = 0, binding = 0) uniform sampler2D samp0;
 vec4 sample_c(vec2 uv)
 {
 	return texture(samp0, uv);
@@ -147,17 +155,10 @@ void ps_copy()
 }
 #endif
 
-#ifdef ps_copy_uint
-void ps_copy_uint()
-{
-	o_col0 = sample_c(v_tex);
-}
-#endif
-
 #ifdef ps_depth_copy
 void ps_depth_copy()
 {
-	OUTPUT = sample_c(v_tex);
+	OUTPUT = uint_to_depth32(depth_to_uint(sample_c(v_tex)));
 }
 #endif
 
@@ -332,17 +333,31 @@ void ps_convert_rgb5a1_uint16()
 }
 #endif
 
+#if HAS_INTEGER_OUTPUT
+uint lerp_depth(uint a, uint b, float c)
+{
+  uint absdiff = a > b ? a - b : b - a;
+  uint adjust = min(uint(round(float(absdiff) * c)), absdiff);
+  return a > b ? a - adjust : a + adjust;
+}
+#else
+float lerp_depth(float a, float b, float c)
+{
+  return mix(a, b, c);
+}
+#endif
+
 #define SAMPLE_RGBA_DEPTH_BILN(CONVERT_FN) \
 	ivec2 dims = textureSize(samp0, 0); \
 	vec2 top_left_f = v_tex * vec2(dims) - 0.5f; \
 	ivec2 top_left = ivec2(floor(top_left_f)); \
 	ivec4 coords = clamp(ivec4(top_left, top_left + 1), ivec4(0), dims.xyxy - 1); \
 	vec2 mix_vals = fract(top_left_f); \
-	float depthTL = CONVERT_FN(texelFetch(samp0, coords.xy, 0)); \
-	float depthTR = CONVERT_FN(texelFetch(samp0, coords.zy, 0)); \
-	float depthBL = CONVERT_FN(texelFetch(samp0, coords.xw, 0)); \
-	float depthBR = CONVERT_FN(texelFetch(samp0, coords.zw, 0)); \
-	OUTPUT = mix(mix(depthTL, depthTR, mix_vals.x), mix(depthBL, depthBR, mix_vals.x), mix_vals.y);
+	DEPTH_OUTPUT_TYPE depthTL = CONVERT_FN(texelFetch(samp0, coords.xy, 0)); \
+	DEPTH_OUTPUT_TYPE depthTR = CONVERT_FN(texelFetch(samp0, coords.zy, 0)); \
+	DEPTH_OUTPUT_TYPE depthBL = CONVERT_FN(texelFetch(samp0, coords.xw, 0)); \
+	DEPTH_OUTPUT_TYPE depthBR = CONVERT_FN(texelFetch(samp0, coords.zw, 0)); \
+	OUTPUT = lerp_depth(lerp_depth(depthTL, depthTR, mix_vals.x), lerp_depth(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
 #ifdef ps_convert_rgba8_depth32
 void ps_convert_rgba8_depth32()

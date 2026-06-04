@@ -558,7 +558,7 @@ public:
 		{
 			return GetRenderPass(
 				rt ? LookupNativeFormat(GSTexture::Format::Color) : VK_FORMAT_UNDEFINED,
-				LookupNativeFormat(GSTexture::Format::UInt32),
+				LookupNativeFormat(GSTexture::Format::DepthInteger),
 				ds ? LookupNativeFormat(GSTexture::Format::DepthStencil) : VK_FORMAT_UNDEFINED,
 				rt ? rt_op : VK_ATTACHMENT_LOAD_OP_DONT_CARE, rt ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
 				ds_as_rt_op, VK_ATTACHMENT_STORE_OP_STORE,
