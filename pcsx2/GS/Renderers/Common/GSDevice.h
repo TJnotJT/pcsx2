@@ -45,7 +45,7 @@ enum class ShaderConvert
 	RTA_CORRECTION,
 	RTA_DECORRECTION,
 	TRANSPARENCY_FILTER,
-	DEPTH32_TO_16_BITS,
+	DEPTH16_TO_16_BITS,
 	DEPTH32_TO_32_BITS,
 	DEPTH32_TO_RGBA8,
 	DEPTH32_TO_RGB8,
@@ -152,7 +152,7 @@ static inline constexpr bool HasDepthLikeInput(ShaderConvert shader)
 	switch (shader)
 	{
 		case ShaderConvert::DEPTH_COPY:
-		case ShaderConvert::DEPTH32_TO_16_BITS:
+		case ShaderConvert::DEPTH16_TO_16_BITS:
 		case ShaderConvert::DEPTH32_TO_32_BITS:
 		case ShaderConvert::DEPTH32_TO_RGBA8:
 		case ShaderConvert::DEPTH32_TO_RGB8:
@@ -189,7 +189,7 @@ static inline constexpr int IntegerOutputBpp(ShaderConvert shader)
 	{
 		case ShaderConvert::DEPTH32_TO_32_BITS:
 			return 32;
-		case ShaderConvert::DEPTH32_TO_16_BITS:
+		case ShaderConvert::DEPTH16_TO_16_BITS:
 		case ShaderConvert::RGB5A1_TO_16_BITS:
 			return 16;
 		default:
@@ -599,6 +599,56 @@ static inline ShaderConvertSelector GetConvertShaderMask(const GSTexture* src, c
 	u32 src_bpp, u32 dst_bpp, bool red = true, bool green = true, bool blue = true, bool alpha = true)
 {
 	return GetConvertShaderMask(src->GetFormat(), dst->GetFormat(), src_bpp, dst_bpp, red, green, blue, alpha);
+}
+
+static inline ShaderConvertSelector GetConvertToBitsShader(GSTexture::Format src, u32 bpp, bool alpha_scaled)
+{
+	ShaderConvert shader = static_cast<ShaderConvert>(-1);
+	if (bpp == 32)
+	{
+		switch (src)
+		{
+			case GSTexture::Format::Color:
+				shader = alpha_scaled ? ShaderConvert::RTA_DECORRECTION : ShaderConvert::COPY;
+				break;
+			case GSTexture::Format::DepthInteger:
+			case GSTexture::Format::DepthColor:
+			case GSTexture::Format::DepthStencil:
+				shader = ShaderConvert::DEPTH32_TO_32_BITS;
+				break;
+			default:
+				pxAssert(false);
+				break;
+		}
+	}
+	else if (bpp == 16)
+	{
+		switch (src)
+		{
+			case GSTexture::Format::Color:
+				shader = ShaderConvert::RGB5A1_TO_16_BITS;
+				break;
+			case GSTexture::Format::DepthInteger:
+			case GSTexture::Format::DepthColor:
+			case GSTexture::Format::DepthStencil:
+				shader = ShaderConvert::DEPTH16_TO_16_BITS;
+				break;
+			default:
+				pxAssert(false);
+				break;
+		}
+	}
+	else
+	{
+		pxAssert(false);
+	}
+	return ShaderConvertSelector(shader, 0xf, src == GSTexture::Format::DepthInteger);
+}
+
+
+static inline ShaderConvertSelector GetConvertToBitsShader(GSTexture* src, u32 bpp, bool alpha_scaled)
+{
+	return GetConvertToBitsShader(src->GetFormat(), bpp, alpha_scaled);
 }
 
 enum ChannelFetch

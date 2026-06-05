@@ -38,7 +38,7 @@ const char* ShaderEntryPoint(ShaderConvert value)
 		case ShaderConvert::RTA_CORRECTION:         return "ps_rta_correction";
 		case ShaderConvert::RTA_DECORRECTION:       return "ps_rta_decorrection";
 		case ShaderConvert::TRANSPARENCY_FILTER:    return "ps_filter_transparency";
-		case ShaderConvert::DEPTH32_TO_16_BITS:     return "ps_convert_depth32_32bits";
+		case ShaderConvert::DEPTH16_TO_16_BITS:     return "ps_convert_depth32_32bits";
 		case ShaderConvert::DEPTH32_TO_32_BITS:     return "ps_convert_depth32_32bits";
 		case ShaderConvert::DEPTH32_TO_RGBA8:       return "ps_convert_depth32_rgba8";
 		case ShaderConvert::DEPTH32_TO_RGB8:        return "ps_convert_depth32_rgba8";
@@ -99,7 +99,7 @@ const char* ShaderConvertName(ShaderConvert shader)
 		ENTRY(RTA_CORRECTION);
 		ENTRY(RTA_DECORRECTION);
 		ENTRY(TRANSPARENCY_FILTER);
-		ENTRY(DEPTH32_TO_16_BITS);
+		ENTRY(DEPTH16_TO_16_BITS);
 		ENTRY(DEPTH32_TO_32_BITS);
 		ENTRY(DEPTH32_TO_RGBA8);
 		ENTRY(DEPTH32_TO_RGB8);
@@ -1249,12 +1249,15 @@ static const char* GetVSExpandName(GSHWDrawConfig::VSExpand vsexpand)
 {
 	switch (vsexpand)
 	{
-		case GSHWDrawConfig::VSExpand::None:        return "None";
-		case GSHWDrawConfig::VSExpand::Point:       return "Point";
-		case GSHWDrawConfig::VSExpand::Line:        return "Line";
-		case GSHWDrawConfig::VSExpand::Sprite:      return "Sprite";
-		case GSHWDrawConfig::VSExpand::LineAA1:     return "LineAA1";
-		case GSHWDrawConfig::VSExpand::TriangleAA1: return "TriangleAA1";
+		case GSHWDrawConfig::VSExpand::None:             return "None";
+		case GSHWDrawConfig::VSExpand::Point:            return "Point";
+		case GSHWDrawConfig::VSExpand::Line:             return "Line";
+		case GSHWDrawConfig::VSExpand::Sprite:           return "Sprite";
+		case GSHWDrawConfig::VSExpand::LineAA1:          return "LineAA1";
+		case GSHWDrawConfig::VSExpand::TriangleAA1:      return "TriangleAA1";
+		case GSHWDrawConfig::VSExpand::PointZInteger:    return "PointZInteger";
+		case GSHWDrawConfig::VSExpand::LineZInteger:     return "LineZInteger";
+		case GSHWDrawConfig::VSExpand::TriangleZInteger: return "TriangleZInteger";
 	}
 	return "Unknown";
 }

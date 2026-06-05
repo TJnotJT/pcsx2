@@ -1261,7 +1261,7 @@ void GSDownloadTexture12::CopyFromTexture(
 {
 	GSTexture12* const tex12 = static_cast<GSTexture12*>(stex);
 
-	pxAssert(tex12->GetFormat() == m_format);
+	pxAssert(GSTexture::AreFormatsEquivalent(tex12->GetFormat(), m_format));
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());
 	pxAssert(src.z <= tex12->GetWidth() && src.w <= tex12->GetHeight());
 	pxAssert(static_cast<u32>(drc.z) <= m_width && static_cast<u32>(drc.w) <= m_height);

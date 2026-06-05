@@ -175,6 +175,15 @@ u32 GSTexture::CalcUploadSize(Format format, u32 height, u32 pitch)
 	return pitch * ((static_cast<u32>(height) + (block_size - 1)) / block_size);
 }
 
+bool GSTexture::AreFormatsEquivalent(Format format1, Format format2)
+{
+	return (format1 == format2) ||
+	       (format1 == Format::DepthColor && format2 == Format::PrimID) ||
+	       (format1 == Format::PrimID && format2 == Format::DepthColor) ||
+	       (format1 == Format::DepthInteger && format2 == Format::UInt32) ||
+	       (format1 == Format::UInt32 && format2 == Format::DepthInteger);
+}
+
 void GSTexture::GenerateMipmapsIfNeeded()
 {
 	if (!m_needs_mipmaps_generated || m_mipmap_levels <= 1 || IsCompressedFormat())

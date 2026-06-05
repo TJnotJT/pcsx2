@@ -430,7 +430,7 @@ void GSDownloadTextureOGL::CopyFromTexture(
 	GSTextureOGL* const glTex = static_cast<GSTextureOGL*>(stex);
 	GSDeviceOGL::GetInstance()->CommitClear(glTex, true);
 
-	pxAssert(glTex->GetFormat() == m_format);
+	pxAssert(GSTexture::AreFormatsEquivalent(glTex->GetFormat(), m_format));
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());
 	pxAssert(src.z <= glTex->GetWidth() && src.w <= glTex->GetHeight());
 	pxAssert(static_cast<u32>(drc.z) <= m_width && static_cast<u32>(drc.w) <= m_height);

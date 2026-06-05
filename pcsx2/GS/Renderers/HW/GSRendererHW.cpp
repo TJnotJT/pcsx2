@@ -11148,7 +11148,7 @@ void GSRendererHW::EmulateDepthInteger()
 
 	// Setup for pixel shader.
 	const GSLocalMemory::psm_t& psm = GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM];
-	const bool need_clamp = psm.bpp < 32;
+	const bool need_clamp = psm.trbpp < 32;
 
 	// Enable SW Z to correctly mask depth bits.
 	const u32 max_z = (0xFFFFFFFF >> (GSLocalMemory::m_psm[m_cached_ctx.ZBUF.PSM].fmt * 8));

@@ -2918,7 +2918,7 @@ GSTextureCache::Target* GSTextureCache::LookupDrawTarget(GIFRegTEX0 TEX0, const 
 						}
 						else
 						{
-							const u32 cd = dst_match->m_texture->GetClearDepth();
+							const u32 cd = dst_match->m_texture->GetClearValue();
 							const u32 cc = ConvertDepthToColor(cd, dst_bpp);
 							GL_INS("TC: Convert clear depth[%08X] to color[%08X]", cd, cc);
 							g_gs_device->ClearRenderTarget(dst->m_texture, cc);
@@ -4357,7 +4357,7 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 
 	if (depth_src->m_texture->GetState() == GSTexture::State::Cleared)
 	{
-		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearDepth(), 32));
+		g_gs_device->ClearRenderTarget(tex, ConvertDepthToColor(depth_src->m_texture->GetClearValue(), 32));
 	}
 	else if (depth_src->m_texture->GetState() != GSTexture::State::Invalidated)
 	{
@@ -7287,54 +7287,19 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 
 	const GIFRegTEX0& TEX0 = t->m_TEX0;
 	const bool is_depth = (t->m_type == DepthStencil);
-	const bool is_int = t->m_texture->IsDepthInteger();
+	const u16 bpp = GSLocalMemory::m_psm[TEX0.PSM].bpp;
 
-	GSTexture::Format fmt;
-	ShaderConvert ps_shader;
-	std::unique_ptr<GSDownloadTexture>* dltex;
-	switch (TEX0.PSM)
-	{
-		case PSMCT32:
-		case PSMCT24:
-		case PSMZ32:
-		case PSMZ24:
-		{
-			// If we're downloading a depth buffer that's been reinterpreted as a color
-			// format, convert it to integer. The format/swizzle is likely wrong, but it's
-			// better than writing back FP values to local memory.
-			if (is_depth)
-			{
-				fmt = GSTexture::Format::UInt32;
-				ps_shader = ShaderConvert::DEPTH32_TO_32_BITS;
-				dltex = &m_uint32_download_texture;
-			}
-			else
-			{
-				fmt = GSTexture::Format::Color;
-				if (t->m_rt_alpha_scale)
-					ps_shader = ShaderConvert::RTA_DECORRECTION;
-				else
-					ps_shader = ShaderConvert::COPY;
+	if (bpp != 32 && bpp != 16)
+		return;
 
-				dltex = &m_color_download_texture;
-			}
-		}
-		break;
-
-		case PSMCT16:
-		case PSMCT16S:
-		case PSMZ16:
-		case PSMZ16S:
-		{
-			fmt = GSTexture::Format::UInt16;
-			ps_shader = is_depth ? ShaderConvert::DEPTH32_TO_16_BITS : ShaderConvert::RGB5A1_TO_16_BITS;
-			dltex = &m_uint16_download_texture;
-		}
-		break;
-
-		default:
-			return;
-	}
+	const GSTexture::Format fmt = (bpp == 32) ?
+		(is_depth ? GSTexture::Format::UInt32 : GSTexture::Format::Color) :
+		GSTexture::Format::UInt16;
+	std::unique_ptr<GSDownloadTexture>* dltex = (bpp == 32) ?
+		(is_depth ? &m_uint32_download_texture : &m_color_download_texture) :
+		&m_uint16_download_texture;
+	const ShaderConvertSelector shader = GetConvertToBitsShader(t->m_texture, bpp, t->m_rt_alpha_scale);
+	const bool direct_read = (t->GetScale() == 1.0f && bpp == 32) && (is_depth || !t->m_rt_alpha_scale);
 
 	// Don't overwrite bits which aren't used in the target's format.
 	// Stops Burnout 3's sky from breaking when flushing targets to local memory.
@@ -7349,7 +7314,6 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 
 	const GSVector4 src(GSVector4(r) * GSVector4(t->m_scale) / GSVector4(t->m_texture->GetSize()).xyxy());
 	const GSVector4i drc(0, 0, r.width(), r.height());
-	const bool direct_read = t->m_type == RenderTarget && t->m_scale == 1.0f && ps_shader == ShaderConvert::COPY;
 
 	if (!PrepareDownloadTexture(drc.z, drc.w, fmt, dltex))
 		return;
@@ -7363,7 +7327,7 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 		GSTexture* tmp = g_gs_device->CreateRenderTarget(drc.z, drc.w, fmt, false);
 		if (tmp)
 		{
-			g_gs_device->StretchRect(t->m_texture, src, tmp, GSVector4(drc), ps_shader, Nearest);
+			g_gs_device->StretchRect(t->m_texture, src, tmp, GSVector4(drc), shader, Nearest);
 			dltex->get()->CopyFromTexture(drc, tmp, drc, 0, true);
 			g_gs_device->Recycle(tmp);
 		}
@@ -7383,24 +7347,13 @@ void GSTextureCache::Read(Target* t, const GSVector4i& r)
 	u8* bits = const_cast<u8*>(dltex->get()->GetMapPointer());
 	const u32 pitch = dltex->get()->GetMapPitch();
 
-	switch (TEX0.PSM)
+	if (bpp == 32)
 	{
-		case PSMCT32:
-		case PSMZ32:
-		case PSMCT24:
-		case PSMZ24:
-			g_gs_renderer->m_mem.WritePixel32(bits, pitch, off, r, write_mask);
-			break;
-		case PSMCT16:
-		case PSMCT16S:
-		case PSMZ16:
-		case PSMZ16S:
-			g_gs_renderer->m_mem.WritePixel16(bits, pitch, off, r);
-			break;
-
-		default:
-			Console.Error("Unknown PSM %u on Read", TEX0.PSM);
-			break;
+		g_gs_renderer->m_mem.WritePixel32(bits, pitch, off, r, write_mask);
+	}
+	else
+	{
+		g_gs_renderer->m_mem.WritePixel16(bits, pitch, off, r);
 	}
 
 	dltex->get()->Unmap();

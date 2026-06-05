@@ -955,7 +955,7 @@ void GSDownloadTextureVK::CopyFromTexture(
 {
 	GSTextureVK* const vkTex = static_cast<GSTextureVK*>(stex);
 
-	pxAssert(vkTex->GetFormat() == m_format);
+	pxAssert(GSTexture::AreFormatsEquivalent(vkTex->GetFormat(), m_format));
 	pxAssert(drc.width() == src.width() && drc.height() == src.height());
 	pxAssert(src.z <= vkTex->GetWidth() && src.w <= vkTex->GetHeight());
 	pxAssert(static_cast<u32>(drc.z) <= m_width && static_cast<u32>(drc.w) <= m_height);
