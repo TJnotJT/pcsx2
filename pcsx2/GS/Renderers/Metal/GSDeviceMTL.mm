@@ -560,23 +560,25 @@ GSTexture* GSDeviceMTL::CreateSurface(GSTexture::Type type, int width, int heigh
 		[desc setMipmapLevelCount:levels];
 
 	[desc setStorageMode:MTLStorageModePrivate];
+
+	MTLTextureUsage usage;
 	switch (type)
 	{
 		case GSTexture::Type::Texture:
-			[desc setUsage:MTLTextureUsageShaderRead];
+			usage = MTLTextureUsageShaderRead;
 			break;
 		case GSTexture::Type::RenderTarget:
+		case GSTexture::Type::RWRenderTarget:
+			usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
 			if (m_dev.features.slow_color_compression)
-				[desc setUsage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget | MTLTextureUsagePixelFormatView]; // Force color compression off by including PixelFormatView
-			else
-				[desc setUsage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
-			break;
-		case GSTexture::Type::RWTexture:
-			[desc setUsage:MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite];
+				usage |= MTLTextureUsagePixelFormatView; // Force color compression off by including PixelFormatView
+			if (type ==  GSTexture::Type::RWRenderTarget)
+				usage |= MTLTextureUsageShaderWrite;
 			break;
 		default:
-			[desc setUsage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+			usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
 	}
+	[desc setUsage:usage];
 
 	MRCOwned<id<MTLTexture>> tex = MRCTransfer([m_dev.dev newTextureWithDescriptor:desc]);
 	if (tex)
@@ -585,6 +587,7 @@ GSTexture* GSDeviceMTL::CreateSurface(GSTexture::Type type, int width, int heigh
 		switch (type)
 		{
 			case GSTexture::Type::RenderTarget:
+			case GSTexture::Type::RWRenderTarget:
 				ClearRenderTarget(t, 0);
 				break;
 			case GSTexture::Type::DepthStencil:
@@ -2005,7 +2008,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		MTLRenderPipelineColorAttachmentDescriptor* color1 = [[pdesc colorAttachments] objectAtIndexedSubscript:1];
 		[color1 setPixelFormat:MTLPixelFormatR32Float];
 	}
-	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%x.%llx.%llx", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
+	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%llx.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
 	auto pipeline = MakePipeline(pdesc, vs, ps, pname);
 
 	[m_current_render.encoder setRenderPipelineState:pipeline];

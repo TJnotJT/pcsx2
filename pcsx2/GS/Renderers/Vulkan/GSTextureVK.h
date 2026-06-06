@@ -42,7 +42,7 @@ public:
 	__fi VkImage GetImage() const { return m_image; }
 	__fi VkImageView GetView() const { return m_view; }
 	__fi Layout GetLayout() const { return m_layout; }
-	virtual bool IsUnorderedAccess() const override { return GetLayout() == Layout::ReadWriteImage; }
+	virtual bool IsRWMode() const override { return GetLayout() == Layout::ReadWriteImage; }
 
 	__fi VkFormat GetVkFormat() const { return m_vk_format; }
 
@@ -72,7 +72,7 @@ public:
 	void TransitionSubresourcesToLayout(
 		VkCommandBuffer command_buffer, int start_level, int num_levels, Layout old_layout, Layout new_layout);
 
-	static VkFramebuffer CreateNullFramebuffer();
+	static VkFramebuffer CreateNullFramebuffer(u32 w, u32 h);
 
 	/// Framebuffers are lazily allocated.
 	VkFramebuffer GetFramebuffer(bool feedback_loop);

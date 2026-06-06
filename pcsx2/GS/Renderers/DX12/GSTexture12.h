@@ -56,7 +56,7 @@ public:
 	__fi ID3D12Resource* GetResource() const { return m_resource.get(); }
 	__fi ID3D12Resource* GetFBLResource() const { return m_resource_fbl.get(); }
 
-	virtual bool IsUnorderedAccess() const override { return GetResourceState() == ResourceState::PixelShaderUAV; }
+	virtual bool IsRWMode() const override { return GetResourceState() == ResourceState::PixelShaderUAV; }
 
 	void* GetNativeHandle() const override;
 

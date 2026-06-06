@@ -293,6 +293,8 @@ private:
 	VkPhysicalDeviceDriverPropertiesKHR m_device_driver_properties = {};
 	OptionalExtensions m_optional_extensions = {};
 
+	u32 m_max_framebuffer_width = 0;
+	u32 m_max_framebuffer_height = 0;
 public:
 	enum FeedbackLoopFlag : u8
 	{
@@ -608,7 +610,7 @@ public:
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
-	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
+	void PSSetShaderResourceRW(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 

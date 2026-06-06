@@ -1259,14 +1259,14 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 	{
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo_write);
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-			(t->GetType() == GSTexture::Type::RenderTarget) ? static_cast<GSTextureOGL*>(t)->GetID() : 0, 0);
+			t->IsRenderTarget() ? static_cast<GSTextureOGL*>(t)->GetID() : 0, 0);
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, m_features.framebuffer_fetch ? GL_DEPTH_ATTACHMENT : GL_DEPTH_STENCIL_ATTACHMENT,
-			GL_TEXTURE_2D, (t->GetType() == GSTexture::Type::DepthStencil) ? static_cast<GSTextureOGL*>(t)->GetID() : 0, 0);
+			GL_TEXTURE_2D, t->IsDepthStencil() ? static_cast<GSTextureOGL*>(t)->GetID() : 0, 0);
 	}
 	else
 	{
 		OMSetFBO(m_fbo);
-		if (T->GetType() == GSTexture::Type::DepthStencil)
+		if (T->IsDepthStencil())
 		{
 			if (GLState::rt && GLState::rt->GetSize() != T->GetSize())
 				OMAttachRt(nullptr);
@@ -1284,7 +1284,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 	{
 		if (GLAD_GL_VERSION_4_3)
 		{
-			if (T->GetType() == GSTexture::Type::DepthStencil)
+			if (T->IsDepthStencil())
 			{
 				const GLenum attachments[] = {GL_DEPTH_STENCIL_ATTACHMENT};
 				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, std::size(attachments), attachments);
@@ -1344,7 +1344,7 @@ void GSDeviceOGL::CommitClear(GSTexture* t, bool use_write_fbo)
 	if (use_write_fbo)
 	{
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-			(t->GetType() == GSTexture::Type::RenderTarget) ?
+			t->IsRenderTarget() ?
 				GL_COLOR_ATTACHMENT0 :
 				(m_features.framebuffer_fetch ? GL_DEPTH_ATTACHMENT : GL_DEPTH_STENCIL_ATTACHMENT),
 			GL_TEXTURE_2D, 0, 0);

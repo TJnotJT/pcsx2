@@ -212,20 +212,20 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		break;
 
 		case Type::RenderTarget:
+		case Type::RWRenderTarget:
 		{
 			// RT's tend to be larger, so we'll keep them committed for speed.
 			pxAssert(levels == 1);
 			allocationDesc.Flags |= D3D12MA::ALLOCATION_FLAG_COMMITTED;
 			allocationDesc.ExtraHeapFlags = D3D12_HEAP_FLAG_DENY_BUFFERS | D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES;
 			desc.desc1.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
+			if (type == Type::RWRenderTarget)
+				desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 			if (!dev->UseEnhancedBarriers())
 				desc.desc1.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
 			optimized_clear_value.Format = rtv_format;
-			state = ResourceState::RenderTarget;
-			if (uav_format != DXGI_FORMAT_UNKNOWN)
-			{
-				desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-			}
+			state = (type == Type::RWRenderTarget) ? ResourceState::PixelShaderUAV : ResourceState::RenderTarget;
+			pxAssert((type == Type::RWRenderTarget) || (uav_format == DXGI_FORMAT_UNKNOWN));
 		}
 		break;
 
@@ -240,16 +240,6 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		}
 		break;
 
-		case Type::RWTexture:
-		{
-			pxAssert(levels == 1);
-			allocationDesc.Flags |= D3D12MA::ALLOCATION_FLAG_COMMITTED;
-			state = ResourceState::PixelShaderResource;
-			pxAssert(uav_format != DXGI_FORMAT_UNKNOWN);
-			desc.desc1.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-		}
-		break;
-
 		default:
 			return {};
 	}
@@ -258,7 +248,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 	wil::com_ptr_nothrow<ID3D12Resource> resource_fbl;
 	wil::com_ptr_nothrow<D3D12MA::Allocation> allocation;
 
-	if (type == Type::RenderTarget && !dev->UseEnhancedBarriers())
+	if (IsRenderTarget(type) && !dev->UseEnhancedBarriers())
 	{
 		// We need to use an aliased resource for feedback with legacy barriers.
 		const D3D12_RESOURCE_ALLOCATION_INFO allocInfo = dev->GetDevice()->GetResourceAllocationInfo(0, 1, &desc.desc);
@@ -301,14 +291,14 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 		if (dev->UseEnhancedBarriers())
 		{
 			hr = dev->GetAllocator()->CreateResource3(&allocationDesc, &desc.desc1,
-				type == Type::RenderTarget ? D3D12_BARRIER_LAYOUT_COMMON : GetD3D12BarrierLayout(state),
-				(type == Type::RenderTarget || type == Type::DepthStencil) ? &optimized_clear_value : nullptr,
+				IsRenderTarget(type) ? D3D12_BARRIER_LAYOUT_COMMON : GetD3D12BarrierLayout(state),
+				IsRenderTargetOrDepthStencil(type) ? &optimized_clear_value : nullptr,
 				0, nullptr, allocation.put(), IID_PPV_ARGS(resource.put()));
 		}
 		else
 		{
 			hr = dev->GetAllocator()->CreateResource(&allocationDesc, &desc.desc, GetD3D12ResourceState(state),
-				(type == Type::RenderTarget || type == Type::DepthStencil) ? &optimized_clear_value : nullptr, allocation.put(),
+				IsRenderTargetOrDepthStencil(type) ? &optimized_clear_value : nullptr, allocation.put(),
 				IID_PPV_ARGS(resource.put()));
 		}
 		if (FAILED(hr))
@@ -332,6 +322,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 	switch (type)
 	{
 		case Type::RenderTarget:
+		case Type::RWRenderTarget:
 		{
 			write_descriptor_type = WriteDescriptorType::RTV;
 			if (!CreateRTVDescriptor(resource.get(), rtv_format, &write_descriptor))
@@ -339,7 +330,8 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
 				return {};
 			}
-			if (uav_format != DXGI_FORMAT_UNKNOWN && !CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
+			if (type == Type::RWRenderTarget && uav_format != DXGI_FORMAT_UNKNOWN &&
+				!CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
 			{
 				dev->GetRTVHeapManager().Free(&write_descriptor);
 				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
@@ -359,16 +351,6 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 			if (!CreateDSVDescriptor(resource.get(), dsv_format, &ro_dsv_descriptor, true))
 			{
 				dev->GetDSVHeapManager().Free(&write_descriptor);
-				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
-				return {};
-			}
-		}
-		break;
-
-		case Type::RWTexture:
-		{
-			if (uav_format != DXGI_FORMAT_UNKNOWN && !CreateUAVDescriptor(resource.get(), uav_format, &uav_descriptor))
-			{
 				dev->GetDescriptorHeapManager().Free(&srv_descriptor);
 				return {};
 			}
@@ -402,7 +384,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Create(Type type, Format format, int w
 
 	return std::unique_ptr<GSTexture12>(
 		new GSTexture12(type, format, width, height, levels, dxgi_format, std::move(resource), std::move(resource_fbl), std::move(allocation),
-			srv_descriptor, write_descriptor, ro_dsv_descriptor, uav_descriptor, fbl_descriptor, write_descriptor_type, type == Type::RenderTarget, state));
+			srv_descriptor, write_descriptor, ro_dsv_descriptor, uav_descriptor, fbl_descriptor, write_descriptor_type, IsRenderTarget(type), state));
 }
 
 std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resource> resource, Type type, Format format,
@@ -419,7 +401,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resou
 			return {};
 	}
 
-	if (type == Type::RenderTarget)
+	if (IsRenderTarget(type))
 	{
 		write_descriptor_type = WriteDescriptorType::RTV;
 		if (!CreateRTVDescriptor(resource.get(), rtv_format, &write_descriptor))
@@ -428,7 +410,7 @@ std::unique_ptr<GSTexture12> GSTexture12::Adopt(wil::com_ptr_nothrow<ID3D12Resou
 			return {};
 		}
 	}
-	else if (type == Type::DepthStencil)
+	else if (IsDepthStencil(type))
 	{
 		write_descriptor_type = WriteDescriptorType::DSV;
 		if (!CreateDSVDescriptor(resource.get(), dsv_format, &write_descriptor, false))
@@ -535,7 +517,7 @@ void* GSTexture12::GetNativeHandle() const
 const D3D12CommandList& GSTexture12::GetCommandBufferForUpdate()
 {
 	GSDevice12* const dev = GSDevice12::GetInstance();
-	if (m_type != Type::Texture || m_use_fence_counter == dev->GetCurrentFenceValue())
+	if (!IsTexture() || m_use_fence_counter == dev->GetCurrentFenceValue())
 	{
 		// Console.WriteLn("Texture update within frame, can't use do beforehand");
 		GSDevice12::GetInstance()->EndRenderPass();
@@ -661,7 +643,7 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 		TransitionSubresourceToState(cmdlist, layer, m_resource_state, GSTexture12::ResourceState::CopyDst);
 
 	// if we're an rt and have been cleared, and the full rect isn't being uploaded, do the clear
-	if (m_type == Type::RenderTarget)
+	if (IsRenderTarget())
 	{
 		if (!r.eq(GSVector4i(0, 0, m_size.x, m_size.y)))
 			CommitClear(cmdlist);
@@ -681,7 +663,7 @@ bool GSTexture12::Update(const GSVector4i& r, const void* data, int pitch, int l
 	if (m_resource_state != GSTexture12::ResourceState::CopyDst)
 		TransitionSubresourceToState(cmdlist, layer, GSTexture12::ResourceState::CopyDst, m_resource_state);
 
-	if (m_type == Type::Texture)
+	if (IsTexture())
 		m_needs_mipmaps_generated |= (layer == 0);
 
 	return true;
@@ -740,7 +722,7 @@ void GSTexture12::Unmap()
 		TransitionSubresourceToState(cmdlist, m_map_level, m_resource_state, ResourceState::CopyDst);
 
 	// if we're an rt and have been cleared, and the full rect isn't being uploaded, do the clear
-	if (m_type == Type::RenderTarget)
+	if (IsRenderTarget())
 	{
 		if (!m_map_area.eq(GSVector4i(0, 0, m_size.x, m_size.y)))
 			CommitClear(cmdlist);
@@ -769,7 +751,7 @@ void GSTexture12::Unmap()
 	if (m_resource_state != ResourceState::CopyDst)
 		TransitionSubresourceToState(cmdlist, m_map_level, ResourceState::CopyDst, m_resource_state);
 
-	if (m_type == Type::Texture)
+	if (IsTexture())
 		m_needs_mipmaps_generated |= (m_map_level == 0);
 }
 

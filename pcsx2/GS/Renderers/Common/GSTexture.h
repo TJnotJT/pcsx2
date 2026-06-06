@@ -21,9 +21,9 @@ public:
 	{
 		Invalid = 0,
 		RenderTarget = 1,
+		RWRenderTarget, // RenderTarget with UAV / storage image / shader write capabilities
 		DepthStencil,
-		Texture,   // Generic texture (usually is color textures loaded by the game)
-		RWTexture, // UAV
+		Texture, // Generic texture (usually is color textures loaded by the game)
 	};
 
 	enum class Format : u8
@@ -34,7 +34,7 @@ public:
 		ColorHDR,     ///< High dynamic range (RGBA16F) color texture
 		ColorClip,    ///< Color texture with more bits for colclip (wrap) emulation, given that blending requires 9bpc (RGBA16Unorm)
 		DepthStencil, ///< Depth stencil texture
-		DepthColor,      ///< For treating depth texture as RT
+		DepthColor,   ///< For treating depth texture as RT
 		UNorm8,       ///< A8UNorm texture for paletted textures and the OSD font
 		UInt16,       ///< UInt16 texture for reading back 16-bit depth
 		UInt32,       ///< UInt32 texture for reading back 24 and 32-bit depth
@@ -72,10 +72,6 @@ protected:
 
 	bool m_needs_mipmaps_generated = true;
 	ClearValue m_clear_value = {};
-
-	// For GL/DX11 since they don't track layouts.
-	// Used heuristically to decide whether to use ROV for a draw.
-	bool m_unordered_access = false;
 
 #ifdef PCSX2_DEVBUILD
 	std::string m_debug_name;
@@ -118,6 +114,7 @@ public:
 	static u32 CalcUploadPitch(Format format, u32 width);
 	static u32 CalcUploadRowLengthFromPitch(Format format, u32 pitch);
 	static u32 CalcUploadSize(Format format, u32 height, u32 pitch);
+	static bool IsFormatUsedForRW(Format format);
 
 	u32 GetCompressedBytesPerBlock() const;
 	u32 GetCompressedBlockSize() const;
@@ -125,29 +122,67 @@ public:
 	u32 CalcUploadRowLengthFromPitch(u32 pitch) const;
 	u32 CalcUploadSize(u32 height, u32 pitch) const;
 
+	static __fi bool IsRenderTarget(Type type)
+	{
+		return (type == Type::RenderTarget || type == Type::RWRenderTarget);
+	}
+	static __fi bool IsDepthStencil(Type type)
+	{
+		return (type == Type::DepthStencil);
+	}
+	static __fi bool IsRenderTargetOrDepthStencil(Type type)
+	{
+		return IsRenderTarget(type) || IsDepthStencil(type);
+	}
+	static __fi bool IsDepthColor(Format format)
+	{
+		return (format == Format::DepthColor);
+	}
+	static __fi bool IsTexture(Type type)
+	{
+		return (type == Type::Texture);
+	}
+	static __fi bool IsDepthLike(Type type, Format format)
+	{
+		return IsDepthStencil(type) || IsDepthColor(format);
+	}
+	static __fi bool IsRWRenderTarget(Type type)
+	{
+		return (type == Type::RWRenderTarget);
+	}
+
 	__fi bool IsRenderTargetOrDepthStencil() const
 	{
-		return (m_type >= Type::RenderTarget && m_type <= Type::DepthStencil);
+		return IsRenderTargetOrDepthStencil(m_type);
 	}
 	__fi bool IsRenderTarget() const
 	{
-		return (m_type == Type::RenderTarget);
+		return IsRenderTarget(m_type);
 	}
 	__fi bool IsDepthStencil() const
 	{
-		return (m_type == Type::DepthStencil);
+		return IsDepthStencil(m_type);
 	}
 	__fi bool IsDepthColor() const
 	{
-		return (m_type == Type::RenderTarget && m_format == Format::DepthColor);
+		return IsDepthColor(m_format);
 	}
 	__fi bool IsTexture() const
 	{
-		return (m_type == Type::Texture);
+		return IsTexture(m_type);
 	}
 	__fi bool IsDepthLike() const
 	{
-		return IsDepthStencil() || IsDepthColor();
+		return IsDepthLike(m_type, m_format);
+	}
+	__fi bool IsRWRenderTarget() const
+	{
+		return IsRWRenderTarget(m_type);
+	}
+	virtual bool IsRWMode() const
+	{
+		// Backends that track state explicitly can specialize this based on actual state.
+		return IsRWRenderTarget();
 	}
 
 	__fi State GetState() const { return m_state; }
@@ -180,12 +215,6 @@ public:
 
 	// Typical size of a RGBA texture
 	u32 GetMemUsage() const { return m_size.x * m_size.y * (m_format == Format::UNorm8 ? 1 : 4); }
-
-	// The unordered access flag is sticky, so once it's set we keep using ROV for the target
-	// until it's recycled/destroyed. Only used for DX11/GL, which don't track actual resource layout/state.
-	virtual bool IsUnorderedAccess() const { return m_unordered_access; }
-	void SetUnorderedAccess() { m_unordered_access = true; }
-	void ClearUnorderedAccess() { m_unordered_access = false; }
 
 	// Helper routines for formats/types
 	static bool IsCompressedFormat(Format format) { return (format >= Format::BC1 && format <= Format::BC7); }

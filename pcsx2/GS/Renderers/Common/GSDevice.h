@@ -1489,7 +1489,7 @@ protected:
 	/// Resolves CAS shader includes for the specified source.
 	static bool GetCASShaderSource(std::string* source);
 
-	/// Applies CAS and writes to the destination texture, which should be a RWTexture.
+	/// Applies CAS and writes to the destination texture, which should be a RWRenderTarget.
 	virtual bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) = 0;
 
 	/// Perform texture operations for ImGui
@@ -1623,12 +1623,12 @@ public:
 	virtual void InsertDebugMessage(DebugMessageCategory category, const char* fmt, ...) = 0;
 
 	GSTexture* CreateRenderTarget(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateRWRenderTarget(int w, int h, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(int w, int h, bool clear = true, bool prefer_reuse = true);
-	GSTexture* CreateDepthColor(int w, int h, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
 	GSTexture* CreateRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
+	GSTexture* CreateRWRenderTarget(const GSVector2i& size, GSTexture::Format format, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateDepthStencil(const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
-	GSTexture* CreateDepthColor(const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateTexture(const GSVector2i& size, int mipmap_levels, GSTexture::Format format, bool prefer_reuse = false);
 	GSTexture* CreateCompatible(GSTexture* tex, bool clear = true, bool prefer_reuse = true);
 	GSTexture* CreateCompatible(GSTexture* tex, const GSVector2i& size, bool clear = true, bool prefer_reuse = true);
