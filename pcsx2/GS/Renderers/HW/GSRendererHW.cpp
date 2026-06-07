@@ -11076,7 +11076,9 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 	const bool aligning = GSConfig.SpriteAlign != GSSpriteAlignMode::Off;
 	const bool clamping = GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp;
 
-	if (GetVertexUVRoundingInfo(tex_enabled, target->GetScale() != 1.0))
+	bool pixel_centers_aligned = true;
+
+	if (GetVertexUVRoundingInfo(tex_enabled, target->GetScale() != 1.0, tex_enabled ? &pixel_centers_aligned : nullptr))
 	{
 		GL_INS("HW: Doing shader UV rounding.%s", PRIM->FST ? "" : " Converting ST to UV (pre-divide Q).");
 
@@ -11095,14 +11097,23 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 				}
 			}
 
+			bool linear = m_vt.IsRealLinear() && !pixel_centers_aligned;
+
+			if (m_vt.IsRealLinear() && pixel_centers_aligned)
+			{
+				GL_INS("HW: Disable bilinear due to pixel/texel centers being aligned.");
+				m_conf.sampler = GSHWDrawConfig::SamplerSelector::Point();
+				m_conf.ps.ltf = false;
+			}
+
 			m_conf.ps.round_uv = rounding ?
-				(m_vt.IsRealLinear() ? GSHWDrawConfig::PS_ROUND_UV::LINEAR : GSHWDrawConfig::PS_ROUND_UV::NEAREST) :
+				(linear ? GSHWDrawConfig::PS_ROUND_UV::LINEAR : GSHWDrawConfig::PS_ROUND_UV::NEAREST) :
 				GSHWDrawConfig::PS_ROUND_UV::NONE;
 			m_conf.vs.round_uv = rounding;
 
 			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt_scale != 1.0f) && clamping;
 
-			if (m_conf.vs.clamp_uv && m_vt.IsRealLinear())
+			if (m_conf.vs.clamp_uv && linear)
 			{
 				m_conf.vs.clamp_uv = 2; // Bilinear clamping.
 			}
