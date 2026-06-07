@@ -5080,7 +5080,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 	const int th = 1 << m_context->TEX0.TH;
 	const bool linear = m_vt.IsRealLinear();
 
-	std::vector<u32> tri_quad_corners; // Corners of right-angle corners for triangles forming quads.
+	std::vector<TriangleOrdering> tri_ordering; // Ordering or vertices of right triangles.
 	std::vector<bool> tri_swap_uv; // Whether triangle swaps UV (i.e. U follows Y, V follows X).
 
 	// Only apply this to draws where all triangles form axis-aligned quads (both for XY and UV).
@@ -5100,8 +5100,6 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 			TriangleOrdering tri0, tri1;
 
 
-#if 0
-			// IN PROGRESS - new methods for determining a quad with error tolerance.
 			GSVector4 quad_verts[6];
 			for (u32 j = 0; j < 6; j++)
 			{
@@ -5112,25 +5110,20 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 
 			// Check if vertex XYs and UVs form an axis-aligned quad.
 			constexpr float tolerance = 15.0f / 16.0f;
-			const bool quad = AreTrianglesQuadTolerance(
-				quad_verts + 0, quad_verts + 3, tolerance, tolerance, false, &tri0, &tri1);
+
+			// First check if U follows X, and V follows Y.
+			const bool quad =
+				AreTrianglesQuadTolerance(
+					quad_verts + 0, quad_verts + 3, tolerance, tolerance, false, &tri0, &tri1);
+
+			// b   c | c  b | a     |     a
+			// a     |    a | b   c | c   b
+			// Otherwise check them swapped, U follows Y, and V follows X.
 			const bool quad_swap_uv = !quad &&
-				AreTrianglesQuadTolerance(quad_verts + 0, quad_verts + 3, tolerance, tolerance, true, &tri0, &tri1);
+				AreTrianglesQuadTolerance(
+					quad_verts + 0, quad_verts + 3, tolerance, tolerance, true, &tri0, &tri1);
 
 			if (!quad && !quad_swap_uv)
-			{
-				return false; // No quad
-			}
-#endif
-			if (AreTrianglesQuad<tme, fst, 0>(vtx, idx0, idx1, &tri0, &tri1))
-			{
-				tri_swap_uv.push_back(false);
-			}
-			else if (AreTrianglesQuad<tme, fst, 1>(vtx, idx0, idx1, &tri0, &tri1))
-			{
-				tri_swap_uv.push_back(true);
-			}
-			else
 			{
 				return false; // No quad
 			}
@@ -5148,15 +5141,9 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				}
 			}
 
-			tri_quad_corners.push_back(i + 0 + tri0.b);
-			tri_quad_corners.push_back(i + 3 + tri1.b);
-
-#if 0
-			// IN PROGRESS - new methods for determining a quad with error tolerance.
-			// Save the right angle corners.
-
+			tri_ordering.push_back(tri0);
+			tri_ordering.push_back(tri1);
 			tri_swap_uv.push_back(quad_swap_uv);
-#endif
 		}
 	}
 
@@ -5172,13 +5159,16 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 
 	for (u32 i = 0; i < count; i += n)
 	{
+		TriangleOrdering tri0, tri1;
 		GSVertex v0, v1; // Corners of the quad.
 		bool swap_uv;
 
 		if constexpr (primclass == GS_TRIANGLE_CLASS)
 		{
-			v0 = vtx[tri_quad_corners[2 * (i / n) + 0]];
-			v1 = vtx[tri_quad_corners[2 * (i / n) + 1]];
+			tri0 = tri_ordering[2 * (i / n) + 0];
+			tri1 = tri_ordering[2 * (i / n) + 1];
+			v0 = vtx[i + 0 + tri0.b];
+			v1 = vtx[i + 3 + tri1.b];
 			swap_uv = tri_swap_uv[i / n];
 		}
 		else
@@ -5187,7 +5177,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 			v1 = vtx[i + 1];
 			swap_uv = false;
 
-			if constexpr (primclass == GS_SPRITE_CLASS && tme && !fst)
+			if constexpr (tme && !fst)
 				v0.RGBAQ.Q = v1.RGBAQ.Q; // Use Q of second vertex for sprites.
 		}
 
@@ -5387,7 +5377,22 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 		{
 			// Reorder the vertices so that the right angle comes first and the horizontal edge
 			// comes before the vertical edge.
-			for (int j = 0; j < 2; j++)
+			GSVertex v[6] = {
+				vtx[i + 0 + tri0.b],
+				vtx[i + 0 + tri0.c],
+				vtx[i + 0 + tri0.a],
+				vtx[i + 3 + tri1.b],
+				vtx[i + 3 + tri1.c],
+				vtx[i + 3 + tri1.a],
+			};
+			vtx[i + 0] = v[0];
+			vtx[i + 1] = v[1];
+			vtx[i + 2] = v[2];
+			vtx[i + 3] = v[3];
+			vtx[i + 4] = v[4];
+			vtx[i + 5] = v[5];
+
+			/*for (int j = 0; j < 2; j++)
 			{
 				const int idx_first = i + 3 * j;
 				const int idx_right_angle = tri_quad_corners[2 * (i / n) + j];
@@ -5399,7 +5404,7 @@ bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling)
 				{
 					std::swap(vtx[idx_first + 1], vtx[idx_first + 2]);
 				}
-			}
+			}*/
 		}
 	}
 

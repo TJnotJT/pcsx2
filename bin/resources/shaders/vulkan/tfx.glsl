@@ -235,6 +235,73 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 	return tex;
 }
 
+mat2 get_inverse(mat2 mat, float det)
+{
+	return mat2(mat[1][1], -mat[0][1], -mat[1][0], mat[0][0]) * (1 / det);
+}
+
+void triangle_align_and_round(inout vec2 pos0, inout vec2 pos1, inout vec2 pos2,
+	inout vec2 tex0, inout vec2 tex1, inout vec2 tex2)
+{
+	mat2 dp_mat = mat2(pos1 - pos0, pos2 - pos0);
+	mat2 dt_mat = mat2(tex1 - tex0, tex2 - tex0);
+
+	float dp_det = determinant(dp_mat);
+
+	mat2 inv_dp_mat = get_inverse(dp_mat, dp_det);
+
+	mat2 dt_inv_dp_mat = dt_mat * inv_dp_mat;
+
+	//bvec2 floor0 = bvec2(pos0.x <= pos1.x - 0.9325f, pos0.y <= pos2.y - 0.9325f);
+	//bvec2 floor1 = bvec2(pos1.x <= pos0.x - 0.9325f, pos1.y <= pos2.y - 0.9325f);
+	//bvec2 floor2 = bvec2(pos2.x <= pos0.x - 0.9325f, pos2.y <= pos0.y - 0.9325f);
+
+	float min_x = min(pos0.x, min(pos1.x, pos2.x));
+	float max_x = max(pos0.x, max(pos1.x, pos2.x));
+	float min_y = min(pos0.y, min(pos1.y, pos2.y));
+	float max_y = max(pos0.y, max(pos1.y, pos2.y));
+
+	bvec2 floor0 = bvec2(pos0.x < max_x - 15.0f, pos0.y < max_y - 15.0f);
+	bvec2 floor1 = bvec2(pos1.x < max_x - 15.0f, pos1.y < max_y - 15.0f);
+	bvec2 floor2 = bvec2(pos2.x < max_x - 15.0f, pos2.y < max_y - 15.0f);
+
+	vec2 pos_min = vec2(min_x, min_y);
+	vec2 pos_max = vec2(max_x, max_y);
+
+	vec2 pos0_floor = ceil(pos0 / 16.0f) * 16.0f - 8.0f;
+	vec2 pos0_ceil = floor((pos0 - vec2(1.0f)) / 16.0f) * 16.0f + 8.0f;
+	vec2 pos1_floor = ceil(pos1 / 16.0f) * 16.0f - 8.0f;
+	vec2 pos1_ceil = floor((pos1 - vec2(1.0f)) / 16.0f) * 16.0f + 8.0f;
+	vec2 pos2_floor = ceil(pos2 / 16.0f) * 16.0f - 8.0f;
+	vec2 pos2_ceil = floor((pos2 - vec2(1.0f)) / 16.0f) * 16.0f + 8.0f;
+
+	// vec2 pos0_new = mix(pos0_ceil, pos0_floor, floor0);
+	// vec2 pos1_new = mix(pos1_ceil, pos1_floor, floor1);
+	// vec2 pos2_new = mix(pos2_ceil, pos2_floor, floor2);
+
+	pos_min = ceil(pos_min / 16.0f) * 16.0f - 8.0f;
+	pos_max = floor((pos_max - vec2(1.0f)) / 16.0f) * 16.0f + 8.0f;
+
+	// pos_min = round(pos_min / 16.0f) * 16.0f - 8.0f;
+	// pos_max = round(pos_max / 16.0f) * 16.0f + 8.0f;
+
+	vec2 pos0_new = mix(pos_max, pos_min, floor0);
+	vec2 pos1_new = mix(pos_max, pos_min, floor1);
+	vec2 pos2_new = mix(pos_max, pos_min, floor2);
+
+	vec2 dp0 = pos0_new - pos0;
+	vec2 dp1 = pos1_new - pos1;
+	vec2 dp2 = pos2_new - pos2;
+
+	tex0 += dt_inv_dp_mat * dp0;
+	tex1 += dt_inv_dp_mat * dp1;
+	tex2 += dt_inv_dp_mat * dp2;
+
+	pos0 = pos0_new;
+	pos1 = pos1_new;
+	pos2 = pos2_new;
+}
+
 void sprite_align_and_round(inout vec4 pos, inout vec4 tex)
 {
 	bool rev_x = pos.x > pos.z;
@@ -381,11 +448,6 @@ vec2 get_aa1_triangle_expand_dir(ProcessedVertex v0, ProcessedVertex v1, Process
 	}
 
 	return line_expand;
-}
-
-mat2 get_inverse(mat2 mat, float det)
-{
-	return mat2(mat[1][1], -mat[0][1], -mat[1][0], mat[0][0]) * (1 / det);
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
@@ -672,6 +734,14 @@ void main()
 		#endif
 
 		#if VS_ALIGN_UV
+			vec2 pos0 = v0.pos_raw;
+			vec2 pos1 = v1.pos_raw;
+			vec2 pos2 = v2.pos_raw;
+			vec2 tex0 = v0.ti.zw;
+			vec2 tex1 = v1.ti.zw;
+			vec2 tex2 = v2.ti.zw;
+			triangle_align_and_round(pos0, pos1, pos2, tex0, tex1, tex2);
+
 			sprite_align_and_round(pos, tex);
 			v0.p.xy = transform_raw_pos(pos.xy);
 			v1.p.xy = transform_raw_pos(pos.zy);
@@ -680,6 +750,14 @@ void main()
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;
 			v2.ti.zw = tex.xw;
+
+			v0.p.xy = transform_raw_pos(pos0);
+			v1.p.xy = transform_raw_pos(pos1);
+			v2.p.xy = transform_raw_pos(pos2);
+
+			v0.ti.zw = tex0;
+			v1.ti.zw = tex1;
+			v2.ti.zw = tex2;
 
 			vec2 texscale = TextureScale;
 			#if VS_ROUND_UV
