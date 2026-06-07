@@ -4144,7 +4144,7 @@ void GSTextureCache::Target::ScaleRTAlpha()
 			const GSVector4i valid_rect = GSVector4i(GSVector4(m_valid) * GSVector4(m_scale));
 			GL_PUSH("TC: ScaleRTAlpha(valid=(%dx%d %d,%d=>%d,%d))", m_valid.width(), m_valid.height(), m_valid.x, m_valid.y, m_valid.z, m_valid.w);
 
-			if (GSTexture* temp_rt = g_gs_device->CreateRenderTarget(rtsize, GSTexture::Format::Color, !GSVector4i::loadh(rtsize).eq(valid_rect)))
+			if (GSTexture* temp_rt = g_gs_device->CreateCompatible(m_texture, rtsize, !GSVector4i::loadh(rtsize).eq(valid_rect)))
 			{
 				// Only copy up the valid area, since there's no point in "correcting" nothing.
 				const GSVector4 dRect(m_texture->GetRect().rintersect(valid_rect));
@@ -4169,7 +4169,7 @@ void GSTextureCache::Target::UnscaleRTAlpha()
 			const GSVector4i valid_rect = GSVector4i(GSVector4(m_valid) * GSVector4(m_scale));
 			GL_PUSH("TC: UnscaleRTAlpha(valid=(%dx%d %d,%d=>%d,%d))", valid_rect.width(), valid_rect.height(), valid_rect.x, valid_rect.y, valid_rect.z, valid_rect.w);
 
-			if (GSTexture* temp_rt = g_gs_device->CreateRenderTarget(rtsize, GSTexture::Format::Color, !GSVector4i::loadh(rtsize).eq(valid_rect)))
+			if (GSTexture* temp_rt = g_gs_device->CreateCompatible(m_texture, rtsize, !GSVector4i::loadh(rtsize).eq(valid_rect)))
 			{
 				// Only copy up the valid area, since there's no point in "correcting" nothing.
 				const GSVector4 dRect(m_texture->GetRect().rintersect(valid_rect));
@@ -4222,7 +4222,7 @@ void GSTextureCache::ScaleTargetForDisplay(Target* t, const GIFRegTEX0& dispfb, 
 	const int new_width = std::max(t->m_unscaled_size.x, needed_width);
 	const int scaled_new_height = static_cast<int>(std::ceil(static_cast<float>(new_height) * scale));
 	const int scaled_new_width = static_cast<int>(std::ceil(static_cast<float>(new_width) * scale));
-	GSTexture* new_texture = g_gs_device->CreateRenderTarget(scaled_new_width, scaled_new_height, GSTexture::Format::Color, false);
+	GSTexture* new_texture = g_gs_device->CreateCompatible(old_texture, scaled_new_width, scaled_new_height, false);
 	if (!new_texture)
 	{
 		// Memory allocation failure, do our best to hobble along.
@@ -4331,7 +4331,7 @@ bool GSTextureCache::CopyRGBFromDepthToColor(Target* dst, Target* depth_src)
 	GSTexture* tex = dst->m_texture;
 	if (needs_new_tex)
 	{
-		tex = g_gs_device->CreateRenderTarget(new_scaled_size, GSTexture::Format::Color,
+		tex = g_gs_device->CreateCompatible(dst->m_texture, new_scaled_size,
 			new_size != dst->m_unscaled_size || new_size != depth_src->m_unscaled_size);
 		if (!tex)
 			return false;
@@ -6071,8 +6071,8 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 			const bool outside_target = ((x + w) > dst->m_texture->GetWidth() || (y + h) > dst->m_texture->GetHeight());
 			GSTexture* sTex = dst->m_texture;
 			GSTexture* dTex = outside_target ?
-				g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::Color, true, PreferReusedLabelledTexture()) :
-				g_gs_device->CreateTexture(w, h, tlevels, GSTexture::Format::Color, PreferReusedLabelledTexture());
+				g_gs_device->CreateRenderTarget(w, h, dst->m_texture->GetFormat(), true, PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess()) :
+				g_gs_device->CreateTexture(w, h, tlevels, dst->m_texture->GetFormat(), PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess());
 			if (!dTex) [[unlikely]]
 			{
 				Console.Error("Failed to allocate %dx%d texture for offset source", w, h);
@@ -6382,8 +6382,8 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 			// 'src' is the new texture cache entry (hence the output)
 			GSTexture* sTex = dst->m_texture;
 			GSTexture* dTex = use_texture ?
-				g_gs_device->CreateTexture(new_size, 1, GSTexture::Format::Color, PreferReusedLabelledTexture()) :
-				g_gs_device->CreateRenderTarget(new_size, GSTexture::Format::Color, source_rect_empty || destX != 0 || destY != 0, PreferReusedLabelledTexture());
+				g_gs_device->CreateTexture(new_size, 1, dst->m_texture->GetFormat(), PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess()) :
+				g_gs_device->CreateRenderTarget(new_size, dst->m_texture->GetFormat(), source_rect_empty || destX != 0 || destY != 0, PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess());
 			if (!dTex) [[unlikely]]
 			{
 				Console.Error("Failed to allocate %dx%d texture for target copy to source", new_size.x, new_size.y);
@@ -6429,8 +6429,8 @@ GSTextureCache::Source* GSTextureCache::CreateSource(const GIFRegTEX0& TEX0, con
 					if (dst->GetScale() > 1.0f)
 					{
 						GSTexture* tmpTex = use_texture ?
-							g_gs_device->CreateTexture(dst->m_unscaled_size, 1, GSTexture::Format::Color, PreferReusedLabelledTexture()) :
-							g_gs_device->CreateRenderTarget(dst->m_unscaled_size, GSTexture::Format::Color, false, PreferReusedLabelledTexture());
+							g_gs_device->CreateTexture(dst->m_unscaled_size, 1, dst->m_texture->GetFormat(), PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess()) :
+							g_gs_device->CreateRenderTarget(dst->m_unscaled_size, dst->m_texture->GetFormat(), false, PreferReusedLabelledTexture(), dst->m_texture->GetShaderAccess());
 
 						const GSVector4 dRect = GSVector4(GSVector4i::loadh(dst->m_unscaled_size));
 

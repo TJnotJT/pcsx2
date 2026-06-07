@@ -12,7 +12,7 @@
 #include "fmt/format.h"
 
 GSTexture11::GSTexture11(wil::com_ptr_nothrow<ID3D11Texture2D> texture, const D3D11_TEXTURE2D_DESC& desc,
-	GSTexture::Type type, GSTexture::Format format)
+	Type type, Format format, ShaderAccess access)
 	: m_texture(std::move(texture))
 	, m_desc(desc)
 {
@@ -20,6 +20,7 @@ GSTexture11::GSTexture11(wil::com_ptr_nothrow<ID3D11Texture2D> texture, const D3
 	m_size.y = static_cast<int>(desc.Height);
 	m_type = type;
 	m_format = format;
+	m_shader_access = access;
 	m_mipmap_levels = static_cast<int>(desc.MipLevels);
 }
 
@@ -102,6 +103,8 @@ void GSTexture11::SetDebugName(std::string_view name)
 		GSDevice11::SetD3DDebugObjectName(m_srv.get(), fmt::format("{} SRV", name));
 	if (m_rtv)
 		GSDevice11::SetD3DDebugObjectName(m_rtv.get(), fmt::format("{} RTV", name));
+	if (m_uav)
+		GSDevice11::SetD3DDebugObjectName(m_uav.get(), fmt::format("{} UAV", name));
 
 	m_debug_name = name;
 }

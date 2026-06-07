@@ -28,7 +28,7 @@ private:
 	u32 m_int_shift = 0;
 
 public:
-	explicit GSTextureOGL(Type type, int width, int height, int levels, Format format);
+	explicit GSTextureOGL(Type type, int width, int height, int levels, Format format, ShaderAccess access);
 	~GSTextureOGL() override;
 
 	__fi GLenum GetIntFormat() const { return m_int_format; }

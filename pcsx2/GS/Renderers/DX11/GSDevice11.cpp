@@ -48,6 +48,15 @@ static bool IsTextureFormatHWBlendable(ID3D11Device* dev, DXGI_FORMAT format)
 	return (support & D3D11_FORMAT_SUPPORT_RENDER_TARGET) && (support & D3D11_FORMAT_SUPPORT_BLENDABLE);
 }
 
+static bool IsTextureFormatUAVCapable(ID3D11Device* dev, DXGI_FORMAT format)
+{
+	UINT support;
+	if (FAILED(dev->CheckFormatSupport(format, &support)))
+		return false;
+
+	return (support & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW) != 0;
+}
+
 GSDevice11::GSDevice11()
 {
 	memset(&m_state, 0, sizeof(m_state));
@@ -594,7 +603,9 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	}
 
 	// 1x1 dummy texture.
-	m_null_texture = CreateSurface(GSTexture::Type::RenderTarget, 1, 1, 1, GSTexture::Format::Color);
+	const GSTexture::ShaderAccess null_access = m_features.rov ? GSTexture::ShaderAccess::ReadWrite :
+	                                                             GSTexture::ShaderAccess::ReadOnly;
+	m_null_texture = CreateSurface(GSTexture::Type::RenderTarget, 1, 1, 1, GSTexture::Format::Color, null_access);
 	if (!m_null_texture)
 		return false;
 
@@ -696,6 +707,11 @@ void GSDevice11::SetFeatures(IDXGIAdapter1* adapter)
 	D3D11_FEATURE_DATA_D3D11_OPTIONS2 options2{};
 	m_dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS2, &options2, sizeof(options2));
 	m_features.rov = m_uav_texture && options2.ROVsSupported;
+	for (u32 fmt = static_cast<u32>(GSTexture::Format::Color); fmt <= static_cast<u32>(GSTexture::Format::PrimID); fmt++)
+	{
+		if (GSTexture::IsShaderReadWriteFormat(static_cast<GSTexture::Format>(fmt)))
+			m_features.rov &= IsTextureFormatUAVCapable(m_dev.get(), GSTexture11::GetDXGIFormat(static_cast<GSTexture::Format>(fmt)));
+	}
 
 	// Let the user know if said features are available.
 	Console.WriteLnFmt("D3D11: DXTn Texture Compression: {}", m_features.dxt_textures ? "Supported" : "Not Supported");
@@ -1320,7 +1336,8 @@ void GSDevice11::InsertDebugMessage(DebugMessageCategory category, const char* f
 	m_annotation->SetMarker(StringUtil::UTF8StringToWideString(str).c_str());
 }
 
-GSTexture* GSDevice11::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format)
+GSTexture* GSDevice11::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format,
+	GSTexture::ShaderAccess access)
 {
 	D3D11_TEXTURE2D_DESC desc = {};
 	desc.Width = width;
@@ -1336,8 +1353,6 @@ GSTexture* GSDevice11::CreateSurface(GSTexture::Type type, int width, int height
 	{
 		case GSTexture::Type::RenderTarget:
 			desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-			if (m_uav_texture)
-				desc.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
 			break;
 		case GSTexture::Type::DepthStencil:
 			desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
@@ -1346,12 +1361,14 @@ GSTexture* GSDevice11::CreateSurface(GSTexture::Type type, int width, int height
 			desc.BindFlags = (levels > 1 && !GSTexture::IsCompressedFormat(format)) ? (D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE) : D3D11_BIND_SHADER_RESOURCE;
 			desc.MiscFlags = (levels > 1 && !GSTexture::IsCompressedFormat(format)) ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 			break;
-		case GSTexture::Type::RWTexture:
-			pxAssert(m_uav_texture);
-			desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
-			break;
 		default:
 			break;
+	}
+
+	if (GSTexture::IsShaderReadWrite(access))
+	{
+		pxAssert(!GSTexture::IsDepthStencil(type));
+		desc.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
 	}
 
 	wil::com_ptr_nothrow<ID3D11Texture2D> texture;
@@ -1362,7 +1379,7 @@ GSTexture* GSDevice11::CreateSurface(GSTexture::Type type, int width, int height
 		return nullptr;
 	}
 
-	return new GSTexture11(std::move(texture), desc, type, format);
+	return new GSTexture11(std::move(texture), desc, type, format, access);
 }
 
 std::unique_ptr<GSDownloadTexture> GSDevice11::CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format)

@@ -134,6 +134,15 @@ bool GSDevice12::SupportsTextureFormat(DXGI_FORMAT format)
 	       (support.Support1 & required) == required;
 }
 
+bool GSDevice12::IsTextureFormatUAVCapable(DXGI_FORMAT format)
+{
+	constexpr u32 required = D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW;
+
+	D3D12_FEATURE_DATA_FORMAT_SUPPORT support = { format };
+	return SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support))) &&
+		(support.Support1 & required) == required;
+}
+
 bool GSDevice12::SupportsProgrammableSamplePositions()
 {
 	D3D12_FEATURE_DATA_D3D12_OPTIONS2 options = {};
@@ -1094,7 +1103,8 @@ bool GSDevice12::CreateSwapChainRTV()
 		}
 
 		std::unique_ptr<GSTexture12> tex = GSTexture12::Adopt(std::move(backbuffer), GSTexture::Type::RenderTarget,
-			GSTexture::Format::Color, swap_chain_desc.BufferDesc.Width, swap_chain_desc.BufferDesc.Height, 1,
+			GSTexture::Format::Color, GSTexture::ShaderAccess::ReadOnly,
+			swap_chain_desc.BufferDesc.Width, swap_chain_desc.BufferDesc.Height, 1,
 			swap_chain_desc.BufferDesc.Format, DXGI_FORMAT_UNKNOWN, swap_chain_desc.BufferDesc.Format,
 			DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, GSTexture12::ResourceState::Present);
 		if (!tex)
@@ -1441,6 +1451,15 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
 	m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS));
 	m_features.rov = options.ROVsSupported;
+	for (u32 fmt = static_cast<u32>(GSTexture::Format::Color); fmt <= static_cast<u32>(GSTexture::Format::PrimID); fmt++)
+	{
+		if (GSTexture::IsShaderReadWriteFormat(static_cast<GSTexture::Format>(fmt)))
+		{
+			DXGI_FORMAT dxgi_fmt;
+			LookupNativeFormat(static_cast<GSTexture::Format>(fmt), &dxgi_fmt, nullptr, nullptr, nullptr, nullptr);
+			m_features.rov &= IsTextureFormatUAVCapable(dxgi_fmt);
+		}
+	}
 
 	return true;
 }
@@ -1537,22 +1556,22 @@ void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_f
 		*uav_format = mapping[4];
 }
 
-GSTexture* GSDevice12::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format)
+GSTexture* GSDevice12::CreateSurface(GSTexture::Type type, int width, int height, int levels, GSTexture::Format format, GSTexture::ShaderAccess access)
 {
 	DXGI_FORMAT dxgi_format, srv_format, rtv_format, dsv_format, uav_format;
 	LookupNativeFormat(format, &dxgi_format, &srv_format, &rtv_format, &dsv_format, &uav_format);
 
-	if (type != GSTexture::Type::RWTexture && type != GSTexture::Type::RenderTarget)
+	if (GSTexture::IsShaderReadOnly(access))
 		uav_format = DXGI_FORMAT_UNKNOWN; // We don't need the UAV descriptor.
 
-	std::unique_ptr<GSTexture12> tex(GSTexture12::Create(type, format, width, height, levels,
+	std::unique_ptr<GSTexture12> tex(GSTexture12::Create(type, format, access, width, height, levels,
 		dxgi_format, srv_format, rtv_format, dsv_format, uav_format));
 	if (!tex)
 	{
 		// We're probably out of vram, try flushing the command buffer to release pending textures.
 		PurgePool();
 		ExecuteCommandListAndRestartRenderPass(true, "Couldn't allocate texture.");
-		tex = GSTexture12::Create(type, format, width, height, levels, dxgi_format, srv_format,
+		tex = GSTexture12::Create(type, format, access, width, height, levels, dxgi_format, srv_format,
 			rtv_format, dsv_format, uav_format);
 	}
 
@@ -1601,7 +1620,7 @@ void GSDevice12::CopyRect(GSTexture* sTex, GSTexture* dTex, const GSVector4i& r,
 
 			dTex12->SetState(GSTexture::State::Dirty);
 
-			if (dTex12->GetType() != GSTexture::Type::DepthStencil)
+			if (!dTex12->IsDepthStencil())
 			{
 				dTex12->TransitionToState(GSTexture12::ResourceState::RenderTarget);
 				GetCommandList().list4->ClearRenderTargetView(
@@ -1889,7 +1908,7 @@ void GSDevice12::BeginRenderPassForStretchRect(
 	                                                            GetLoadOpForTexture(dTex);
 	dTex->SetState(GSTexture::State::Dirty);
 
-	if (dTex->GetType() != GSTexture::Type::DepthStencil)
+	if (!dTex->IsDepthStencil())
 	{
 		BeginRenderPass(load_op, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
 			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
@@ -1920,7 +1939,7 @@ void GSDevice12::DoStretchRect(GSTexture12* sTex, const GSVector4& sRect, GSText
 	SetPipeline(pipeline);
 
 	const bool is_present = (!dTex);
-	const bool depth = (dTex && dTex->GetType() == GSTexture::Type::DepthStencil);
+	const bool depth = (dTex && dTex->IsDepthStencil());
 	const GSVector2i size(is_present ? GSVector2i(GetWindowWidth(), GetWindowHeight()) : dTex->GetSize());
 	const GSVector4i dtex_rc(0, 0, size.x, size.y);
 	const GSVector4i dst_rc(GSVector4i(dRect).rintersect(dtex_rc));
@@ -2603,9 +2622,11 @@ GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string
 
 bool GSDevice12::CreateNullTexture()
 {
+	const GSTexture::ShaderAccess null_access = m_features.rov ? GSTexture::ShaderAccess::ReadWrite : GSTexture::ShaderAccess::ReadOnly;
+	const DXGI_FORMAT null_uav_format = m_features.rov ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_UNKNOWN;
 	m_null_texture =
-		GSTexture12::Create(GSTexture::Type::RenderTarget, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
-			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R8G8B8A8_UNORM);
+		GSTexture12::Create(GSTexture::Type::RenderTarget, GSTexture::Format::Color, null_access, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, null_uav_format);
 	if (!m_null_texture)
 		return false;
 
@@ -3525,7 +3546,7 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
 }
 
-void GSDevice12::PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds)
+void GSDevice12::PSSetShaderRWResource(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds)
 {
 	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
 	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
@@ -4424,12 +4445,12 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			draw_rt = m_current_render_target;
 			m_pipeline_selector.rt = true;
 		}
-	}
-	else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
-		draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
-	{
-		draw_ds = m_current_depth_target;
-		m_pipeline_selector.ds = true;
+		else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
+			draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
+		{
+			draw_ds = m_current_depth_target;
+			m_pipeline_selector.ds = true;
+		}
 	}
 
 	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(m_ds_as_rt);
@@ -4482,7 +4503,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			Console.Warning("D3D12: Failed to allocate temp texture for RT copy.");
 	}
 
-	PSSetUnorderedAccess(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
+	PSSetShaderRWResource(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,

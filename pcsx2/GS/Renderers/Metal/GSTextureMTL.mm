@@ -13,12 +13,13 @@
 // Uploads/downloads need 32-byte alignment for AVX2.
 static constexpr u32 PITCH_ALIGNMENT = 32;
 
-GSTextureMTL::GSTextureMTL(GSDeviceMTL* dev, MRCOwned<id<MTLTexture>> texture, Type type, Format format)
+GSTextureMTL::GSTextureMTL(GSDeviceMTL* dev, MRCOwned<id<MTLTexture>> texture, Type type, Format format, ShaderAccess access)
 	: m_dev(dev)
 	, m_texture(std::move(texture))
 {
 	m_type = type;
 	m_format = format;
+	m_shader_access = access;
 	m_size.x = [m_texture width];
 	m_size.y = [m_texture height];
 	m_mipmap_levels = [m_texture mipmapLevelCount];

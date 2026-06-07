@@ -21,7 +21,7 @@ class GSTexture11 final : public GSTexture
 	D3D11_TEXTURE2D_DESC m_desc;
 public:
 	explicit GSTexture11(wil::com_ptr_nothrow<ID3D11Texture2D> texture, const D3D11_TEXTURE2D_DESC& desc,
-		GSTexture::Type type, GSTexture::Format format);
+		Type type, Format format, ShaderAccess access);
 
 	static DXGI_FORMAT GetDXGIFormat(Format format);
 

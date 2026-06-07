@@ -174,6 +174,12 @@ u32 GSTexture::CalcUploadSize(Format format, u32 height, u32 pitch)
 	return pitch * ((static_cast<u32>(height) + (block_size - 1)) / block_size);
 }
 
+// Other formats could be shader writeable, but these the ones we use for shader read/write.
+bool GSTexture::IsShaderReadWriteFormat(Format format)
+{
+	return format == Format::Color || format == Format::DepthColor;
+}
+
 void GSTexture::GenerateMipmapsIfNeeded()
 {
 	if (!m_needs_mipmaps_generated || m_mipmap_levels <= 1 || IsCompressedFormat())

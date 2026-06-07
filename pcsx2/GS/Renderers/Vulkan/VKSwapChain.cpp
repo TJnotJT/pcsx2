@@ -464,7 +464,8 @@ bool VKSwapChain::CreateSwapChain()
 	{
 		std::unique_ptr<GSTextureVK> texture =
 			GSTextureVK::Adopt(images[i], GSTexture::Type::RenderTarget, GSTexture::Format::Color,
-				m_window_info.surface_width, m_window_info.surface_height, 1, surface_format->format);
+				GSTexture::ShaderAccess::ReadOnly, m_window_info.surface_width, m_window_info.surface_height,
+				1, surface_format->format);
 		if (!texture)
 			return false;
 
