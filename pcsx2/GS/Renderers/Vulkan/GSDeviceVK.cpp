@@ -3626,7 +3626,7 @@ void GSDeviceVK::OMSetRenderTargets(
 		{
 			std::array<VkClearAttachment, 3> cas;
 			u32 num_ca = 0;
-			auto AddClearAttachment = [this, &cas, &num_ca](GSTextureVK* tex, u32 colorAttachment, bool depth) {
+			auto AddClearAttachment = [&cas, &num_ca](GSTextureVK* tex, u32 colorAttachment, bool depth) {
 				if (tex && tex->GetState() != GSTexture::State::Dirty)
 				{
 					if (tex->GetState() == GSTexture::State::Cleared)

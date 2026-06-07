@@ -7,7 +7,7 @@ using namespace metal;
 
 
 // Weave shader
-fragment float4 ps_interlace0(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
+fragment float4 ps_interlace0(ConvertShaderData data [[stage_in]], ConvertPSRes res,
 	constant GSMTLInterlacePSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	const int idx   = int(uniform.ZrH.x); // buffer index passed from CPU
@@ -24,14 +24,14 @@ fragment float4 ps_interlace0(ConvertShaderData data [[stage_in]], ConvertPSRes<
 
 
 // Bob shader
-fragment float4 ps_interlace1(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+fragment float4 ps_interlace1(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	return res.sample_level(data.t, 0);
 }
 
 
 // Blend shader
-fragment float4 ps_interlace2(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
+fragment float4 ps_interlace2(ConvertShaderData data [[stage_in]], ConvertPSRes res,
 	constant GSMTLInterlacePSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	float2 vstep = float2(0.0f, uniform.ZrH.y);
@@ -43,7 +43,7 @@ fragment float4 ps_interlace2(ConvertShaderData data [[stage_in]], ConvertPSRes<
 
 
 // MAD shader - buffering
-fragment float4 ps_interlace3(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
+fragment float4 ps_interlace3(ConvertShaderData data [[stage_in]], ConvertPSRes res,
 	constant GSMTLInterlacePSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	// We take half the lines from the current frame and stores them in the MAD frame buffer.
@@ -72,7 +72,7 @@ fragment float4 ps_interlace3(ConvertShaderData data [[stage_in]], ConvertPSRes<
 
 
 // MAD shader - reconstruction
-fragment float4 ps_interlace4(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
+fragment float4 ps_interlace4(ConvertShaderData data [[stage_in]], ConvertPSRes res,
 	constant GSMTLInterlacePSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	const int    idx         = int(uniform.ZrH.x);                   // buffer index passed from CPU

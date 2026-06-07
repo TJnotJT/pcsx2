@@ -8,8 +8,8 @@ using namespace metal;
 constant bool BILN        [[function_constant(GSMTLConstantIndex_BILN)]];
 constant bool INTEGER_IN  [[function_constant(GSMTLConstantIndex_INTEGER_IN)]];
 constant bool INTEGER_OUT [[function_constant(GSMTLConstantIndex_INTEGER_OUT)]];
-constant bool FLOAT_IN    !INTEGER_IN;
-constant bool FLOAT_OUT   !INTEGER_OUT;
+constant bool FLOAT_IN  = !INTEGER_IN;
+constant bool FLOAT_OUT = !INTEGER_OUT;
 constant bool DEPTH_OUT   [[function_constant(GSMTLConstantIndex_DEPTH_OUT)]];
 constant bool COLOR_OUT = !DEPTH_OUT && !INTEGER_OUT;
 
@@ -68,7 +68,7 @@ vertex ImGuiShaderData vs_imgui(ImGuiVSIn in [[stage_in]], constant float4& cb [
 	return out;
 }
 
-fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	return res.sample(data.t);
 }
@@ -134,13 +134,13 @@ fragment float4 ps_primid_rta_init_datm0(float4 p [[position]], DirectReadTextur
 	return tex.read(p).a > (254.5f / 255.f) ? -1 : FLT_MAX;
 }
 
-fragment float4 ps_rta_correction(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+fragment float4 ps_rta_correction(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 in = res.sample(data.t);
 	return float4(in.rgb, in.a / (128.25f / 255.0f));
 }
 
-fragment float4 ps_rta_decorrection(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+fragment float4 ps_rta_decorrection(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 in = res.sample(data.t);
 	return float4(in.rgb, in.a * (128.25f / 255.0f));
@@ -158,7 +158,7 @@ fragment float4 ps_colclip_resolve(float4 p [[position]], DirectReadTextureIn<fl
 	return float4(float3(uint3(in.rgb * 65535.5f) & 255) / 255.f, in.a);
 }
 
-fragment float4 ps_filter_transparency(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res)
+fragment float4 ps_filter_transparency(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 c = res.sample(data.t);
 	return float4(c.rgb, 1.0);
@@ -176,7 +176,7 @@ struct DepthOrColorOut
 {
 	float color [[color(0), function_constant(COLOR_OUT)]];
 	float depth [[depth(any), function_constant(DEPTH_OUT)]];
-	uint ucolor [[color(0), function_constant(UINT_COLOR_OUT)]];
+	uint ucolor [[color(0), function_constant(INTEGER_OUT)]];
 	DepthOrColorOut(float value): color(value), depth(value), ucolor(value * 0x1p32) {}
 	DepthOrColorOut(uint value): color(value * 0x1p-32), depth(value * 0x1p-32), ucolor(value) {}
 	DepthOrColorOut(FloatOrUIntDepth value)
@@ -211,18 +211,6 @@ fragment float4 ps_convert_depth16_rgb5a1(ConvertShaderData data [[stage_in]], C
 	return (FLOAT_IN ? convert_depth16_rgba8(res.sample(data.t).f) :  convert_depth16_rgba8(res.sample(data.t).u)) / 255.f;
 }
 
-fragment float4 ps_convert_uint32_rgba8(ConvertShaderData data [[stage_in]], ConvertPSRes<uint> res)
-{
-	uint d = res.sample(data.t).r;
-	return float4(uint4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24))) / 255.0f;
-}
-
-fragment float4 ps_convert_uint16_rgb5a1(ConvertShaderData data [[stage_in]], ConvertPSRes<uint> res)
-{
-	uint d = res.sample(data.t).r;
-	return float4(uint4(d << 3, d >> 2, d >> 7, d >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80)) / 255.0f;
-}
-
 fragment float4 ps_downsample_copy(ConvertShaderData data [[stage_in]],
 	texture2d<float> texture [[texture(GSMTLTextureIndexNonHW)]],
 	constant GSMTLDownsamplePSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
@@ -251,7 +239,7 @@ static FloatOrUIntDepth rgba8_to_depth24(half4 unorm)
 
 static FloatOrUIntDepth rgba8_to_depth16(half4 unorm)
 {
-	return FloatOrUIntDepth(as_type<ushort>(uchar2(unorm.rg * 255.5h)));
+	return FloatOrUIntDepth(uint(as_type<ushort>(uchar2(unorm.rg * 255.5h))));
 }
 
 static FloatOrUIntDepth rgb5a1_to_depth16(half4 unorm)
@@ -289,10 +277,10 @@ struct ConvertToDepthRes
 		uint4 coords = uint4(clamp(int4(top_left, top_left + 1), 0, int2(dimensions - 1).xyxy));
 		float2 mix_vals = fract(top_left_f);
 
-		float depthTL = convert(texture.read(coords.xy));
-		float depthTR = convert(texture.read(coords.zy));
-		float depthBL = convert(texture.read(coords.xw));
-		float depthBR = convert(texture.read(coords.zw));
+		FloatOrUIntDepth depthTL = convert(texture.read(coords.xy));
+		FloatOrUIntDepth depthTR = convert(texture.read(coords.zy));
+		FloatOrUIntDepth depthBL = convert(texture.read(coords.xw));
+		FloatOrUIntDepth depthBR = convert(texture.read(coords.zw));
 		return lerp_depth(lerp_depth(depthTL, depthTR, mix_vals.x), lerp_depth(depthBL, depthBR, mix_vals.x), mix_vals.y);
 	}
 
@@ -528,7 +516,7 @@ fragment float4 ps_convert_clut_8(ConvertShaderData data [[stage_in]],
 	return texture.read(final);
 }
 
-fragment float4 ps_yuv(ConvertShaderData data [[stage_in]], ConvertPSRes<float> res,
+fragment float4 ps_yuv(ConvertShaderData data [[stage_in]], ConvertPSRes res,
 	constant GSMTLConvertPSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
 {
 	float4 i = res.sample(data.t);

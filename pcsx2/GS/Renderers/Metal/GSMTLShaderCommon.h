@@ -13,16 +13,15 @@ struct ConvertShaderData
 	float2 t;
 };
 
-template <typename Format>
 struct ConvertPSRes
 {
-	texture2d<Format> texture [[texture(GSMTLTextureIndexNonHW)]];
+	texture2d<float> texture [[texture(GSMTLTextureIndexNonHW)]];
 	sampler s [[sampler(0)]];
-	vec<Format, 4> sample(float2 coord)
+	float4 sample(float2 coord)
 	{
 		return texture.sample(s, coord);
 	}
-	vec<Format, 4> sample_level(float2 coord, float lod)
+	float4 sample_level(float2 coord, float lod)
 	{
 		return texture.sample(s, coord, level(lod));
 	}
@@ -40,7 +39,7 @@ struct ConvertPSDepthRes
 
 static inline float4 convert_depth32_rgba8(uint value)
 {
-	return float4(as_type<uchar4>(val));
+	return float4(as_type<uchar4>(value));
 }
 
 static inline float4 convert_depth32_rgba8(float value)
@@ -50,7 +49,7 @@ static inline float4 convert_depth32_rgba8(float value)
 
 static inline float4 convert_depth16_rgba8(uint value)
 {
-	return float4(uint4(val << 3, val >> 2, val >> 7, val >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80));
+	return float4(uint4(value << 3, value >> 2, value >> 7, value >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80));
 }
 
 static inline float4 convert_depth16_rgba8(float value)

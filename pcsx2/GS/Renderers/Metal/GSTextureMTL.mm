@@ -128,6 +128,30 @@ void GSTextureMTL::GenerateMipmap()
 	}
 }}
 
+GSVector4 GSTextureMTL::GetMTLClearValue() const
+{
+	if (IsDepthStencil())
+	{
+		return GSVector4(GetClearDepth(), 0.0f, 0.0f, 0.0f);
+	}
+	else if (IsRenderTarget())
+	{
+		if (IsDepthInteger())
+		{
+			return GSVector4(static_cast<float>(GetClearValue()), 0.0f, 0.0f, 0.0f);
+		}
+		else
+		{
+			return GSVector4::unorm8(GetClearValue());
+		}
+	}
+	else
+	{
+		pxAssert(false);
+		return GSVector4::zero();
+	}
+}
+
 #ifdef PCSX2_DEVBUILD
 
 void GSTextureMTL::SetDebugName(std::string_view name)

@@ -413,7 +413,7 @@ static GSVector4 GetRTLoadInfo(GSTextureMTL* tex, MTLLoadAction* load_action)
 		else if (tex->GetState() == GSTexture::State::Cleared && *load_action != MTLLoadActionDontCare)
 		{
 			*load_action = MTLLoadActionClear;
-			return tex->GetClearForFormat();
+			return tex->GetMTLClearValue();
 		}
 	}
 	return {};
@@ -529,6 +529,7 @@ static constexpr MTLPixelFormat ConvertPixelFormat(GSTexture::Format format)
 	{
 		case GSTexture::Format::DepthColor:   return MTLPixelFormatR32Float;
 		case GSTexture::Format::PrimID:       return MTLPixelFormatR32Float;
+		case GSTexture::Format::DepthInteger: return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt32:       return MTLPixelFormatR32Uint;
 		case GSTexture::Format::UInt16:       return MTLPixelFormatR16Uint;
 		case GSTexture::Format::UNorm8:       return MTLPixelFormatA8Unorm;
@@ -1202,7 +1203,7 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			name = [name stringByAppendingString:@" Biln"];
 		name = [name stringByAppendingString:[NSString stringWithUTF8String:shader.InputFormat()]];
 		name = [name stringByAppendingString:@" → "];
-		name = [name stringByAppendingString:[NSString GSTexture::GetFormatName(shader.OutputFormat())]];
+		name = [name stringByAppendingString:[NSString stringWithUTF8String:GSTexture::GetFormatName(shader.OutputFormat())]];
 
 		const u32 scmask = shader.Mask();
 		MTLColorWriteMask mask = MTLColorWriteMaskNone;
@@ -1998,7 +1999,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		MTLRenderPipelineColorAttachmentDescriptor* color1 = [[pdesc colorAttachments] objectAtIndexedSubscript:1];
 		[color1 setPixelFormat:MTLPixelFormatR32Float];
 	}
-	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%x.%llx.%llx", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
+	NSString* pname = [NSString stringWithFormat:@"HW Render %x.%llx.%llx.%x", vssel_mtl.key, pssel.key_hi, pssel.key_lo, extras.fullkey];
 	auto pipeline = MakePipeline(pdesc, vs, ps, pname);
 
 	[m_current_render.encoder setRenderPipelineState:pipeline];

@@ -572,7 +572,6 @@ void GSTextureVK::CommitClear(VkCommandBuffer cmdbuf)
 {
 	TransitionToLayout(cmdbuf, Layout::ClearDst);
 
-	const VkClearValue cv = GetVkClearValue();
 	if (IsDepthStencil())
 	{
 		const VkClearDepthStencilValue cv = GetVkClearValue().depthStencil;
