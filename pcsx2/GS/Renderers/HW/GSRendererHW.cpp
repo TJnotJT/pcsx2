@@ -15,6 +15,8 @@
 using PS_ATST  = GSShader::PS_ATST;
 using PS_AFAIL = GSShader::PS_AFAIL;
 
+constexpr bool COLOR_ONLY_ROV = true;
+
 GSRendererHW::GSRendererHW()
 	: GSRenderer()
 {
@@ -5590,7 +5592,8 @@ void GSRendererHW::EmulateZbuffer(const GSTextureCache::Target* ds)
 	// Even when Z is read-only, Z floor must be enabled with ZTST_GREATER since otherwise there
 	// can be false passing if the incoming Z is not floored when the buffer value is floored.
 	m_conf.ps.zfloor = !flat_z &&
-		(m_cached_ctx.DepthWrite() || (m_cached_ctx.DepthRead() && m_cached_ctx.TEST.ZTST == ZTST_GREATER));
+		(m_cached_ctx.DepthWrite() || (m_cached_ctx.DepthRead() && m_cached_ctx.TEST.ZTST == ZTST_GREATER)) &&
+		!COLOR_ONLY_ROV; // Z floor forces depth ROV
 
 	if (m_cached_ctx.DepthWrite() && large_z)
 	{
@@ -7588,7 +7591,7 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 	const bool depth_is_rov = ds && ds->m_texture->IsDepthColor();
 
 	bool use_rov_color = (color_write && multipass_color) || color_is_rov;
-	bool use_rov_depth = (depth_write && multipass_depth) || depth_is_rov;
+	bool use_rov_depth = (((depth_write && multipass_depth) && !COLOR_ONLY_ROV) || depth_is_rov);
 
 	// In certain cases, ROV in color or depth will force ROV in the other for correctness.
 	GetForcedROVUsage(use_rov_color, use_rov_depth);
@@ -7603,13 +7606,14 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 		}
 		else
 		{
+#if PCSX2_DEVBUILD
+			barriers = INT_MAX;
+#else
 			barriers = 2; // Tells drawlist computation to stop after reaching 2.
+#endif
 			GetPrimitiveOverlapDrawlist(false, false, 1.0f, &barriers);
 		}
 	}
-	
-	const u32 multiplier = m_conf.alpha_second_pass.enable ? 2 : 1; // Alpha second pass doubles the barriers.
-	barriers *= multiplier;
 
 	// Heuristic: only activate ROV if we save at least one draw call by doing so.
 	const bool activate = (use_rov_color != color_is_rov || use_rov_depth != depth_is_rov) && barriers >= 2;
