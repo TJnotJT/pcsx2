@@ -10,6 +10,7 @@
 #include "common/Console.h"
 #include "common/BitUtils.h"
 #include "common/StringUtil.h"
+#include "common/FileSystem.h"
 #include <bit>
 
 using PS_ATST  = GSShader::PS_ATST;
@@ -9222,6 +9223,29 @@ void GSRendererHW::ResetStates()
 	memset(static_cast<void*>(&m_conf), 0, reinterpret_cast<const char*>(&m_conf.cb_vs) - reinterpret_cast<const char*>(&m_conf));
 }
 
+static FILE* barrier_file;
+static void CloseLogging()
+{
+	if (barrier_file)
+		fclose(barrier_file);
+}
+static void DoLogging(const std::string& path, u64 frame, u64 draw, u64 addr_rt, u64 addr_ds, u64 addr_tex, u64 barriers, GSVector4i area,
+	u64 alpha, u64 test, u64 frame_reg, u64 zbuf, u64 tex0)
+{
+	static bool first = true;
+	if (first)
+	{
+		barrier_file = fopen(path.c_str(), "w");
+		std::atexit(CloseLogging);
+		fprintf(barrier_file, "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", "frame", "draw", "addr_rt", "addr_ds", "addr_tex", "barriers",
+			"area.x", "area.y", "area.z", "area.w", "alpha", "test", "frame_reg", "zbuf", "tex0");
+	}
+	fprintf(barrier_file, "%lld,%lld,0x%llx,0x%llx,0x%llx,%lld,%d,%d,%d,%d,0x%llx,0x%llx,0x%llx,0x%llx,0x%llx\n",
+		frame, draw, addr_rt, addr_ds, addr_tex, barriers,
+		area.x, area.y, area.z, area.w, alpha, test, frame_reg, zbuf, tex0);
+	first = false;
+}
+
 __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex, const TextureMinMaxResult& tmm)
 {
 #ifdef ENABLE_OGL_DEBUG
@@ -9489,6 +9513,21 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	{
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
 	}
+
+	DoLogging(GetDrawDumpPath("barriers.csv"),
+		g_perfmon.GetFrame(),
+		s_n,
+		rt ? rt->m_TEX0.TBP0 : 0,
+		ds ? ds->m_TEX0.TBP0 : 0,
+		tex ? tex->m_TEX0.TBP0 : 0,
+		m_conf.require_full_barrier ? m_drawlist.size() : 0,
+		m_conf.drawarea,
+		m_context->ALPHA.U64,
+		m_cached_ctx.TEST.U64,
+		m_cached_ctx.FRAME.U64,
+		m_cached_ctx.ZBUF.U64,
+		m_cached_ctx.TEX0.U64
+	);
 
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
