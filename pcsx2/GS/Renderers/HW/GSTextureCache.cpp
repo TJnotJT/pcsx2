@@ -5977,6 +5977,8 @@ void GSTextureCache::IncAge()
 		{
 			Target* t = *i;
 
+			t->m_rov_state.NextFrame();
+
 			if (++t->m_age > max_rt_age)
 			{
 				const Target* overlapping_tgt = FindOverlappingTarget(t);

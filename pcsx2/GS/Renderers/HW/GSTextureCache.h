@@ -230,6 +230,68 @@ public:
 		GSVector4i rect_since;
 	};
 
+	// Simple state machine to use for ROV heuristic.
+	struct ROVState
+	{
+		static constexpr int START_BARRIERS = 5; // Number of barriers in a single draw to activate barriers.
+		static constexpr int DEACTIVATE_DRAWS = 10; // Number of draws without barriers to deactivate ROV.
+		static constexpr float AVG_BARRIERS = 1.0f; // Average barriers in a frame needed to keep ROV activated.
+		static constexpr float MIN_DRAWS = 30; // Minimum draws in a frame needed to keep ROV activated.
+
+		bool m_last_frame_valid = false;
+		u32 m_barriers_last_frame = 0;
+		u32 m_draws_last_frame = 0;
+		u32 m_barriers_curr_frame = 0;
+		u32 m_draws_curr_frame = 0;
+
+		u32 m_draws_no_barriers = 0;
+		bool m_rov_active = false;
+
+		void NextFrame()
+		{
+			m_last_frame_valid = true;
+			m_barriers_last_frame = m_barriers_curr_frame;
+			m_draws_last_frame = m_draws_curr_frame;
+			m_barriers_curr_frame = 0;
+			m_draws_curr_frame = 0;
+		}
+
+		void NextDraw(u32 barriers)
+		{
+			if (barriers >= START_BARRIERS)
+			{
+				m_rov_active = true;
+			}
+
+			if (m_rov_active)
+			{
+				if (barriers == 0)
+					m_draws_no_barriers++;
+				else
+					m_draws_no_barriers = 0;
+				if (m_draws_no_barriers >= DEACTIVATE_DRAWS)
+				{
+					m_rov_active = false;
+					m_draws_no_barriers = 0;
+				}
+
+				m_draws_curr_frame++;
+				m_barriers_curr_frame += barriers;
+			}
+		}
+
+		bool Active() const
+		{
+			return m_rov_active;
+		}
+
+		bool LastFrameMeetsThreshold()
+		{
+			return (static_cast<float>(m_barriers_last_frame) >= static_cast<float>(m_draws_last_frame) * AVG_BARRIERS) &&
+				m_draws_last_frame >= MIN_DRAWS;
+		}
+	};
+
 	class Target : public Surface
 	{
 	public:
@@ -255,6 +317,7 @@ public:
 		GSVector4i m_drawn_since_read{};
 		int readbacks_since_draw = 0;
 
+		ROVState m_rov_state;
 	public:
 		Target(GIFRegTEX0 TEX0, int type, const GSVector2i& unscaled_size, float scale, GSTexture* texture);
 		~Target();
@@ -284,7 +347,6 @@ public:
 
 		/// Resizes target texture, DOES NOT RESCALE.
 		bool ResizeTexture(int new_unscaled_width, int new_unscaled_height, bool recycle_old = true, bool require_new_rect = false, GSVector4i new_rect = GSVector4i::zero(), bool keep_old = false);
-
 	private:
 		void UpdateTextureDebugName();
 	};

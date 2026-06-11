@@ -391,6 +391,7 @@ private:
 	std::array<ComPtr<ID3D12PipelineState>, 2> m_colclip_setup_pipelines{}; // [depth]
 	std::array<ComPtr<ID3D12PipelineState>, 2> m_colclip_finish_pipelines{}; // [depth]
 	std::array<std::array<ComPtr<ID3D12PipelineState>, 4>, 2> m_primid_image_setup_pipelines{}; // [depth][datm]
+	std::array<std::array<ComPtr<ID3D12PipelineState>, 2>, 2> m_rov_depth_copy_pipelines{}; // [rt][depth->rov or rov->depth]
 	ComPtr<ID3D12PipelineState> m_fxaa_pipeline;
 	ComPtr<ID3D12PipelineState> m_shadeboost_pipeline;
 	ComPtr<ID3D12PipelineState> m_imgui_pipeline;
@@ -547,13 +548,15 @@ public:
 	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
 	GSTexture12* SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, PipelineSelector& pipe);
 
+	virtual void DoROVDepthCopy(bool rov_to_depth, const GSVector4i* rects, u32 num_rects) override;
+
 	void IASetVertexBuffer(const void* vertex, size_t stride, size_t count);
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
-	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
+	void PSSetUnorderedAccess(bool write_rt, bool write_ds);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
 		bool depth_read = false, const GSVector2i& viewport_size = {});
@@ -564,8 +567,8 @@ public:
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
+	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config,
+		GSTexture12* draw_rt, GSTexture12* draw_ds,
 		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config);

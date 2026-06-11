@@ -599,6 +599,9 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		}
 	}
 
+	if (g_gs_device->IsROVActive())
+		g_gs_device->EndROV();
+
 	const int fb_sprite_blits = g_perfmon.GetDisplayFramebufferSpriteBlits();
 	const bool fb_sprite_frame = (fb_sprite_blits > 0);
 

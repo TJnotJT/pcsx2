@@ -693,4 +693,21 @@ float ps_primid_image_init_3(PS_INPUT input) : SV_Target
 }
 #endif
 
+#if defined(PS_ROV_DEPTH_COPY)
+	#if PS_ROV_DEPTH_COPY == 0
+		Texture2D<float> DepthTexture : register(t4);
+		RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+		void ps_rov_depth_copy(PS_INPUT input)
+		{
+			DepthTextureRov[int2(input.p.xy)] = DepthTexture.Load(int3(int2(input.p.xy), 0));
+		}
+	#elif PS_ROV_DEPTH_COPY == 1
+		RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+		float ps_rov_depth_copy(PS_INPUT input) : SV_Depth
+		{
+			return DepthTextureRov[int2(input.p.xy)];
+		}
+	#endif
+#endif
+
 #endif // PIXEL_SHADER

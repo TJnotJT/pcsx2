@@ -31,6 +31,11 @@ class GSRendererHW : public GSRenderer
 public:
 	static constexpr int MAX_FRAMEBUFFER_HEIGHT = 1280;
 
+	static constexpr int ROV_START_BARRIERS = 5;
+	static constexpr int ROV_END_AND_START_BARRIERS = 10;
+	static constexpr int ROV_MAX_NO_BARRIER_DRAWS = 10;
+	static constexpr float ROV_MIN_AVG_FRAME_BARRIERS = 0.5f;
+
 private:
 	static constexpr float SSR_UV_TOLERANCE = 1.0f;
 
@@ -251,13 +256,12 @@ private:
 
 	void DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, const GSVector2i& rtsize,
 		const GSVector2i& unscaled_size, float& vs_scale_x, float& vs_scale_y);
-	void DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
+	void DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex);
 
 	void GetForcedROVUsage(bool& color_cov, bool& depth_rov); // Whether having color or depth with the current config forces the other.
 	void DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Heuristics to determine whether to enable/disable ROV
 	void ConfigureROV(bool color_rov, bool depth_rov); // Actual config for ROV
 	void SetUnorderedAccessFlag(GSTextureCache::Target* rt); // Set flag for DX11 ROV heuristic to work.
-	void ConvertDepthFormatROV(GSTextureCache::Target* ds); // Convert between depth and depth color if needed.
 
 	void SetTCOffset();
 	bool NextDrawColClip() const;
@@ -345,6 +349,9 @@ private:
 	std::vector<GSVertexSW> m_sw_vertex_buffer;
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
+
+	// How many draws didn't have barriers in a row.
+	u32 m_rov_no_barrier_draws = 0;
 
 public:
 	GSRendererHW();

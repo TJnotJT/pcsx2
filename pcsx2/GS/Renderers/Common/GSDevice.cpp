@@ -1114,6 +1114,171 @@ void GSDevice::EndDSAsRT()
 	m_ds_as_rt = nullptr;
 }
 
+// Can be called multiple times without EndROV() to update textures
+void GSDevice::BeginROV(GSTexture* rt, GSTexture* ds)
+{
+	pxAssert(IsROVCompatible(rt, ds));
+
+	if (!IsROVActive())
+		GL_ROV("ROV begin: RT=016%p DS=%016p", rt, ds);
+	if (!m_rov_state.rt && rt)
+		m_rov_state.rt = rt;
+	if (!m_rov_state.ds && ds)
+	{
+		pxAssert(!m_rov_state.ds_rov);
+		m_rov_state.ds = ds;
+		m_rov_state.ds_rov = CreateRenderTarget((rt ? rt : ds)->GetSize(), GSTexture::Format::DepthColor, false, true);
+#if PCSX2_DEVBUILD
+		m_rov_state.ds_rov->SetDebugName(m_rov_state.ds->GetDebugName() + " (ROV)");
+#endif
+	}
+}
+
+void GSDevice::CheckROVHazards(GSTexture* src, GSTexture* dst)
+{
+	if (dst && dst == m_rov_state.ds)
+	{
+		GL_ROV("ROV: End ROV for write to DS %016p", dst);
+		EndROV();
+		return;
+	}
+
+	if (src && src == m_rov_state.ds)
+	{
+		GL_ROV("ROV: Resolve ROV for read from DS %016p", dst);
+		ResolveROVDrawArea();
+		return;
+	}
+}
+
+
+
+void GSDevice::EndROV()
+{
+	GL_ROV("End ROV RT=%016p DS=%016p", m_rov_state.rt, m_rov_state.ds);
+	if (m_rov_state.ds_rov)
+	{
+		if (!m_rov_state.drawarea.rempty())
+			ResolveROVDrawArea();
+		Recycle(m_rov_state.ds_rov);
+	}
+	m_rov_state = {};
+}
+
+void GSDevice::PrepareROVDrawArea(GSVector4i drawarea)
+{
+	if (!m_rov_state.ds)
+		return;
+
+	if (m_rov_state.ds->GetState() == GSTexture::State::Cleared)
+	{
+		GL_ROV("ROV: Propagate DS clear to ROV");
+		m_rov_state.ds_rov->SetClearDepth(m_rov_state.ds->GetClearDepth());
+		m_rov_state.drawarea = m_rov_state.ds->GetRect();
+		return;
+	}
+
+	if (m_rov_state.ds->GetState() == GSTexture::State::Invalidated)
+	{
+		GL_ROV("ROV: Real DS is invalidated");
+		m_rov_state.drawarea = m_rov_state.ds->GetRect();
+		return;
+	}
+
+	const GSVector4i size = m_rov_state.ds->GetRect();
+
+	// Align the copy area to reduce the number of needed copies
+	drawarea = drawarea.ralign<Align_Outside>(GSVector2i(ROV_DEPTH_COPY_ALIGN, ROV_DEPTH_COPY_ALIGN));
+	drawarea = drawarea.rintersect(size);
+
+	GSVector4i& curr_drawarea = m_rov_state.drawarea;
+	
+	if (curr_drawarea.rcontains(drawarea))
+	{
+		return; // Already have the area
+	}
+
+	GL_PUSH_ROV("ROV: Copy DS to ROV [%d, %d, %d, %d]", drawarea.x, drawarea.y, drawarea.z, drawarea.w);
+	
+	if (curr_drawarea.rempty())
+	{
+		// No current area, copy the whole draw area.
+		DoROVDepthCopy(false, &drawarea, 1);
+		curr_drawarea = drawarea;
+		return;
+	}
+
+	// Get the rectangles needed to create the union excluding the current area.
+	GSVector4i rects[4];
+	u32 nrects = 0;
+
+	const bool need_top = drawarea.top < curr_drawarea.top;
+	const bool need_bottom = drawarea.bottom > curr_drawarea.bottom;
+	const bool need_left = drawarea.left < curr_drawarea.left;
+	const bool need_right = drawarea.right > curr_drawarea.right;
+
+	if (need_top)
+	{
+		rects[nrects].top = drawarea.top;
+		rects[nrects].bottom = curr_drawarea.top;
+		rects[nrects].left = need_left ? drawarea.left : curr_drawarea.left;
+		rects[nrects].right = need_right ? drawarea.right : curr_drawarea.right;
+		GL_INS("Area%d=[%d, %d, %d, %d]", nrects, rects[nrects].x, rects[nrects].y, rects[nrects].z, rects[nrects].w);
+		nrects++;
+	}
+
+	if (need_bottom)
+	{
+		rects[nrects].top = curr_drawarea.bottom;
+		rects[nrects].bottom = drawarea.bottom;
+		rects[nrects].left = need_left ? drawarea.left : curr_drawarea.left;
+		rects[nrects].right = need_right ? drawarea.right : curr_drawarea.right;
+		GL_INS("Area%d=[%d, %d, %d, %d]", nrects, rects[nrects].x, rects[nrects].y, rects[nrects].z, rects[nrects].w);
+		nrects++;
+	}
+
+	if (need_left)
+	{
+		rects[nrects].top = curr_drawarea.top;
+		rects[nrects].bottom = curr_drawarea.bottom;
+		rects[nrects].left = drawarea.left;
+		rects[nrects].right = curr_drawarea.left;
+		GL_INS("Area%d=[%d, %d, %d, %d]", nrects, rects[nrects].x, rects[nrects].y, rects[nrects].z, rects[nrects].w);
+		nrects++;
+	}
+
+	if (need_right)
+	{
+		rects[nrects].top = curr_drawarea.top;
+		rects[nrects].bottom = curr_drawarea.bottom;
+		rects[nrects].left = curr_drawarea.right;
+		rects[nrects].right = drawarea.right;
+		GL_INS("Area%d=[%d, %d, %d, %d]", nrects, rects[nrects].x, rects[nrects].y, rects[nrects].z, rects[nrects].w);
+		nrects++;
+	}
+
+	DoROVDepthCopy(false, rects, nrects);
+
+	curr_drawarea = curr_drawarea.runion(drawarea);
+}
+
+void GSDevice::ResolveROVDrawArea()
+{
+	if (!m_rov_state.ds)
+		return;
+
+	if (m_rov_state.ds->GetState() == GSTexture::State::Cleared ||
+		m_rov_state.ds->GetState() == GSTexture::State::Invalidated)
+	{
+		GL_ROV("ROV: DS cleared/invalidated; do not update.");
+		return;
+	}
+
+	GL_PUSH_ROV("ROV: Copy ROV to DS [%d, %d, %d, %d]",
+		m_rov_state.drawarea.x, m_rov_state.drawarea.y, m_rov_state.drawarea.z, m_rov_state.drawarea.w);
+	DoROVDepthCopy(true, &m_rov_state.drawarea, 1);
+}
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"

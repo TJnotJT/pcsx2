@@ -428,6 +428,7 @@ private:
 	VkPipeline m_colclip_finish_pipelines[2][2] = {}; // [depth][feedback_loop]
 	VkRenderPass m_primid_image_setup_render_passes[2][2] = {}; // [depth][clear]
 	VkPipeline m_primid_image_setup_pipelines[2][4] = {}; // [depth][datm]
+	VkPipeline m_rov_depth_copy_pipelines[2][2] = {}; // [rt][depth->rov or rov->depth]
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
 
@@ -604,11 +605,13 @@ public:
 	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
 	GSTextureVK* SetupPrimitiveTrackingDATE(GSHWDrawConfig& config);
 
+	void DoROVDepthCopy(bool rov_to_depth, const GSVector4i* rects, u32 num_rects) override;
+
 	void IASetVertexBuffer(const void* vertex, size_t stride, size_t count, size_t align_multiplier = 1);
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
-	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
+	void PSSetUnorderedAccess(bool write_rt, bool write_ds);
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 

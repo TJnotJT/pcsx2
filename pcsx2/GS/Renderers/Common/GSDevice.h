@@ -1475,6 +1475,13 @@ protected:
 	GSTexture* m_cas = nullptr;
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
+	struct
+	{
+		GSTexture* rt;
+		GSTexture* ds;
+		GSTexture* ds_rov;
+		GSVector4i drawarea;
+	} m_rov_state = {};
 
 	bool AcquireWindow(bool recreate_window);
 
@@ -1521,6 +1528,24 @@ public:
 	/// Create a temporary color clone of depth for depth feedback
 	virtual void BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea);
 	void EndDSAsRT();
+
+	static constexpr int ROV_DEPTH_COPY_ALIGN = 128;
+
+	bool IsROVActive() const { return m_rov_state.rt || m_rov_state.ds; }
+	bool IsROVCompatible(GSTexture* rt, GSTexture* ds) const
+	{
+		return (rt == nullptr || m_rov_state.rt == nullptr || rt == m_rov_state.rt) &&
+			(ds == nullptr || m_rov_state.ds == nullptr || ds == m_rov_state.ds);
+	}
+	void BeginROV(GSTexture* rt, GSTexture* ds);
+	void EndROV();
+	void PrepareROVDrawArea(GSVector4i drawarea);
+	void ResolveROVDrawArea();
+	void CheckROVHazards(GSTexture* src, GSTexture* dst);
+	virtual void DoROVDepthCopy(bool rov_to_depth, const GSVector4i* rects, u32 num_rects)
+	{
+		pxAssert(false);
+	}
 
 	/// Returns a string representing the specified API.
 	static const char* RenderAPIToString(RenderAPI api);

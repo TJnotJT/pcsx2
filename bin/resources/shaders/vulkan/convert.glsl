@@ -649,4 +649,28 @@ void main()
 }
 #endif
 
+#if defined(PS_ROV_DEPTH_COPY)
+	#if PS_ROV_DEPTH_COPY == 0
+		layout(set = 1, binding = 4) uniform texture2D DepthSampler;
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+		layout(pixel_interlock_ordered) in;
+		void ps_rov_depth_copy()
+		{
+			vec4 d = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0);
+			beginInvocationInterlockARB();
+			imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), d);
+			endInvocationInterlockARB();
+		}
+	#elif PS_ROV_DEPTH_COPY == 1
+		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+		layout(pixel_interlock_ordered) in;
+		void ps_rov_depth_copy()
+		{
+			beginInvocationInterlockARB();
+			gl_FragDepth = imageLoad(DepthImageRov, ivec2(gl_FragCoord.xy)).r;
+			endInvocationInterlockARB();
+		}
+	#endif
+#endif
+
 #endif
