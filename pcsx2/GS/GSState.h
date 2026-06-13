@@ -331,69 +331,16 @@ public:
 	std::vector<u64> m_replay_draws;
 	std::vector<u64> m_replay_packets;
 
-	void SaveReplayDrawsPackets(bool enable)
-	{
-		m_save_replay_draws_packets = enable;
-	}
-	void SetCurrentReplayPacket(u64 packet)
-	{
-		m_current_replay_packet = packet;
-	}
-	void ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
-	{
-		*draws = m_replay_draws;
-		*packets = m_replay_packets;
-	}
+	void SaveReplayDrawsPackets(bool enable);
+	void SetCurrentReplayPacket(u64 packet);
+	void ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets);
 
-	void IncDraw()
-	{
-		s_n++;
-		if (m_save_replay_draws_packets)
-		{
-			if (m_replay_draws.empty())
-			{
-				m_replay_draws.push_back(0);
-				m_replay_packets.push_back(0);
-			}
-			m_replay_draws.push_back(s_n);
-			m_replay_packets.push_back(m_current_replay_packet);
-		}
-	}
-
-	bool UseIntervalStats() const
-	{
-		return m_n_interval_start < m_n_interval_end;
-	}
-	void SetIntervalStatsRange(u64 start, u64 end)
-	{
-		m_n_interval_start = start;
-		m_n_interval_end = end;
-	}
-	void SetIntervalStatsBase()
-	{
-		m_n_interval_base = s_n;
-	}
-	bool InStatsInterval()
-	{
-		return (s_n - m_n_interval_base) >= m_n_interval_start &&
-		       (s_n - m_n_interval_base) < m_n_interval_end;
-	}
-	bool ShouldStartIntervalStats()
-	{
-		return InStatsInterval() && !m_interval_stats_started;
-	}
-	bool ShouldEndIntervalStats()
-	{
-		return !InStatsInterval() && m_interval_stats_started;
-	}
 	void StartIntervalStats();
 	void EndIntervalStats();
-
-	u64 GetGSIntervalTime()
-	{
-		return std::max<s64>(static_cast<s64>(m_interval_end_time - m_interval_start_time), 0);
-	}
-
+	u64 GetGSIntervalTime();
+	
+	void IncDraw();
+	
 	static constexpr u32 STATE_VERSION = 9;
 
 	#define PRIM_REG_MASK 0x7FF

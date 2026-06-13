@@ -163,8 +163,6 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	s_average_gpu_time = s_accumulated_gpu_time / static_cast<float>(s_unskipped_frames_since_last_update);
 	s_gpu_usage = s_accumulated_gpu_time / (time * 10.0f);
 
-	if (!s_no_reset_mode)
-		s_accumulated_gpu_time = 0.0f;
 
 	// prefer privileged register write based framerate detection, it's less likely to have false positives
 	if (s_gs_privileged_register_writes_since_last_update > 0 && !EmuConfig.Gamefixes.BlitInternalFPSHack)
@@ -183,8 +181,11 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 		s_internal_fps_method = InternalFPSMethod::None;
 	}
 
-	s_gs_privileged_register_writes_since_last_update = 0;
-	s_gs_framebuffer_blits_since_last_update = 0;
+	if (!s_no_reset_mode)
+	{
+		s_gs_privileged_register_writes_since_last_update = 0;
+		s_gs_framebuffer_blits_since_last_update = 0;
+	}
 
 	const u64 ticks = GetCPUTicks();
 	const u64 ticks_delta = ticks - s_last_ticks;
@@ -203,24 +204,8 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 
 	const u64 cpu_delta = cpu_time - s_last_cpu_time;
 	const u64 gs_delta = s_enable_gs_interval_time ? s_accumulated_gs_interval_time : gs_time - s_last_gs_time;
-	s_accumulated_gs_interval_time = 0;
 	const u64 vu_delta = vu_time - s_last_vu_time;
 	const u64 capture_delta = capture_time - s_last_capture_time;
-
-	if (s_no_reset_mode)
-	{
-		s_last_cpu_time += cpu_time;
-		s_last_gs_time += gs_time;
-		s_last_vu_time += vu_time;
-		s_last_capture_time += capture_time;
-	}
-	else
-	{
-		s_last_cpu_time = cpu_time;
-		s_last_gs_time = gs_time;
-		s_last_vu_time = vu_time;
-		s_last_capture_time = capture_time;
-	}
 
 	s_cpu_thread_usage = static_cast<double>(cpu_delta) * pct_divider;
 	s_gs_thread_usage = static_cast<double>(gs_delta) * pct_divider;
@@ -240,9 +225,25 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 		thread.time = static_cast<double>(delta) * time_divider;
 	}
 
-	s_frames_since_last_update = 0;
-	s_unskipped_frames_since_last_update = 0;
-	s_presents_since_last_update = 0;
+	if (s_no_reset_mode)
+	{
+		s_last_cpu_time += cpu_time;
+		s_last_gs_time += gs_time;
+		s_last_vu_time += vu_time;
+		s_last_capture_time += capture_time;
+	}
+	else
+	{
+		s_last_cpu_time = cpu_time;
+		s_last_gs_time = gs_time;
+		s_last_vu_time = vu_time;
+		s_last_capture_time = capture_time;
+		s_accumulated_gpu_time = 0.0f;
+		s_accumulated_gs_interval_time = 0;
+		s_frames_since_last_update = 0;
+		s_unskipped_frames_since_last_update = 0;
+		s_presents_since_last_update = 0;
+	}
 
 	Host::OnPerformanceMetricsUpdated();
 }

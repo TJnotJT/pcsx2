@@ -18,6 +18,7 @@ namespace GSDumpReplayer
 	bool IsRunner();
 	void SetIsDumpRunner(bool is_runner);
 	void SetFrameRange(u32 start, u32 end);
+	void SetIntervalStatsRange(u64 start_draw, u64 end_draw);
 	void SetRepeatDraws(const std::string& repeat_draws);
 
 	bool Initialize(const char* filename, Error* error = nullptr);

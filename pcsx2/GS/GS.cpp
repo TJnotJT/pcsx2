@@ -223,8 +223,6 @@ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
 	g_gs_renderer->UpdateRenderFixes();
 	g_perfmon.Reset();
 	g_perfmon.EnableInterval(GSConfig.IntervalStats);
-	if (GSConfig.IntervalStats)
-		g_gs_renderer->SetIntervalStatsRange(GSConfig.IntervalStatsStartDraw, GSConfig.IntervalStatsEndDraw);
 	return true;
 }
 
@@ -565,9 +563,14 @@ void GSSetVSyncMode(GSVSyncMode mode, bool allow_present_throttle)
 	g_gs_device->SetVSyncMode(mode, allow_present_throttle);
 }
 
-void GSSetIntervalStatsBase()
+void GSStartIntervalStats()
 {
-	g_gs_renderer->SetIntervalStatsBase();
+	g_gs_renderer->StartIntervalStats();
+}
+
+void GSEndIntervalStats()
+{
+	g_gs_renderer->EndIntervalStats();
 }
 
 void GSSaveDumpReplayDrawsPackets(bool enable)
@@ -913,8 +916,6 @@ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
 	}
 
 	g_perfmon.EnableInterval(GSConfig.IntervalStats);
-	if (GSConfig.IntervalStats)
-		g_gs_renderer->SetIntervalStatsRange(GSConfig.IntervalStatsStartDraw, GSConfig.IntervalStatsEndDraw);
 }
 
 void GSSetSoftwareRendering(bool software_renderer, GSInterlaceMode new_interlace)

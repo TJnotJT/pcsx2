@@ -55,19 +55,28 @@ static u32 s_frame_end = 0;
 static u32 s_frame_start_packet;
 static u32 s_frame_end_packet;
 
+static bool s_use_interval_stats = false;
+static u64 s_interval_stats_start_draw = 0;
+static u64 s_interval_stats_end_draw = 0;
+static bool s_interval_stats_started = false;
+
 static bool s_use_repeat_draws = false;
 static std::vector<u64> s_repeat_draw_start;
 static std::vector<u64> s_repeat_draw_end;
 static std::vector<u64> s_repeat_draw_times;
-static std::vector<u64> s_repeat_draw_start_packet;
-static std::vector<u64> s_repeat_draw_end_packet;
 static bool s_need_draws_packets = false;
-static std::vector<u64> s_replay_draws;
-static std::vector<u64> s_replay_packets;
 static u64 s_curr_repeat_start_packet = 0;
 static u64 s_curr_repeat_end_packet = 0;
 static u64 s_curr_repeat_remaining = 0;
 static u64 s_curr_repeat_position = 0;
+
+static std::vector<u64> s_packet_to_draw_map;
+struct PacketRange
+{
+	u64 start;
+	u64 end;
+};
+static std::vector<PacketRange> s_draw_to_packet_map;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -112,6 +121,14 @@ void GSDumpReplayer::SetFrameRange(u32 start, u32 end)
 	s_use_frame_range = true;
 	s_frame_start = start;
 	s_frame_end = end;
+}
+
+void GSDumpReplayer::SetIntervalStatsRange(u64 start_draw, u64 end_draw)
+{
+	s_use_interval_stats = true;
+	s_need_draws_packets = true;
+	s_interval_stats_start_draw = start_draw;
+	s_interval_stats_end_draw = end_draw;
 }
 
 void GSDumpReplayer::SetRepeatDraws(const std::string& repeat_draws)
@@ -323,36 +340,27 @@ static void GSDumpReplayerFrameLimit()
 	s_next_frame_time = std::max(now, s_next_frame_time + s_frame_ticks);
 }
 
-void NextPacket()
+void AdvanceNextPacket()
 {
-	if (s_use_repeat_draws && !s_repeat_draw_start_packet.empty())
+	s_current_packet++;
+	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
+
+	if (s_use_repeat_draws && !s_first_loop)
 	{
-		/*auto start_repeat = std::find(s_repeat_draw_start_packet.begin() + s_curr_repeat_position,
-		                              s_repeat_draw_start_packet.end(),
-		                              s_current_packet);
-		if (start_repeat != s_repeat_draw_start_packet.end())
+		u64 curr_draw = s_packet_to_draw_map[s_current_packet];
+
+		auto start_draw = std::find(s_repeat_draw_start.begin() + s_curr_repeat_position,
+			s_repeat_draw_start.end(), curr_draw);
+		if (start_draw != s_repeat_draw_start.end())
 		{
-			s_curr_repeat_start_packet = s_current_packet;
-			const size_t i = start_repeat - s_repeat_draw_start_packet.begin();
-			s_curr_repeat_end_packet = s_repeat_draw_end_packet[i];
-			s_curr_repeat_remaining = s_repeat_draw_times[i];
-			s_curr_repeat_position++;
-		}*/
-		auto start_repeat = std::find(s_repeat_draw_start_packet.begin() + s_curr_repeat_position,
-									  s_repeat_draw_start_packet.end(),
-									  s_current_packet);
-		if (start_repeat != s_repeat_draw_start_packet.end())
-		{
-			s_curr_repeat_start_packet = s_current_packet;
-			const size_t i = start_repeat - s_repeat_draw_start_packet.begin();
-			s_curr_repeat_end_packet = s_repeat_draw_end_packet[i];
+			const size_t i = start_draw - s_repeat_draw_start.begin();
+			const u64 end_draw = s_repeat_draw_end[i];
+			s_curr_repeat_start_packet = s_draw_to_packet_map[curr_draw].start;
+			s_curr_repeat_end_packet = s_draw_to_packet_map[end_draw].end;
 			s_curr_repeat_remaining = s_repeat_draw_times[i];
 			s_curr_repeat_position++;
 		}
 	}
-
-	s_current_packet++;
-	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
 
 	if ((s_current_packet > s_curr_repeat_end_packet || end_of_dump) && (s_curr_repeat_remaining > 1))
 	{
@@ -366,19 +374,96 @@ void NextPacket()
 	}
 }
 
+void AdvanceNextLoop()
+{
+	s_dump_frame_number = 0;
+	if (s_dump_loop_count > 0)
+		s_dump_loop_count--;
+	else if (s_dump_loop_count == 0)
+	{
+		Host::RequestVMShutdown(false, false, false);
+		s_dump_running = false;
+	}
+}
+
+void CheckFrameRange()
+{
+	if (s_init_frame_range)
+	{
+		if (!s_first_loop)
+		{
+			if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
+			{
+				s_dump_frame_number = s_frame_start;
+				s_current_packet = s_frame_start_packet;
+			}
+		}
+	}
+	else if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()))
+	{
+		s_frame_end_packet = s_current_packet;
+		s_init_frame_range = true;
+	}
+}
+
+void CheckIntervalStatsRange()
+{
+	if (s_use_interval_stats && !s_first_loop)
+	{
+		const u64 prev_draw = s_current_packet == 0 ? 0 : s_packet_to_draw_map[s_current_packet - 1];
+		const u64 curr_draw = s_packet_to_draw_map[s_current_packet];
+		if (curr_draw >= s_interval_stats_start_draw && prev_draw < s_interval_stats_start_draw && !s_interval_stats_started)
+		{
+			s_interval_stats_started = true;
+			MTGS::RunOnGSThread([]() {
+				GSStartIntervalStats();
+			});
+		}
+		else if (curr_draw > s_interval_stats_end_draw && s_interval_stats_started)
+		{
+			s_interval_stats_started = false;
+			MTGS::RunOnGSThread([]() {
+				GSEndIntervalStats();
+			});
+		}
+	}
+}
+
+void GetDrawsPackets()
+{
+	s_need_draws_packets = false;
+	std::atomic<bool> ready(false);
+	std::vector<u64> draws;
+	std::vector<u64> packets;
+	MTGS::RunOnGSThread([&]() {
+		GSSaveDumpReplayDrawsPackets(false);
+		GSReadDumpReplayDrawsPackets(&draws, &packets);
+		ready.store(true);
+	});
+	MTGS::WaitGS();
+	while (!ready.load())
+		std::this_thread::yield();
+	s_draw_to_packet_map.push_back({ 0, 0 });
+	for (u64 i = 1; i < draws.size(); i++)
+	{
+		const u64 first_packet = i == 1 ? 0 : packets[i - 1] + 1;
+		const u64 last_packet = packets[i];
+		s_draw_to_packet_map.push_back({ first_packet, last_packet });
+	}
+	for (u64 i = 0; i < packets.size(); i++)
+	{
+		const u64 next_packet = (i + 1 < packets.size()) ? packets[i + 1] : s_dump_file->GetPackets().size();
+		for (u64 packet = packets[i]; packet < next_packet; packet++)
+			s_packet_to_draw_map.push_back(draws[i]);
+	}
+}
+
 void GSDumpReplayerCpuStep()
 {
 	if (s_needs_state_loaded)
 	{
 		GSDumpReplayerLoadInitialState();
 		s_needs_state_loaded = false;
-	}
-
-	if (s_use_frame_range && s_init_frame_range && s_current_packet == s_frame_start_packet)
-	{
-		MTGS::RunOnGSThread([]() {
-			GSSetIntervalStatsBase();
-		});
 	}
 
 	if (s_need_draws_packets)
@@ -391,39 +476,18 @@ void GSDumpReplayerCpuStep()
 
 	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
 
-	NextPacket();
+	CheckIntervalStatsRange();
+
+	AdvanceNextPacket();
 	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
 
-	// Do looping behavior
 	if (end_of_dump || (!s_first_loop && s_init_frame_range && s_current_packet > s_frame_end_packet))
 	{
-		s_dump_frame_number = 0;
-		if (s_dump_loop_count > 0)
-			s_dump_loop_count--;
-		else if (s_dump_loop_count == 0)
-		{
-			Host::RequestVMShutdown(false, false, false);
-			s_dump_running = false;
-		}
+		printf("LOOP: %lld\n", s_current_packet);
+		AdvanceNextLoop();
 	}
 	
-	// Setup the packet range for the frames requested.
-	if (s_init_frame_range)
-	{
-		if (!s_first_loop)
-		{
-			if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
-			{
-				s_dump_frame_number = s_frame_start;
-				s_current_packet = s_frame_start_packet;
-			}
-		}
-	}
-	else if (end_of_dump)
-	{
-		s_frame_end_packet = s_current_packet;
-		s_init_frame_range = true;
-	}
+	CheckFrameRange();
 
 	switch (packet.id)
 	{
@@ -504,29 +568,7 @@ void GSDumpReplayerCpuStep()
 	}
 
 	if (end_of_dump && s_need_draws_packets)
-	{
-		s_need_draws_packets = false;
-		std::atomic<bool> ready(false);
-		MTGS::RunOnGSThread([replay_draws = &s_replay_draws, replay_packets = &s_replay_packets, &ready]() {
-			GSSaveDumpReplayDrawsPackets(false);
-			GSReadDumpReplayDrawsPackets(replay_draws, replay_packets);
-			ready.store(true);
-		});
-		MTGS::WaitGS();
-		while (!ready.load())
-			std::this_thread::yield();
-		for (size_t i = 0, j = 0; i < s_repeat_draw_start.size(); i++)
-		{
-			const u64 draw_start = s_repeat_draw_start[i];
-			const u64 draw_end = s_repeat_draw_end[i];
-			for (; j < s_replay_draws.size() && s_replay_draws[j] < draw_start; j++)
-				;
-			s_repeat_draw_start_packet.push_back(j == 0 ? 0 : s_replay_packets[j - 1] + 1);
-			for (; j < s_replay_draws.size() && s_replay_draws[j] < draw_end; j++)
-				;
-			s_repeat_draw_end_packet.push_back(j == 0 ? 0 : s_replay_packets[j - 1]);
-		}
-	}
+		GetDrawsPackets();
 
 	s_current_packet %= static_cast<u32>(s_dump_file->GetPackets().size());
 

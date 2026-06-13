@@ -2490,6 +2490,37 @@ u32 GSState::CalcMask(int exp, int max_exp)
 	return (1 << std::min(amount, 23)) - 1;
 }
 
+void GSState::IncDraw()
+{
+	s_n++;
+	if (m_save_replay_draws_packets)
+	{
+		if (m_replay_draws.empty())
+		{
+			m_replay_draws.push_back(0);
+			m_replay_packets.push_back(0);
+		}
+		m_replay_draws.push_back(s_n);
+		m_replay_packets.push_back(m_current_replay_packet);
+	}
+}
+
+void GSState::SaveReplayDrawsPackets(bool enable)
+{
+	m_save_replay_draws_packets = enable;
+}
+
+void GSState::SetCurrentReplayPacket(u64 packet)
+{
+	m_current_replay_packet = packet;
+}
+
+void GSState::ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	*draws = m_replay_draws;
+	*packets = m_replay_packets;
+}
+
 void GSState::StartIntervalStats()
 {
 	g_perfmon.StartInterval();
@@ -2504,6 +2535,11 @@ void GSState::EndIntervalStats()
 	g_gs_device->EndGPUTiming();
 	m_interval_end_time = MTGS::GetThreadHandle().GetCPUTime();
 	m_interval_stats_started = false;
+}
+
+u64 GSState::GetGSIntervalTime()
+{
+	return std::max<s64>(static_cast<s64>(m_interval_end_time - m_interval_start_time), 0);
 }
 
 void GSState::FlushPrim()
@@ -2646,14 +2682,6 @@ void GSState::FlushPrim()
 
 			if (GSConfig.SaveTransferImages)
 				DumpTransferImages();
-		}
-
-		if (UseIntervalStats())
-		{
-			if (ShouldStartIntervalStats())
-				StartIntervalStats();
-			else if (ShouldEndIntervalStats())
-				EndIntervalStats();
 		}
 
 		if (!skip_draw)
