@@ -43,6 +43,13 @@ protected:
 	clock_t m_lastframe = 0;
 	int m_count = 0;
 	int m_disp_fb_sprite_blits = 0;
+	bool m_enable_interval = false;
+	bool m_collect_interval = false;
+
+	bool CheckInterval()
+	{
+		return !m_enable_interval || m_collect_interval;
+	}
 
 public:
 	GSPerfMon();
@@ -53,10 +60,29 @@ public:
 	int GetFrame() { return m_frame; }
 	void EndFrame(bool frame_only);
 
-	void Put(counter_t c, double val) { m_counters[c] += val; }
+	void Put(counter_t c, double val)
+	{
+		if (CheckInterval())
+			m_counters[c] += val;
+	}
 	double GetCounter(counter_t c) { return m_counters[c]; }
 	double Get(counter_t c) { return m_stats[c]; }
 	void Update();
+
+	void EnableInterval(bool interval)
+	{
+		m_enable_interval = interval;
+	}
+
+	void StartInterval()
+	{
+		m_collect_interval = true;
+	}
+
+	void EndInterval()
+	{
+		m_collect_interval = false;
+	}
 
 	__fi void AddDisplayFramebufferSpriteBlit() { m_disp_fb_sprite_blits++; }
 	__fi int GetDisplayFramebufferSpriteBlits()

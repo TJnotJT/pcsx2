@@ -47,6 +47,13 @@ static u64 s_frame_ticks = 0;
 static u64 s_next_frame_time = 0;
 static bool s_is_dump_runner = false;
 
+static bool s_use_frame_range = false;
+static bool s_init_frame_range = false;
+static u32 s_frame_start = 0;
+static u32 s_frame_end = 0;
+static u32 s_frame_start_packet;
+static u32 s_frame_end_packet;
+
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
 	GSDumpReplayerCpuShutdown,
@@ -83,6 +90,13 @@ void GSDumpReplayer::SetLoopCount(s32 loop_count)
 int GSDumpReplayer::GetLoopCount()
 {
 	return s_dump_loop_count;
+}
+
+void GSDumpReplayer::SetFrameRange(u32 start, u32 end)
+{
+	s_use_frame_range = true;
+	s_frame_start = start;
+	s_frame_end = end;
 }
 
 bool GSDumpReplayer::Initialize(const char* filename, Error* error)
@@ -264,9 +278,17 @@ void GSDumpReplayerCpuStep()
 		s_needs_state_loaded = false;
 	}
 
-	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
-	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
-	if (s_current_packet == 0)
+	if (s_use_frame_range && s_init_frame_range && s_current_packet == s_frame_start_packet)
+	{
+		MTGS::RunOnGSThread([&]() {
+			GSSetIntervalStatsBase();
+		});
+	}
+
+	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet++];
+
+	if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()) ||
+		(s_init_frame_range && s_current_packet > s_frame_end_packet))
 	{
 		s_dump_frame_number = 0;
 		if (s_dump_loop_count > 0)
@@ -276,6 +298,21 @@ void GSDumpReplayerCpuStep()
 			Host::RequestVMShutdown(false, false, false);
 			s_dump_running = false;
 		}
+	}
+	
+	// Setup the packet range for the frames requested.
+	if (s_init_frame_range)
+	{
+		if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
+		{
+			s_dump_frame_number = s_frame_start;
+			s_current_packet = s_frame_start_packet;
+		}
+	}
+	else if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()))
+	{
+		s_frame_end_packet = s_current_packet;
+		s_init_frame_range = true;
 	}
 
 	switch (packet.id)
@@ -323,6 +360,18 @@ void GSDumpReplayerCpuStep()
 			if (VMManager::Internal::IsExecutionInterrupted())
 				GSDumpReplayerExitExecution();
 			Host::PumpMessagesOnCPUThread();
+			if (s_use_frame_range && !s_init_frame_range)
+			{
+				if (s_dump_frame_number == s_frame_start)
+				{
+					s_frame_start_packet = s_current_packet;
+				}
+				else if (s_dump_frame_number == s_frame_end)
+				{
+					s_frame_end_packet = s_current_packet;
+					s_init_frame_range = true;
+				}
+			}
 		}
 		break;
 
@@ -343,6 +392,8 @@ void GSDumpReplayerCpuStep()
 		}
 		break;
 	}
+
+	s_current_packet %= static_cast<u32>(s_dump_file->GetPackets().size());
 }
 
 void GSDumpReplayerCpuExecute()

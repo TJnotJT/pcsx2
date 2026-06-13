@@ -161,7 +161,7 @@ static bool OpenGSDevice(GSRendererType renderer, bool clear_state_on_fail, bool
 		return false;
 	}
 
-	GSConfig.OsdShowGPU = GSConfig.OsdShowGPU && g_gs_device->SetGPUTimingEnabled(true);
+	GSConfig.OsdShowGPU = GSConfig.OsdShowGPU && g_gs_device->SetGPUTimingEnabled(true, GSConfig.IntervalStats);
 
 	Console.WriteLn(Color_StrongGreen, "%s Graphics Driver Info:", GSDevice::RenderAPIToString(new_api));
 	Console.WriteLn(g_gs_device->GetDriverInfo());
@@ -222,6 +222,9 @@ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
 	g_gs_renderer->ResetPCRTC();
 	g_gs_renderer->UpdateRenderFixes();
 	g_perfmon.Reset();
+	g_perfmon.EnableInterval(GSConfig.IntervalStats);
+	if (GSConfig.IntervalStats)
+		g_gs_renderer->SetIntervalStatsRange(GSConfig.IntervalStatsStartDraw, GSConfig.IntervalStatsEndDraw);
 	return true;
 }
 
@@ -562,6 +565,11 @@ void GSSetVSyncMode(GSVSyncMode mode, bool allow_present_throttle)
 	g_gs_device->SetVSyncMode(mode, allow_present_throttle);
 }
 
+void GSSetIntervalStatsBase()
+{
+	g_gs_renderer->SetIntervalStatsBase();
+}
+
 bool GSWantsExclusiveFullscreen()
 {
 	if (!g_gs_device || !g_gs_device->SupportsExclusiveFullscreen())
@@ -880,9 +888,13 @@ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
 
 	if (GSConfig.OsdShowGPU != old_config.OsdShowGPU)
 	{
-		if (!g_gs_device->SetGPUTimingEnabled(GSConfig.OsdShowGPU))
+		if (!g_gs_device->SetGPUTimingEnabled(GSConfig.OsdShowGPU, GSConfig.IntervalStats))
 			GSConfig.OsdShowGPU = false;
 	}
+
+	g_perfmon.EnableInterval(GSConfig.IntervalStats);
+	if (GSConfig.IntervalStats)
+		g_gs_renderer->SetIntervalStatsRange(GSConfig.IntervalStatsStartDraw, GSConfig.IntervalStatsEndDraw);
 }
 
 void GSSetSoftwareRendering(bool software_renderer, GSInterlaceMode new_interlace)

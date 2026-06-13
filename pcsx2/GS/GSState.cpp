@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "MTGS.h"
 #include "GS/GSState.h"
 #include "GS/GSDump.h"
 #include "GS/GSGL.h"
@@ -11,6 +12,7 @@
 #include "common/BitUtils.h"
 #include "common/Path.h"
 #include "common/StringUtil.h"
+#include "common/Timer.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -104,7 +106,6 @@ GSState::GSState()
 
 	s_n = 0;
 	s_transfer_n = 0;
-
 
 	memset(&m_v, 0, sizeof(m_v));
 	memset(m_mem.m_vm8, 0, m_mem.m_vmsize);
@@ -2489,6 +2490,22 @@ u32 GSState::CalcMask(int exp, int max_exp)
 	return (1 << std::min(amount, 23)) - 1;
 }
 
+void GSState::StartIntervalStats()
+{
+	g_perfmon.StartInterval();
+	g_gs_device->StartGPUTiming();
+	m_interval_start_time = MTGS::GetThreadHandle().GetCPUTime();
+	m_interval_stats_started = true;
+}
+
+void GSState::EndIntervalStats()
+{
+	g_perfmon.EndInterval();
+	g_gs_device->EndGPUTiming();
+	m_interval_end_time = MTGS::GetThreadHandle().GetCPUTime();
+	m_interval_stats_started = false;
+}
+
 void GSState::FlushPrim()
 {
 	if (m_index->tail > 0)
@@ -2629,6 +2646,14 @@ void GSState::FlushPrim()
 
 			if (GSConfig.SaveTransferImages)
 				DumpTransferImages();
+		}
+
+		if (UseIntervalStats())
+		{
+			if (ShouldStartIntervalStats())
+				StartIntervalStats();
+			else if (ShouldEndIntervalStats())
+				EndIntervalStats();
 		}
 
 		if (!skip_draw)

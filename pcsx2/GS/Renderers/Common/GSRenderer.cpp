@@ -701,7 +701,12 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			EndPresentFrame();
 
 			if (GSConfig.OsdShowGPU || GSDumpReplayer::IsReplayingDump())
-				PerformanceMetrics::OnGPUPresent(g_gs_device->GetAndResetAccumulatedGPUTime());
+			{
+				if (UseIntervalStats() && m_interval_stats_started)
+					EndIntervalStats();
+				PerformanceMetrics::EnableGSIntervalTime(GSConfig.IntervalStats);
+				PerformanceMetrics::OnGPUPresent(g_gs_device->GetAndResetAccumulatedGPUTime(), g_gs_renderer->GetGSIntervalTime());
+			}
 		}
 
 		PerformanceMetrics::Update(registers_written, fb_sprite_frame, false);

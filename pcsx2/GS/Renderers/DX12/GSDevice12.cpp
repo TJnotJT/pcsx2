@@ -479,36 +479,11 @@ void GSDevice12::MoveToNextCommandList()
 	if (res.sampler_allocator.ShouldReset())
 		res.sampler_allocator.Reset();
 
-	if (res.has_timestamp_query)
-	{
-		// readback timestamp from the last time this cmdlist was used.
-		// we don't need to worry about disjoint in dx12, the frequency is reliable within a single cmdlist.
-		const u32 offset = (m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
-		const D3D12_RANGE read_range = {offset, offset + (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST)};
-		void* map;
-		HRESULT hr = m_timestamp_query_buffer->Map(0, &read_range, &map);
-		if (SUCCEEDED(hr))
-		{
-			u64 timestamps[2];
-			std::memcpy(timestamps, static_cast<const u8*>(map) + offset, sizeof(timestamps));
-			m_accumulated_gpu_time +=
-				static_cast<float>(static_cast<double>(timestamps[1] - timestamps[0]) / m_timestamp_frequency);
-
-			const D3D12_RANGE write_range = {};
-			m_timestamp_query_buffer->Unmap(0, &write_range);
-		}
-		else
-		{
-			Console.Warning("D3D12: Map() for timestamp query failed: %08X", hr);
-		}
-	}
-
-	res.has_timestamp_query = m_gpu_timing_enabled;
 	if (m_gpu_timing_enabled)
-	{
-		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST);
-	}
+		ResolveGPUTiming();
+
+	if (m_gpu_timing_enabled && !m_gpu_timing_manual)
+		StartGPUTiming12();
 
 	ID3D12DescriptorHeap* heaps[2] = {
 		res.descriptor_allocator.GetDescriptorHeap(), res.sampler_allocator.GetDescriptorHeap()};
@@ -545,15 +520,7 @@ bool GSDevice12::ExecuteCommandList(WaitType wait_for_completion)
 	m_vertex_constant_buffer.FlushMemory();
 	m_pixel_constant_buffer.FlushMemory();
 
-	if (res.has_timestamp_query)
-	{
-		// write the timestamp back at the end of the cmdlist
-		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			(m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) + 1);
-		res.command_lists[1].list4->ResolveQueryData(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
-			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST, NUM_TIMESTAMP_QUERIES_PER_CMDLIST,
-			m_timestamp_query_buffer.get(), m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
-	}
+	EndGPUTiming12(); // Always end in case manual timing didn't properly end
 
 	if (res.init_command_list_used)
 	{
@@ -754,10 +721,78 @@ float GSDevice12::GetAndResetAccumulatedGPUTime()
 	return time;
 }
 
-bool GSDevice12::SetGPUTimingEnabled(bool enabled)
+bool GSDevice12::SetGPUTimingEnabled(bool enabled, bool manual)
 {
 	m_gpu_timing_enabled = enabled;
+	m_gpu_timing_manual = manual;
 	return true;
+}
+
+void GSDevice12::StartGPUTiming()
+{
+	if (m_gpu_timing_manual)
+		StartGPUTiming12();
+}
+
+void GSDevice12::StartGPUTiming12()
+{
+	GL_INS("HW: Start collecting stats.");
+	CommandListResources& res = m_command_lists[m_current_command_list];
+	res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+		m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST);
+	res.timestamp_query_state = QueryState::Started;
+}
+
+void GSDevice12::EndGPUTiming()
+{
+	if (m_gpu_timing_manual)
+		EndGPUTiming12();
+}
+
+void GSDevice12::EndGPUTiming12()
+{
+	CommandListResources& res = m_command_lists[m_current_command_list];
+	if (res.timestamp_query_state == QueryState::Started)
+	{
+		// write the timestamp back at the end of the cmdlist
+		if (InRenderPass())
+			EndRenderPass(); // Can't end query in a render pass
+		res.command_lists[1].list4->EndQuery(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+			(m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) + 1);
+		res.command_lists[1].list4->ResolveQueryData(m_timestamp_query_heap.get(), D3D12_QUERY_TYPE_TIMESTAMP,
+			m_current_command_list * NUM_TIMESTAMP_QUERIES_PER_CMDLIST, NUM_TIMESTAMP_QUERIES_PER_CMDLIST,
+			m_timestamp_query_buffer.get(), m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
+		res.timestamp_query_state = QueryState::Ended;
+		GL_INS("HW: End collecting stats.");
+	}
+}
+
+void GSDevice12::ResolveGPUTiming()
+{
+	CommandListResources& res = m_command_lists[m_current_command_list];
+	if (res.timestamp_query_state == QueryState::Ended)
+	{
+		// readback timestamp from the last time this cmdlist was used.
+		// we don't need to worry about disjoint in dx12, the frequency is reliable within a single cmdlist.
+		const u32 offset = (m_current_command_list * (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST));
+		const D3D12_RANGE read_range = { offset, offset + (sizeof(u64) * NUM_TIMESTAMP_QUERIES_PER_CMDLIST) };
+		void* map;
+		HRESULT hr = m_timestamp_query_buffer->Map(0, &read_range, &map);
+		if (SUCCEEDED(hr))
+		{
+			u64 timestamps[2];
+			std::memcpy(timestamps, static_cast<const u8*>(map) + offset, sizeof(timestamps));
+			m_accumulated_gpu_time +=
+				static_cast<float>(static_cast<double>(timestamps[1] - timestamps[0]) / m_timestamp_frequency);
+
+			const D3D12_RANGE write_range = {};
+			m_timestamp_query_buffer->Unmap(0, &write_range);
+		}
+		else
+		{
+			Console.Warning("D3D12: Map() for timestamp query failed: %08X", hr);
+		}
+	}
 }
 
 bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer,

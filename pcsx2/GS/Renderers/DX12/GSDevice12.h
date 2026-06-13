@@ -188,6 +188,13 @@ public:
 	void UploadIndices(D3D12StreamBuffer& buffer, const void* index, size_t count);
 
 private:
+	enum class QueryState
+	{
+		None,
+		Started,
+		Ended,
+	};
+
 	struct CommandListResources
 	{
 		std::array<ComPtr<ID3D12CommandAllocator>, 2> command_allocators;
@@ -198,7 +205,7 @@ private:
 		std::vector<std::pair<D3D12DescriptorHeapManager&, u32>> pending_descriptors;
 		u64 ready_fence_value = 0;
 		bool init_command_list_used = false;
-		bool has_timestamp_query = false;
+		QueryState timestamp_query_state = QueryState::None;
 	};
 
 	void LoadAgilitySDK();
@@ -229,6 +236,7 @@ private:
 	double m_timestamp_frequency = 0.0;
 	float m_accumulated_gpu_time = 0.0f;
 	bool m_gpu_timing_enabled = false;
+	bool m_gpu_timing_manual = false;
 	bool m_programmable_sample_positions = false;
 
 	D3D12DescriptorHeapManager m_descriptor_heap_manager;
@@ -505,7 +513,12 @@ public:
 	PresentResult BeginPresent(bool frame_skip) override;
 	void EndPresent() override;
 
-	bool SetGPUTimingEnabled(bool enabled) override;
+	bool SetGPUTimingEnabled(bool enabled, bool manual) override;
+	void StartGPUTiming() override;
+	void StartGPUTiming12();
+	void EndGPUTiming() override;
+	void EndGPUTiming12();
+	void ResolveGPUTiming();
 	float GetAndResetAccumulatedGPUTime() override;
 
 	void PushDebugGroup(const char* fmt, ...) override;

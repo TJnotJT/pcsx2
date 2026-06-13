@@ -317,8 +317,48 @@ public:
 	static u64 s_last_transfer_draw_n;
 	static u64 s_transfer_n;
 
-	GSPerfMon m_perfmon_frame; // Track stat across a frame.
-	GSPerfMon m_perfmon_draw;  // Track stat across a draw.
+	GSPerfMon m_perfmon_frame; // Track stats across a frame.
+	GSPerfMon m_perfmon_draw;  // Track stats across a draw.
+	u64 m_n_interval_start = 0;
+	u64 m_n_interval_end = 0;
+	u64 m_n_interval_base = 0;
+	u64 m_interval_start_time = 0;
+	u64 m_interval_end_time = 0;
+	bool m_interval_stats_started = false;
+
+	bool UseIntervalStats() const
+	{
+		return m_n_interval_start < m_n_interval_end;
+	}
+	void SetIntervalStatsRange(u64 start, u64 end)
+	{
+		m_n_interval_start = start;
+		m_n_interval_end = end;
+	}
+	void SetIntervalStatsBase()
+	{
+		m_n_interval_base = s_n;
+	}
+	bool InStatsInterval()
+	{
+		return (s_n - m_n_interval_base) >= m_n_interval_start &&
+		       (s_n - m_n_interval_base) < m_n_interval_end;
+	}
+	bool ShouldStartIntervalStats()
+	{
+		return InStatsInterval() && !m_interval_stats_started;
+	}
+	bool ShouldEndIntervalStats()
+	{
+		return !InStatsInterval() && m_interval_stats_started;
+	}
+	void StartIntervalStats();
+	void EndIntervalStats();
+
+	u64 GetGSIntervalTime()
+	{
+		return std::max<s64>(static_cast<s64>(m_interval_end_time - m_interval_start_time), 0);
+	}
 
 	static constexpr u32 STATE_VERSION = 9;
 
