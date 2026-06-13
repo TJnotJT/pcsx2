@@ -2526,7 +2526,7 @@ void GSState::FlushPrim()
 		}
 
 		GSVertex buff[2];
-		s_n++;
+		IncDraw();
 
 		const u32 head = m_vertex->head;
 		const u32 tail = m_vertex->tail;

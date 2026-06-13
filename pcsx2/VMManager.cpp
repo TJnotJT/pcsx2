@@ -667,6 +667,8 @@ void VMManager::LoadCoreSettings(SettingsInterface& si)
 		EmuConfig.Speedhacks.vuThread = false;
 		if (EmuConfig.GS.DumpReplayFrameRange)
 			GSDumpReplayer::SetFrameRange(EmuConfig.GS.DumpReplayStartFrame, EmuConfig.GS.DumpReplayEndFrame);
+		if (!EmuConfig.GS.RepeatDraws.empty())
+			GSDumpReplayer::SetRepeatDraws(EmuConfig.GS.RepeatDraws);
 		GSDumpReplayer::SetLoopCount(EmuConfig.GS.DumpReplayLoops);
 	}
 }

@@ -570,6 +570,26 @@ void GSSetIntervalStatsBase()
 	g_gs_renderer->SetIntervalStatsBase();
 }
 
+void GSSaveDumpReplayDrawsPackets(bool enable)
+{
+	g_gs_renderer->SaveReplayDrawsPackets(enable);
+}
+
+void GSSetDumpReplayPacket(u64 packet)
+{
+	g_gs_renderer->SetCurrentReplayPacket(packet);
+}
+
+void GSReadDumpReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	g_gs_renderer->ReadReplayDrawsPackets(draws, packets);
+}
+
+void GSReadDumpReplayDrawPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	g_gs_renderer->ReadReplayDrawsPackets(draws, packets);
+}
+
 bool GSWantsExclusiveFullscreen()
 {
 	if (!g_gs_device || !g_gs_device->SupportsExclusiveFullscreen())

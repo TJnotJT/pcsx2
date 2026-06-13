@@ -152,7 +152,7 @@ bool GSRenderer::Merge(int field)
 		return false;
 	}
 
-	s_n++;
+	IncDraw();
 
 	GSVector4 src_gs_read[2];
 	GSVector4 dst[3];

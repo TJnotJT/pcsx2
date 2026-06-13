@@ -38,6 +38,7 @@ static void GSDumpReplayerCancelInstruction();
 static void GSDumpReplayerCpuClear(u32 addr, u32 size);
 
 static std::unique_ptr<GSDumpFile> s_dump_file;
+static bool s_first_loop = true;
 static u32 s_current_packet = 0;
 static u32 s_dump_frame_number = 0;
 static s32 s_dump_loop_count = 0;
@@ -53,6 +54,20 @@ static u32 s_frame_start = 0;
 static u32 s_frame_end = 0;
 static u32 s_frame_start_packet;
 static u32 s_frame_end_packet;
+
+static bool s_use_repeat_draws = false;
+static std::vector<u64> s_repeat_draw_start;
+static std::vector<u64> s_repeat_draw_end;
+static std::vector<u64> s_repeat_draw_times;
+static std::vector<u64> s_repeat_draw_start_packet;
+static std::vector<u64> s_repeat_draw_end_packet;
+static bool s_need_draws_packets = false;
+static std::vector<u64> s_replay_draws;
+static std::vector<u64> s_replay_packets;
+static u64 s_curr_repeat_start_packet = 0;
+static u64 s_curr_repeat_end_packet = 0;
+static u64 s_curr_repeat_remaining = 0;
+static u64 s_curr_repeat_position = 0;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -97,6 +112,44 @@ void GSDumpReplayer::SetFrameRange(u32 start, u32 end)
 	s_use_frame_range = true;
 	s_frame_start = start;
 	s_frame_end = end;
+}
+
+void GSDumpReplayer::SetRepeatDraws(const std::string& repeat_draws)
+{
+	s_use_repeat_draws = true;
+	s_need_draws_packets = true;
+
+	// Parse the repeat draw string
+	auto ranges = StringUtil::SplitString(repeat_draws, ',');
+	for (auto range_view : ranges)
+	{
+		std::string range(range_view);
+		u64 times = 1;
+		size_t times_start = range.find("x");
+		if (times_start != std::string::npos)
+		{
+			std::string times_str(StringUtil::StripWhitespace(range.substr(times_start + 1)));
+			range = StringUtil::StripWhitespace(range.substr(0, times_start));
+			times = StringUtil::FromChars<u64>(times_str).value_or(1);
+		}
+		u64 draw_start = 0, draw_end = 0;
+		size_t range_delim_start = range.find("-");
+		if (range_delim_start != std::string::npos)
+		{
+			std::string start_str(StringUtil::StripWhitespace(range.substr(0, range_delim_start)));
+			std::string end_str(StringUtil::StripWhitespace(range.substr(range_delim_start + 1)));
+			draw_start = StringUtil::FromChars<u64>(start_str).value_or(0);
+			draw_end = StringUtil::FromChars<u64>(end_str).value_or(0);
+		}
+		else
+		{
+			draw_start = StringUtil::FromChars<u64>(range).value_or(0);
+			draw_end = draw_start + 1;
+		}
+		s_repeat_draw_start.push_back(draw_start);
+		s_repeat_draw_end.push_back(draw_end);
+		s_repeat_draw_times.push_back(times);
+	}
 }
 
 bool GSDumpReplayer::Initialize(const char* filename, Error* error)
@@ -270,6 +323,49 @@ static void GSDumpReplayerFrameLimit()
 	s_next_frame_time = std::max(now, s_next_frame_time + s_frame_ticks);
 }
 
+void NextPacket()
+{
+	if (s_use_repeat_draws && !s_repeat_draw_start_packet.empty())
+	{
+		/*auto start_repeat = std::find(s_repeat_draw_start_packet.begin() + s_curr_repeat_position,
+		                              s_repeat_draw_start_packet.end(),
+		                              s_current_packet);
+		if (start_repeat != s_repeat_draw_start_packet.end())
+		{
+			s_curr_repeat_start_packet = s_current_packet;
+			const size_t i = start_repeat - s_repeat_draw_start_packet.begin();
+			s_curr_repeat_end_packet = s_repeat_draw_end_packet[i];
+			s_curr_repeat_remaining = s_repeat_draw_times[i];
+			s_curr_repeat_position++;
+		}*/
+		auto start_repeat = std::find(s_repeat_draw_start_packet.begin() + s_curr_repeat_position,
+									  s_repeat_draw_start_packet.end(),
+									  s_current_packet);
+		if (start_repeat != s_repeat_draw_start_packet.end())
+		{
+			s_curr_repeat_start_packet = s_current_packet;
+			const size_t i = start_repeat - s_repeat_draw_start_packet.begin();
+			s_curr_repeat_end_packet = s_repeat_draw_end_packet[i];
+			s_curr_repeat_remaining = s_repeat_draw_times[i];
+			s_curr_repeat_position++;
+		}
+	}
+
+	s_current_packet++;
+	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
+
+	if ((s_current_packet > s_curr_repeat_end_packet || end_of_dump) && (s_curr_repeat_remaining > 1))
+	{
+		s_current_packet = s_curr_repeat_start_packet;
+		s_curr_repeat_remaining--;
+	}
+
+	if (end_of_dump || (s_init_frame_range && s_current_packet > s_frame_end_packet))
+	{
+		s_curr_repeat_position = 0;
+	}
+}
+
 void GSDumpReplayerCpuStep()
 {
 	if (s_needs_state_loaded)
@@ -280,15 +376,26 @@ void GSDumpReplayerCpuStep()
 
 	if (s_use_frame_range && s_init_frame_range && s_current_packet == s_frame_start_packet)
 	{
-		MTGS::RunOnGSThread([&]() {
+		MTGS::RunOnGSThread([]() {
 			GSSetIntervalStatsBase();
 		});
 	}
 
-	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet++];
+	if (s_need_draws_packets)
+	{
+		MTGS::RunOnGSThread([packet = s_current_packet]() {
+			GSSaveDumpReplayDrawsPackets(true);
+			GSSetDumpReplayPacket(packet);
+		});
+	}
 
-	if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()) ||
-		(s_init_frame_range && s_current_packet > s_frame_end_packet))
+	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
+
+	NextPacket();
+	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
+
+	// Do looping behavior
+	if (end_of_dump || (!s_first_loop && s_init_frame_range && s_current_packet > s_frame_end_packet))
 	{
 		s_dump_frame_number = 0;
 		if (s_dump_loop_count > 0)
@@ -303,13 +410,16 @@ void GSDumpReplayerCpuStep()
 	// Setup the packet range for the frames requested.
 	if (s_init_frame_range)
 	{
-		if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
+		if (!s_first_loop)
 		{
-			s_dump_frame_number = s_frame_start;
-			s_current_packet = s_frame_start_packet;
+			if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
+			{
+				s_dump_frame_number = s_frame_start;
+				s_current_packet = s_frame_start_packet;
+			}
 		}
 	}
-	else if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()))
+	else if (end_of_dump)
 	{
 		s_frame_end_packet = s_current_packet;
 		s_init_frame_range = true;
@@ -393,7 +503,35 @@ void GSDumpReplayerCpuStep()
 		break;
 	}
 
+	if (end_of_dump && s_need_draws_packets)
+	{
+		s_need_draws_packets = false;
+		std::atomic<bool> ready(false);
+		MTGS::RunOnGSThread([replay_draws = &s_replay_draws, replay_packets = &s_replay_packets, &ready]() {
+			GSSaveDumpReplayDrawsPackets(false);
+			GSReadDumpReplayDrawsPackets(replay_draws, replay_packets);
+			ready.store(true);
+		});
+		MTGS::WaitGS();
+		while (!ready.load())
+			std::this_thread::yield();
+		for (size_t i = 0, j = 0; i < s_repeat_draw_start.size(); i++)
+		{
+			const u64 draw_start = s_repeat_draw_start[i];
+			const u64 draw_end = s_repeat_draw_end[i];
+			for (; j < s_replay_draws.size() && s_replay_draws[j] < draw_start; j++)
+				;
+			s_repeat_draw_start_packet.push_back(j == 0 ? 0 : s_replay_packets[j - 1] + 1);
+			for (; j < s_replay_draws.size() && s_replay_draws[j] < draw_end; j++)
+				;
+			s_repeat_draw_end_packet.push_back(j == 0 ? 0 : s_replay_packets[j - 1]);
+		}
+	}
+
 	s_current_packet %= static_cast<u32>(s_dump_file->GetPackets().size());
+
+	if (s_current_packet == 0)
+		s_first_loop = false;
 }
 
 void GSDumpReplayerCpuExecute()

@@ -326,6 +326,40 @@ public:
 	u64 m_interval_end_time = 0;
 	bool m_interval_stats_started = false;
 
+	bool m_save_replay_draws_packets = false;
+	u64 m_current_replay_packet = 0;
+	std::vector<u64> m_replay_draws;
+	std::vector<u64> m_replay_packets;
+
+	void SaveReplayDrawsPackets(bool enable)
+	{
+		m_save_replay_draws_packets = enable;
+	}
+	void SetCurrentReplayPacket(u64 packet)
+	{
+		m_current_replay_packet = packet;
+	}
+	void ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+	{
+		*draws = m_replay_draws;
+		*packets = m_replay_packets;
+	}
+
+	void IncDraw()
+	{
+		s_n++;
+		if (m_save_replay_draws_packets)
+		{
+			if (m_replay_draws.empty())
+			{
+				m_replay_draws.push_back(0);
+				m_replay_packets.push_back(0);
+			}
+			m_replay_draws.push_back(s_n);
+			m_replay_packets.push_back(m_current_replay_packet);
+		}
+	}
+
 	bool UseIntervalStats() const
 	{
 		return m_n_interval_start < m_n_interval_end;

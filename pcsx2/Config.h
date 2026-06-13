@@ -879,6 +879,7 @@ struct Pcsx2Config
 		s16 MoveHandlerFunctionId = -1;
 		int SkipDrawStart = 0;
 		int SkipDrawEnd = 0;
+		std::string RepeatDraws;
 
 		GSHWAutoFlushLevel UserHacks_AutoFlush = GSHWAutoFlushLevel::Disabled;
 		GSHalfPixelOffset UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;

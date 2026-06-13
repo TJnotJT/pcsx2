@@ -87,6 +87,9 @@ void GSResizeDisplayWindow(u32 width, u32 height, float scale);
 void GSUpdateDisplayWindow();
 void GSSetVSyncMode(GSVSyncMode mode, bool allow_present_throttle);
 void GSSetIntervalStatsBase();
+void GSSaveDumpReplayDrawsPackets(bool enable);
+void GSSetDumpReplayPacket(u64 packet);
+void GSReadDumpReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets);
 
 GSRendererType GSGetCurrentRenderer();
 bool GSIsHardwareRenderer();
