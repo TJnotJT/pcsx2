@@ -21,6 +21,7 @@
 #include "GS/Renderers/HW/GSRendererHW.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
 #include "VMManager.h"
+#include "PerformanceMetrics.h"
 
 #ifdef ENABLE_OPENGL
 #include "GS/Renderers/OpenGL/GSDeviceOGL.h"
@@ -161,7 +162,7 @@ static bool OpenGSDevice(GSRendererType renderer, bool clear_state_on_fail, bool
 		return false;
 	}
 
-	GSConfig.OsdShowGPU = GSConfig.OsdShowGPU && g_gs_device->SetGPUTimingEnabled(true);
+	GSConfig.OsdShowGPU = GSConfig.OsdShowGPU && g_gs_device->SetGPUTimingEnabled(true, GSConfig.IntervalStats);
 
 	Console.WriteLn(Color_StrongGreen, "%s Graphics Driver Info:", GSDevice::RenderAPIToString(new_api));
 	Console.WriteLn(g_gs_device->GetDriverInfo());
@@ -222,6 +223,7 @@ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
 	g_gs_renderer->ResetPCRTC();
 	g_gs_renderer->UpdateRenderFixes();
 	g_perfmon.Reset();
+	g_perfmon.EnableInterval(GSConfig.IntervalStats);
 	return true;
 }
 
@@ -562,6 +564,46 @@ void GSSetVSyncMode(GSVSyncMode mode, bool allow_present_throttle)
 	g_gs_device->SetVSyncMode(mode, allow_present_throttle);
 }
 
+void GSStartPerformanceIntervalStats()
+{
+	PerformanceMetrics::StartIntervalStatsCollection();
+}
+
+void GSEndPerformanceIntervalStats()
+{
+	PerformanceMetrics::EndIntervalStatsCollection();
+}
+
+void GSStartIntervalStats()
+{
+	g_gs_renderer->StartIntervalStats();
+}
+
+void GSEndIntervalStats()
+{
+	g_gs_renderer->EndIntervalStats();
+}
+
+void GSSaveDumpReplayDrawsPackets(bool enable)
+{
+	g_gs_renderer->SaveReplayDrawsPackets(enable);
+}
+
+void GSSetDumpReplayPacket(u64 packet)
+{
+	g_gs_renderer->SetCurrentReplayPacket(packet);
+}
+
+void GSReadDumpReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	g_gs_renderer->ReadReplayDrawsPackets(draws, packets);
+}
+
+void GSReadDumpReplayDrawPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	g_gs_renderer->ReadReplayDrawsPackets(draws, packets);
+}
+
 bool GSWantsExclusiveFullscreen()
 {
 	if (!g_gs_device || !g_gs_device->SupportsExclusiveFullscreen())
@@ -880,9 +922,11 @@ void GSUpdateConfig(const Pcsx2Config::GSOptions& new_config)
 
 	if (GSConfig.OsdShowGPU != old_config.OsdShowGPU)
 	{
-		if (!g_gs_device->SetGPUTimingEnabled(GSConfig.OsdShowGPU))
+		if (!g_gs_device->SetGPUTimingEnabled(GSConfig.OsdShowGPU, GSConfig.IntervalStats))
 			GSConfig.OsdShowGPU = false;
 	}
+
+	g_perfmon.EnableInterval(GSConfig.IntervalStats);
 }
 
 void GSSetSoftwareRendering(bool software_renderer, GSInterlaceMode new_interlace)

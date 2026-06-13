@@ -1465,6 +1465,7 @@ protected:
 	GSVSyncMode m_vsync_mode = GSVSyncMode::Disabled;
 	bool m_allow_present_throttle = false;
 	u64 m_last_frame_displayed_time = 0;
+	bool m_manual_timing_window = false;
 
 	GSTexture* m_merge = nullptr;
 	GSTexture* m_weavebob = nullptr;
@@ -1602,7 +1603,15 @@ public:
 	virtual std::string GetDriverInfo() const = 0;
 
 	/// Enables/disables GPU frame timing.
-	virtual bool SetGPUTimingEnabled(bool enabled) = 0;
+	virtual bool SetGPUTimingEnabled(bool enabled, bool manual = false) = 0;
+	virtual void StartGPUTiming()
+	{
+		pxAssert(false);
+	}
+	virtual void EndGPUTiming()
+	{
+		pxAssert(false);
+	}
 
 	/// Returns the amount of GPU time utilized since the last time this method was called.
 	virtual float GetAndResetAccumulatedGPUTime() = 0;

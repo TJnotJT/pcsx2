@@ -663,7 +663,16 @@ void VMManager::LoadCoreSettings(SettingsInterface& si)
 
 	// Force MTVU off when playing back GS dumps, it doesn't get used.
 	if (GSDumpReplayer::IsReplayingDump())
+	{
 		EmuConfig.Speedhacks.vuThread = false;
+		if (EmuConfig.GS.DumpReplayFrameRange)
+			GSDumpReplayer::SetFrameRange(EmuConfig.GS.DumpReplayStartFrame, EmuConfig.GS.DumpReplayEndFrame);
+		if (!EmuConfig.GS.RepeatDraws.empty())
+			GSDumpReplayer::SetRepeatDraws(EmuConfig.GS.RepeatDraws);
+		if (EmuConfig.GS.IntervalStats)
+			GSDumpReplayer::SetIntervalStatsRange(EmuConfig.GS.IntervalStatsStartDraw, EmuConfig.GS.IntervalStatsEndDraw);
+		GSDumpReplayer::SetLoopCount(EmuConfig.GS.DumpReplayLoops);
+	}
 }
 
 void VMManager::LoadInputBindings(SettingsInterface& si, std::unique_lock<std::mutex>& lock)

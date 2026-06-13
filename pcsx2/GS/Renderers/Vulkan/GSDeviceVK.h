@@ -559,7 +559,7 @@ public:
 	void EndPresent() override;
 	bool IsPresenting() const;
 
-	bool SetGPUTimingEnabled(bool enabled) override;
+	bool SetGPUTimingEnabled(bool enabled, bool manual) override;
 	float GetAndResetAccumulatedGPUTime() override;
 
 	void PushDebugGroup(const char* fmt, ...) override;

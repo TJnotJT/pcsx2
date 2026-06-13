@@ -317,9 +317,30 @@ public:
 	static u64 s_last_transfer_draw_n;
 	static u64 s_transfer_n;
 
-	GSPerfMon m_perfmon_frame; // Track stat across a frame.
-	GSPerfMon m_perfmon_draw;  // Track stat across a draw.
+	GSPerfMon m_perfmon_frame; // Track stats across a frame.
+	GSPerfMon m_perfmon_draw;  // Track stats across a draw.
+	u64 m_n_interval_start = 0;
+	u64 m_n_interval_end = 0;
+	u64 m_n_interval_base = 0;
+	u64 m_interval_start_time = 0;
+	u64 m_interval_end_time = 0;
+	bool m_interval_stats_started = false;
 
+	bool m_save_replay_draws_packets = false;
+	u64 m_current_replay_packet = 0;
+	std::vector<u64> m_replay_draws;
+	std::vector<u64> m_replay_packets;
+
+	void SaveReplayDrawsPackets(bool enable);
+	void SetCurrentReplayPacket(u64 packet);
+	void ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets);
+
+	void StartIntervalStats();
+	void EndIntervalStats();
+	u64 GetGSIntervalTime();
+	
+	void IncDraw();
+	
 	static constexpr u32 STATE_VERSION = 9;
 
 	#define PRIM_REG_MASK 0x7FF

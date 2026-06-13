@@ -1195,7 +1195,7 @@ void GSDevice11::KickTimestampQuery()
 	m_timestamp_query_started = true;
 }
 
-bool GSDevice11::SetGPUTimingEnabled(bool enabled)
+bool GSDevice11::SetGPUTimingEnabled(bool enabled, bool manual)
 {
 	if (m_gpu_timing_enabled == enabled)
 		return true;

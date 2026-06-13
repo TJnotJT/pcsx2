@@ -1116,7 +1116,7 @@ float GSDeviceVK::GetAndResetAccumulatedGPUTime()
 	return time;
 }
 
-bool GSDeviceVK::SetGPUTimingEnabled(bool enabled)
+bool GSDeviceVK::SetGPUTimingEnabled(bool enabled, bool manual)
 {
 	m_gpu_timing_enabled = enabled && m_gpu_timing_supported;
 	return (enabled == m_gpu_timing_enabled);

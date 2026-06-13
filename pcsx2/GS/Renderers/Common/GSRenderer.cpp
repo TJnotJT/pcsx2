@@ -152,7 +152,7 @@ bool GSRenderer::Merge(int field)
 		return false;
 	}
 
-	s_n++;
+	IncDraw();
 
 	GSVector4 src_gs_read[2];
 	GSVector4 dst[3];
@@ -701,7 +701,12 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			EndPresentFrame();
 
 			if (GSConfig.OsdShowGPU || GSDumpReplayer::IsReplayingDump())
-				PerformanceMetrics::OnGPUPresent(g_gs_device->GetAndResetAccumulatedGPUTime());
+			{
+				if (m_interval_stats_started)
+					EndIntervalStats();
+				PerformanceMetrics::EnableGSIntervalTime(GSConfig.IntervalStats);
+				PerformanceMetrics::OnGPUPresent(g_gs_device->GetAndResetAccumulatedGPUTime(), g_gs_renderer->GetGSIntervalTime());
+			}
 		}
 
 		PerformanceMetrics::Update(registers_written, fb_sprite_frame, false);

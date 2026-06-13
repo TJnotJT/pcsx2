@@ -69,7 +69,17 @@ std::vector<GSSWThreadStats> s_gs_sw_threads;
 static float s_average_gpu_time = 0.0f;
 static float s_accumulated_gpu_time = 0.0f;
 static float s_gpu_usage = 0.0f;
+static bool s_enable_gs_interval_time = false;
+static u64 s_accumulated_gs_interval_time = 0;
 static u32 s_presents_since_last_update = 0;
+
+
+static bool s_interval_stats_enable_next_update = false;
+static bool s_interval_stats_enable = false;
+static u32 s_interval_unskipped_frames = 0.0f;
+static u32 s_interval_frames = 0.0f;
+static float s_interval_gpu_time = 0.0f;
+static u64 s_interval_gs_time = 0.0f;
 
 void PerformanceMetrics::Clear()
 {
@@ -111,7 +121,14 @@ void PerformanceMetrics::Reset()
 	s_maximum_frame_time_accumulator = 0.0f;
 
 	s_accumulated_gpu_time = 0.0f;
+	s_accumulated_gs_interval_time = 0;
 	s_presents_since_last_update = 0;
+
+	s_interval_stats_enable = 0;
+	s_interval_unskipped_frames = 0;
+	s_interval_frames = 0;
+	s_interval_gpu_time = 0.0f;
+	s_interval_gs_time = 0.0f;
 
 	s_last_update_time.Reset();
 	s_last_frame_time.Reset();
@@ -124,6 +141,23 @@ void PerformanceMetrics::Reset()
 
 	for (GSSWThreadStats& stat : s_gs_sw_threads)
 		stat.last_cpu_time = stat.handle.GetCPUTime();
+}
+
+static double GetCPUTimeToPCTFactor(u64 ticks_delta)
+{
+	return 100.0 * static_cast<double>(GetTickFrequency()) /
+		(static_cast<double>(ticks_delta) * static_cast<double>(Threading::GetThreadTicksPerSecond()));
+}
+
+static double GetCPUTimeToMSFactor(u64 frames)
+{
+	return 1000.0 / static_cast<double>(Threading::GetThreadTicksPerSecond()) / static_cast<double>(frames);
+}
+
+template<typename T>
+T IfIntervalEnabled(T val)
+{
+	return s_interval_stats_enable ? val : 0;
 }
 
 void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_skipping_present)
@@ -149,6 +183,10 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	const float time = Common::Timer::ConvertValueToSeconds(ticks_diff);
 	if (time < UPDATE_INTERVAL)
 		return;
+
+	s_interval_unskipped_frames += IfIntervalEnabled(s_unskipped_frames_since_last_update);
+	s_interval_frames += IfIntervalEnabled(s_frames_since_last_update);
+	s_interval_gpu_time += IfIntervalEnabled(s_accumulated_gpu_time);
 
 	s_last_update_time.ResetTo(now_ticks);
 	s_minimum_frame_time = std::exchange(s_minimum_frame_time_accumulator, 0.0f);
@@ -183,11 +221,8 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	const u64 ticks_delta = ticks - s_last_ticks;
 	s_last_ticks = ticks;
 
-	const double pct_divider =
-		100.0 * (1.0 / ((static_cast<double>(ticks_delta) * static_cast<double>(Threading::GetThreadTicksPerSecond())) /
-						   static_cast<double>(GetTickFrequency())));
-	const double time_divider = 1000.0 * (1.0 / static_cast<double>(Threading::GetThreadTicksPerSecond())) *
-								(1.0 / static_cast<double>(s_frames_since_last_update));
+	const double pct_divider = GetCPUTimeToPCTFactor(ticks_delta);
+	const double time_divider = GetCPUTimeToMSFactor(s_frames_since_last_update);
 
 	const u64 cpu_time = s_cpu_thread_handle.GetCPUTime();
 	const u64 gs_time = MTGS::GetThreadHandle().GetCPUTime();
@@ -195,13 +230,16 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	const u64 capture_time = GSCapture::IsCapturing() ? GSCapture::GetEncoderThreadHandle().GetCPUTime() : 0;
 
 	const u64 cpu_delta = cpu_time - s_last_cpu_time;
-	const u64 gs_delta = gs_time - s_last_gs_time;
+	const u64 gs_delta = s_enable_gs_interval_time ? s_accumulated_gs_interval_time : gs_time - s_last_gs_time;
+	s_accumulated_gs_interval_time = 0;
 	const u64 vu_delta = vu_time - s_last_vu_time;
 	const u64 capture_delta = capture_time - s_last_capture_time;
 	s_last_cpu_time = cpu_time;
 	s_last_gs_time = gs_time;
 	s_last_vu_time = vu_time;
 	s_last_capture_time = capture_time;
+
+	s_interval_gs_time += IfIntervalEnabled(gs_delta);
 
 	s_cpu_thread_usage = static_cast<double>(cpu_delta) * pct_divider;
 	s_gs_thread_usage = static_cast<double>(gs_delta) * pct_divider;
@@ -225,13 +263,25 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	s_unskipped_frames_since_last_update = 0;
 	s_presents_since_last_update = 0;
 
+	if (s_interval_stats_enable_next_update)
+	{
+		s_interval_stats_enable = true;
+		s_interval_stats_enable_next_update = false;
+	}
+
 	Host::OnPerformanceMetricsUpdated();
 }
 
-void PerformanceMetrics::OnGPUPresent(float gpu_time)
+void PerformanceMetrics::OnGPUPresent(float gpu_time, u64 gs_interval_time)
 {
 	s_accumulated_gpu_time += gpu_time;
+	s_accumulated_gs_interval_time += gs_interval_time;
 	s_presents_since_last_update++;
+}
+
+void PerformanceMetrics::EnableGSIntervalTime(bool enable)
+{
+	s_enable_gs_interval_time = enable;
 }
 
 void PerformanceMetrics::SetCPUThread(Threading::ThreadHandle thread)
@@ -370,4 +420,31 @@ const PerformanceMetrics::FrameTimeHistory& PerformanceMetrics::GetFrameTimeHist
 u32 PerformanceMetrics::GetFrameTimeHistoryPos()
 {
 	return s_frame_time_history_pos;
+}
+
+void PerformanceMetrics::StartIntervalStatsCollection()
+{
+	if (!s_interval_stats_enable)
+	{
+		s_interval_unskipped_frames = 0;
+		s_interval_frames = 0;
+		s_interval_gs_time = 0;
+		s_interval_gpu_time = 0;
+	}
+	s_interval_stats_enable_next_update = true;
+}
+
+void PerformanceMetrics::EndIntervalStatsCollection()
+{
+	s_interval_stats_enable = false;
+}
+
+double PerformanceMetrics::GetIntervalGPUAverageTime()
+{
+	return static_cast<double>(s_interval_gpu_time) / static_cast<double>(s_interval_unskipped_frames);
+}
+
+double PerformanceMetrics::GetIntervalGSAverageTime()
+{
+	return static_cast<double>(s_interval_gs_time) * GetCPUTimeToMSFactor(s_interval_frames);
 }

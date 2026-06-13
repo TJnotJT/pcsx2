@@ -334,7 +334,7 @@ public:
 	PresentResult BeginPresent(bool frame_skip) override;
 	void EndPresent() override;
 
-	bool SetGPUTimingEnabled(bool enabled) override;
+	bool SetGPUTimingEnabled(bool enabled, bool manual) override;
 	float GetAndResetAccumulatedGPUTime() override;
 
 	// Helpers and utility draws.

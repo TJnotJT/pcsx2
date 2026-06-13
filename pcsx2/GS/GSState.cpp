@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "PerformanceMetrics.h"
+#include "MTGS.h"
 #include "GS/GSState.h"
 #include "GS/GSDump.h"
 #include "GS/GSGL.h"
@@ -11,6 +13,7 @@
 #include "common/BitUtils.h"
 #include "common/Path.h"
 #include "common/StringUtil.h"
+#include "common/Timer.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -104,7 +107,6 @@ GSState::GSState()
 
 	s_n = 0;
 	s_transfer_n = 0;
-
 
 	memset(&m_v, 0, sizeof(m_v));
 	memset(m_mem.m_vm8, 0, m_mem.m_vmsize);
@@ -2489,6 +2491,58 @@ u32 GSState::CalcMask(int exp, int max_exp)
 	return (1 << std::min(amount, 23)) - 1;
 }
 
+void GSState::IncDraw()
+{
+	s_n++;
+	if (m_save_replay_draws_packets)
+	{
+		if (m_replay_draws.empty())
+		{
+			m_replay_draws.push_back(0);
+			m_replay_packets.push_back(0);
+		}
+		m_replay_draws.push_back(s_n);
+		m_replay_packets.push_back(m_current_replay_packet);
+	}
+}
+
+void GSState::SaveReplayDrawsPackets(bool enable)
+{
+	m_save_replay_draws_packets = enable;
+}
+
+void GSState::SetCurrentReplayPacket(u64 packet)
+{
+	m_current_replay_packet = packet;
+}
+
+void GSState::ReadReplayDrawsPackets(std::vector<u64>* draws, std::vector<u64>* packets)
+{
+	*draws = m_replay_draws;
+	*packets = m_replay_packets;
+}
+
+void GSState::StartIntervalStats()
+{
+	g_perfmon.StartInterval();
+	g_gs_device->StartGPUTiming();
+	m_interval_start_time = MTGS::GetThreadHandle().GetCPUTime();
+	m_interval_stats_started = true;
+}
+
+void GSState::EndIntervalStats()
+{
+	g_perfmon.EndInterval();
+	g_gs_device->EndGPUTiming();
+	m_interval_end_time = MTGS::GetThreadHandle().GetCPUTime();
+	m_interval_stats_started = false;
+}
+
+u64 GSState::GetGSIntervalTime()
+{
+	return std::max<s64>(static_cast<s64>(m_interval_end_time - m_interval_start_time), 0);
+}
+
 void GSState::FlushPrim()
 {
 	if (m_index->tail > 0)
@@ -2509,7 +2563,7 @@ void GSState::FlushPrim()
 		}
 
 		GSVertex buff[2];
-		s_n++;
+		IncDraw();
 
 		const u32 head = m_vertex->head;
 		const u32 tail = m_vertex->tail;
