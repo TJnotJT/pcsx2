@@ -2218,6 +2218,19 @@ GSTextureCache::Source* GSTextureCache::LookupSource(const bool is_color, const 
 				src_TEX0.PSM = PSMCT32;
 			}
 		}
+		else if (!dst)
+		{
+			// Clamp the region to the TEX0 size to prevent loading garbage.
+			rect = rect.rintersect(GSVector4i(0, 0, 1 << src_TEX0.TW, 1 << src_TEX0.TH));
+			s32 region_min_x = region.GetMinX();
+			s32 region_max_x = std::min(region.GetMaxX(), 1 << src_TEX0.TW);
+			s32 region_min_y = region.GetMinY();
+			s32 region_max_y = std::min(region.GetMaxY(), 1 << src_TEX0.TH);
+			region.ClearX();
+			region.ClearY();
+			region.SetX(region_min_x, region_max_x);
+			region.SetY(region_min_y, region_max_y);
+		}
 
 		src = CreateSource(src_TEX0, TEXA, CLAMP, dst, x_offset, y_offset, lod, &rect, gpu_clut, region, target_bp_hit_outside_valid_area && TEX0.PSM != PSMT8);
 		if (!src) [[unlikely]]
