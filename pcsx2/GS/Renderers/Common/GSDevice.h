@@ -791,6 +791,8 @@ struct alignas(16) GSHWDrawConfig
 				// ROVs
 				u32 rov_color : 1;
 				PS_ROV_DEPTH rov_depth : 2;
+				u32 rov_oneshot_color : 1;
+				PS_ROV_DEPTH rov_oneshot_depth : 2;
 			};
 
 			struct
@@ -899,6 +901,21 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool HasDepthROVWrite() const
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
+		}
+
+		__fi bool HasOneshotColorROV() const
+		{
+			return rov_oneshot_color;
+		}
+
+		__fi bool HasOneshotDepthROV() const
+		{
+			return rov_oneshot_depth == PS_ROV_DEPTH::READ_ONLY || rov_oneshot_depth == PS_ROV_DEPTH::READ_WRITE;
+		}
+
+		__fi bool HasOneshotROV() const
+		{
+			return HasOneshotColorROV() || HasOneshotDepthROV();
 		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
@@ -1238,6 +1255,7 @@ struct alignas(16) GSHWDrawConfig
 	const std::vector<size_t>* drawlist;              ///< For reducing barriers on sprites
 	const std::vector<GSVector4i>* drawlist_bbox;     ///< For RT copy when barriers not available.
 	const std::vector<GSVector4i>* drawlist_bbox_tex; ///< Additionally if we need to sample not from the same pixel of the RT.
+	const std::vector<GSVector4i>* draw_coarse_rasterize;
 	GSVector4i scissor; ///< Scissor rect
 	GSVector4i drawarea; ///< Area in the framebuffer which will be modified.
 	GSVector4i samplearea; ///< Area in the texture which will be sampled.

@@ -201,7 +201,8 @@ u32 GSTexture::CalcUploadSize(Format format, u32 height, u32 pitch)
 
 bool GSTexture::IsFeedbackFormat(Format format)
 {
-	return format == Format::Color || format == Format::DepthColor || format == Format::DepthStencil;
+	return format == Format::Color || format == Format::ColorClip ||
+		format == Format::DepthColor || format == Format::DepthStencil;
 }
 
 bool GSTexture::IsShaderWriteFormat(Format format)
