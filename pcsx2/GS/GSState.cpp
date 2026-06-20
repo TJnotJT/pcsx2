@@ -2608,6 +2608,7 @@ void GSState::FlushPrim()
 		m_drawlist.clear();
 		m_drawlist_bbox.clear();
 		m_drawlist_bbox_tex.clear();
+		m_draw_coarse_rasterize.clear();
 
 		if (GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 		{
@@ -5139,13 +5140,13 @@ __forceinline bool GSState::EarlyDetectShuffle(u32 prim)
 	return false;
 }
 
-__fi GSVector4 GSState::GetXYWindow(const GSVertex& v)
+GSVector4 GSState::GetXYWindow(const GSVertex& v)
 {
 	return GSVector4(GetVertexXY(v) - m_context->scissor.xyof.xyxy()) / 16.0f;
 }
 
 template<bool fst>
-__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q)
+GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q)
 {
 	if constexpr (fst)
 	{
@@ -5161,12 +5162,12 @@ __fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v, float q)
 }
 
 template<bool fst>
-__fi GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v)
+GSVector4 GSState::GetTexCoordsImpl(const GSVertex& v)
 {
 	return GetTexCoordsImpl<fst>(v, v.RGBAQ.Q);
 }
 
-__fi GSVector4 GSState::GetTexCoords(const GSVertex& v, float q)
+GSVector4 GSState::GetTexCoords(const GSVertex& v, float q)
 {
 	if (PRIM->FST)
 	{
@@ -5178,7 +5179,7 @@ __fi GSVector4 GSState::GetTexCoords(const GSVertex& v, float q)
 	}
 }
 
-__fi GSVector4 GSState::GetTexCoords(const GSVertex& v)
+GSVector4 GSState::GetTexCoords(const GSVertex& v)
 {
 	return GetTexCoords(v, v.RGBAQ.Q);
 }

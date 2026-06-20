@@ -393,6 +393,7 @@ public:
 	std::vector<size_t> m_drawlist;
 	std::vector<GSVector4i> m_drawlist_bbox;
 	std::vector<GSVector4i> m_drawlist_bbox_tex;
+	std::vector<GSVector4i> m_draw_coarse_rasterize;
 
 	struct GSPCRTCRegs
 	{
