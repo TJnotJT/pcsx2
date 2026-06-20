@@ -267,13 +267,19 @@ SamplerState TextureSampler : register(s0);
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_ONESHOT_COLOR
-RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(RT_ROV_SLOT);
-static float4 rov_rt_value;
+	RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(RT_ROV_SLOT);
+	static float4 rov_rt_value;
+	#if PS_ROV_ONESHOT_COLOR
+		static float4 rt_value;
+	#endif
 #endif
 
-#if PS_ROV_DEPTH || PS_ROV_ONESHOT_DEPTH
-RasterizerOrderedTexture2D<float> DepthTextureRov : register(DS_ROV_SLOT);
-static float rov_depth_value;
+#if PS_ROV_DEPTH || PS_ROV_ONESHOT_DEPTH || PS_ROV_ONESHOT_COLOR
+	RasterizerOrderedTexture2D<float> DepthTextureRov : register(DS_ROV_SLOT);
+	static float rov_depth_value;
+	#if PS_ROV_ONESHOT_DEPTH
+		static float depth_value;
+	#endif
 #endif
 
 #ifdef DX12
@@ -304,8 +310,10 @@ cbuffer cb1
 
 float4 RtLoad(int2 xy)
 {
-#if PS_ROV_COLOR || PS_ROV_ONESHOT_COLOR
+#if PS_ROV_COLOR
 	return rov_rt_value;
+#elif PS_ROV_ONESHOT_COLOR
+	return rov_depth_value == -1.0f ? rt_value : rov_rt_value;
 #else
 	return RtTexture.Load(int3(int2(xy), 0));
 #endif
@@ -313,8 +321,10 @@ float4 RtLoad(int2 xy)
 
 float DepthLoad(int2 xy)
 {
-#if PS_ROV_DEPTH || PS_ROV_ONESHOT_DEPTH
+#if PS_ROV_DEPTH
 	return rov_depth_value;
+#elif PS_ROV_ONESHOT_DEPTH
+	return rov_depth_value == -1.0f ? depth_value : rov_depth_value;
 #else
 	return DepthTexture.Load(int3(int2(xy), 0));
 #endif
@@ -1347,12 +1357,19 @@ void ps_main(PS_INPUT input)
 	input.p.z = floor(input.p.z * exp2(32.0f)) * exp2(-32.0f);
 #endif
 
-#if PS_ROV_COLOR || PS_ROV_ONESHOT_COLOR
-	rov_rt_value = RtTextureRov[input.p.xy];
+#if PS_ROV_DEPTH || PS_ROV_ONESHOT_DEPTH || PS_ROV_ONESHOT_COLOR
+	// Depth must be initialized first in case of using oneshot.
+	rov_depth_value = DepthTextureRov[input.p.xy];
+	#if PS_ROV_ONESHOT_DEPTH
+		depth_value = DepthTexture.Load(int3(input.p.xy, 0));
+	#endif
 #endif
 
-#if PS_ROV_DEPTH || PS_ROV_ONESHOT_DEPTH
-	rov_depth_value = DepthTextureRov[input.p.xy];
+#if PS_ROV_COLOR || PS_ROV_ONESHOT_COLOR
+	rov_rt_value = RtTextureRov[input.p.xy];
+	#if PS_ROV_ONESHOT_COLOR
+		rt_value = RtTexture.Load(int3(input.p.xy, 0));
+	#endif
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH || PS_ROV_ONESHOT_COLOR || PS_ROV_ONESHOT_DEPTH
@@ -1605,12 +1622,15 @@ if (bad)
 	#endif
 #endif
 
-	// Depth ROV write back. Must come before normal dept write back.
+	// Depth ROV write back. Must come before normal depth write back.
 #if PS_RETURN_DEPTH_ROV
 	#if SW_DEPTH
 		input.p.z = rov_discard ? DepthLoad(input.p.xy) : input.p.z;
 	#endif
 	DepthWrite(input.p.xy, input.p.z);
+#elif PS_ROV_ONESHOT_DEPTH
+	// Initialize for oneshot color, though the written value won't be used.
+	DepthWrite(input.p.xy, DepthLoad(input.p.xy));
 #endif
 
 	// Depth write back.

@@ -1899,18 +1899,41 @@ void GSDevice12::DoMultiStretchRects(
 		DrawIndexedPrimitive();
 }
 
-void GSDevice12::SetupOneshotROV(const GSHWDrawConfig& config, GSTexture12* rt, GSTexture12* ds,
-	const std::vector<GSVector4i>& rects, const GSVector2i& size)
+void GSDevice12::ResolveOneshotDepthROV(const GSHWDrawConfig& config, GSTexture12* rt, GSTexture12* ds,
+	const GSVector4i& drawarea, const GSVector2i& size)
 {
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 	g_perfmon.Put(GSPerfMon::TextureCopiesROV, 1);
 	g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 
-	bool rt_copy = config.ps.HasOneshotColorROV();
-	bool ds_copy = config.ps.HasOneshotDepthROV();
+	const GSVector4 src = GSVector4(drawarea) / GSVector4(size).xyxy();
+	const GSVector4 dst = src * 2.0f - 1.0f;
+	const GSVertexPT1 vertices[] = {
+		{GSVector4(dst.x, -dst.y, 0.5f, 1.0f), GSVector2(src.x, src.y)},
+		{GSVector4(dst.z, -dst.y, 0.5f, 1.0f), GSVector2(src.z, src.y)},
+		{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
+		{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
+	};
 
+	OMSetRenderTargets(rt, nullptr, ds, GSVector4i::loadh(size), false, size);
+	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
+
+	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	SetPipeline(m_rov_depth_resolve_pipelines[rt ? 1 : 0].get());
+
+	PSSetShaderResource(TEXTURE_DEPTH, m_rov_ds.get(), true);
+	
+	BeginTFXRenderPass(config, rt, ds, false);
+
+	if (ApplyTFXState())
+		DrawPrimitive();
+}
+
+void GSDevice12::SetupOneshotROV(const GSHWDrawConfig& config, GSTexture12* rt, GSTexture12* ds,
+	const std::vector<GSVector4i>& rects, const GSVector2i& size)
+{
 	// Create ROV textures
-	if (rt_copy && (!m_rov_rt || m_rov_rt->GetSize() != size))
+	if (!m_rov_rt || m_rov_rt->GetSize() != size)
 	{
 		if (m_rov_rt)
 			Recycle(m_rov_rt.release());
@@ -1919,7 +1942,7 @@ void GSDevice12::SetupOneshotROV(const GSHWDrawConfig& config, GSTexture12* rt, 
 		m_rov_rt->SetDebugName(fmt::format("RT for oneshot ROV {}x{}", size.x, size.y));
 #endif
 	}
-	if (ds_copy && (!m_rov_ds || m_rov_ds->GetSize() != size))
+	if (!m_rov_ds || m_rov_ds->GetSize() != size)
 	{
 		if (m_rov_ds)
 			Recycle(m_rov_ds.release());
@@ -1929,95 +1952,20 @@ void GSDevice12::SetupOneshotROV(const GSHWDrawConfig& config, GSTexture12* rt, 
 #endif
 	}
 
-	// Avoid copies if the original is cleared.
-	if (rt_copy && rt->GetState() == GSTexture::State::Cleared)
+	// Clear depth ROV to -1
+	EndRenderPass();
+	m_rov_ds->TransitionToState(GSTexture12::ResourceState::RenderTarget);
+	D3D12_RECT rect{ config.drawarea.left, config.drawarea.top, config.drawarea.right, config.drawarea.bottom };
+	GetCommandList().list4->ClearRenderTargetView(m_rov_ds->GetWriteDescriptor(), GSVector4(-1).v, 1, &rect);
+
+	// Setup up real RT/DS for sampling
+	if (rt)
 	{
-		m_rov_rt->SetClearColor(rt->GetClearColor());
-		m_rov_rt->CommitClear();
-		rt_copy = false;
-	}
-	if (ds_copy && ds->GetState() == GSTexture::State::Cleared)
-	{
-		m_rov_ds->SetClearDepth(ds->GetClearDepth());
-		m_rov_ds->CommitClear();
-		ds_copy = false;
-	}
-
-	if (!(rt_copy || ds_copy))
-		return; // Copy handled with clear.
-
-	// Vertices / IA
-	const u32 num_rects = static_cast<u32>(rects.size());
-	const u32 vertex_reserve_size = num_rects * 4 * sizeof(GSVertexPT1);
-	const u32 index_reserve_size = num_rects * 6 * sizeof(u16);
-	if (!m_vertex_stream_buffer.ReserveMemory(vertex_reserve_size, sizeof(GSVertexPT1)) ||
-		!m_index_stream_buffer.ReserveMemory(index_reserve_size, sizeof(u16)))
-	{
-		ExecuteCommandListAndRestartRenderPass(false, "Uploading bytes to vertex buffer");
-		if (!m_vertex_stream_buffer.ReserveMemory(vertex_reserve_size, sizeof(GSVertexPT1)) ||
-			!m_index_stream_buffer.ReserveMemory(index_reserve_size, sizeof(u16)))
-		{
-			pxFailRel("Failed to reserve space for vertices");
-		}
-	}
-
-	const GSVector4i size_rect(GSVector4i::loadh(size));
-	GSVertexPT1* verts = reinterpret_cast<GSVertexPT1*>(m_vertex_stream_buffer.GetCurrentHostPointer());
-	u16* idx = reinterpret_cast<u16*>(m_index_stream_buffer.GetCurrentHostPointer());
-	u32 icount = 0;
-	u32 vcount = 0;
-	for (u32 i = 0; i < num_rects; i++)
-	{
-		const GSVector4 dst = (GSVector4(rects[i]) / GSVector4(size_rect).zwzw()) * 2.0f - 1.0f;
-
-		const u32 vstart = vcount;
-		verts[vcount++] = {GSVector4(dst.x, -dst.y, 0.5f, 1.0f), {}};
-		verts[vcount++] = {GSVector4(dst.z, -dst.y, 0.5f, 1.0f), {}};
-		verts[vcount++] = {GSVector4(dst.x, -dst.w, 0.5f, 1.0f), {}};
-		verts[vcount++] = {GSVector4(dst.z, -dst.w, 0.5f, 1.0f), {}};
-
-		if (i > 0)
-			idx[icount++] = vstart;
-
-		idx[icount++] = vstart;
-		idx[icount++] = vstart + 1;
-		idx[icount++] = vstart + 2;
-		idx[icount++] = vstart + 3;
-		idx[icount++] = vstart + 3;
-	}
-
-	m_vertex.start = m_vertex_stream_buffer.GetCurrentOffset() / sizeof(GSVertexPT1);
-	m_vertex.count = vcount;
-	m_index.start = m_index_stream_buffer.GetCurrentOffset() / sizeof(u16);
-	m_index.count = icount;
-	m_vertex_stream_buffer.CommitMemory(vcount * sizeof(GSVertexPT1));
-	m_index_stream_buffer.CommitMemory(icount * sizeof(u16));
-	SetVertexBuffer(m_vertex_stream_buffer.GetGPUPointer(), m_vertex_stream_buffer.GetSize(), sizeof(GSVertexPT1));
-	SetIndexBuffer(m_index_stream_buffer.GetGPUPointer(), m_index_stream_buffer.GetSize(), DXGI_FORMAT_R16_UINT);
-	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-	// Pipeline
-	SetPipeline(m_rov_copy_pipelines[rt ? (rt_copy ? 2 : 1) : 0][ds ? (ds_copy ? 2 : 1) : 0].get());
-
-	// Shader resources
-	PSSetROVs(m_rov_rt.get(), m_rov_ds.get(), rt_copy, ds_copy);
-	if (rt_copy)
 		PSSetShaderResource(TEXTURE_RT, rt, false, ResourceType::FBL);
-	if (ds_copy)
-		PSSetShaderResource(TEXTURE_DEPTH, ds, false, ResourceType::SRV);
-
-	// RTs / render pass
-	OMSetRenderTargets(rt, nullptr, ds, size_rect, ds_copy, size);
-	if (!InRenderPass())
-		BeginTFXRenderPass(config, rt, ds, false);
-
-	// RT barrier. DS barrier is handled with transition to read-only depth.
-	if (rt_copy)
 		FeedbackBarrier(rt);
-
-	// Draw
-	if (ApplyTFXState())
-		DrawIndexedPrimitive();
+	}
+	if (ds)
+		PSSetShaderResource(TEXTURE_DEPTH, ds, true, ResourceType::SRV);
 }
 
 void GSDevice12::BeginRenderPassForStretchRect(
@@ -3034,6 +2982,41 @@ bool GSDevice12::CompileConvertPipelines()
 		}
 	}
 
+	// ROV copy pipelines for oneshot
+	if (m_features.rov)
+	{
+		for (u32 rt = 0; rt < 2; rt++)
+		{
+			ShaderMacro sm;
+			sm.AddMacro("PIXEL_SHADER", "1");
+			sm.AddMacro("PS_ROV_DEPTH_RESOLVE", 1);
+
+			ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), "ps_rov_depth_resolve"));
+			if (!ps)
+				return false;
+
+			gpb.SetRootSignature(m_tfx_root_signature.get());
+			gpb.SetPixelShader(ps.get());
+			gpb.ClearRenderTargets();
+			if (rt)
+			{
+				gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
+				gpb.SetBlendState(0, false, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO,
+					D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, 0);
+			}
+			gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
+			gpb.SetDepthState(true, true, D3D12_COMPARISON_FUNC_ALWAYS);
+			gpb.SetNoStencilState();
+
+			m_rov_depth_resolve_pipelines[rt] = gpb.Create(m_device.get(), m_shader_cache, false);
+			if (!m_rov_depth_resolve_pipelines[rt])
+				return false;
+
+			D3D12::SetObjectName(m_rov_depth_resolve_pipelines[rt].get(),
+				TinyString::from_format("ROV depth resolve pipeline (RT={})", rt));
+		}
+	}
+
 	return true;
 }
 
@@ -3750,7 +3733,11 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 		PSSetShaderResource(TEXTURE_RT_UAV, d12Rt, true, ResourceType::UAV);
 
 		// Unbind conflicting RT texture
-		PSSetShaderResource(TEXTURE_RT, nullptr, false);
+		if (m_tfx_textures[TEXTURE_RT] == d12Rt->GetSRVDescriptor() ||
+			m_tfx_textures[TEXTURE_RT] == d12Rt->GetFBLDescriptor())
+		{
+			PSSetShaderResource(TEXTURE_RT, nullptr, false);
+		}
 
 		// Unbind conflicting source texture
 		if (m_tfx_textures[TEXTURE_TEXTURE] == d12Rt->GetSRVDescriptor() ||
@@ -3775,7 +3762,11 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 		PSSetShaderResource(TEXTURE_DEPTH_UAV, d12Ds, true, ResourceType::UAV);
 
 		// Unbind conflicting depth texture
-		PSSetShaderResource(TEXTURE_DEPTH, nullptr, false);
+		if (m_tfx_textures[TEXTURE_DEPTH] == d12Rt->GetSRVDescriptor() ||
+			m_tfx_textures[TEXTURE_DEPTH] == d12Rt->GetFBLDescriptor())
+		{
+			PSSetShaderResource(TEXTURE_DEPTH, nullptr, false);
+		}
 
 		// Unbind conflicting source texture
 		if (m_tfx_textures[TEXTURE_TEXTURE] == d12Ds->GetSRVDescriptor())
@@ -4643,7 +4634,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// Setup oneshot ROV
 	if (config.ps.HasOneshotROV())
+	{
 		SetupOneshotROV(config, draw_rt, draw_ds, *config.draw_coarse_rasterize, rtsize);
+	}
 
 	// Clear texture binding when it's bound to RT or DS.
 	if (!config.tex && ((draw_rt && static_cast<GSTexture12*>(draw_rt)->GetSRVDescriptor() == m_tfx_textures[0]) ||
@@ -4725,7 +4718,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
 	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
-		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
+		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth() || config.ps.HasOneshotROV()) &&
+			!config.depth.zwe && !config.ps.HasDepthROV(),
 		config.rt ? config.rt->GetSize() : config.ds->GetSize());
 
 	// DX12 equivalent of vkCmdClearAttachments for StencilOne
@@ -4838,6 +4832,11 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 			Recycle(colclip_rt);
 			g_gs_device->SetColorClipTexture(nullptr);
 		}
+	}
+
+	if (config.ps.rov_oneshot_depth == GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE)
+	{
+		ResolveOneshotDepthROV(config, draw_rt, draw_ds, config.drawarea, rtsize);
 	}
 }
 

@@ -7634,7 +7634,9 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov, bool oneshot)
 		if (oneshot)
 		{
 			// Don't disable real depth; we write to it simultaneously with ROV depth.
+			// FIXME: Simplify this, some duplication with non-oneshot setup.
 			m_conf.ps.rov_oneshot_depth = depth_write ? GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE : GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
+			m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable real depth.
 		}
 		else
 		{
