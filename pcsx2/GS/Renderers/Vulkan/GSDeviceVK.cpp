@@ -462,6 +462,7 @@ bool GSDeviceVK::SelectDeviceFeatures()
 	m_device_features.textureCompressionBC = available_features.textureCompressionBC;
 	m_device_features.geometryShader = available_features.geometryShader;
 	m_device_features.fragmentStoresAndAtomics = available_features.fragmentStoresAndAtomics;
+	m_device_features.independentBlend = available_features.independentBlend;
 
 	return true;
 }
@@ -3118,9 +3119,12 @@ void GSDeviceVK::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureVK* rt, 
 	bool rt_copy = config.ps.HasOneshotColorROV();
 	bool ds_copy = config.ps.HasOneshotDepthROV();
 
+	bool rov_framebuffer_changed = false;
+
 	// Create ROV textures
-	if (rt_copy && (!m_rov_rt || m_rov_rt->GetSize() != size))
+	if (!m_rov_rt || m_rov_rt->GetSize() != size)
 	{
+		rov_framebuffer_changed = true;
 		if (m_rov_rt)
 			Recycle(m_rov_rt.release());
 		m_rov_rt.reset(static_cast<GSTextureVK*>(CreateShaderWriteTarget(size, GSTexture::Format::Color, false)));
@@ -3128,14 +3132,37 @@ void GSDeviceVK::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureVK* rt, 
 		m_rov_rt->SetDebugName(fmt::format("RT for oneshot ROV {}x{}", size.x, size.y));
 #endif
 	}
-	if (ds_copy && (!m_rov_ds || m_rov_ds->GetSize() != size))
+	if (!m_rov_ds || m_rov_ds->GetSize() != size)
 	{
+		rov_framebuffer_changed = true;
 		if (m_rov_ds)
 			Recycle(m_rov_ds.release());
 		m_rov_ds.reset(static_cast<GSTextureVK*>(CreateShaderWriteTarget(size, GSTexture::Format::DepthColor, false)));
 #if PCSX2_DEVBUILD
 		m_rov_ds->SetDebugName(fmt::format("DS for oneshot ROV {}x{}", size.x, size.y));
 #endif
+	}
+
+	if (rov_framebuffer_changed)
+	{
+		Vulkan::FramebufferBuilder fbb;
+		fbb.SetSize(size.x, size.y, 1);
+		fbb.AddAttachment(m_rov_rt->GetView());
+		fbb.AddAttachment(m_rov_ds->GetView());
+		for (u32 rt = 0; rt < 3; rt++)
+		{
+			for (u32 ds = 0; ds < 3; ds++)
+			{
+				if (rt || ds)
+				{
+					if (m_rov_copy_framebuffers[rt][ds] != VK_NULL_HANDLE)
+						vkDestroyFramebuffer(m_device, m_rov_copy_framebuffers[rt][ds], nullptr);
+					fbb.SetRenderPass(m_rov_copy_render_passes[rt][ds]);
+					m_rov_copy_framebuffers[rt][ds] = fbb.Create(m_device, false);
+					pxAssert(m_rov_copy_framebuffers[rt][ds] != VK_NULL_HANDLE);
+				}
+			}
+		}
 	}
 	
 	// Avoid copies if the original is cleared.
@@ -3145,11 +3172,19 @@ void GSDeviceVK::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureVK* rt, 
 		m_rov_rt->CommitClear();
 		rt_copy = false;
 	}
+	else
+	{
+		InvalidateRenderTarget(m_rov_rt.get()); // Discard previous contents.
+	}
 	if (ds_copy && ds->GetState() == GSTexture::State::Cleared)
 	{
 		m_rov_ds->SetClearDepth(ds->GetClearDepth());
-		m_rov_rt->CommitClear();
+		m_rov_ds->CommitClear();
 		ds_copy = false;
+	}
+	else
+	{
+		InvalidateRenderTarget(m_rov_ds.get()); // Discard previous contents.
 	}
 
 	if (!(rt_copy || ds_copy))
@@ -3207,26 +3242,44 @@ void GSDeviceVK::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureVK* rt, 
 	SetPipeline(m_rov_copy_pipelines[rt ? (rt_copy ? 2 : 1) : 0][ds ? (ds_copy ? 2 : 1) : 0]);
 
 	// Shader resources
-	PSSetROVs(m_rov_rt.get(), m_rov_ds.get(), rt_copy, ds_copy);
 	if (rt_copy)
-		PSSetShaderResource(TFX_TEXTURE_RT, rt, false);
+		PSSetShaderResource(TFX_TEXTURE_RT, rt, true);
 	if (ds_copy)
-		PSSetShaderResource(TFX_TEXTURE_DEPTH, ds, false);
+		PSSetShaderResource(TFX_TEXTURE_DEPTH, ds, true);
 	
 	// RTs / render pass
-	m_pipeline_selector.feedback_loop_flags |=
-	    (rt_copy ? FeedbackLoopFlag_ReadAndWriteRT : FeedbackLoopFlag_None) |
-	    (ds_copy ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None);
-	OMSetRenderTargets(rt, ds, size_rect, static_cast<FeedbackLoopFlag>(m_pipeline_selector.feedback_loop_flags), size);
-	if (!InRenderPass())
-		BeginTFXRenderPass(config, rt, ds, size);
+	EndRenderPass();
+
+	if (rt_copy)
+		m_rov_rt->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
+	if (ds_copy)
+		m_rov_ds->TransitionToLayout(GSTextureVK::Layout::ColorAttachment);
+	
+	VkRenderPassBeginInfo begin_info = {
+		VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		{},
+		m_rov_copy_render_passes[rt_copy][ds_copy],
+		m_rov_copy_framebuffers[rt_copy][ds_copy],
+		{ { 0, 0 }, { static_cast<u32>(size.x), static_cast<u32>(size.y) } },
+		0,
+		{},
+	};
+	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
 	// Barriers
-	FeedbackBarrier(rt_copy ? rt : nullptr, ds_copy ? ds : nullptr);
+	//FeedbackBarrier(rt_copy ? rt : nullptr, ds_copy ? ds : nullptr);
 
 	// Draw
 	if (ApplyTFXState())
 		DrawIndexedPrimitive();
+
+	vkCmdEndRenderPass(GetCurrentCommandBuffer());
+
+	if (rt_copy)
+		m_rov_rt->TransitionToLayout(GSTextureVK::Layout::ReadWriteImage);
+	if (ds_copy)
+		m_rov_ds->TransitionToLayout(GSTextureVK::Layout::ReadWriteImage);
+
 }
 
 void GSDeviceVK::BeginRenderPassForStretchRect(
@@ -4346,17 +4399,16 @@ bool GSDeviceVK::CompileConvertPipelines()
 			{
 				const u32 rt_copy = (rt == 2) ? 1 : 0;
 				const u32 ds_copy = (ds == 2) ? 1 : 0;
-				if (!rt_copy && !ds_copy)
+				if (!rt && !ds)
 				{
 					m_rov_copy_pipelines[rt][ds] = VK_NULL_HANDLE;
+					m_rov_copy_render_passes[rt][ds] = VK_NULL_HANDLE;
 					continue;
 				}
 				
 				std::string macro =
-					fmt::format("#define PS_ROV_COPY_COLOR {}\n", rt_copy) +
-					fmt::format("#define PS_ROV_COPY_DEPTH {}\n", ds_copy) +
-					"#extension GL_ARB_fragment_shader_interlock : require\n" +
-					"#extension GL_ARB_shader_image_load_store : require\n";
+					fmt::format("#define PS_ROV_COPY_COLOR {}\n", rt) +
+					fmt::format("#define PS_ROV_COPY_DEPTH {}\n", ds);
 
 				std::string shader_with_header = macro + *source;
 
@@ -4369,21 +4421,76 @@ bool GSDeviceVK::CompileConvertPipelines()
 				gpb.SetPipelineLayout(m_tfx_pipeline_layout);
 				gpb.SetFragmentShader(ps);
 				gpb.ClearBlendAttachments();
-				VkRenderPass rp = GetRenderPass(
-					LookupNativeFormat(rt ? GSTexture::Format::Color : GSTexture::Format::Invalid),
-					LookupNativeFormat(ds ? GSTexture::Format::DepthStencil : GSTexture::Format::Invalid),
-					rt_copy ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-					rt_copy ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
-					ds_copy ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-					ds_copy ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
-					VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
-					rt_copy, ds_copy);
-				gpb.SetRenderPass(rp, 0);
-				if (rt)
-				{
-					gpb.SetBlendAttachment(0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-						VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, 0);
-				}
+				
+				u32 num_attachments = 0;
+				VkAttachmentDescription attachments[2]{};
+				VkAttachmentReference attachment_references[2]{};
+				attachments[num_attachments] = {
+					0,
+					LookupNativeFormat(GSTexture::Format::Color),
+					VK_SAMPLE_COUNT_1_BIT,
+					VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					rt ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					rt ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+					rt ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+				};
+				attachment_references[num_attachments] = {
+					num_attachments,
+					rt ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+				};
+				gpb.SetBlendAttachment(num_attachments, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
+					VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, rt ? 0xF : 0);
+				num_attachments++;
+
+				attachments[num_attachments] = {
+					0,
+					LookupNativeFormat(GSTexture::Format::DepthColor),
+					VK_SAMPLE_COUNT_1_BIT,
+					VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					ds ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					ds ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+					ds ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+				};
+				attachment_references[num_attachments] = {
+					num_attachments,
+					ds ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+				};
+				gpb.SetBlendAttachment(num_attachments, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
+					VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, ds ? 0xF : 0);
+				num_attachments++;
+				
+				VkSubpassDescription subpass = {
+					{},
+					VK_PIPELINE_BIND_POINT_GRAPHICS,
+					{},
+					{},
+					num_attachments,
+					attachment_references,
+					{},
+					{},
+					{},
+				};
+
+				const VkRenderPassCreateInfo render_pass_info = {
+					VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+					{},
+					0u,
+					num_attachments,
+					attachments,
+					1u,
+					&subpass,
+					0,
+					{},
+				};
+
+				if (vkCreateRenderPass(m_device, &render_pass_info, nullptr, &m_rov_copy_render_passes[rt][ds]) != VK_SUCCESS)
+					return false;
+
+				gpb.SetRenderPass(m_rov_copy_render_passes[rt][ds], 0);
 				gpb.SetNoDepthTestState();
 				gpb.SetNoStencilState();
 
@@ -4938,6 +5045,8 @@ void GSDeviceVK::DestroyResources()
 		{
 			if (m_rov_copy_pipelines[rt][ds] != VK_NULL_HANDLE)
 				vkDestroyPipeline(m_device, m_rov_copy_pipelines[rt][ds], nullptr);
+			if (m_rov_copy_render_passes[rt][ds] != VK_NULL_HANDLE)
+				vkDestroyRenderPass(m_device, m_rov_copy_render_passes[rt][ds], nullptr);
 		}
 	}
 	if (m_fxaa_pipeline != VK_NULL_HANDLE)

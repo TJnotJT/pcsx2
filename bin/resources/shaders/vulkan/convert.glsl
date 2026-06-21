@@ -29,7 +29,7 @@ layout(location = 0) in vec2 v_tex;
 #elif HAS_FLOAT32_OUTPUT
 	layout(location = 0) out float o_col0;
 	#define OUTPUT o_col0
-#elif HAS_STENCIL_OUTPUT
+#elif HAS_STENCIL_OUTPUT || defined(PS_ROV_COPY_COLOR) || defined(PS_ROV_COPY_DEPTH)
 #else
 	layout(location = 0) out vec4 o_col0;
 	#define OUTPUT o_col0
@@ -650,34 +650,22 @@ void main()
 #endif
 
 #if defined(PS_ROV_COPY_COLOR) || defined(PS_ROV_COPY_DEPTH)
-	layout(pixel_interlock_ordered) in;
 	#if PS_ROV_COPY_COLOR
 		layout(set = 1, binding = 2) uniform texture2D RtSampler;
-		layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
+		layout(location = 0) out vec4 o_col0;
 	#endif
 	#if PS_ROV_COPY_DEPTH
 		layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-		layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+		layout(location = 1) out float o_col1;
 	#endif
 	void ps_rov_copy()
 	{
 		#if PS_ROV_COPY_COLOR
-			vec4 c = texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0);
+			o_col0 = texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0);
 		#endif
 		#if PS_ROV_COPY_DEPTH
-			vec4 d = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0);
+			o_col1 = texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r;
 		#endif
-		
-		beginInvocationInterlockARB();
-		
-		#if PS_ROV_COPY_COLOR
-			imageStore(RtImageRov, ivec2(gl_FragCoord.xy), c);
-		#endif
-		#if PS_ROV_COPY_DEPTH
-			imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), d);
-		#endif
-
-		endInvocationInterlockARB();
 	}
 #endif
 

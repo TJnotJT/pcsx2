@@ -696,20 +696,29 @@ float ps_primid_image_init_3(PS_INPUT input) : SV_Target
 #if defined(PS_ROV_COPY_COLOR) || defined(PS_ROV_COPY_DEPTH)
 	#if PS_ROV_COPY_COLOR
 		Texture2D<float4> RtTexture : register(t2);
-		RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
 	#endif
 	#if PS_ROV_COPY_DEPTH
 		Texture2D<float> DepthTexture : register(t4);
-		RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
 	#endif
-	void ps_rov_copy(PS_INPUT input)
+	struct PS_ROV_COPY_OUTPUT
 	{
 		#if PS_ROV_COPY_COLOR
-			RtTextureRov[int2(input.p.xy)] = RtTexture.Load(int3(int2(input.p.xy), 0));
+			float4 c : SV_Target0;
 		#endif
 		#if PS_ROV_COPY_DEPTH
-			DepthTextureRov[int2(input.p.xy)] = DepthTexture.Load(int3(int2(input.p.xy), 0));
+			float d : SV_Target1;
 		#endif
+	};
+	PS_ROV_COPY_OUTPUT ps_rov_copy(PS_INPUT input)
+	{
+		PS_ROV_COPY_OUTPUT output;
+		#if PS_ROV_COPY_COLOR
+			output.c = RtTexture.Load(int3(int2(input.p.xy), 0));
+		#endif
+		#if PS_ROV_COPY_DEPTH
+			output.d = DepthTexture.Load(int3(int2(input.p.xy), 0));
+		#endif
+		return output;
 	}
 #endif
 

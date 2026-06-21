@@ -431,6 +431,8 @@ private:
 	VkRenderPass m_primid_image_setup_render_passes[2][2] = {}; // [depth][clear]
 	VkPipeline m_primid_image_setup_pipelines[2][4] = {}; // [depth][datm]
 	VkPipeline m_rov_copy_pipelines[3][3] = {}; // [color][depth]
+	VkRenderPass m_rov_copy_render_passes[3][3] = {}; // [color][depth]
+	VkFramebuffer m_rov_copy_framebuffers[3][3] = {}; // FIXME: REMOVE THE 3x3
 	VkPipeline m_fxaa_pipeline = {};
 	VkPipeline m_shadeboost_pipeline = {};
 
