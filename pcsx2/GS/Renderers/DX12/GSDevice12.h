@@ -152,6 +152,9 @@ public:
 	/// Test for support for the specified texture format.
 	bool SupportsTextureFormat(DXGI_FORMAT format);
 
+	/// Test for UAV support for the specified texture format.
+	bool IsTextureFormatUAVCapable(DXGI_FORMAT format);
+
 	// Partial depth copies require ProgrammableSamplePositions tier 1.
 	bool SupportsProgrammableSamplePositions();
 
@@ -431,8 +434,7 @@ private:
 	void DestroySwapChainRTVs();
 	void DestroySwapChain();
 
-	GSTexture* CreateSurface(
-		GSTexture::Type type, int width, int height, int levels, GSTexture::Format format) override;
+	GSTexture* CreateSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format) override;
 
 	void DoMerge(GSTexture* sTex[3], GSVector4* sRect, GSTexture* dTex, GSVector4* dRect, const GSRegPMODE& PMODE,
 		const GSRegEXTBUF& EXTBUF, u32 c, const Filter filter) final;
@@ -553,7 +555,7 @@ public:
 
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
-	void PSSetUnorderedAccess(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
+	void PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
 		bool depth_read = false, const GSVector2i& viewport_size = {});

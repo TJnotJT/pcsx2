@@ -33,16 +33,16 @@ public:
 
 	~GSTextureVK() override;
 
-	static std::unique_ptr<GSTextureVK> Create(Type type, Format format, int width, int height, int levels);
+	static std::unique_ptr<GSTextureVK> Create(Usage usage, Format format, int width, int height, int levels);
 	static std::unique_ptr<GSTextureVK> Adopt(
-		VkImage image, Type type, Format format, int width, int height, int levels, VkFormat vk_format);
+		VkImage image, Usage usage, Format format, int width, int height, int levels, VkFormat vk_format);
 
 	void Destroy(bool defer);
 
 	__fi VkImage GetImage() const { return m_image; }
 	__fi VkImageView GetView() const { return m_view; }
 	__fi Layout GetLayout() const { return m_layout; }
-	virtual bool IsUnorderedAccess() const override { return GetLayout() == Layout::ReadWriteImage; }
+	bool IsShaderWriteMode() const override { return GetLayout() == Layout::ReadWriteImage; }
 
 	__fi VkFormat GetVkFormat() const { return m_vk_format; }
 
@@ -83,7 +83,7 @@ public:
 	__fi void SetUseFenceCounter(u64 counter) { m_use_fence_counter = counter; }
 
 private:
-	GSTextureVK(Type type, Format format, int width, int height, int levels, VkImage image, VmaAllocation allocation,
+	GSTextureVK(Usage usage, Format format, int width, int height, int levels, VkImage image, VmaAllocation allocation,
 		VkImageView view, VkFormat vk_format);
 
 	VkCommandBuffer GetCommandBufferForUpdate();
