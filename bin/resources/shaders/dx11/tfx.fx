@@ -1599,9 +1599,14 @@ if (bad)
 
 	// Color ROV write back. Must come before normal write back.
 #if PS_RETURN_COLOR_ROV
-	o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
+	#if !PS_FBMASK
+		if (any(FbMask))
+			o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
+	#endif
 	if (!rov_discard_color)
 		RtWrite(input.p.xy, o_col0);
+	else
+		o_col0 = RtLoad(input.p.xy); // Discard in case we're doing oneshot ROV.
 #endif
 
 	// Color write back.
@@ -1616,6 +1621,8 @@ if (bad)
 #if PS_RETURN_DEPTH_ROV
 	if (!rov_discard_depth)
 		DepthWrite(input.p.xy, input.p.z);
+	else
+		input.p.z = DepthLoad(input.p.xy); // Discard in case we're doing oneshot ROV.
 #endif
 
 	// Depth write back.

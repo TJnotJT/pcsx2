@@ -1772,6 +1772,7 @@ void main()
 	if ((int(gl_FragCoord.y) & 1) == (PS_SCANMSK & 1))
 		DISCARD;
 #endif
+
 #if PS_DATE >= 5
 
 #if PS_WRITE_RG == 1
@@ -1975,16 +1976,22 @@ void main()
 	
 	// Color ROV write back.
 	#if PS_RETURN_COLOR_ROV
-		o_col0 = mix(o_col0, sample_from_rt(), equal(FbMask, uvec4(0xFFu))); // channel masking
-
+		#if !PS_FBMASK
+			if (any(notEqual(FbMask, uvec4(0))))
+				o_col0 = mix(o_col0, sample_from_rt(), equal(FbMask, uvec4(0xFFu))); // channel masking
+		#endif
 		if (!rov_discard_color)
 			imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
+		else
+			o_col0 = sample_from_rt(); // Discard in case we're doing oneshot ROV.
 	#endif
 	
 	// Depth ROV write back. Must come before normal depth write back.
 	#if PS_RETURN_DEPTH_ROV
 		if (!rov_discard_depth)
 			imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
+		else
+			input_z = sample_from_depth(); // Discard in case we're doing oneshot ROV.
 	#endif
 
 	// Depth write back.
