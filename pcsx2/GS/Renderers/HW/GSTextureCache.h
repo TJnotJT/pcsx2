@@ -432,7 +432,7 @@ public:
 		bool operator()(const SurfaceOffsetKey& lhs, const SurfaceOffsetKey& rhs) const;
 	};
 
-protected:
+public:
 	PaletteMap m_palette_map;
 	SourceMap m_src;
 	u64 m_source_memory_usage = 0;
@@ -566,6 +566,8 @@ public:
 	void InvalidateVideoMemSubTarget(GSTextureCache::Target* rt);
 	void InvalidateVideoMem(const GSOffset& off, const GSVector4i& r, bool target = true);
 	void InvalidateLocalMem(const GSOffset& off, const GSVector4i& r, bool full_flush = false);
+
+	void InvalidateVideoMemForMemoryEmulation(u32 start_bp, u32 end_bp, u32 channel_mask);
 
 	/// Removes any sources which point to the specified target.
 	void InvalidateSourcesFromTarget(const Target* t);

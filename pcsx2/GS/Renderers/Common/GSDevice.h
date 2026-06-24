@@ -6,6 +6,7 @@
 #include "common/HashCombine.h"
 #include "common/WindowInfo.h"
 #include "GS/GS.h"
+#include "GS/GSLocalMemory.h"
 #include "GS/Renderers/Common/GSFastList.h"
 #include "GS/Renderers/Common/GSShaderEnums.h"
 #include "GS/Renderers/Common/GSTexture.h"
@@ -14,6 +15,13 @@
 #include "GS/GSExtra.h"
 #include <array>
 #include <span>
+
+enum ComputeTransferType : u32
+{
+	MEM_TO_TEXTURE = 0,
+	TEXTURE_TO_MEM = 1,
+	RAW_TO_MEM     = 2,
+};
 
 enum class Filter
 {
@@ -1199,6 +1207,93 @@ struct alignas(16) GSHWDrawConfig
 		bool IsEffective(ColorMaskSelector colormask) const;
 	};
 
+	struct SwizzleConstants
+	{
+		u32 BP;
+		u32 BW;
+		u32 PSM;
+		int mem_x;
+		int mem_y;
+		int tex_x;
+		int tex_y;
+		int w;
+		int h;
+		u32 type;
+
+		__fi SwizzleConstants()
+		{
+			memset(static_cast<void*>(this), 0, sizeof(*this));
+		}
+		__fi SwizzleConstants(const SwizzleConstants& other)
+		{
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		}
+		__fi SwizzleConstants& operator=(const SwizzleConstants& other)
+		{
+			new (this) SwizzleConstants(other);
+			return *this;
+		}
+		__fi bool operator==(const SwizzleConstants& other) const
+		{
+			return BitEqual(*this, other);
+		}
+		__fi bool operator!=(const SwizzleConstants& other) const
+		{
+			return !(*this == other);
+		}
+		__fi bool Update(const SwizzleConstants& other)
+		{
+			if (*this == other)
+				return false;
+
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+			return true;
+		}
+	};
+	static_assert(sizeof(SwizzleConstants) == 40);
+
+	struct CLUTConstants
+	{
+		u32 PSM;
+		u32 CBP;
+		u32 CBW;
+		u32 CPSM;
+		u32 CSM;
+		u32 COU;
+		u32 COV;
+
+		__fi CLUTConstants()
+		{
+			memset(static_cast<void*>(this), 0, sizeof(*this));
+		}
+		__fi CLUTConstants(const CLUTConstants& other)
+		{
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		}
+		__fi CLUTConstants& operator=(const CLUTConstants& other)
+		{
+			new (this) CLUTConstants(other);
+			return *this;
+		}
+		__fi bool operator==(const CLUTConstants& other) const
+		{
+			return BitEqual(*this, other);
+		}
+		__fi bool operator!=(const CLUTConstants& other) const
+		{
+			return !(*this == other);
+		}
+		__fi bool Update(const CLUTConstants& other)
+		{
+			if (*this == other)
+				return false;
+
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+			return true;
+		}
+	};
+	static_assert(sizeof(CLUTConstants) == 28);
+
 	enum class AlphaTestMode
 	{
 		NONE,
@@ -1361,6 +1456,158 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 	}
 }
 
+struct GSHybridVertex
+{
+	GSVector2 p;
+	u32       z;
+	GSVector2 t;
+	float     q;
+	u32       c;
+	u32       f;
+};
+
+struct GSHybridDrawTextures
+{
+	GSTexture* rt;
+	GSTexture* depth;
+	GSTexture* tex;
+	GSTexture* clut;
+};
+
+struct GSHybridDrawMesh
+{
+	GSHybridVertex* vertices;
+	u32 num_vertices;
+	u16* indices;
+	u32 num_indices;
+};
+
+struct GSHybridDrawSelector
+{
+	u32 bits[4];
+
+	__fi GSHybridDrawSelector()
+	{
+		memset(static_cast<void*>(this), 0, sizeof(*this));
+	}
+	__fi GSHybridDrawSelector(const GSHybridDrawSelector& other)
+	{
+		memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+	}
+	__fi GSHybridDrawSelector& operator=(const GSHybridDrawSelector& other)
+	{
+		new (this) GSHybridDrawSelector(other);
+		return *this;
+	}
+	__fi bool operator==(const GSHybridDrawSelector& other) const
+	{
+		return BitEqual(*this, other);
+	}
+	__fi bool operator!=(const GSHybridDrawSelector& other) const
+	{
+		return !(*this == other);
+	}
+	__fi bool Update(const GSHybridDrawSelector& other)
+	{
+		if (*this == other)
+			return false;
+
+		memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		return true;
+	}
+};
+
+struct GSHybridDrawSelectorBits
+{
+	u32 start;
+	u32 end;
+	const char* name;
+};
+
+static inline constexpr GSHybridDrawSelectorBits GS_HYBRID_SELECTOR_HAS_RT_BITS{ 0, 1, "HAS_RT" };
+static inline constexpr GSHybridDrawSelectorBits GS_HYBRID_SELECTOR_HAS_DEPTH_BITS{ 1, 2, "HAS_DEPTH" };
+static inline constexpr GSHybridDrawSelectorBits GS_HYBRID_SELECTOR_ZTST_BITS{ 3, 6, "ZTST" };
+
+static inline void SetHybridSelectorBits(const GSHybridDrawSelectorBits& bits, u32 value, GSHybridDrawSelector& selector)
+{
+	pxAssert((bits.start / 32) == ((bits.end - 1) / 32)); // We don't allow a bit range to straddle a 32 bit boundary.
+
+	const u32 field = bits.start / 32;
+	const u32 bits_start = bits.start - field * 32;
+	const u32 bits_end = bits.end - field * 32;
+	u32 mask = (1 << (bits_end - bits_start)) - 1;
+	
+	pxAssert(value <= mask);
+
+	u32 new_value = selector.bits[field];
+	new_value &= ~(mask << bits_start); // Clear bits
+	new_value |= ((value & mask) << bits_start); // Set bits
+	selector.bits[field] = new_value;
+}
+
+struct GSHybridDrawSelectorConstant
+{
+	GSHybridDrawSelectorBits bits;
+	const char* name;
+	u32 value;
+	enum { BOOL, INT } type;
+};
+
+static inline constexpr std::array<GSHybridDrawSelectorConstant, 4> GS_HYBRID_SELECTOR_CONSTANTS = {
+	GSHybridDrawSelectorConstant{GS_HYBRID_SELECTOR_HAS_RT_BITS, "HAS_RT", 1, GSHybridDrawSelectorConstant::BOOL},
+	GSHybridDrawSelectorConstant{GS_HYBRID_SELECTOR_HAS_DEPTH_BITS, "HAS_DEPTH", 1, GSHybridDrawSelectorConstant::BOOL},
+	GSHybridDrawSelectorConstant{GS_HYBRID_SELECTOR_ZTST_BITS, "ZTST_GEQUAL",  ZTST_GEQUAL,  GSHybridDrawSelectorConstant::BOOL},
+	GSHybridDrawSelectorConstant{GS_HYBRID_SELECTOR_ZTST_BITS, "ZTST_GREATER", ZTST_GREATER, GSHybridDrawSelectorConstant::BOOL},
+};
+
+struct GSHybridConstantBuffer
+{
+	GSVector2 frame_size;
+
+	__fi GSHybridConstantBuffer()
+	{
+		memset(static_cast<void*>(this), 0, sizeof(*this));
+	}
+	__fi GSHybridConstantBuffer(const GSHybridConstantBuffer& other)
+	{
+		memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+	}
+	__fi GSHybridConstantBuffer& operator=(const GSHybridConstantBuffer& other)
+	{
+		new (this) GSHybridConstantBuffer(other);
+		return *this;
+	}
+	__fi bool operator==(const GSHybridConstantBuffer& other) const
+	{
+		return BitEqual(*this, other);
+	}
+	__fi bool operator!=(const GSHybridConstantBuffer& other) const
+	{
+		return !(*this == other);
+	}
+	__fi bool Update(const GSHybridConstantBuffer& other)
+	{
+		if (*this == other)
+			return false;
+
+		memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		return true;
+	}
+};
+
+static_assert(sizeof(GSHybridConstantBuffer) == 8);
+
+struct GSHybridDrawConfig
+{
+	GSHybridDrawSelector selector;
+	GSHybridConstantBuffer constants;
+	GSHybridDrawTextures textures;
+	GSHybridDrawMesh mesh;
+	u32 topology;
+	GSVector4i viewport;
+	GSVector4i scissor;
+};
+
 class GSDevice : public GSAlignedClass<32>
 {
 public:
@@ -1500,6 +1747,11 @@ protected:
 
 	/// Applies CAS and writes to the destination texture, which should be a shader writeable texture.
 	virtual bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) = 0;
+public:
+	virtual bool DoSwizzle(ComputeTransferType type, GSTexture* tex, GSTexture* clut, u32 BP, u32 BW, u32 PSM, int mem_x, int mem_y, int tex_x, int tex_y, int w, int h) { return false; }
+	virtual bool DoCLUT(GSTexture* clut, u32 PSM, u32 CBP, u32 CBW, u32 CPSM, u32 CSM, u32 COU, u32 COV) { return false; }
+	void TransferEEtoGS(const void* data, u32 DBP, u32 DBW, u32 DPSM, int mem_x, int mem_y, int w, int h);
+protected:
 
 	/// Perform texture operations for ImGui
 	void UpdateImGuiTextures();
@@ -1518,6 +1770,8 @@ protected:
 public:
 	GSDevice();
 	virtual ~GSDevice();
+
+	virtual bool LoadGSMemory(void* src, u32 offset = 0, u32 size = GSLocalMemory::m_vmsize) { return false; }
 
 	/// Returns a string containing current adapter in use.
 	const std::string& GetName() const { return m_name; }
@@ -1724,6 +1978,11 @@ public:
 	// Index is computed as ((((A * 3 + B) * 3) + C) * 3) + D. A, B, C, D taken from ALPHA register.
 	__ri static HWBlend GetBlend(u32 index) { return m_blendMap[index]; }
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
+
+	virtual void SetHybridDrawSelector(const GSHybridDrawSelector& selector) {}
+	virtual void SetHybridConstants(const GSHybridConstantBuffer& cb) {}
+	virtual void BindDrawTexturesHybrid(const GSHybridDrawTextures& textures) {}
+	virtual void DrawHybrid(const GSHybridDrawConfig& config) {}
 };
 
 template <>

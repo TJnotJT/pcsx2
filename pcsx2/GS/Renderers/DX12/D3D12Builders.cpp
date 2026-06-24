@@ -334,6 +334,18 @@ u32 D3D12::RootSignatureBuilder::AddSRVParameter(u32 shader_reg, D3D12_SHADER_VI
 	return index;
 }
 
+u32 D3D12::RootSignatureBuilder::AddUAVParameter(u32 shader_reg, D3D12_SHADER_VISIBILITY visibility)
+{
+	const u32 index = m_desc.NumParameters++;
+
+	m_params[index].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+	m_params[index].ShaderVisibility = visibility;
+	m_params[index].Descriptor.ShaderRegister = shader_reg;
+	m_params[index].Descriptor.RegisterSpace = 0;
+
+	return index;
+}
+
 u32 D3D12::RootSignatureBuilder::AddDescriptorTable(
 	D3D12_DESCRIPTOR_RANGE_TYPE rt, u32 start_shader_reg, u32 num_shader_regs, D3D12_SHADER_VISIBILITY visibility)
 {

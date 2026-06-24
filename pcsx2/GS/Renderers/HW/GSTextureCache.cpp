@@ -1765,8 +1765,8 @@ GSTextureCache::Source* GSTextureCache::LookupSource(const bool is_color, const 
 								target_bp_hit_outside_valid_area = true;
 								GL_CACHE(
 									"TC: LookupSource: Target BP match but outside valid area;"
-									" Source=(BP=%04x, BW=%d, PSM=%s, req=(%x,%x - %x,%x));"
-									" Target=(BP=%04x, BW=%d, PSM=%s, valid_area=(%x,%x - %x,%x))",
+									" Source=(BP=%04x, BW=%d, PSM=%s, req=(%d,%d - %d,%d));"
+									" Target=(BP=%04x, BW=%d, PSM=%s, valid_area=(%d,%d - %d,%d))",
 									bp, bw, GSUtil::GetPSMName(psm), r.x, r.y, r.z, r.w,
 									t->m_TEX0.TBP0, t->m_TEX0.TBW, GSUtil::GetPSMName(t->m_TEX0.PSM),
 									t->m_valid.x, t->m_valid.y, t->m_valid.z, t->m_valid.w);
@@ -5196,6 +5196,42 @@ void GSTextureCache::InvalidateLocalMem(const GSOffset& off, const GSVector4i& r
 
 				if (exact_bp && read_end <= t->m_end_block)
 					return;
+			}
+		}
+	}
+}
+
+void GSTextureCache::InvalidateVideoMemForMemoryEmulation(u32 start_bp, u32 end_bp, u32 channel_mask)
+{
+	// Invalidate sources.
+	const int pages = (end_bp + ((1 << 5) - 1) - start_bp) >> 5;
+	for (int pgs = 0; pgs < pages; pgs++)
+	{
+		auto& list = m_src.m_map[((start_bp >> 5) + pgs) & 0x1ff];
+		for (auto i = list.begin(); i != list.end(); i++)
+		{
+			Source* s = *i;
+			if ((GSUtil::GetChannelMask(s->m_TEX0.PSM) & channel_mask) &&
+				(end_bp > s->m_TEX0.TBP0 && start_bp < s->UnwrappedEndBlock()))
+			{
+				m_src.RemoveAt(s);
+			}
+		}
+	}
+
+	for (int type = 0; type < 2; type++)
+	{
+		auto& list = m_dst[type];
+		for (auto i = list.begin(); i != list.end();)
+		{
+			auto j = i++;
+			Target* t = *j;
+
+			if ((GSUtil::GetChannelMask(t->m_TEX0.PSM) & channel_mask) &&
+				(end_bp > t->m_TEX0.TBP0 && start_bp < t->UnwrappedEndBlock()))
+			{
+				g_gs_device->DoSwizzle(TEXTURE_TO_MEM, t->m_texture, nullptr, t->m_TEX0.TBP0, t->m_TEX0.TBW, t->m_TEX0.PSM,
+					t->m_valid.x, t->m_valid.y, 0, 0, t->m_valid.width(), t->m_valid.height());
 			}
 		}
 	}

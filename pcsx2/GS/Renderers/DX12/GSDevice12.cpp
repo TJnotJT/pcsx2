@@ -5,6 +5,7 @@
 #include "GS/GSGL.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
+#include "GS/GSLocalMemory.h"
 #include "GS/Renderers/DX11/D3D.h"
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
@@ -857,40 +858,34 @@ bool GSDevice12::SetGPUPipelineStatisticsEnabled(bool enabled)
 	return true;
 }
 
-bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer,
-	D3D12MA::Allocation** gpu_allocation, const std::function<void(void*)>& fill_callback)
+bool GSDevice12::AllocateCPUBuffer(u32 size, ID3D12Resource** cpu_buffer, D3D12MA::Allocation** cpu_allocation)
 {
-	// Try to place the fixed index buffer in GPU local memory.
-	// Use the staging buffer to copy into it.
-	const D3D12_RESOURCE_DESCU rd = {{D3D12_RESOURCE_DIMENSION_BUFFER, 0, size, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
-		D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_RESOURCE_FLAG_NONE}};
+	const D3D12_RESOURCE_DESCU rd = { {D3D12_RESOURCE_DIMENSION_BUFFER, 0, size, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
+		D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_RESOURCE_FLAG_NONE} };
 
-	const D3D12MA::ALLOCATION_DESC cpu_ad = {D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD};
+	const D3D12MA::ALLOCATION_DESC cpu_ad = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD };
 
-	ComPtr<ID3D12Resource> cpu_buffer;
-	ComPtr<D3D12MA::Allocation> cpu_allocation;
 	HRESULT hr;
 	if (m_enhanced_barriers)
 		hr = m_allocator->CreateResource3(
-			&cpu_ad, &rd.desc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, cpu_allocation.put(), IID_PPV_ARGS(cpu_buffer.put()));
+			&cpu_ad, &rd.desc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, cpu_allocation, IID_PPV_ARGS(cpu_buffer));
 	else
 		hr = m_allocator->CreateResource(
-			&cpu_ad, &rd.desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, cpu_allocation.put(), IID_PPV_ARGS(cpu_buffer.put()));
+			&cpu_ad, &rd.desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, cpu_allocation, IID_PPV_ARGS(cpu_buffer));
 	pxAssertMsg(SUCCEEDED(hr), "Allocate CPU buffer");
 	if (FAILED(hr))
 		return false;
+	return true;
+}
 
+bool GSDevice12::AllocateGPUBuffer(u32 size, ID3D12Resource** gpu_buffer, D3D12MA::Allocation** gpu_allocation,
+	D3D12_RESOURCE_FLAGS flags)
+{
+	const D3D12_RESOURCE_DESCU rd = { {D3D12_RESOURCE_DIMENSION_BUFFER, 0, size, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
+		D3D12_TEXTURE_LAYOUT_ROW_MAJOR, flags} };
 	static constexpr const D3D12_RANGE read_range = {};
-	const D3D12_RANGE write_range = {0, size};
-	void* mapped;
-	hr = cpu_buffer->Map(0, &read_range, &mapped);
-	pxAssertMsg(SUCCEEDED(hr), "Map CPU buffer");
-	if (FAILED(hr))
-		return false;
-	fill_callback(mapped);
-	cpu_buffer->Unmap(0, &write_range);
-
-	const D3D12MA::ALLOCATION_DESC gpu_ad = {D3D12MA::ALLOCATION_FLAG_COMMITTED, D3D12_HEAP_TYPE_DEFAULT};
+	HRESULT hr;
+	const D3D12MA::ALLOCATION_DESC gpu_ad = { D3D12MA::ALLOCATION_FLAG_COMMITTED, D3D12_HEAP_TYPE_DEFAULT };
 	if (m_enhanced_barriers)
 		hr = m_allocator->CreateResource3(
 			&gpu_ad, &rd.desc1, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr, gpu_allocation, IID_PPV_ARGS(gpu_buffer));
@@ -900,9 +895,44 @@ bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_
 	pxAssertMsg(SUCCEEDED(hr), "Allocate GPU buffer");
 	if (FAILED(hr))
 		return false;
+	return true;
+}
 
+bool GSDevice12::UploadToCPUBuffer(u32 size, ID3D12Resource* cpu_buffer, const std::function<void(void*)>& fill_callback)
+{
+	// Fill staging buffer.
+	static constexpr const D3D12_RANGE read_range = {};
+	const D3D12_RANGE write_range = { 0, size };
+	void* mapped;
+	HRESULT hr = cpu_buffer->Map(0, &read_range, &mapped);
+	pxAssertMsg(SUCCEEDED(hr), "Map CPU buffer");
+	if (FAILED(hr))
+		return false;
+	fill_callback(mapped);
+	cpu_buffer->Unmap(0, &write_range);
+	return true;
+}
+
+bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer,
+	D3D12MA::Allocation** gpu_allocation, const std::function<void(void*)>& fill_callback)
+{
+	// Try to place the fixed index buffer in GPU local memory.
+	// Use the staging buffer to copy into it.
+	ComPtr<ID3D12Resource> cpu_buffer;
+	ComPtr<D3D12MA::Allocation> cpu_allocation;
+	if (!AllocateCPUBuffer(size, cpu_buffer.put(), cpu_allocation.put()))
+		return false;
+	if (!AllocateGPUBuffer(size, gpu_buffer, gpu_allocation))
+		return false;
+
+	// Fill staging buffer.
+	if (!UploadToCPUBuffer(size, cpu_buffer.get(), fill_callback))
+		return false;
+
+	// Copy to GPU buffer.
 	GetInitCommandList().list4->CopyBufferRegion(*gpu_buffer, 0, cpu_buffer.get(), 0, size);
 
+	// Transition GPU buffer.
 	if (m_enhanced_barriers)
 	{
 		const D3D12_BUFFER_BARRIER barrier = {D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_INDEX_INPUT,
@@ -920,7 +950,74 @@ bool GSDevice12::AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_
 		GetInitCommandList().list4->ResourceBarrier(1, &rb);
 	}
 
+	// Destroy staging buffer.
 	DeferResourceDestruction(cpu_allocation.get(), cpu_buffer.get());
+	return true;
+}
+
+bool GSDevice12::LoadGSMemory(void* src, u32 offset, u32 size)
+{
+	// Try to place the GS memory in GPU local memory.
+	// Use the staging buffer to copy into it.
+	ComPtr<ID3D12Resource> cpu_buffer;
+	ComPtr<D3D12MA::Allocation> cpu_allocation;
+	if (!AllocateCPUBuffer(GSLocalMemory::m_vmsize, cpu_buffer.put(), cpu_allocation.put()))
+		return false;
+
+	// Fill staging buffer.
+	const auto copy_func = [&](void* mapped) { std::memcpy(mapped, src, GSLocalMemory::m_vmsize); };
+	if (!UploadToCPUBuffer(GSLocalMemory::m_vmsize, cpu_buffer.get(), copy_func))
+		return false;
+
+	// Transition GPU buffer.
+	if (m_enhanced_barriers)
+	{
+		const D3D12_BUFFER_BARRIER barrier = {
+			D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_COPY,
+			m_gs_memory_initialized ? D3D12_BARRIER_ACCESS_UNORDERED_ACCESS : D3D12_BARRIER_ACCESS_COMMON,
+			D3D12_BARRIER_ACCESS_COPY_DEST,
+			m_gs_memory_buffer.get(), 0, GSLocalMemory::m_vmsize };
+		const D3D12_BARRIER_GROUP group = { .Type = D3D12_BARRIER_TYPE_BUFFER, .NumBarriers = 1, .pBufferBarriers = &barrier };
+		GetInitCommandList().list7->Barrier(1, &group);
+	}
+	else
+	{
+		D3D12_RESOURCE_BARRIER rb = { D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_BARRIER_FLAG_NONE };
+		rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		rb.Transition.pResource = m_gs_memory_buffer.get();
+		rb.Transition.StateBefore = m_gs_memory_initialized ?
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS :
+		    D3D12_RESOURCE_STATE_COMMON; // COMMON -> COPY_DEST at first use.
+		rb.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+		GetInitCommandList().list4->ResourceBarrier(1, &rb);
+	}
+
+	// Copy to GPU buffer.
+	GetInitCommandList().list4->CopyBufferRegion(m_gs_memory_buffer.get(), 0, cpu_buffer.get(), 0, GSLocalMemory::m_vmsize);
+
+	// Transition GPU buffer.
+	if (m_enhanced_barriers)
+	{
+		const D3D12_BUFFER_BARRIER barrier = { D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_SYNC_ALL,
+			D3D12_BARRIER_ACCESS_COPY_DEST, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, m_gs_memory_buffer.get(), 0, GSLocalMemory::m_vmsize };
+		const D3D12_BARRIER_GROUP group = { .Type = D3D12_BARRIER_TYPE_BUFFER, .NumBarriers = 1, .pBufferBarriers = &barrier };
+		GetInitCommandList().list7->Barrier(1, &group);
+	}
+	else
+	{
+		D3D12_RESOURCE_BARRIER rb = { D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_BARRIER_FLAG_NONE };
+		rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		rb.Transition.pResource = m_gs_memory_buffer.get();
+		rb.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST; // COMMON -> COPY_DEST at first use.
+		rb.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		GetInitCommandList().list4->ResourceBarrier(1, &rb);
+	}
+
+	// Destroy staging buffer.
+	DeferResourceDestruction(cpu_allocation.get(), cpu_buffer.get());
+
+	m_gs_memory_initialized = true;
+
 	return true;
 }
 
@@ -974,6 +1071,28 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_tfx_source = std::move(*shader);
 	}
 
+	{
+		std::optional<std::string> shader = ReadShaderSource("shaders/dx11hybrid/vertex.hlsl");
+		if (!shader.has_value())
+		{
+			Host::ReportErrorAsync("GS", "Failed to read shaders/dx11hybrid/vertex.hlsl.");
+			return false;
+		}
+
+		m_hybrid_vs_source = std::move(*shader);
+	}
+
+	{
+		std::optional<std::string> shader = ReadShaderSource("shaders/dx11hybrid/pixel.hlsl");
+		if (!shader.has_value())
+		{
+			Host::ReportErrorAsync("GS", "Failed to read shaders/dx11hybrid/pixel.hlsl.");
+			return false;
+		}
+
+		m_hybrid_ps_source = std::move(*shader);
+	}
+
 	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice))
 		Console.Warning("D3D12: Shader cache failed to open.");
 
@@ -994,6 +1113,9 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	}
 
 	if (!CompileCASPipelines())
+		return false;
+
+	if (!CompileSwizzlePipelines())
 		return false;
 
 	if (!CompileImGuiPipeline())
@@ -2315,6 +2437,52 @@ bool GSDevice12::CompileCASPipelines()
 	return true;
 }
 
+bool GSDevice12::CompileSwizzlePipelines()
+{
+	D3D12::RootSignatureBuilder rsb;
+	rsb.Add32BitConstants(0, sizeof(GSHWDrawConfig::SwizzleConstants) / 4, D3D12_SHADER_VISIBILITY_ALL);
+	rsb.AddUAVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 4, D3D12_SHADER_VISIBILITY_ALL);
+	m_swizzle_root_signature = rsb.Create(false);
+	if (!m_swizzle_root_signature)
+		return false;
+	D3D12::SetObjectName(m_swizzle_root_signature.get(), "Swizzle root signature");
+
+	std::optional<std::string> swizzle_source = ReadShaderSource("shaders/dx11/swizzle.hlsl");
+
+	const ComPtr<ID3DBlob> swizzle(m_shader_cache.GetComputeShader(swizzle_source.value(), nullptr, "main"));
+	if (!swizzle)
+		return false;
+
+	D3D12::ComputePipelineBuilder cpb;
+	cpb.SetRootSignature(m_swizzle_root_signature.get());
+	cpb.SetShader(swizzle->GetBufferPointer(), swizzle->GetBufferSize());
+	m_swizzle_pipeline = cpb.Create(m_device.get(), m_shader_cache, false);
+	if (!m_swizzle_pipeline)
+	{
+		Console.Error("D3D12: Failed to create swizzle pipelines");
+		return false;
+	}
+	D3D12::SetObjectName(m_swizzle_pipeline.get(), "Swizzle pipeline");
+
+	std::optional<std::string> clut_source = ReadShaderSource("shaders/dx11/clut.hlsl");
+
+	const ComPtr<ID3DBlob> clut(m_shader_cache.GetComputeShader(clut_source.value(), nullptr, "main"));
+	if (!clut)
+		return false;
+
+	cpb.SetShader(clut->GetBufferPointer(), clut->GetBufferSize());
+	m_clut_pipeline = cpb.Create(m_device.get(), m_shader_cache, false);
+	if (!m_clut_pipeline)
+	{
+		Console.Error("D3D12: Failed to create clut pipelines");
+		return false;
+	}
+	D3D12::SetObjectName(m_clut_pipeline.get(), "CLUT pipeline");
+
+	return true;
+}
+
 bool GSDevice12::CompileImGuiPipeline()
 {
 	const std::optional<std::string> hlsl = ReadShaderSource("shaders/dx11/imgui.fx");
@@ -2494,6 +2662,7 @@ bool GSDevice12::DoCAS(
 	sTex12->TransitionToState(cmdlist, GSTexture12::ResourceState::ComputeShaderResource);
 	dTex12->TransitionToState(cmdlist, GSTexture12::ResourceState::CASShaderUAV);
 
+	m_current_compute_root_signature = RootSignature::CAS;
 	cmdlist.list4->SetComputeRootSignature(m_cas_root_signature.get());
 	cmdlist.list4->SetComputeRoot32BitConstants(
 		CAS_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS, NUM_CAS_CONSTANTS, constants.data(), 0);
@@ -2508,6 +2677,170 @@ bool GSDevice12::DoCAS(
 	cmdlist.list4->Dispatch(dispatchX, dispatchY, 1);
 
 	sTex12->TransitionToState(cmdlist, old_state);
+	return true;
+}
+
+void GSDevice12::SetSwizzleResources(bool raw, bool depth, GSTexture* tex, GSTexture* clut)
+{
+	std::array<GSTexture*, 4> textures{};
+	if (!(raw || depth))
+		textures[SWIZZLE_TEXTURE] = tex;
+	if (clut)
+		textures[SWIZZLE_CLUT] = clut;
+	if (depth)
+		textures[SWIZZLE_DEPTH_TEXTURE] = tex;
+	if (raw)
+		textures[SWIZZLE_RAW_TEXTURE] = tex;
+
+	std::array<GSTexture*, 4> null_textures = {
+		m_null_texture.get(), m_null_texture.get(),
+		m_null_texture.get(), m_null_int_texture.get()
+	};
+
+	for (u32 i = 0; i < textures.size(); i++)
+	{
+		GSTexture12* t = static_cast<GSTexture12*>(textures[i] ? textures[i] : null_textures[i]);
+
+		if (m_swizzle_textures[i] != t->GetUAVDescriptor())
+		{
+			m_swizzle_textures[i] = t->GetUAVDescriptor();
+			m_dirty_flags |= DIRTY_FLAG_SWIZZLE_TEXTURES;
+		}
+
+		t->CommitClear();
+
+		if (t->GetResourceState() != GSTexture12::ResourceState::CASShaderUAV)
+			t->TransitionToState(GSTexture12::ResourceState::CASShaderUAV);
+	}
+}
+
+bool GSDevice12::DoSwizzle(ComputeTransferType type, GSTexture* tex, GSTexture* clut, u32 BP, u32 BW, u32 PSM,
+	int mem_x, int mem_y, int tex_x, int tex_y, int w, int h)
+{
+	const u32 depth = GSLocalMemory::m_psm[PSM].depth;
+	const u32 raw = (type == RAW_TO_MEM);
+
+	static constexpr const char* type_str[] = {
+		"MEM_TO_TEXTURE",
+		"TEXTURE_TO_MEM",
+		"RAW_TO_MEM",
+	};
+
+	GL_PUSH("%s: BP=0x%04x BW=%d PSM=%s mem=(%d, %d) tex=(%d, %d) dim=(%d, %d) depth=%d",
+		type_str[type], BP, BW, GSUtil::GetPSMName(PSM), mem_x, mem_y, tex_x, tex_y, w, h, depth);
+
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+	if (InRenderPass())
+	{
+		GL_INS("Ending render pass due to compute swizzle");
+		EndRenderPass();
+	}
+
+	GSHWDrawConfig::SwizzleConstants constants;
+	constants.BP = BP;
+	constants.BW = BW;
+	constants.PSM = PSM;
+	constants.mem_x = mem_x;
+	constants.mem_y = mem_y;
+	constants.tex_x = tex_x;
+	constants.tex_y = tex_y;
+	constants.w = w;
+	constants.h = h;
+	constants.type = type;
+
+	SetSwizzleResources(raw, depth, tex, clut);
+
+	SetPipeline(m_swizzle_pipeline.get());
+
+	if (ApplySwizzleState(&constants, sizeof(constants), false))
+	{
+		static constexpr int threadGroupWorkRegionDim = 16;
+		const int dispatchX = (tex->GetWidth() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+		const int dispatchY = (tex->GetHeight() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+		GetCommandList().list4->Dispatch(dispatchX, dispatchY, 1);
+	}
+
+	// Apply UAV barriers to written textures.
+	if (type == MEM_TO_TEXTURE)
+	{
+		if (GSTexture12* const tex12 = static_cast<GSTexture12*>(tex))
+			tex12->TransitionSubresourceToState(GetCommandList(), 0, tex12->GetResourceState(), tex12->GetResourceState());
+	}
+	else if (type == TEXTURE_TO_MEM || type == RAW_TO_MEM)
+	{
+		// UAV barrier on GS memory.
+		if (m_enhanced_barriers)
+		{
+			const D3D12_BUFFER_BARRIER barrier = {
+				D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+				D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+				m_gs_memory_buffer.get(), 0, GSLocalMemory::m_vmsize };
+			const D3D12_BARRIER_GROUP group = { .Type = D3D12_BARRIER_TYPE_BUFFER, .NumBarriers = 1, .pBufferBarriers = &barrier };
+			GetCommandList().list7->Barrier(1, &group);
+		}
+		else
+		{
+			D3D12_RESOURCE_BARRIER rb = { D3D12_RESOURCE_BARRIER_TYPE_UAV, D3D12_RESOURCE_BARRIER_FLAG_NONE };
+			rb.UAV.pResource = m_gs_memory_buffer.get();
+			GetCommandList().list4->ResourceBarrier(1, &rb);
+		}
+	}
+	else
+		pxFailRel("Impossible");
+
+	return true;
+}
+
+void GSDevice12::SetCLUTResources(GSTexture* clut)
+{
+	GSTexture12* clut12 = static_cast<GSTexture12*>(clut);
+
+	if (m_swizzle_textures[SWIZZLE_CLUT] != clut12->GetUAVDescriptor())
+	{
+		m_swizzle_textures[SWIZZLE_CLUT] = clut12->GetUAVDescriptor();
+		m_dirty_flags |= DIRTY_FLAG_SWIZZLE_TEXTURES;
+	}
+
+	clut12->CommitClear();
+
+	if (clut12->GetResourceState() != GSTexture12::ResourceState::CASShaderUAV)
+		clut12->TransitionToState(GSTexture12::ResourceState::CASShaderUAV);
+}
+
+// FIXME: Need to revise this function. Add the CLUTConstants to GSHWDrawConfig. Use the new swizzle functions.
+bool GSDevice12::DoCLUT(GSTexture* clut, u32 PSM, u32 CBP, u32 CBW, u32 CPSM, u32 CSM, u32 COU, u32 COV)
+{
+	GL_PUSH("CLUT update: PSM=%s CBP=0x%04x CBW=%d CPSM=%s CSM=%d COU=%d COV=%d",
+		GSUtil::GetPSMName(PSM), CBP, CBW, GSUtil::GetPSMName(CPSM), CSM, COU, COV);
+
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+	EndRenderPass();
+
+	GSHWDrawConfig::CLUTConstants constants;
+	constants.PSM = PSM;
+	constants.CBP = CBP;
+	constants.CPSM = CPSM;
+	constants.CSM = CSM;
+	constants.COU = COU;
+	constants.COV = COV;
+
+	SetCLUTResources(clut);
+
+	SetPipeline(m_clut_pipeline.get());
+
+	if (ApplySwizzleState(&constants, sizeof(constants), false))
+	{
+		static constexpr int threadGroupWorkRegionDim = 16;
+		const int dispatchX = (clut->GetWidth() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+		GetCommandList().list4->Dispatch(dispatchX, 1, 1);
+	}
+
+	// UAV barrier
+	GSTexture12* const clut12 = static_cast<GSTexture12*>(clut);
+	clut12->TransitionSubresourceToState(GetCommandList(), 0, clut12->GetResourceState(), clut12->GetResourceState());
+
 	return true;
 }
 
@@ -2682,10 +3015,11 @@ bool GSDevice12::GetTextureGroupDescriptors(
 		return true;
 	}
 
+	constexpr int MAX_DESCRIPTORS = std::max(NUM_TOTAL_TFX_TEXTURES, NUM_SWIZZLE_TEXTURES);
 	D3D12_CPU_DESCRIPTOR_HANDLE dst_handle = *gpu_handle;
-	D3D12_CPU_DESCRIPTOR_HANDLE src_handles[NUM_TOTAL_TFX_TEXTURES];
-	UINT src_sizes[NUM_TOTAL_TFX_TEXTURES];
-	pxAssert(count <= NUM_TOTAL_TFX_TEXTURES);
+	D3D12_CPU_DESCRIPTOR_HANDLE src_handles[MAX_DESCRIPTORS];
+	UINT src_sizes[MAX_DESCRIPTORS];
+	pxAssert(count <= MAX_DESCRIPTORS);
 	for (u32 i = 0; i < count; i++)
 	{
 		src_handles[i] = cpu_handles[i];
@@ -2719,16 +3053,20 @@ GSDevice12::ComPtr<ID3DBlob> GSDevice12::GetUtilityPixelShader(const std::string
 
 bool GSDevice12::CreateNullTexture()
 {
-	const GSTexture::Usage null_access = m_features.rov ? GSTexture::ShaderWriteTarget : GSTexture::FeedbackTarget;
-	const DXGI_FORMAT null_uav_format = m_features.rov ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_UNKNOWN;
 	m_null_texture =
-		GSTexture12::Create(null_access, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
-			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, null_uav_format);
-	if (!m_null_texture)
+		GSTexture12::Create(GSTexture::ShaderWriteTarget, GSTexture::Format::Color, 1, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R8G8B8A8_UNORM);
+	m_null_int_texture =
+		GSTexture12::Create(GSTexture::ShaderWriteTarget, GSTexture::Format::UInt32, 1, 1, 1, DXGI_FORMAT_R32_UINT,
+			DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R32_UINT, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_R32_UINT);
+	if (!m_null_texture || !m_null_int_texture)
 		return false;
 
 	m_null_texture->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
 	D3D12::SetObjectName(m_null_texture->GetResource(), "Null texture");
+
+	m_null_int_texture->TransitionToState(GSTexture12::ResourceState::CASShaderUAV);
+	D3D12::SetObjectName(m_null_int_texture->GetResource(), "Null texture (integer)");
 	return true;
 }
 
@@ -2777,6 +3115,15 @@ bool GSDevice12::CreateBuffers()
 		return false;
 	}
 
+	if (!AllocateGPUBuffer(GSLocalMemory::m_vmsize, m_gs_memory_buffer.put(), m_gs_memory_buffer_allocation.put(),
+		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
+	{
+		Host::ReportErrorAsync("GS", "Failed to allocate GS memory buffer");
+		return false;
+	}
+
+	D3D12::SetObjectName(m_gs_memory_buffer.get(), "GS Memory");
+
 	return true;
 }
 
@@ -2814,6 +3161,18 @@ bool GSDevice12::CreateRootSignatures()
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
+
+	//////////////////////////////////////////////////////////////////////////
+	// Hybrid Draw Pipeline Layout
+	//////////////////////////////////////////////////////////////////////////
+	rsb.SetInputAssemblerFlag();
+	rsb.Add32BitConstants(0, 4, D3D12_SHADER_VISIBILITY_ALL);
+	rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_ALL);
+	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 4, D3D12_SHADER_VISIBILITY_PIXEL);
+	if (!(m_hybrid_root_signature = rsb.Create()))
+		return false;
+	D3D12::SetObjectName(m_tfx_root_signature.get(), "Hybrid root signature");
+
 	return true;
 }
 
@@ -3143,6 +3502,12 @@ void GSDevice12::DestroyResources()
 	m_cas_upscale_pipeline.reset();
 	m_cas_root_signature.reset();
 
+	m_clut_pipeline.reset();
+	m_swizzle_pipeline.reset();
+	m_swizzle_root_signature.reset();
+	m_hybrid_vertex_shader.reset();
+	m_hybrid_pixel_shader.reset();
+
 	m_tfx_pipelines.clear();
 	m_tfx_pixel_shaders.clear();
 	m_tfx_vertex_shaders.clear();
@@ -3165,6 +3530,8 @@ void GSDevice12::DestroyResources()
 	m_samplers.clear();
 	InvalidateSamplerGroups();
 
+	m_gs_memory_buffer.reset();
+	m_gs_memory_buffer_allocation.reset();
 	m_expand_index_buffer.reset();
 	m_expand_index_buffer_allocation.reset();
 	m_texture_stream_buffer.Destroy(false);
@@ -3181,6 +3548,12 @@ void GSDevice12::DestroyResources()
 	{
 		m_null_texture->Destroy(false);
 		m_null_texture.reset();
+	}
+
+	if (m_null_int_texture)
+	{
+		m_null_int_texture->Destroy(false);
+		m_null_int_texture.reset();
 	}
 
 	m_shader_cache.Close();
@@ -3455,6 +3828,100 @@ bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
 	return ApplyTFXState();
 }
 
+static void GetSelectorConstantMacro(GSDevice12::ShaderMacro& sm, const GSHybridDrawSelectorConstant& sc)
+{
+	// We don't handle selectors straddling a 32 bit boundary.
+	pxAssert((sc.bits.start / 32) == ((sc.bits.end - 1) / 32));
+
+	const u32 field = sc.bits.start / 32;
+	const u32 bits_start = sc.bits.start;
+	const u32 bits_end = sc.bits.end;
+	const u32 bits_width = bits_end - bits_start;
+	const u32 value = sc.value;
+	const char* name = sc.name;
+
+	const std::string& extract_bits = fmt::format("((Selector{} >> {}) & ((1 << {}) - 1))", field, bits_start, bits_width);
+
+	std::string macro;
+	if (sc.type == GSHybridDrawSelectorConstant::BOOL)
+		macro = fmt::format("({} == {})", extract_bits, value);
+	else
+		macro = extract_bits;
+
+	sm.AddMacro(name, macro);
+}
+
+const ID3DBlob* GSDevice12::GetHybridVertexShader()
+{
+	ShaderMacro sm;
+	m_hybrid_vertex_shader = m_shader_cache.GetVertexShader(m_hybrid_vs_source, sm.GetPtr(), "main");
+	return m_hybrid_vertex_shader.get();
+}
+
+const ID3DBlob* GSDevice12::GetHybridPixelShader()
+{
+	ShaderMacro sm;
+	for (const GSHybridDrawSelectorConstant& sc : GS_HYBRID_SELECTOR_CONSTANTS)
+		GetSelectorConstantMacro(sm, sc);
+
+	m_hybrid_pixel_shader = m_shader_cache.GetPixelShader(m_hybrid_ps_source, sm.GetPtr(), "main");
+
+	return m_hybrid_pixel_shader.get();
+}
+
+GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateHybridDrawPipeline(u32 topology)
+{
+	static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY_TYPE, 3> topology_lookup = { {
+		D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT,    // Point
+		D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE,     // Line
+		D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, // Triangle
+	} };
+
+	GSHWDrawConfig::BlendState pbs{};
+
+	const ID3DBlob* vs = GetHybridVertexShader();
+	const ID3DBlob* ps = GetHybridPixelShader();
+	if (!vs || !ps)
+		return nullptr;
+
+	// Common state
+	D3D12::GraphicsPipelineBuilder gpb;
+
+	gpb.SetRootSignature(m_hybrid_root_signature.get());
+	gpb.SetPrimitiveTopologyType(topology_lookup[topology]);
+	gpb.SetRasterizationState(D3D12_FILL_MODE_SOLID, D3D12_CULL_MODE_NONE, false);
+
+	// Shaders
+	gpb.SetVertexShader(vs);
+	gpb.SetPixelShader(ps);
+
+	// IA
+	gpb.AddVertexAttribute("POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,   0, 0);
+	gpb.AddVertexAttribute("POSITION", 1, DXGI_FORMAT_R32_UINT,       0, 8);
+	gpb.AddVertexAttribute("TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, 12);
+	gpb.AddVertexAttribute("TEXCOORD", 1, DXGI_FORMAT_R32_FLOAT,      0, 20);
+	gpb.AddVertexAttribute("COLOR",    0, DXGI_FORMAT_R8G8B8A8_UINT,  0, 24);
+	gpb.AddVertexAttribute("COLOR",    1, DXGI_FORMAT_R32_UINT,       0, 28);
+
+	gpb.ClearRenderTargets();
+	gpb.SetNoDepthTestState();
+
+	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache));
+	if (pipeline)
+	{
+		D3D12::SetObjectName(pipeline.get(), TinyString::from_format("Hybrid Draw Pipeline"));
+	}
+
+	return pipeline;
+}
+
+const ID3D12PipelineState* GSDevice12::GetHybridDrawPipeline(u32 topology)
+{
+	if (!m_hybrid_draw_pipelines[topology])
+		m_hybrid_draw_pipelines[topology] = CreateHybridDrawPipeline(topology);
+	return m_hybrid_draw_pipelines[topology].get();
+}
+
 void GSDevice12::InitializeState()
 {
 	for (u32 i = 0; i < TEXTURE_RT_UAV; i++)
@@ -3462,6 +3929,8 @@ void GSDevice12::InitializeState()
 	for (u32 i = TEXTURE_RT_UAV; i < NUM_TOTAL_TFX_TEXTURES; i++)
 		m_tfx_textures[i] = m_null_texture->GetUAVDescriptor();
 	m_tfx_sampler_sel = GSHWDrawConfig::SamplerSelector::Point().key;
+	for (u32 i = 0; i < NUM_SWIZZLE_TEXTURES; i++)
+		m_swizzle_textures[i] = m_null_texture->GetUAVDescriptor();
 
 	InvalidateCachedState();
 }
@@ -3538,8 +4007,12 @@ void GSDevice12::ExecuteCommandListForReadback()
 
 void GSDevice12::InvalidateCachedState()
 {
-	m_dirty_flags |= DIRTY_BASE_STATE | DIRTY_ROOT_PARAMS | DIRTY_TFX_STATE | DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE;
+	m_dirty_flags |=
+		DIRTY_BASE_STATE | DIRTY_ROOT_PARAMS | DIRTY_TFX_STATE |
+		DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE | DIRTY_SWIZZLE_STATE |
+		DIRTY_HYBRID_STATE;
 	m_current_root_signature = RootSignature::Undefined;
+	m_current_compute_root_signature = RootSignature::Undefined;
 	m_utility_texture_cpu.Clear();
 	m_utility_texture_gpu.Clear();
 	m_utility_sampler_cpu.Clear();
@@ -3547,6 +4020,7 @@ void GSDevice12::InvalidateCachedState()
 	m_tfx_textures_handle_gpu.Clear();
 	m_tfx_samplers_handle_gpu.Clear();
 	m_tfx_rt_textures_handle_gpu.Clear();
+	m_swizzle_textures_handle_gpu.Clear();
 }
 
 void GSDevice12::SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS buffer, size_t size, size_t stride)
@@ -3626,7 +4100,7 @@ void GSDevice12::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
 	}
 	else
 	{
-		handle = m_null_texture->GetSRVDescriptor();
+		handle = GetResourceDescriptor(m_null_texture.get(), type);
 	}
 
 	if (m_tfx_textures[i] == handle)
@@ -3675,7 +4149,7 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 	else
 	{
 		// Unbind to avoid conflicts with OM targets.
-		PSSetShaderResource(TEXTURE_RT_UAV, nullptr, false);
+		PSSetShaderResource(TEXTURE_RT_UAV, nullptr, false, ResourceType::UAV);
 	}
 
 	if (d12Ds)
@@ -3699,7 +4173,7 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 	else
 	{
 		// Unbind to avoid conflicts with OM targets.
-		PSSetShaderResource(TEXTURE_DEPTH_UAV, nullptr, false);
+		PSSetShaderResource(TEXTURE_DEPTH_UAV, nullptr, false, ResourceType::UAV);
 	}
 }
 
@@ -4179,6 +4653,132 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES, m_tfx_rt_textures_handle_gpu);
 
 	ApplyBaseState(flags, cmdlist);
+	return true;
+}
+
+bool GSDevice12::ApplySwizzleState(const void* constants, u32 const_size, bool already_execed)
+{
+	if (m_current_compute_root_signature == RootSignature::Swizzle && m_dirty_flags == 0)
+		return true;
+
+	u32 flags = m_dirty_flags;
+	m_dirty_flags &= ~DIRTY_SWIZZLE_STATE;
+
+	if (flags & DIRTY_FLAG_SWIZZLE_TEXTURES)
+	{
+		if (!GetTextureGroupDescriptors(&m_swizzle_textures_handle_gpu, m_swizzle_textures.data(),
+			static_cast<u32>(m_swizzle_textures.size())))
+		{
+			ExecuteCommandListAndRestartRenderPass(false, "Ran out of swizzle texture descriptor groups");
+			return ApplySwizzleState(constants, const_size, true);
+		}
+
+		flags |= DIRTY_FLAG_SWIZZLE_TEXTURE_DESCRIPTOR_TABLE;
+	}
+
+	ID3D12GraphicsCommandList* cmdlist = GetCommandList().list4.get();
+
+	if (m_current_compute_root_signature != RootSignature::Swizzle)
+	{
+		m_current_compute_root_signature = RootSignature::Swizzle;
+		flags |= DIRTY_SWIZZLE_ROOT_PARAMS | DIRTY_FLAG_PIPELINE;
+		cmdlist->SetComputeRootSignature(m_swizzle_root_signature.get());
+	}
+
+	cmdlist->SetComputeRoot32BitConstants(SWIZZLE_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS,
+		const_size / 4, constants, 0);
+
+	//if (flags & DIRTY_FLAG_SWIZZLE_GS_MEMORY_BUFFER)
+	{
+		cmdlist->SetComputeRootUnorderedAccessView(SWIZZLE_ROOT_SIGNATURE_PARAM_GS_MEMORY_BUFFER,
+			m_gs_memory_buffer->GetGPUVirtualAddress());
+	}
+
+	if (flags & DIRTY_FLAG_SWIZZLE_TEXTURE_DESCRIPTOR_TABLE)
+	{
+		cmdlist->SetComputeRootDescriptorTable(SWIZZLE_ROOT_SIGNATURE_PARAM_TEXTURES,
+			m_swizzle_textures_handle_gpu);
+	}
+
+	if ((flags & DIRTY_FLAG_PIPELINE) && m_current_pipeline)
+	{
+		cmdlist->SetPipelineState(const_cast<ID3D12PipelineState*>(m_current_pipeline));
+	}
+
+	return true;
+}
+
+bool GSDevice12::ApplyHybridDrawState(bool already_execed)
+{
+	if (m_current_root_signature == RootSignature::Hybrid && m_dirty_flags == 0)
+		return true;
+
+	u32 flags = m_dirty_flags;
+	m_dirty_flags &= ~DIRTY_HYBRID_STATE;
+
+	if (flags & DIRTY_FLAG_HYBRID_CONSTANT_BUFFER)
+	{
+		// We reuse the vertex constant buffer from the TFX pipeline.
+		if (!m_vertex_constant_buffer.ReserveMemory(
+			sizeof(m_hybrid_cb_cache), D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT))
+		{
+			if (already_execed)
+			{
+				Console.Error("D3D12: Failed to reserve hybrid uniform space");
+				return false;
+			}
+
+			ExecuteCommandListAndRestartRenderPass(false, "Ran out of hybrid uniform space");
+			return ApplyHybridDrawState(true);
+		}
+
+		std::memcpy(m_vertex_constant_buffer.GetCurrentHostPointer(), &m_hybrid_cb_cache, sizeof(m_hybrid_cb_cache));
+		m_hybrid_constant_buffer = m_vertex_constant_buffer.GetCurrentGPUPointer();
+		m_vertex_constant_buffer.CommitMemory(sizeof(m_hybrid_cb_cache));
+		flags |= DIRTY_FLAG_HYBRID_CONSTANT_BUFFER_BINDING;
+	}
+
+	if (flags & DIRTY_FLAG_HYBRID_TEXTURES)
+	{
+		if (!GetTextureGroupDescriptors(&m_hybrid_textures_handle_gpu, m_hybrid_textures.data(),
+			static_cast<u32>(m_hybrid_textures.size())))
+		{
+			ExecuteCommandListAndRestartRenderPass(false, "Ran out of swizzle texture descriptor groups");
+			return ApplyHybridDrawState(true);
+		}
+
+		flags |= DIRTY_FLAG_HYBRID_TEXTURE_DESCRIPTOR_TABLE;
+	}
+
+	ID3D12GraphicsCommandList* cmdlist = GetCommandList().list4.get();
+
+	if (m_current_root_signature != RootSignature::Hybrid)
+	{
+		m_current_root_signature = RootSignature::Hybrid;
+		flags |= DIRTY_HYBRID_ROOT_PARAMS | DIRTY_FLAG_PIPELINE;
+		cmdlist->SetGraphicsRootSignature(m_hybrid_root_signature.get());
+	}
+
+	if (flags & DIRTY_FLAG_HYBRID_SELECTORS)
+	{
+		cmdlist->SetGraphicsRoot32BitConstants(HYBRID_ROOT_SIGNATURE_PARAM_SELECTORS,
+			sizeof(m_hybrid_selector_cache) / 4, &m_hybrid_selector_cache, 0);
+	}
+
+	if (flags & DIRTY_FLAG_HYBRID_CONSTANT_BUFFER_BINDING)
+	{
+		cmdlist->SetGraphicsRootConstantBufferView(HYBRID_ROOT_SIGNATURE_PARAM_CBV,
+			m_hybrid_constant_buffer);
+	}
+
+	if (flags & DIRTY_FLAG_HYBRID_TEXTURE_DESCRIPTOR_TABLE)
+	{
+		cmdlist->SetGraphicsRootDescriptorTable(HYBRID_ROOT_SIGNATURE_PARAM_TEXTURES,
+			m_hybrid_textures_handle_gpu);
+	}
+
+	ApplyBaseState(flags, cmdlist);
+
 	return true;
 }
 
@@ -4846,4 +5446,69 @@ void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
 	{
 		IASetIndexBuffer(config.indices, config.nindices);
 	}
+}
+
+void GSDevice12::SetHybridDrawSelector(const GSHybridDrawSelector& selector)
+{
+	if (m_hybrid_selector_cache.Update(selector))
+	{
+		m_dirty_flags |= DIRTY_FLAG_HYBRID_SELECTORS;
+	}
+}
+
+void GSDevice12::SetHybridConstants(const GSHybridConstantBuffer& cb)
+{
+	if (m_hybrid_cb_cache.Update(cb))
+	{
+		m_dirty_flags |= DIRTY_FLAG_HYBRID_CONSTANT_BUFFER;
+	}
+}
+
+void GSDevice12::BindDrawTexturesHybrid(const GSHybridDrawTextures& textures)
+{
+	std::array<GSTexture12*, NUM_HYBRID_TEXTURES> tex_array;
+
+	tex_array[HYBRID_RT] = GetOrNullTexture(textures.rt);
+	tex_array[HYBRID_DEPTH] = GetOrNullTexture(textures.depth);
+	tex_array[HYBRID_TEXTURE] = GetOrNullTexture(textures.tex);
+	tex_array[HYBRID_CLUT] = GetOrNullTexture(textures.clut);
+
+	for (u32 i = 0; i < NUM_HYBRID_TEXTURES; i++)
+	{
+		GSTexture12* tex = tex_array[i];
+		if (tex->GetResourceState() != GSTexture12::ResourceState::CASShaderUAV)
+		{
+			if (InRenderPass())
+			{
+				GL_INS("Ending render pass due to resource transition");
+				EndRenderPass();
+			}
+			tex->TransitionToState(GSTexture12::ResourceState::CASShaderUAV);
+		}
+		if (m_hybrid_textures[i] != tex->GetUAVDescriptor())
+		{
+			m_hybrid_textures[i] = tex->GetUAVDescriptor();
+			m_dirty_flags |= DIRTY_FLAG_HYBRID_TEXTURES;
+		}
+	}
+}
+
+void GSDevice12::DrawHybrid(const GSHybridDrawConfig& config)
+{
+	SetHybridDrawSelector(config.selector);
+	SetHybridConstants(config.constants);
+	BindDrawTexturesHybrid(config.textures);
+
+	SetPipeline(GetHybridDrawPipeline(config.topology));
+
+	IASetVertexBuffer(config.mesh.vertices, sizeof(GSHybridVertex), config.mesh.num_vertices);
+	IASetIndexBuffer(config.mesh.indices, config.mesh.num_indices);
+
+	const GSVector2i viewport_size(config.viewport.width(), config.viewport.height());
+	OMSetRenderTargets(nullptr, nullptr, nullptr, config.scissor, false, viewport_size);
+
+	SetPrimitiveTopology(s_primitive_topology_mapping[config.topology]);
+
+	if (ApplyHybridDrawState())
+		DrawIndexedPrimitive();
 }

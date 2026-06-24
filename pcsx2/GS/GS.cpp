@@ -19,6 +19,7 @@
 #include "pcsx2/GS.h"
 #include "GS/Renderers/Null/GSRendererNull.h"
 #include "GS/Renderers/HW/GSRendererHW.h"
+#include "GS/Renderers/HW/GSRendererHWCompute.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
 #include "VMManager.h"
 
@@ -90,6 +91,7 @@ static RenderAPI GetAPIForRenderer(GSRendererType renderer)
 			return RenderAPI::D3D11;
 
 		case GSRendererType::DX12:
+		case GSRendererType::DX12Compute:
 			return RenderAPI::D3D12;
 #endif
 
@@ -210,6 +212,10 @@ static bool OpenGSRenderer(GSRendererType renderer, u8* basemem)
 	if (renderer == GSRendererType::Null)
 	{
 		g_gs_renderer = std::make_unique<GSRendererNull>();
+	}
+	else if (renderer == GSRendererType::DX12Compute)
+	{
+		g_gs_renderer = std::make_unique<GSRendererHWCompute>();
 	}
 	else if (renderer != GSRendererType::SW)
 	{
