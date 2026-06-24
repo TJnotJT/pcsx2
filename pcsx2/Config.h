@@ -278,6 +278,7 @@ enum class GSRendererType : s8
 	VK = 14,
 	Metal = 17,
 	DX12 = 15,
+	DX12Compute = 16,
 };
 
 enum class GSVSyncMode : u8
@@ -797,6 +798,7 @@ struct Pcsx2Config
 					HWROV : 1,
 					HWROVLogging : 1,
 					HWROVBarriersVK : 1,
+					HWGSMemoryEmulation : 1,
 					ManualUserHacks : 1,
 					UserHacks_AlignSpriteX : 1,
 					UserHacks_CPUFBConversion : 1,

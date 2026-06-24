@@ -360,6 +360,7 @@
     <ClCompile Include="GS\Renderers\Common\GSRenderer.cpp" />
     <ClCompile Include="GS\Renderers\HW\GSRendererHW.cpp" />
     <ClCompile Include="GS\Renderers\HW\GSRendererHWMultiISA.cpp" />
+    <ClCompile Include="GS\Renderers\HW\GSRendererHWCompute.cpp" />
     <ClCompile Include="GS\Renderers\Null\GSRendererNull.cpp" />
     <ClCompile Include="GS\Renderers\SW\GSRendererSW.cpp" />
     <ClCompile Include="GS\Renderers\SW\GSSetupPrimCodeGenerator.all.cpp">
@@ -374,6 +375,7 @@
     </ClCompile>
     <ClCompile Include="GS\Renderers\HW\GSTextureCache.cpp" />
     <ClCompile Include="GS\Renderers\SW\GSTextureCacheSW.cpp" />
+    <ClCompile Include="GS\Renderers\HW\GSTextureCacheCompute.cpp" />
     <ClCompile Include="GS\GSUtil.cpp" />
     <ClCompile Include="GS\GSVector.cpp" />
     <ClCompile Include="GS\Renderers\Common\GSVertexTrace.cpp" />
@@ -800,6 +802,7 @@
     <ClInclude Include="GS\Renderers\SW\GSRasterizer.h" />
     <ClInclude Include="GS\Renderers\Common\GSRenderer.h" />
     <ClInclude Include="GS\Renderers\HW\GSRendererHW.h" />
+    <ClInclude Include="GS\Renderers\HW\GSRendererHWCompute.h" />
     <ClInclude Include="GS\Renderers\Null\GSRendererNull.h" />
     <ClInclude Include="GS\Renderers\SW\GSRendererSW.h" />
     <ClInclude Include="GS\Renderers\SW\GSScanlineEnvironment.h" />
@@ -815,6 +818,7 @@
     </ClInclude>
     <ClInclude Include="GS\Renderers\HW\GSTextureCache.h" />
     <ClInclude Include="GS\Renderers\SW\GSTextureCacheSW.h" />
+    <ClInclude Include="GS\Renderers\HW\GSTextureCacheCompute.h" />
     <ClInclude Include="GS\GSJobQueue.h" />
     <ClInclude Include="GS\GSUtil.h" />
     <ClInclude Include="GS\GSVector.h" />

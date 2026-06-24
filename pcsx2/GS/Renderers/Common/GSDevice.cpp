@@ -1097,6 +1097,40 @@ bool GSDevice::ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_con
 	return true;
 }
 
+// FIXME: Add a max length parameter.
+void GSDevice::TransferEEtoGS(const void* data, u32 DBP, u32 DBW, u32 DPSM, int mem_x, int mem_y, int w, int h)
+{
+	// Create the raw bits texture.
+	GSTexture* tex = g_gs_device->CreateRenderTarget(w, h, GSTexture::Format::UInt32, false, true);
+	GSTexture::GSMap map;
+	tex->Map(map);
+	u32 trbpp = GSLocalMemory::m_psm[DPSM].trbpp;
+	for (u32 y = 0; y < h; y++)
+	{
+		for (u32 x = 0; x < w; x++)
+		{
+			const u32 address = y * w + x;
+			const u32 byte_address = address * trbpp / 8; // divides by 2 if trbpp == 4
+			const u32 read_bytes = (trbpp + 7) / 8;
+
+			u32 val = 0;
+			for (u32 i = 0; i < read_bytes; i++)
+				val |= static_cast<const u8*>(data)[byte_address + i] << (8 * i);
+
+			if (trbpp == 4)
+				val = (val >> ((address % 2) * 4)) & 0xF;
+
+			reinterpret_cast<u32*>(map.bits)[y * (map.pitch / 4) + x] = val;
+		}
+	}
+	tex->Unmap();
+
+	// Write to memory.
+	g_gs_device->DoSwizzle(RAW_TO_MEM, tex, nullptr, DBP, DBW, DPSM, mem_x, mem_y, 0, 0, w, h);
+
+	g_gs_device->Recycle(tex);
+}
+
 void GSDevice::BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea)
 {
 	// Create a temporary RT and copy the area needed for the draw.

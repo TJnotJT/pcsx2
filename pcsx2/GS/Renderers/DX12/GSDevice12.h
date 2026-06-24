@@ -182,11 +182,17 @@ public:
 	void DeferDescriptorDestruction(D3D12DescriptorHeapManager& manager, u32 index);
 	void DeferDescriptorDestruction(D3D12DescriptorHeapManager& manager, D3D12DescriptorHandle* handle);
 
+	bool AllocateGPUBuffer(u32 size, ID3D12Resource** gpu_buffer, D3D12MA::Allocation** gpu_allocation,
+		D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+	bool AllocateCPUBuffer(u32 size, ID3D12Resource** cpu_buffer, D3D12MA::Allocation** cpu_allocation);
+	bool UploadToCPUBuffer(u32 size, ID3D12Resource* cpu_buffer, const std::function<void(void*)>& fill_callback);
+
 	// Allocates a temporary CPU staging buffer, fires the callback with it to populate, then copies to a GPU buffer.
 	bool AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer, D3D12MA::Allocation** gpu_allocation,
 		const std::function<void(void*)>& fill_callback);
 	void UploadIndices(D3D12StreamBuffer& buffer, const void* index, size_t count);
 
+	bool LoadGSMemory(void* src, u32 offset = 0, u32 size = GSLocalMemory::m_vmsize) override;
 private:
 	struct CommandListResources
 	{
@@ -378,6 +384,9 @@ private:
 	D3D12StreamBuffer m_texture_stream_buffer;
 	ComPtr<ID3D12Resource> m_expand_index_buffer;
 	ComPtr<D3D12MA::Allocation> m_expand_index_buffer_allocation;
+	ComPtr<ID3D12Resource> m_gs_memory_buffer;
+	ComPtr<D3D12MA::Allocation> m_gs_memory_buffer_allocation;
+	bool m_gs_memory_initialized = false;
 
 	D3D12DescriptorHandle m_point_sampler_cpu;
 	D3D12DescriptorHandle m_linear_sampler_cpu;
@@ -414,6 +423,10 @@ private:
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
 	ComPtr<ID3D12PipelineState> m_cas_sharpen_pipeline;
 
+	ComPtr<ID3D12RootSignature> m_swizzle_root_signature;
+	ComPtr<ID3D12PipelineState> m_swizzle_pipeline;
+	ComPtr<ID3D12PipelineState> m_clut_pipeline;
+
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
 	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
@@ -444,6 +457,9 @@ private:
 	bool DoCAS(
 		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
 
+	bool DoSwizzle(ComputeTransferType type, GSTexture* tex, GSTexture* clut, u32 BP, u32 BW, u32 PSM, int mem_x, int mem_y, int tex_x, int tex_y, int w, int h) override;
+	bool DoCLUT(GSTexture* clut, u32 PSM, u32 CBP, u32 CBW, u32 CPSM, u32 CSM, u32 COU, u32 COV) override;
+
 	bool GetSampler(D3D12DescriptorHandle* cpu_handle, GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 	bool GetTextureGroupDescriptors(
@@ -470,6 +486,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileSwizzlePipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -711,6 +728,7 @@ private:
 	const ID3D12PipelineState* m_current_pipeline = nullptr;
 
 	std::unique_ptr<GSTexture12> m_null_texture;
+	std::unique_ptr<GSTexture12> m_null_int_texture;
 
 	// current pipeline selector - we save this in the struct to avoid re-zeroing it every draw
 	PipelineSelector m_pipeline_selector = {};

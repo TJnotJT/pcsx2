@@ -2753,8 +2753,245 @@ void GSRendererHW::RoundSpriteOffset()
 	}
 }
 
+#define INTERLEAVE_BIT_X(src_bit, dst_bit) ((((xy.x) >> src_bit) & 1) << dst_bit)
+#define INTERLEAVE_BIT_Y(src_bit, dst_bit) ((((xy.y) >> src_bit) & 1) << dst_bit)
+u32 word_addr_c32(GSVector2i xy)
+{
+	return INTERLEAVE_BIT_X(5, 10) |
+		INTERLEAVE_BIT_Y(4, 9) |
+		INTERLEAVE_BIT_X(4, 8) |
+		INTERLEAVE_BIT_Y(3, 7) |
+		INTERLEAVE_BIT_X(3, 6) |
+		INTERLEAVE_BIT_Y(2, 5) |
+		INTERLEAVE_BIT_Y(1, 4) |
+		INTERLEAVE_BIT_X(2, 3) |
+		INTERLEAVE_BIT_X(1, 2) |
+		INTERLEAVE_BIT_Y(0, 1) |
+		INTERLEAVE_BIT_X(0, 0);
+}
+
+u32 short_addr_c16(GSVector2i xy)
+{
+	return INTERLEAVE_BIT_Y(5, 11) |
+		INTERLEAVE_BIT_X(5, 10) |
+		INTERLEAVE_BIT_Y(4, 9) |
+		INTERLEAVE_BIT_X(4, 8) |
+		INTERLEAVE_BIT_Y(3, 7) |
+		INTERLEAVE_BIT_Y(2, 6) |
+		INTERLEAVE_BIT_Y(1, 5) |
+		INTERLEAVE_BIT_X(2, 4) |
+		INTERLEAVE_BIT_X(1, 3) |
+		INTERLEAVE_BIT_Y(0, 2) |
+		INTERLEAVE_BIT_X(0, 1) |
+		INTERLEAVE_BIT_X(3, 0);
+}
+
+u32 short_addr_c16s(GSVector2i xy)
+{
+	return INTERLEAVE_BIT_Y(4, 10) |
+		INTERLEAVE_BIT_X(5, 11) |
+		INTERLEAVE_BIT_Y(5, 9) |
+		INTERLEAVE_BIT_X(4, 8) |
+		INTERLEAVE_BIT_Y(3, 7) |
+		INTERLEAVE_BIT_Y(2, 6) |
+		INTERLEAVE_BIT_Y(1, 5) |
+		INTERLEAVE_BIT_X(2, 4) |
+		INTERLEAVE_BIT_X(1, 3) |
+		INTERLEAVE_BIT_Y(0, 2) |
+		INTERLEAVE_BIT_X(0, 1) |
+		INTERLEAVE_BIT_X(3, 0);
+}
+
+u32 xor_z16(u32 short_addr)
+{
+	return short_addr ^ (1 << 11) ^ (1 << 10);
+}
+
+u32 xor_z32(u32 word_addr)
+{
+	return word_addr ^ (1 << 10) ^ (1 << 9);
+}
+
+u32 byte_addr_p8(GSVector2i xy)
+{
+	return INTERLEAVE_BIT_X(6, 12) |
+		INTERLEAVE_BIT_Y(5, 11) |
+		INTERLEAVE_BIT_X(5, 10) |
+		INTERLEAVE_BIT_Y(4, 9) |
+		INTERLEAVE_BIT_X(4, 8) |
+		INTERLEAVE_BIT_Y(3, 7) |
+		INTERLEAVE_BIT_Y(2, 6) |
+		(INTERLEAVE_BIT_X(2, 5) ^ INTERLEAVE_BIT_Y(1, 5) ^ INTERLEAVE_BIT_Y(2, 5)) |
+		INTERLEAVE_BIT_X(1, 4) |
+		INTERLEAVE_BIT_Y(0, 3) |
+		INTERLEAVE_BIT_X(0, 2) |
+		INTERLEAVE_BIT_X(3, 1) |
+		INTERLEAVE_BIT_Y(1, 0);
+}
+
+u32 nibble_addr_p4(GSVector2i xy)
+{
+	return INTERLEAVE_BIT_Y(6, 13) |
+		INTERLEAVE_BIT_X(6, 12) |
+		INTERLEAVE_BIT_Y(5, 11) |
+		INTERLEAVE_BIT_X(5, 10) |
+		INTERLEAVE_BIT_Y(4, 9) |
+		INTERLEAVE_BIT_Y(3, 8) |
+		INTERLEAVE_BIT_Y(2, 7) |
+		(INTERLEAVE_BIT_X(2, 6) ^ INTERLEAVE_BIT_Y(1, 6) ^ INTERLEAVE_BIT_Y(2, 6)) |
+		INTERLEAVE_BIT_X(1, 5) |
+		INTERLEAVE_BIT_Y(0, 4) |
+		INTERLEAVE_BIT_X(0, 3) |
+		INTERLEAVE_BIT_X(4, 2) |
+		INTERLEAVE_BIT_X(3, 1) |
+		INTERLEAVE_BIT_Y(1, 0);
+}
+
+static void test_zwizzle_functions()
+{
+	const GSOffset offset32(GSLocalMemory::m_psm[PSMCT32].info, 0, 1, PSMCT32);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 32; y++)
+		{
+			int a1 = offset32.pa(x, y);
+			int a2 = word_addr_c32(GSVector2i(x, y));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offset16(GSLocalMemory::m_psm[PSMCT16].info, 0, 1, PSMCT16);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 64; y++)
+		{
+			int a1 = offset16.pa(x, y);
+			int a2 = short_addr_c16(GSVector2i(x, y));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offset16s(GSLocalMemory::m_psm[PSMCT16S].info, 0, 1, PSMCT16S);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 64; y++)
+		{
+			int a1 = offset16s.pa(x, y);
+			int a2 = short_addr_c16s(GSVector2i(x, y));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offsetz32(GSLocalMemory::m_psm[PSMZ32].info, 0, 1, PSMZ32);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 32; y++)
+		{
+			int a1 = offsetz32.pa(x, y);
+			int a2 = xor_z32(word_addr_c32(GSVector2i(x, y)));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offsetz16(GSLocalMemory::m_psm[PSMZ16].info, 0, 1, PSMZ16);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 64; y++)
+		{
+			int a1 = offsetz16.pa(x, y);
+			int a2 = xor_z16(short_addr_c16(GSVector2i(x, y)));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offsetz16s(GSLocalMemory::m_psm[PSMZ16S].info, 0, 1, PSMZ16S);
+	for (int x = 0; x < 64; x++)
+	{
+		for (int y = 0; y < 64; y++)
+		{
+			int a1 = offsetz16s.pa(x, y);
+			int a2 = xor_z16(short_addr_c16s(GSVector2i(x, y)));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offsetp8(GSLocalMemory::m_psm[PSMT8].info, 0, 1, PSMT8);
+	for (int x = 0; x < 128; x++)
+	{
+		for (int y = 0; y < 64; y++)
+		{
+			int a1 = offsetp8.pa(x, y);
+			int a2 = byte_addr_p8(GSVector2i(x, y));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+
+	const GSOffset offsetp4(GSLocalMemory::m_psm[PSMT4].info, 0, 1, PSMT4);
+	for (int x = 0; x < 128; x++)
+	{
+		for (int y = 0; y < 128; y++)
+		{
+			int a1 = offsetp4.pa(x, y);
+			int a2 = nibble_addr_p4(GSVector2i(x, y));
+			printf("%d %d\n", a1, a2);
+			if (a1 != a2)
+			{
+				printf("PANIC!\n");
+			}
+		}
+	}
+}
+
 void GSRendererHW::Draw()
 {
+	if (true)
+	{
+		int tw = 1 << m_context->TEX0.TW;
+		int th = 1 << m_context->TEX0.TH;
+		int psm = m_context->TEX0.PSM;
+
+		GSTexture* clut = g_gs_device->CreateRenderTarget({ 256, 1 }, GSTexture::Format::Color, true, true);
+		GSTexture* tex1 = g_gs_device->CreateRenderTarget({ tw, th }, GSTexture::Format::Color, true, true);
+
+		if (GSLocalMemory::m_psm[psm].pal)
+		{
+			g_gs_device->DoCLUT(clut, psm, m_context->TEX0.CBP, m_env.TEXCLUT.CBW, m_context->TEX0.CPSM,
+				m_context->TEX0.CSM, m_env.TEXCLUT.COU, m_env.TEXCLUT.COV);
+		}
+
+		g_gs_device->DoSwizzle(MEM_TO_TEXTURE, tex1, clut, m_context->TEX0.TBP0, m_context->TEX0.TBW, psm, 0, 0, 0, 0, tw, th);
+		g_gs_device->Recycle(clut);
+		g_gs_device->Recycle(tex1);
+	}
+
 	static u32 num_skipped_channel_shuffle_draws = 0;
 
 	// We mess with this state as an optimization, so take a copy and use that instead.
@@ -3311,7 +3548,7 @@ void GSRendererHW::Draw()
 			}
 		}
 	}
-
+	
 	GIFRegTEX0 TEX0 = {};
 	GSTextureCache::Source* src = nullptr;
 	TextureMinMaxResult tmm;

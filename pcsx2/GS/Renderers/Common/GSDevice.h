@@ -6,6 +6,7 @@
 #include "common/HashCombine.h"
 #include "common/WindowInfo.h"
 #include "GS/GS.h"
+#include "GS/GSLocalMemory.h"
 #include "GS/Renderers/Common/GSFastList.h"
 #include "GS/Renderers/Common/GSShaderEnums.h"
 #include "GS/Renderers/Common/GSTexture.h"
@@ -14,6 +15,13 @@
 #include "GS/GSExtra.h"
 #include <array>
 #include <span>
+
+enum ComputeTransferType : u32
+{
+	MEM_TO_TEXTURE = 0,
+	TEXTURE_TO_MEM = 1,
+	RAW_TO_MEM     = 2,
+};
 
 enum class Filter
 {
@@ -1495,6 +1503,11 @@ protected:
 
 	/// Applies CAS and writes to the destination texture, which should be a RWTexture.
 	virtual bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) = 0;
+public:
+	virtual bool DoSwizzle(ComputeTransferType type, GSTexture* tex, GSTexture* clut, u32 BP, u32 BW, u32 PSM, int mem_x, int mem_y, int tex_x, int tex_y, int w, int h) { return false; }
+	virtual bool DoCLUT(GSTexture* clut, u32 PSM, u32 CBP, u32 CBW, u32 CPSM, u32 CSM, u32 COU, u32 COV) { return false; }
+	void TransferEEtoGS(const void* data, u32 DBP, u32 DBW, u32 DPSM, int mem_x, int mem_y, int w, int h);
+protected:
 
 	/// Perform texture operations for ImGui
 	void UpdateImGuiTextures();
@@ -1513,6 +1526,8 @@ protected:
 public:
 	GSDevice();
 	virtual ~GSDevice();
+
+	virtual bool LoadGSMemory(void* src, u32 offset = 0, u32 size = GSLocalMemory::m_vmsize) { return false; }
 
 	/// Returns a string containing current adapter in use.
 	const std::string& GetName() const { return m_name; }

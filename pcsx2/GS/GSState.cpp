@@ -2413,6 +2413,10 @@ void GSState::FlushWrite()
 
 	wi(m_mem, m_tr.x, m_tr.y, &m_tr.buff[m_tr.start], len, m_tr.m_blit, m_tr.m_pos, m_tr.m_reg);
 
+	if (GSConfig.HWGSMemoryEmulation)
+		g_gs_device->TransferEEtoGS(&m_tr.buff[m_tr.start], m_tr.m_blit.DBP, m_tr.m_blit.DBW, m_tr.m_blit.DPSM,
+			m_tr.m_pos.DSAX, m_tr.m_pos.DSAY, m_tr.m_reg.RRW, m_tr.m_reg.RRH);
+
 	m_tr.start += len;
 
 	g_perfmon.Put(GSPerfMon::Swizzle, len);
@@ -2929,6 +2933,29 @@ void GSState::Write(const u8* mem, int len)
 			InvalidateVideoMem(blit, r);
 
 			psm.wi(m_mem, m_tr.x, m_tr.y, mem, m_tr.total, blit, m_tr.m_pos, m_tr.m_reg);
+
+			if (GSConfig.HWGSMemoryEmulation)
+				g_gs_device->TransferEEtoGS(mem, m_tr.m_blit.DBP, m_tr.m_blit.DBW, m_tr.m_blit.DPSM,
+					m_tr.m_pos.DSAX, m_tr.m_pos.DSAY, m_tr.m_reg.RRW, m_tr.m_reg.RRH);
+
+			if (0)
+			{
+				GSTexture::GSMap map;
+				GSTexture* clut = g_gs_device->CreateRenderTarget(256, 1, GSTexture::Format::Color);
+				clut->Map(map);
+				for (int i = 0; i < 256; i++)
+					reinterpret_cast<u32*>(map.bits)[i] = 0xFF000000 | (0x010101 * i);
+				clut->Unmap();
+				GSTexture* tex2 = g_gs_device->CreateRenderTarget(m_tr.m_reg.RRW, m_tr.m_reg.RRH, GSTexture::Format::Color);
+				g_gs_device->DoSwizzle(MEM_TO_TEXTURE, tex2, clut, m_tr.m_blit.DBP, m_tr.m_blit.DBW, m_tr.m_blit.DPSM,
+					m_tr.m_pos.DSAX, m_tr.m_pos.DSAY, 0, 0, m_tr.m_reg.RRW, m_tr.m_reg.RRH);
+
+				g_gs_device->Recycle(tex2);
+				g_gs_device->Recycle(clut);
+			}
+
+			std::string path = GetDrawDumpPath("%05lld_read_tex_%04x_%d_%d", s_n, m_tr.m_blit.DBP, m_tr.m_pos.DSAX, m_tr.m_pos.DSAY);
+			m_mem.SaveBMP(path, m_tr.m_blit.DBP, m_tr.m_blit.DBW, m_tr.m_blit.DPSM, m_tr.m_reg.RRW, m_tr.m_reg.RRH, m_tr.m_pos.DSAX, m_tr.m_pos.DSAY);
 
 			m_tr.start = m_tr.end = m_tr.total;
 
@@ -3730,6 +3757,8 @@ int GSState::Defrost(const freezeData* fd)
 	}
 
 	ReadState(m_mem.m_vm8, data, m_mem.m_vmsize);
+
+	g_gs_device->LoadGSMemory(m_mem.m_vm8);
 
 	for (GIFPath& path : m_path)
 	{
