@@ -35,6 +35,7 @@ namespace D3D12
 		u32 Add32BitConstants(u32 shader_reg, u32 num_values, D3D12_SHADER_VISIBILITY visibility);
 		u32 AddCBVParameter(u32 shader_reg, D3D12_SHADER_VISIBILITY visibility);
 		u32 AddSRVParameter(u32 shader_reg, D3D12_SHADER_VISIBILITY visibility);
+		u32 AddUAVParameter(u32 shader_reg, D3D12_SHADER_VISIBILITY visibility);
 		u32 AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE rt, u32 start_shader_reg, u32 num_shader_regs,
 			D3D12_SHADER_VISIBILITY visibility);
 		u32 AddDescriptorTableMultiRange(u32 num_ranges, D3D12_DESCRIPTOR_RANGE_TYPE* rt, u32* start_shader_reg,

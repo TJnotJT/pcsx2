@@ -185,11 +185,17 @@ public:
 	void DeferDescriptorDestruction(D3D12DescriptorHeapManager& manager, u32 index);
 	void DeferDescriptorDestruction(D3D12DescriptorHeapManager& manager, D3D12DescriptorHandle* handle);
 
+	bool AllocateGPUBuffer(u32 size, ID3D12Resource** gpu_buffer, D3D12MA::Allocation** gpu_allocation,
+		D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+	bool AllocateCPUBuffer(u32 size, ID3D12Resource** cpu_buffer, D3D12MA::Allocation** cpu_allocation);
+	bool UploadToCPUBuffer(u32 size, ID3D12Resource* cpu_buffer, const std::function<void(void*)>& fill_callback);
+
 	// Allocates a temporary CPU staging buffer, fires the callback with it to populate, then copies to a GPU buffer.
 	bool AllocatePreinitializedGPUBuffer(u32 size, ID3D12Resource** gpu_buffer, D3D12MA::Allocation** gpu_allocation,
 		const std::function<void(void*)>& fill_callback);
 	void UploadIndices(D3D12StreamBuffer& buffer, const void* index, size_t count);
 
+	bool LoadGSMemory(void* src, u32 offset = 0, u32 size = GSLocalMemory::m_vmsize) override;
 private:
 	// For pipeline statistics
 	enum class QueryState
@@ -369,7 +375,30 @@ public:
 
 		CAS_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS = 0,
 		CAS_ROOT_SIGNATURE_PARAM_SRC_TEXTURE = 1,
-		CAS_ROOT_SIGNATURE_PARAM_DST_TEXTURE = 2
+		CAS_ROOT_SIGNATURE_PARAM_DST_TEXTURE = 2,
+
+		// Swizzle textures
+		SWIZZLE_TEXTURE       = 0,
+		SWIZZLE_CLUT          = 1,
+		SWIZZLE_DEPTH_TEXTURE = 2,
+		SWIZZLE_RAW_TEXTURE   = 3,
+		NUM_SWIZZLE_TEXTURES  = 4,
+
+		// Swizzle root parameters
+		SWIZZLE_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS = 0,
+		SWIZZLE_ROOT_SIGNATURE_PARAM_GS_MEMORY_BUFFER = 1,
+		SWIZZLE_ROOT_SIGNATURE_PARAM_TEXTURES = 2,
+
+		// Hybrid textures
+		HYBRID_RT           = 0,
+		HYBRID_DEPTH        = 1,
+		HYBRID_TEXTURE      = 2,
+		HYBRID_CLUT         = 3,
+		NUM_HYBRID_TEXTURES = 4,
+
+		HYBRID_ROOT_SIGNATURE_PARAM_SELECTORS = 0,
+		HYBRID_ROOT_SIGNATURE_PARAM_CBV       = 1,
+		HYBRID_ROOT_SIGNATURE_PARAM_TEXTURES  = 2,
 	};
 
 private:
@@ -388,6 +417,7 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_tfx_root_signature;
 	ComPtr<ID3D12RootSignature> m_utility_root_signature;
+	ComPtr<ID3D12RootSignature> m_hybrid_root_signature;
 
 	D3D12StreamBuffer m_vertex_stream_buffer;
 	D3D12StreamBuffer m_index_stream_buffer;
@@ -397,6 +427,9 @@ private:
 	D3D12StreamBuffer m_texture_stream_buffer;
 	ComPtr<ID3D12Resource> m_expand_index_buffer;
 	ComPtr<D3D12MA::Allocation> m_expand_index_buffer_allocation;
+	ComPtr<ID3D12Resource> m_gs_memory_buffer;
+	ComPtr<D3D12MA::Allocation> m_gs_memory_buffer_allocation;
+	bool m_gs_memory_initialized = false;
 
 	D3D12DescriptorHandle m_point_sampler_cpu;
 	D3D12DescriptorHandle m_linear_sampler_cpu;
@@ -429,17 +462,31 @@ private:
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
 
+	ComPtr<ID3DBlob> m_hybrid_vertex_shader;
+	ComPtr<ID3DBlob> m_hybrid_pixel_shader;
+	std::array<ComPtr<ID3D12PipelineState>, 3> m_hybrid_draw_pipelines;
+
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
 	ComPtr<ID3D12PipelineState> m_cas_sharpen_pipeline;
+
+	ComPtr<ID3D12RootSignature> m_swizzle_root_signature;
+	ComPtr<ID3D12PipelineState> m_swizzle_pipeline;
+	ComPtr<ID3D12PipelineState> m_clut_pipeline;
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
 	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
 
+	GSHybridDrawSelector m_hybrid_selector_cache{};
+	GSHybridConstantBuffer m_hybrid_cb_cache{};
+
 	D3D12ShaderCache m_shader_cache;
 	ComPtr<ID3DBlob> m_convert_vs;
 	std::string m_tfx_source;
+
+	std::string m_hybrid_vs_source;
+	std::string m_hybrid_ps_source;
 
 	void LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
 		DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format, DXGI_FORMAT* uav_format) const;
@@ -462,6 +509,9 @@ private:
 	bool DoCAS(
 		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
 
+	bool DoSwizzle(ComputeTransferType type, GSTexture* tex, GSTexture* clut, u32 BP, u32 BW, u32 PSM, int mem_x, int mem_y, int tex_x, int tex_y, int w, int h) override;
+	bool DoCLUT(GSTexture* clut, u32 PSM, u32 CBP, u32 CBW, u32 CPSM, u32 CSM, u32 COU, u32 COV) override;
+
 	bool GetSampler(D3D12DescriptorHandle* cpu_handle, GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 	bool GetTextureGroupDescriptors(
@@ -471,6 +521,11 @@ private:
 	const ID3DBlob* GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel);
 	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p);
 	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p);
+
+	const ID3DBlob* GetHybridVertexShader();
+	const ID3DBlob* GetHybridPixelShader();
+	ComPtr<ID3D12PipelineState> CreateHybridDrawPipeline(u32 topology);
+	const ID3D12PipelineState* GetHybridDrawPipeline(u32 topology);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);
@@ -488,6 +543,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileSwizzlePipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -592,6 +648,13 @@ public:
 	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 
+	void SetSwizzleResources(bool raw, bool depth, GSTexture* tex, GSTexture* clut);
+	void SetCLUTResources(GSTexture* clut);
+
+	void SetHybridDrawSelector(const GSHybridDrawSelector& selector) override;
+	void SetHybridConstants(const GSHybridConstantBuffer& cb) override;
+	void BindDrawTexturesHybrid(const GSHybridDrawTextures& textures) override;
+	void DrawHybrid(const GSHybridDrawConfig& config) override;
 public:
 	/// Ends any render pass, executes the command buffer, and invalidates cached state.
 	void ExecuteCommandList(bool wait_for_completion);
@@ -605,6 +668,8 @@ public:
 	/// Binds all dirty state to the command buffer.
 	bool ApplyUtilityState(bool already_execed = false);
 	bool ApplyTFXState(bool already_execed = false);
+	bool ApplySwizzleState(const void* constants, u32 const_size, bool already_execed = false);
+	bool ApplyHybridDrawState(bool already_execed = false);
 
 	void SetVertexBuffer(D3D12_GPU_VIRTUAL_ADDRESS buffer, size_t size, size_t stride);
 	void SetIndexBuffer(D3D12_GPU_VIRTUAL_ADDRESS buffer, size_t size, DXGI_FORMAT type);
@@ -668,6 +733,16 @@ private:
 		DIRTY_FLAG_BLEND_CONSTANTS = (1 << 20),
 		DIRTY_FLAG_STENCIL_REF = (1 << 21),
 
+		DIRTY_FLAG_SWIZZLE_GS_MEMORY_BUFFER = (1 << 22),
+		DIRTY_FLAG_SWIZZLE_TEXTURES = (1 << 23),
+		DIRTY_FLAG_SWIZZLE_TEXTURE_DESCRIPTOR_TABLE = (1 << 24),
+
+		DIRTY_FLAG_HYBRID_SELECTORS = (1 << 25),
+		DIRTY_FLAG_HYBRID_CONSTANT_BUFFER = (1 << 26),
+		DIRTY_FLAG_HYBRID_TEXTURES = (1 << 27),
+		DIRTY_FLAG_HYBRID_CONSTANT_BUFFER_BINDING = (1 << 28),
+		DIRTY_FLAG_HYBRID_TEXTURE_DESCRIPTOR_TABLE = (1 << 29),
+
 		DIRTY_ROOT_PARAMS = DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		                    DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING | DIRTY_FLAG_VS_INDEX_BUFFER_BINDING |
 		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
@@ -682,13 +757,24 @@ private:
 
 		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE,
 		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER,
+
+		DIRTY_SWIZZLE_ROOT_PARAMS = DIRTY_FLAG_SWIZZLE_GS_MEMORY_BUFFER | DIRTY_FLAG_SWIZZLE_TEXTURE_DESCRIPTOR_TABLE,
+		DIRTY_SWIZZLE_STATE = DIRTY_FLAG_PIPELINE | DIRTY_SWIZZLE_ROOT_PARAMS | DIRTY_FLAG_SWIZZLE_TEXTURES,
+
+		DIRTY_HYBRID_ROOT_PARAMS = DIRTY_FLAG_HYBRID_SELECTORS | DIRTY_FLAG_HYBRID_CONSTANT_BUFFER_BINDING |
+		                           DIRTY_FLAG_HYBRID_TEXTURE_DESCRIPTOR_TABLE,
+		DIRTY_HYBRID_STATE = DIRTY_BASE_STATE | DIRTY_HYBRID_ROOT_PARAMS | DIRTY_FLAG_HYBRID_TEXTURES |
+		                     DIRTY_FLAG_HYBRID_CONSTANT_BUFFER,
 	};
 
 	enum class RootSignature
 	{
 		Undefined,
 		TFX,
-		Utility
+		Utility,
+		CAS,
+		Swizzle,
+		Hybrid,
 	};
 
 	void InitializeState();
@@ -717,11 +803,16 @@ private:
 
 	std::array<D3D12_GPU_VIRTUAL_ADDRESS, NUM_TFX_CONSTANT_BUFFERS> m_tfx_constant_buffers{};
 	std::array<D3D12DescriptorHandle, NUM_TOTAL_TFX_TEXTURES> m_tfx_textures{};
+	std::array<D3D12DescriptorHandle, NUM_SWIZZLE_TEXTURES> m_swizzle_textures{};
+	D3D12_GPU_VIRTUAL_ADDRESS m_hybrid_constant_buffer{};
+	std::array<D3D12DescriptorHandle, NUM_HYBRID_TEXTURES> m_hybrid_textures{};
 	D3D12DescriptorHandle m_tfx_sampler;
 	u32 m_tfx_sampler_sel = 0;
 	D3D12DescriptorHandle m_tfx_textures_handle_gpu;
 	D3D12DescriptorHandle m_tfx_samplers_handle_gpu;
 	D3D12DescriptorHandle m_tfx_rt_textures_handle_gpu;
+	D3D12DescriptorHandle m_swizzle_textures_handle_gpu;
+	D3D12DescriptorHandle m_hybrid_textures_handle_gpu;
 
 	D3D12DescriptorHandle m_utility_texture_cpu;
 	D3D12DescriptorHandle m_utility_texture_gpu;
@@ -729,10 +820,17 @@ private:
 	D3D12DescriptorHandle m_utility_sampler_gpu;
 
 	RootSignature m_current_root_signature = RootSignature::Undefined;
+	RootSignature m_current_compute_root_signature = RootSignature::Undefined;
 	const ID3D12PipelineState* m_current_pipeline = nullptr;
 
 	std::unique_ptr<GSTexture12> m_null_texture;
+	std::unique_ptr<GSTexture12> m_null_int_texture;
 
 	// current pipeline selector - we save this in the struct to avoid re-zeroing it every draw
 	PipelineSelector m_pipeline_selector = {};
+
+	GSTexture12* GetOrNullTexture(GSTexture* tex)
+	{
+		return static_cast<GSTexture12*>(tex ? tex : m_null_texture.get());
+	}
 };
