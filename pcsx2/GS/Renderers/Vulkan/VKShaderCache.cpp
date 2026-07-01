@@ -313,7 +313,7 @@ void VKShaderCache::Destroy()
 
 void VKShaderCache::Open()
 {
-	if (!GSConfig.DisableShaderCache)
+	if (GSConfig.ShaderCacheType != GSShaderCacheType::Disabled)
 	{
 		m_pipeline_cache_filename = GetPipelineCacheBaseFileName(GSConfig.UseDebugDevice);
 
