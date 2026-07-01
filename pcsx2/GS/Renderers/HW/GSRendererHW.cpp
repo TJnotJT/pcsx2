@@ -9496,6 +9496,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
 	}
 
+	m_conf.uber_shader = true;
+
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else

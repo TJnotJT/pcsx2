@@ -258,6 +258,22 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
+	union UberSelector
+	{
+		struct
+		{
+			u8 enable : 1;
+			u8 zwrite : 1;
+			u8 sw_depth : 1;
+			u8 date_init : 1;
+			u8 _free : 4;
+		};
+
+		u8 key;
+	};
+
+	static_assert(sizeof(UberSelector) == 1);
+
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
@@ -280,6 +296,8 @@ public:
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
 
+		UberSelector uber;
+
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
 
@@ -292,7 +310,7 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.uber.key, e.key);
 			return hash;
 		}
 	};
@@ -435,11 +453,13 @@ private:
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
-	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
+	GSHWDrawConfig::ShaderPushConstants m_tfx_pc_cache;
 
 	D3D12ShaderCache m_shader_cache;
+	D3D12ShaderCache m_uber_shader_cache;
 	ComPtr<ID3DBlob> m_convert_vs;
 	std::string m_tfx_source;
+	std::string m_tfx_uber_source;
 
 	void LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
 		DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format, DXGI_FORMAT* uav_format) const;
@@ -467,8 +487,8 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
-	const ID3DBlob* GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel);
+	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, const UberSelector& uber_sel);
+	const ID3DBlob* GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, const UberSelector& uber_sel);
 	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p);
 	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p);
 
@@ -582,6 +602,8 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
+	void SetSelectorPushConstants(const GSHWDrawConfig& config);
+	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	void RenderHW(GSHWDrawConfig& config) override;
@@ -656,7 +678,7 @@ private:
 		DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE = (1 << 9),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE = (1 << 10),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 = (1 << 11),
-		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 12),
+		DIRTY_FLAG_TFX_PUSH_CONSTANTS = (1 << 12),
 
 		DIRTY_FLAG_VERTEX_BUFFER = (1 << 13),
 		DIRTY_FLAG_INDEX_BUFFER = (1 << 14),
@@ -671,7 +693,7 @@ private:
 		DIRTY_ROOT_PARAMS = DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		                    DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING | DIRTY_FLAG_VS_INDEX_BUFFER_BINDING |
 		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
-		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_VS_PUSH_CONSTANTS,
+		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_TFX_PUSH_CONSTANTS,
 
 		DIRTY_BASE_STATE = DIRTY_FLAG_VERTEX_BUFFER | DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PRIMITIVE_TOPOLOGY |
 		                   DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR | DIRTY_FLAG_RENDER_TARGET | DIRTY_FLAG_PIPELINE |

@@ -651,7 +651,7 @@ bool GSDevice12::ExecuteCommandList(WaitType wait_for_completion)
 		WaitForFence(res.ready_fence_value, wait_for_completion == WaitType::Spin);
 
 	// Push constants need to be refreshed each command list.
-	m_dirty_flags |= DIRTY_FLAG_VS_PUSH_CONSTANTS;
+	m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
 
 	return true;
 }
@@ -974,8 +974,22 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_tfx_source = std::move(*shader);
 	}
 
+	{
+		std::optional<std::string> shader = ReadShaderSource("shaders/dx11/tfx_uber.fx");
+		if (!shader.has_value())
+		{
+			Host::ReportErrorAsync("GS", "Failed to read shaders/dx11/tfx_uber.fx.");
+			return false;
+		}
+
+		m_tfx_uber_source = std::move(*shader);
+	}
+
 	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice))
 		Console.Warning("D3D12: Shader cache failed to open.");
+
+	if (!m_uber_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice))
+		Console.Warning("D3D12: Uber shader cache failed to open.");
 
 	if (!CreateRootSignatures())
 	{
@@ -2810,7 +2824,7 @@ bool GSDevice12::CreateRootSignatures()
 	u32 rt_start_regs[2] = { 2, 0 };
 	u32 rt_num_regs[2] = { 3, 2 };
 	rsb.AddDescriptorTableMultiRange(2, rt_types, rt_start_regs, rt_num_regs, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.Add32BitConstants(2, sizeof(m_vs_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_VERTEX);
+	rsb.Add32BitConstants(2, sizeof(m_tfx_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_ALL);
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -3208,100 +3222,155 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
-const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
+const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, const UberSelector& uber_sel)
 {
+	ShaderMacro sm;
+	sm.AddMacro("VERTEX_SHADER", 1);
+	if (uber_sel.enable)
+	{
+		// Do the dynamic macros and clear them from the selector.
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+		{
+			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
+			sel.ClearField(dynamic_define.name);
+		}
+
+		// Add the uber selector bits.
+		sel.uber_enable = 1;
+
+		// Do the static macros.
+		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::vs_selector_fields)
+		{
+			if (!field_desc.dynamic)
+				sm.AddMacro(field_desc.shader_name, sel.GetField(field_desc.name));
+		}
+	}
+	else
+	{
+		sm.AddMacro("VS_TME", sel.tme);
+		sm.AddMacro("VS_FST", sel.fst);
+		sm.AddMacro("VS_IIP", sel.iip);
+		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+	}
+
+	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
 		return it->second.get();
 
-	ShaderMacro sm;
-	sm.AddMacro("VERTEX_SHADER", 1);
-	sm.AddMacro("VS_TME", sel.tme);
-	sm.AddMacro("VS_FST", sel.fst);
-	sm.AddMacro("VS_IIP", sel.iip);
-	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
-
+	// FIXME: Make the Uber/Normal sources the same.
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
-	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
+	const std::string& source = uber_sel.enable ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point));
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
 	return it->second.get();
 }
 
-const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel)
+const ID3DBlob* GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, const UberSelector& uber_sel)
 {
-	auto it = m_tfx_pixel_shaders.find(sel);
-	if (it != m_tfx_pixel_shaders.end())
-		return it->second.get();
-
 	ShaderMacro sm;
 	sm.AddMacro("PIXEL_SHADER", 1);
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_DEPTH_FEEDBACK_SUPPORT", 2);
-	sm.AddMacro("PS_FST", sel.fst);
-	sm.AddMacro("PS_WMS", sel.wms);
-	sm.AddMacro("PS_WMT", sel.wmt);
-	sm.AddMacro("PS_ADJS", sel.adjs);
-	sm.AddMacro("PS_ADJT", sel.adjt);
-	sm.AddMacro("PS_AEM_FMT", sel.aem_fmt);
-	sm.AddMacro("PS_AEM", sel.aem);
-	sm.AddMacro("PS_TFX", sel.tfx);
-	sm.AddMacro("PS_TCC", sel.tcc);
-	sm.AddMacro("PS_DATE", sel.date);
-	sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
-	sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
-	sm.AddMacro("PS_FOG", sel.fog);
-	sm.AddMacro("PS_IIP", sel.iip);
-	sm.AddMacro("PS_BLEND_HW", sel.blend_hw);
-	sm.AddMacro("PS_A_MASKED", sel.a_masked);
-	sm.AddMacro("PS_FBA", sel.fba);
-	sm.AddMacro("PS_FBMASK", sel.fbmask);
-	sm.AddMacro("PS_LTF", sel.ltf);
-	sm.AddMacro("PS_TCOFFSETHACK", sel.tcoffsethack);
-	sm.AddMacro("PS_POINT_SAMPLER", sel.point_sampler);
-	sm.AddMacro("PS_REGION_RECT", sel.region_rect);
-	sm.AddMacro("PS_SHUFFLE", sel.shuffle);
-	sm.AddMacro("PS_SHUFFLE_SAME", sel.shuffle_same);
-	sm.AddMacro("PS_PROCESS_BA", sel.process_ba);
-	sm.AddMacro("PS_PROCESS_RG", sel.process_rg);
-	sm.AddMacro("PS_SHUFFLE_ACROSS", sel.shuffle_across);
-	sm.AddMacro("PS_READ16_SRC", sel.real16src);
-	sm.AddMacro("PS_WRITE_RG", sel.write_rg);
-	sm.AddMacro("PS_CHANNEL_FETCH", sel.channel);
-	sm.AddMacro("PS_TALES_OF_ABYSS_HLE", sel.tales_of_abyss_hle);
-	sm.AddMacro("PS_URBAN_CHAOS_HLE", sel.urban_chaos_hle);
-	sm.AddMacro("PS_DST_FMT", sel.dst_fmt);
-	sm.AddMacro("PS_DEPTH_FMT", sel.depth_fmt);
-	sm.AddMacro("PS_PAL_FMT", sel.pal_fmt);
-	sm.AddMacro("PS_COLCLIP_HW", sel.colclip_hw);
-	sm.AddMacro("PS_RTA_CORRECTION", sel.rta_correction);
-	sm.AddMacro("PS_RTA_SRC_CORRECTION", sel.rta_source_correction);
-	sm.AddMacro("PS_COLCLIP", sel.colclip);
-	sm.AddMacro("PS_BLEND_A", sel.blend_a);
-	sm.AddMacro("PS_BLEND_B", sel.blend_b);
-	sm.AddMacro("PS_BLEND_C", sel.blend_c);
-	sm.AddMacro("PS_BLEND_D", sel.blend_d);
-	sm.AddMacro("PS_BLEND_MIX", sel.blend_mix);
-	sm.AddMacro("PS_ROUND_INV", sel.round_inv);
-	sm.AddMacro("PS_FIXED_ONE_A", sel.fixed_one_a);
-	sm.AddMacro("PS_PABE", sel.pabe);
-	sm.AddMacro("PS_DITHER", sel.dither);
-	sm.AddMacro("PS_DITHER_ADJUST", sel.dither_adjust);
-	sm.AddMacro("PS_ZCLAMP", sel.zclamp);
-	sm.AddMacro("PS_ZFLOOR", sel.zfloor);
-	sm.AddMacro("PS_SCANMSK", sel.scanmsk);
-	sm.AddMacro("PS_AUTOMATIC_LOD", sel.automatic_lod);
-	sm.AddMacro("PS_MANUAL_LOD", sel.manual_lod);
-	sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
-	sm.AddMacro("PS_NO_COLOR", sel.no_color);
-	sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
-	sm.AddMacro("PS_ZTST", sel.ztst);
-	sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
-	sm.AddMacro("PS_ABE", sel.abe);
-	sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
-	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
-	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 
-	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
+	if (uber_sel.enable)
+	{
+		// Do the dynamic macros and clear them from the selector.
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
+		{
+			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
+			sel.ClearField(dynamic_define.name);
+		}
+
+		// Add the uber selector bits.
+		sel.uber_enable = 1;
+		sel.uber_sw_depth = uber_sel.sw_depth;
+		sel.uber_zwrite = uber_sel.zwrite;
+		sel.uber_date_init = uber_sel.date_init;
+
+		// Do the static macros.
+		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::ps_selector_fields)
+		{
+			if (!field_desc.dynamic)
+				sm.AddMacro(field_desc.shader_name, sel.GetField(field_desc.name));
+		}
+	}
+	else
+	{
+		sm.AddMacro("UBER_SHADER", 0);
+		sm.AddMacro("PS_FST", sel.fst);
+		sm.AddMacro("PS_WMS", sel.wms);
+		sm.AddMacro("PS_WMT", sel.wmt);
+		sm.AddMacro("PS_ADJS", sel.adjs);
+		sm.AddMacro("PS_ADJT", sel.adjt);
+		sm.AddMacro("PS_AEM_FMT", sel.aem_fmt);
+		sm.AddMacro("PS_AEM", sel.aem);
+		sm.AddMacro("PS_TFX", sel.tfx);
+		sm.AddMacro("PS_TCC", sel.tcc);
+		sm.AddMacro("PS_DATE", sel.date);
+		sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
+		sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
+		sm.AddMacro("PS_FOG", sel.fog);
+		sm.AddMacro("PS_IIP", sel.iip);
+		sm.AddMacro("PS_BLEND_HW", sel.blend_hw);
+		sm.AddMacro("PS_A_MASKED", sel.a_masked);
+		sm.AddMacro("PS_FBA", sel.fba);
+		sm.AddMacro("PS_FBMASK", sel.fbmask);
+		sm.AddMacro("PS_LTF", sel.ltf);
+		sm.AddMacro("PS_TCOFFSETHACK", sel.tcoffsethack);
+		sm.AddMacro("PS_POINT_SAMPLER", sel.point_sampler);
+		sm.AddMacro("PS_REGION_RECT", sel.region_rect);
+		sm.AddMacro("PS_SHUFFLE", sel.shuffle);
+		sm.AddMacro("PS_SHUFFLE_SAME", sel.shuffle_same);
+		sm.AddMacro("PS_PROCESS_BA", sel.process_ba);
+		sm.AddMacro("PS_PROCESS_RG", sel.process_rg);
+		sm.AddMacro("PS_SHUFFLE_ACROSS", sel.shuffle_across);
+		sm.AddMacro("PS_READ16_SRC", sel.real16src);
+		sm.AddMacro("PS_WRITE_RG", sel.write_rg);
+		sm.AddMacro("PS_CHANNEL_FETCH", sel.channel);
+		sm.AddMacro("PS_TALES_OF_ABYSS_HLE", sel.tales_of_abyss_hle);
+		sm.AddMacro("PS_URBAN_CHAOS_HLE", sel.urban_chaos_hle);
+		sm.AddMacro("PS_DST_FMT", sel.dst_fmt);
+		sm.AddMacro("PS_DEPTH_FMT", sel.depth_fmt);
+		sm.AddMacro("PS_PAL_FMT", sel.pal_fmt);
+		sm.AddMacro("PS_COLCLIP_HW", sel.colclip_hw);
+		sm.AddMacro("PS_RTA_CORRECTION", sel.rta_correction);
+		sm.AddMacro("PS_RTA_SRC_CORRECTION", sel.rta_source_correction);
+		sm.AddMacro("PS_COLCLIP", sel.colclip);
+		sm.AddMacro("PS_BLEND_A", sel.blend_a);
+		sm.AddMacro("PS_BLEND_B", sel.blend_b);
+		sm.AddMacro("PS_BLEND_C", sel.blend_c);
+		sm.AddMacro("PS_BLEND_D", sel.blend_d);
+		sm.AddMacro("PS_BLEND_MIX", sel.blend_mix);
+		sm.AddMacro("PS_ROUND_INV", sel.round_inv);
+		sm.AddMacro("PS_FIXED_ONE_A", sel.fixed_one_a);
+		sm.AddMacro("PS_PABE", sel.pabe);
+		sm.AddMacro("PS_DITHER", sel.dither);
+		sm.AddMacro("PS_DITHER_ADJUST", sel.dither_adjust);
+		sm.AddMacro("PS_ZCLAMP", sel.zclamp);
+		sm.AddMacro("PS_ZFLOOR", sel.zfloor);
+		sm.AddMacro("PS_SCANMSK", sel.scanmsk);
+		sm.AddMacro("PS_AUTOMATIC_LOD", sel.automatic_lod);
+		sm.AddMacro("PS_MANUAL_LOD", sel.manual_lod);
+		sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
+		sm.AddMacro("PS_NO_COLOR", sel.no_color);
+		sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
+		sm.AddMacro("PS_ZTST", sel.ztst);
+		sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
+		sm.AddMacro("PS_ABE", sel.abe);
+		sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
+		sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
+		sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
+	}
+
+	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
+	auto it = m_tfx_pixel_shaders.find(sel);
+	if (it != m_tfx_pixel_shaders.end())
+		return it->second.get();
+
+	// FIXME: Make the Uber/Normal sources the same.
+	const std::string& source = uber_sel.enable ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
 	return it->second.get();
 }
@@ -3323,8 +3392,8 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		pps.no_color1 = true;
 	}
 
-	const ID3DBlob* vs = GetTFXVertexShader(p.vs);
-	const ID3DBlob* ps = GetTFXPixelShader(pps);
+	const ID3DBlob* vs = GetTFXVertexShader(p.vs, p.uber);
+	const ID3DBlob* ps = GetTFXPixelShader(pps, p.uber);
 	if (!vs || !ps)
 		return nullptr;
 
@@ -4155,12 +4224,14 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootSignature(m_tfx_root_signature.get());
 	}
 
+	if (flags & DIRTY_FLAG_TFX_PUSH_CONSTANTS)
+		WriteTFXPushConstants(0, sizeof(m_tfx_pc_cache) / sizeof(u32));
 	if (flags & DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_VS_CBV, m_tfx_constant_buffers[0]);
 	if (flags & DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_PS_CBV, m_tfx_constant_buffers[1]);
-	if (m_features.vs_expand && (flags & DIRTY_FLAG_VS_PUSH_CONSTANTS))
-		SetVSPushConstants(m_vs_pc_cache.base_vertex, m_vs_pc_cache.base_index, true);
+	if (m_features.vs_expand && (flags & DIRTY_FLAG_TFX_PUSH_CONSTANTS))
+		SetVSPushConstants(m_tfx_pc_cache.base_vertex, m_tfx_pc_cache.base_index, true);
 	if (flags & DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING)
 	{
 		cmdlist->SetGraphicsRootShaderResourceView(TFX_ROOT_SIGNATURE_PARAM_VS_VB_SRV,
@@ -4222,15 +4293,34 @@ void GSDevice12::SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb)
 
 void GSDevice12::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::VSPushConstants pc;
+	GSHWDrawConfig::ShaderPushConstants pc = m_tfx_pc_cache;
 	pc.base_vertex = base_vertex;
 	pc.base_index = base_index;
-	if (m_vs_pc_cache.Update(pc) || force_update)
-	{
-		GetCommandList().list4->SetGraphicsRoot32BitConstants(
-			TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS, sizeof(m_vs_pc_cache) / sizeof(u32),
-			&m_vs_pc_cache, 0);
-	}
+	static constexpr u32 start = offsetof(GSHWDrawConfig::ShaderPushConstants, base_vertex) / sizeof(u32);
+	static constexpr u32 end = offsetof(GSHWDrawConfig::ShaderPushConstants, base_index) / sizeof(u32);
+	static_assert(start < end);
+	// Need to write results as this function is called after ApplyTFXState().
+	if (m_tfx_pc_cache.Update(pc) || force_update)
+		WriteTFXPushConstants(start, end - start + 1);
+}
+
+void GSDevice12::SetSelectorPushConstants(const GSHWDrawConfig& config)
+{
+	GSHWDrawConfig::ShaderPushConstants pc = m_tfx_pc_cache;
+	std::memset(pc.uber_selectors, 0, sizeof(pc.uber_selectors));
+	GSHWDrawConfig::GetUberShaderVSSelector(
+		config.vs, GSHWDrawConfig::ShaderPushConstants::NUM_UBER_SELECTORS, pc.uber_selectors);
+	GSHWDrawConfig::GetUberShaderPSSelector(
+		config.ps, GSHWDrawConfig::ShaderPushConstants::NUM_UBER_SELECTORS, pc.uber_selectors);
+	if (m_tfx_pc_cache.Update(pc))
+		m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
+}
+
+void GSDevice12::WriteTFXPushConstants(u32 offset, u32 num_constants)
+{
+	GetCommandList().list4->SetGraphicsRoot32BitConstants(
+		TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS, num_constants,
+		reinterpret_cast<u32*>(&m_tfx_pc_cache) + offset, offset);
 }
 
 void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox)
@@ -4378,6 +4468,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
+
+	if (config.uber_shader)
+		SetSelectorPushConstants(config);
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
@@ -4826,6 +4919,15 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
+
+	m_pipeline_selector.uber.key = 0;
+	if (config.uber_shader)
+	{
+		m_pipeline_selector.uber.enable = 1;
+		m_pipeline_selector.uber.sw_depth = config.ps.IsFeedbackLoopDepth();
+		m_pipeline_selector.uber.zwrite = config.ps.HasDepthOutput();
+		m_pipeline_selector.uber.date_init = config.ps.HasDATEInit();
+	}
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
