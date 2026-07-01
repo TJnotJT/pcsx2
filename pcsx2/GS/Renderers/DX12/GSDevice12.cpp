@@ -60,32 +60,6 @@ static D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE GetLoadOpForTexture(GSTexture12* 
 	// clang-format on
 }
 
-GSDevice12::ShaderMacro::ShaderMacro()
-{
-	mlist.emplace_back("DX12", "1");
-}
-
-void GSDevice12::ShaderMacro::AddMacro(const char* n, int d)
-{
-	AddMacro(n, std::to_string(d));
-}
-
-void GSDevice12::ShaderMacro::AddMacro(const char* n, std::string d)
-{
-	mlist.emplace_back(n, std::move(d));
-}
-
-D3D_SHADER_MACRO* GSDevice12::ShaderMacro::GetPtr(void)
-{
-	mout.clear();
-
-	for (auto& i : mlist)
-		mout.emplace_back(i.name.c_str(), i.def.c_str());
-
-	mout.emplace_back(nullptr, nullptr);
-	return (D3D_SHADER_MACRO*)mout.data();
-}
-
 GSDevice12::GSDevice12() = default;
 
 GSDevice12::~GSDevice12() = default;
@@ -651,7 +625,7 @@ bool GSDevice12::ExecuteCommandList(WaitType wait_for_completion)
 		WaitForFence(res.ready_fence_value, wait_for_completion == WaitType::Spin);
 
 	// Push constants need to be refreshed each command list.
-	m_dirty_flags |= DIRTY_FLAG_VS_PUSH_CONSTANTS;
+	m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
 
 	return true;
 }
@@ -974,8 +948,22 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_tfx_source = std::move(*shader);
 	}
 
-	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice))
+	{
+		std::optional<std::string> shader = ReadShaderSource("shaders/dx11/tfx_uber.fx");
+		if (!shader.has_value())
+		{
+			Host::ReportErrorAsync("GS", "Failed to read shaders/dx11/tfx_uber.fx.");
+			return false;
+		}
+
+		m_tfx_uber_source = std::move(*shader);
+	}
+
+	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice, GSConfig.HybridShaderCacheThreads,
+		GSConfig.HybridShaderCacheLatencyMS))
+	{
 		Console.Warning("D3D12: Shader cache failed to open.");
+	}
 
 	if (!CreateRootSignatures())
 	{
@@ -987,7 +975,8 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		return false;
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
-		!CompileMergePipelines() || !CompilePostProcessingPipelines())
+		!CompileMergePipelines() || !CompilePostProcessingPipelines() ||
+		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileUberTFXPipelines()))
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
@@ -1596,7 +1585,7 @@ void GSDevice12::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 
 void GSDevice12::Draw(const GSHWDrawConfig& config, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	if (config.vs.expand != GSHWDrawConfig::VSExpand::None || config.uber_shader)
 	{
 		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
 		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
@@ -2346,7 +2335,7 @@ bool GSDevice12::CompileImGuiPipeline()
 		D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 	gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
 
-	m_imgui_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+	m_imgui_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 	if (!m_imgui_pipeline)
 	{
 		Console.Error("D3D12: Failed to compile ImGui pipeline");
@@ -2354,6 +2343,74 @@ bool GSDevice12::CompileImGuiPipeline()
 	}
 
 	D3D12::SetObjectName(m_imgui_pipeline.get(), "ImGui pipeline");
+	return true;
+}
+
+bool GSDevice12::CompileUberTFXPipelines()
+{
+	Common::Timer timer;
+
+	// Uber pixel shaders.
+	u32 num_ps = 0;
+	for (u32 ps = 0; ps < GSHWDrawConfig::NumUberPSSelectors; ps++)
+	{
+		auto [ps_sel, valid] = GSHWDrawConfig::GetNthUberPSSelector(ps);
+		if (!valid)
+			continue;
+		ShaderJob job = GetTFXPixelShader(ps_sel, true);
+		if (!job.blob)
+			return false;
+		num_ps++;
+	}
+
+	Console.WriteLn("Compiled %u uber pixel shaders in %.2f seconds", num_ps, timer.GetTimeSecondsAndReset());
+
+	// Uber vertex shaders.
+	u32 num_vs = 0;
+	for (u32 vs = 0; vs < GSHWDrawConfig::NumUberVSSelectors; vs++)
+	{
+		auto [vs_sel, valid] = GSHWDrawConfig::GetNthUberVSSelector(vs);
+		if (!valid)
+			continue;
+		ShaderJob job = GetTFXVertexShader(vs_sel, true);
+		if (!job.blob)
+			return false;
+		num_vs++;
+	}
+
+	Console.WriteLn("Compiled %u uber vertex shaders in %.2f seconds", num_vs, timer.GetTimeSecondsAndReset());
+
+	// Uber ROV pipelines.
+	u32 num_pipelines = 0;
+	GSHWDrawConfig config{};
+	for (u32 ps = 0; ps < GSHWDrawConfig::NumUberPSSelectors; ps++)
+	{
+		auto [ps_sel, valid] = GSHWDrawConfig::GetNthUberPSSelector(ps);
+		if (!valid)
+			continue;
+		for (u32 vs = 0; vs < GSHWDrawConfig::NumUberVSSelectors; vs++)
+		{
+			auto [vs_sel, valid] = GSHWDrawConfig::GetNthUberVSSelector(vs);
+
+			if (!valid)
+				continue;
+
+			for (u32 topology = 0; topology < 3; topology++)
+			{
+				config.ps = ps_sel;
+				config.vs = vs_sel;
+				config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
+
+				UpdateHWPipelineSelector(config);
+
+				GetTFXPipeline(m_pipeline_selector, true);
+				num_pipelines++;
+			}
+		}
+	}
+
+	Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
+
 	return true;
 }
 
@@ -2810,7 +2867,7 @@ bool GSDevice12::CreateRootSignatures()
 	u32 rt_start_regs[2] = { 2, 0 };
 	u32 rt_num_regs[2] = { 3, 2 };
 	rsb.AddDescriptorTableMultiRange(2, rt_types, rt_start_regs, rt_num_regs, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.Add32BitConstants(2, sizeof(m_vs_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_VERTEX);
+	rsb.Add32BitConstants(2, sizeof(m_tfx_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_ALL);
 	if (!(m_tfx_root_signature = rsb.Create()))
 		return false;
 	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
@@ -2893,7 +2950,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false);
+		ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false, false);
 					
 		if (!pipe)
 			return false;
@@ -2915,7 +2972,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 				gpb.SetRenderTarget(0, is_setup ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
 				gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false);
+				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 				if (!arr[ds])
 					return false;
 
@@ -2949,7 +3006,7 @@ bool GSDevice12::CompileConvertPipelines()
 		for (u32 ds = 0; ds < 2; ds++)
 		{
 			gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-			m_primid_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
+			m_primid_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 			if (!m_primid_image_setup_pipelines[ds][datm])
 				return false;
 
@@ -2994,7 +3051,7 @@ bool GSDevice12::CompilePresentPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_present[index] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_present[index] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_present[index])
 			return false;
 
@@ -3030,7 +3087,7 @@ bool GSDevice12::CompileInterlacePipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_interlace[i] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_interlace[i] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_interlace[i])
 			return false;
 
@@ -3067,7 +3124,7 @@ bool GSDevice12::CompileMergePipelines()
 		gpb.SetBlendState(0, true, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD,
 			D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 
-		m_merge[i] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_merge[i] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_merge[i])
 			return false;
 
@@ -3104,7 +3161,7 @@ bool GSDevice12::CompilePostProcessingPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_fxaa_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_fxaa_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_fxaa_pipeline)
 			return false;
 
@@ -3125,7 +3182,7 @@ bool GSDevice12::CompilePostProcessingPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_shadeboost_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_shadeboost_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_shadeboost_pipeline)
 			return false;
 
@@ -3208,106 +3265,179 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
-const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
+GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, AsyncReturn* async)
 {
+	ShaderJob shader{};
+
+	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
-		return it->second.get();
+	{
+		shader.blob = it->second.get();
+		return shader;
+	}
 
 	ShaderMacro sm;
 	sm.AddMacro("VERTEX_SHADER", 1);
-	sm.AddMacro("VS_TME", sel.tme);
-	sm.AddMacro("VS_FST", sel.fst);
-	sm.AddMacro("VS_IIP", sel.iip);
-	sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+	if (uber)
+	{
+		// Do the dynamic macros.
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
 
-	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
-	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(m_tfx_source, sm.GetPtr(), entry_point));
+		// Do the static macros.
+		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::vs_selector_fields)
+		{
+			if (!field_desc.dynamic)
+				sm.AddMacro(field_desc.shader_name, sel.GetField(field_desc.name));
+		}
+	}
+	else
+	{
+		// FIXME: Just use the name process as above but set all the macros (not just dynamic).
+		sm.AddMacro("UBER_SHADER", 0);
+		sm.AddMacro("VS_TME", sel.tme);
+		sm.AddMacro("VS_FST", sel.fst);
+		sm.AddMacro("VS_IIP", sel.iip);
+		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
+	}
+
+	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None || uber) ? "vs_main_expand" : "vs_main";
+	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber, async));
+	if (!vs && AsyncReturn::IsAsync(async))
+	{
+		// Shader does not exist in cache yet. Return info needed to compile it async.
+		shader.shader_code = source;
+		shader.entry_point = entry_point;
+		shader.macros = sm;
+		shader.type = D3D::ShaderCacheEntryType::VertexShader;
+		return shader;
+	}
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
-	return it->second.get();
+	shader.blob = it->second.get();
+	return shader;
 }
 
-const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel)
+GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, AsyncReturn* async)
 {
+	ShaderJob shader{};
+
 	auto it = m_tfx_pixel_shaders.find(sel);
 	if (it != m_tfx_pixel_shaders.end())
-		return it->second.get();
+	{
+		shader.blob = it->second.get();
+		return shader;
+	}
 
 	ShaderMacro sm;
 	sm.AddMacro("PIXEL_SHADER", 1);
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_DEPTH_FEEDBACK_SUPPORT", 2);
-	sm.AddMacro("PS_FST", sel.fst);
-	sm.AddMacro("PS_WMS", sel.wms);
-	sm.AddMacro("PS_WMT", sel.wmt);
-	sm.AddMacro("PS_ADJS", sel.adjs);
-	sm.AddMacro("PS_ADJT", sel.adjt);
-	sm.AddMacro("PS_AEM_FMT", sel.aem_fmt);
-	sm.AddMacro("PS_AEM", sel.aem);
-	sm.AddMacro("PS_TFX", sel.tfx);
-	sm.AddMacro("PS_TCC", sel.tcc);
-	sm.AddMacro("PS_DATE", sel.date);
-	sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
-	sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
-	sm.AddMacro("PS_FOG", sel.fog);
-	sm.AddMacro("PS_IIP", sel.iip);
-	sm.AddMacro("PS_BLEND_HW", sel.blend_hw);
-	sm.AddMacro("PS_A_MASKED", sel.a_masked);
-	sm.AddMacro("PS_FBA", sel.fba);
-	sm.AddMacro("PS_FBMASK", sel.fbmask);
-	sm.AddMacro("PS_LTF", sel.ltf);
-	sm.AddMacro("PS_TCOFFSETHACK", sel.tcoffsethack);
-	sm.AddMacro("PS_POINT_SAMPLER", sel.point_sampler);
-	sm.AddMacro("PS_REGION_RECT", sel.region_rect);
-	sm.AddMacro("PS_SHUFFLE", sel.shuffle);
-	sm.AddMacro("PS_SHUFFLE_SAME", sel.shuffle_same);
-	sm.AddMacro("PS_PROCESS_BA", sel.process_ba);
-	sm.AddMacro("PS_PROCESS_RG", sel.process_rg);
-	sm.AddMacro("PS_SHUFFLE_ACROSS", sel.shuffle_across);
-	sm.AddMacro("PS_READ16_SRC", sel.real16src);
-	sm.AddMacro("PS_WRITE_RG", sel.write_rg);
-	sm.AddMacro("PS_CHANNEL_FETCH", sel.channel);
-	sm.AddMacro("PS_TALES_OF_ABYSS_HLE", sel.tales_of_abyss_hle);
-	sm.AddMacro("PS_URBAN_CHAOS_HLE", sel.urban_chaos_hle);
-	sm.AddMacro("PS_DST_FMT", sel.dst_fmt);
-	sm.AddMacro("PS_DEPTH_FMT", sel.depth_fmt);
-	sm.AddMacro("PS_PAL_FMT", sel.pal_fmt);
-	sm.AddMacro("PS_COLCLIP_HW", sel.colclip_hw);
-	sm.AddMacro("PS_RTA_CORRECTION", sel.rta_correction);
-	sm.AddMacro("PS_RTA_SRC_CORRECTION", sel.rta_source_correction);
-	sm.AddMacro("PS_COLCLIP", sel.colclip);
-	sm.AddMacro("PS_BLEND_A", sel.blend_a);
-	sm.AddMacro("PS_BLEND_B", sel.blend_b);
-	sm.AddMacro("PS_BLEND_C", sel.blend_c);
-	sm.AddMacro("PS_BLEND_D", sel.blend_d);
-	sm.AddMacro("PS_BLEND_MIX", sel.blend_mix);
-	sm.AddMacro("PS_ROUND_INV", sel.round_inv);
-	sm.AddMacro("PS_FIXED_ONE_A", sel.fixed_one_a);
-	sm.AddMacro("PS_PABE", sel.pabe);
-	sm.AddMacro("PS_DITHER", sel.dither);
-	sm.AddMacro("PS_DITHER_ADJUST", sel.dither_adjust);
-	sm.AddMacro("PS_ZCLAMP", sel.zclamp);
-	sm.AddMacro("PS_ZFLOOR", sel.zfloor);
-	sm.AddMacro("PS_SCANMSK", sel.scanmsk);
-	sm.AddMacro("PS_AUTOMATIC_LOD", sel.automatic_lod);
-	sm.AddMacro("PS_MANUAL_LOD", sel.manual_lod);
-	sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
-	sm.AddMacro("PS_NO_COLOR", sel.no_color);
-	sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
-	sm.AddMacro("PS_ZTST", sel.ztst);
-	sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
-	sm.AddMacro("PS_ABE", sel.abe);
-	sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
-	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
-	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
+	if (uber)
+	{
+		// Do the dynamic macros
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
+			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
 
-	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
+		// Do the static macros.
+		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::ps_selector_fields)
+		{
+			if (!field_desc.dynamic)
+				sm.AddMacro(field_desc.shader_name, sel.GetField(field_desc.name));
+		}
+	}
+	else
+	{
+		// FIXME: Just use the name process as above but set all the macros (not just dynamic).
+		sm.AddMacro("UBER_SHADER", 0);
+		sm.AddMacro("PS_FST", sel.fst);
+		sm.AddMacro("PS_WMS", sel.wms);
+		sm.AddMacro("PS_WMT", sel.wmt);
+		sm.AddMacro("PS_ADJS", sel.adjs);
+		sm.AddMacro("PS_ADJT", sel.adjt);
+		sm.AddMacro("PS_AEM_FMT", sel.aem_fmt);
+		sm.AddMacro("PS_AEM", sel.aem);
+		sm.AddMacro("PS_TFX", sel.tfx);
+		sm.AddMacro("PS_TCC", sel.tcc);
+		sm.AddMacro("PS_DATE", sel.date);
+		sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
+		sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
+		sm.AddMacro("PS_FOG", sel.fog);
+		sm.AddMacro("PS_IIP", sel.iip);
+		sm.AddMacro("PS_BLEND_HW", sel.blend_hw);
+		sm.AddMacro("PS_A_MASKED", sel.a_masked);
+		sm.AddMacro("PS_FBA", sel.fba);
+		sm.AddMacro("PS_FBMASK", sel.fbmask);
+		sm.AddMacro("PS_LTF", sel.ltf);
+		sm.AddMacro("PS_TCOFFSETHACK", sel.tcoffsethack);
+		sm.AddMacro("PS_POINT_SAMPLER", sel.point_sampler);
+		sm.AddMacro("PS_REGION_RECT", sel.region_rect);
+		sm.AddMacro("PS_SHUFFLE", sel.shuffle);
+		sm.AddMacro("PS_SHUFFLE_SAME", sel.shuffle_same);
+		sm.AddMacro("PS_PROCESS_BA", sel.process_ba);
+		sm.AddMacro("PS_PROCESS_RG", sel.process_rg);
+		sm.AddMacro("PS_SHUFFLE_ACROSS", sel.shuffle_across);
+		sm.AddMacro("PS_READ16_SRC", sel.real16src);
+		sm.AddMacro("PS_WRITE_RG", sel.write_rg);
+		sm.AddMacro("PS_CHANNEL_FETCH", sel.channel);
+		sm.AddMacro("PS_TALES_OF_ABYSS_HLE", sel.tales_of_abyss_hle);
+		sm.AddMacro("PS_URBAN_CHAOS_HLE", sel.urban_chaos_hle);
+		sm.AddMacro("PS_DST_FMT", sel.dst_fmt);
+		sm.AddMacro("PS_DEPTH_FMT", sel.depth_fmt);
+		sm.AddMacro("PS_PAL_FMT", sel.pal_fmt);
+		sm.AddMacro("PS_COLCLIP_HW", sel.colclip_hw);
+		sm.AddMacro("PS_RTA_CORRECTION", sel.rta_correction);
+		sm.AddMacro("PS_RTA_SRC_CORRECTION", sel.rta_source_correction);
+		sm.AddMacro("PS_COLCLIP", sel.colclip);
+		sm.AddMacro("PS_BLEND_A", sel.blend_a);
+		sm.AddMacro("PS_BLEND_B", sel.blend_b);
+		sm.AddMacro("PS_BLEND_C", sel.blend_c);
+		sm.AddMacro("PS_BLEND_D", sel.blend_d);
+		sm.AddMacro("PS_BLEND_MIX", sel.blend_mix);
+		sm.AddMacro("PS_ROUND_INV", sel.round_inv);
+		sm.AddMacro("PS_FIXED_ONE_A", sel.fixed_one_a);
+		sm.AddMacro("PS_PABE", sel.pabe);
+		sm.AddMacro("PS_DITHER", sel.dither);
+		sm.AddMacro("PS_DITHER_ADJUST", sel.dither_adjust);
+		sm.AddMacro("PS_ZCLAMP", sel.zclamp);
+		sm.AddMacro("PS_ZFLOOR", sel.zfloor);
+		sm.AddMacro("PS_SCANMSK", sel.scanmsk);
+		sm.AddMacro("PS_AUTOMATIC_LOD", sel.automatic_lod);
+		sm.AddMacro("PS_MANUAL_LOD", sel.manual_lod);
+		sm.AddMacro("PS_TEX_IS_FB", sel.tex_is_fb);
+		sm.AddMacro("PS_NO_COLOR", sel.no_color);
+		sm.AddMacro("PS_NO_COLOR1", sel.no_color1);
+		sm.AddMacro("PS_ZTST", sel.ztst);
+		sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
+		sm.AddMacro("PS_ABE", sel.abe);
+		sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
+		sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
+		sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
+	}
+
+	// FIXME: Make the Uber/Normal sources the same.
+	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", uber, async));
+	if (!ps && AsyncReturn::IsAsync(async))
+	{
+		// Shader does not exist in cache yet. Return info needed to compile it async.
+		shader.entry_point = "ps_main";
+		shader.macros = sm;
+		shader.shader_code = source;
+		shader.type = ShaderEntryType::PixelShader;
+		return shader;
+	}
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
-	return it->second.get();
+	shader.blob = it->second.get();
+	return shader;
 }
 
-GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const PipelineSelector& p)
+GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
+	const PipelineSelector& p, bool uber, AsyncReturn* async)
 {
+	AsyncReturn::ClearAsync(async);
+
 	static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY_TYPE, 3> topology_lookup = {{
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT, // Point
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE, // Line
@@ -3323,10 +3453,16 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		pps.no_color1 = true;
 	}
 
-	const ID3DBlob* vs = GetTFXVertexShader(p.vs);
-	const ID3DBlob* ps = GetTFXPixelShader(pps);
-	if (!vs || !ps)
-		return nullptr;
+	AsyncReturn vs_async(AsyncReturn::Enabled(async));
+	AsyncReturn ps_async(AsyncReturn::Enabled(async));
+
+	ShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
+	ShaderJob ps = GetTFXPixelShader(pps, uber, &ps_async);
+
+	const bool vs_failed = !vs.blob && !AsyncReturn::IsAsync(&vs_async);
+	const bool ps_failed = !ps.blob && !AsyncReturn::IsAsync(&ps_async);
+	if (vs_failed || ps_failed)
+		return nullptr; // Failed
 
 	// Common state
 	D3D12::GraphicsPipelineBuilder gpb;
@@ -3353,8 +3489,10 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
 
 	// Shaders
-	gpb.SetVertexShader(vs);
-	gpb.SetPixelShader(ps);
+	if (vs.blob)
+		gpb.SetVertexShader(vs.blob.get());
+	if (ps.blob)
+		gpb.SetPixelShader(ps.blob.get());
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
@@ -3423,30 +3561,72 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 	}
 
-	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache));
+	// Handle async compilation if requested.
+	if (AsyncReturn::Enabled(async))
+	{
+		// Check if the pipeline has finished compiling from a previous submission.
+		if (vs.blob && ps.blob)
+		{
+			AsyncReturn pipeline_async(true);
+			ComPtr<ID3D12PipelineState> pipeline = m_shader_cache.GetPipelineState(
+				m_device.get(), gpb.GetDesc(), uber, &pipeline_async);
+
+			const bool pipeline_found = pipeline != nullptr;
+			const bool pipeline_failed = pipeline == nullptr && !AsyncReturn::IsAsync(&pipeline_async);
+			if (pipeline_found)
+			{
+				D3D12::SetObjectName(
+					pipeline.get(), TinyString::from_format("{}TFX Pipeline {:08X}/{:016X}_{:016X}",
+						uber ? "Uber " :"", p.vs.key, p.ps.key_hi, p.ps.key_lo));
+				return pipeline;
+			}
+
+			if (pipeline_failed)
+				return nullptr;
+		}
+
+		AsyncReturn::SetAsync(async);
+		if (!m_tfx_pipelines_async_submitted.contains(p)) // Don't resubmit the same pipeline twice.
+		{
+			// Submit pipeline async compilation.
+			m_tfx_pipelines_async_submitted.insert(p);
+			m_shader_cache.StartPipelineCompilationAsync(
+				m_device.get(), std::move(vs), std::move(ps), std::move(gpb), uber, PipelineSelectorHash()(p));
+		}
+
+		return nullptr;
+	}
+
+	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache, uber));
 	if (pipeline)
 	{
 		D3D12::SetObjectName(
-			pipeline.get(), TinyString::from_format("TFX Pipeline {:08X}/{:016X}_{:016X}", p.vs.key, p.ps.key_hi, p.ps.key_lo));
+			pipeline.get(), TinyString::from_format("{}TFX Pipeline {:08X}/{:016X}_{:016X}",
+				uber ? "Uber " : "", p.vs.key, p.ps.key_hi, p.ps.key_lo));
 	}
 
 	return pipeline;
 }
 
-const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p)
+const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, AsyncReturn* async)
 {
 	auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
 		return it->second.get();
 
-	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p));
+	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p, uber, async));
+	
+	if (!pipeline && AsyncReturn::IsAsync(async))
+		return nullptr; // Async compilation in progress.
+	
 	it = m_tfx_pipelines.emplace(p, std::move(pipeline)).first;
 	return it->second.get();
 }
 
-bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
+bool GSDevice12::BindDrawPipeline(const PipelineSelector& p, bool uber)
 {
-	const ID3D12PipelineState* pipeline = GetTFXPipeline(p);
+	const ID3D12PipelineState* pipeline = GetTFXPipeline(p, uber);
+
 	if (!pipeline)
 		return false;
 
@@ -4156,12 +4336,12 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootSignature(m_tfx_root_signature.get());
 	}
 
+	if (flags & DIRTY_FLAG_TFX_PUSH_CONSTANTS)
+		WriteTFXPushConstants(0, sizeof(m_tfx_pc_cache) / sizeof(u32));
 	if (flags & DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_VS_CBV, m_tfx_constant_buffers[0]);
 	if (flags & DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_PS_CBV, m_tfx_constant_buffers[1]);
-	if (m_features.vs_expand && (flags & DIRTY_FLAG_VS_PUSH_CONSTANTS))
-		SetVSPushConstants(m_vs_pc_cache.base_vertex, m_vs_pc_cache.base_index, true);
 	if (flags & DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING)
 	{
 		cmdlist->SetGraphicsRootShaderResourceView(TFX_ROOT_SIGNATURE_PARAM_VS_VB_SRV,
@@ -4223,15 +4403,28 @@ void GSDevice12::SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb)
 
 void GSDevice12::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::VSPushConstants pc;
+	GSHWDrawConfig::ShaderPushConstants pc = m_tfx_pc_cache;
 	pc.base_vertex = base_vertex;
 	pc.base_index = base_index;
-	if (m_vs_pc_cache.Update(pc) || force_update)
-	{
-		GetCommandList().list4->SetGraphicsRoot32BitConstants(
-			TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS, sizeof(m_vs_pc_cache) / sizeof(u32),
-			&m_vs_pc_cache, 0);
-	}
+	static constexpr u32 start = offsetof(GSHWDrawConfig::ShaderPushConstants, base_vertex) / sizeof(u32);
+	static constexpr u32 end = offsetof(GSHWDrawConfig::ShaderPushConstants, base_index) / sizeof(u32);
+	static_assert(start < end);
+	// Need to write results as this function is called after ApplyTFXState().
+	if (m_tfx_pc_cache.Update(pc) || force_update)
+		WriteTFXPushConstants(start, end - start + 1);
+}
+
+void GSDevice12::SetSelectorPushConstants(const GSHWDrawConfig& config)
+{
+	if (m_tfx_pc_cache.Update(config.pc))
+		m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
+}
+
+void GSDevice12::WriteTFXPushConstants(u32 offset, u32 num_constants)
+{
+	GetCommandList().list4->SetGraphicsRoot32BitConstants(
+		TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS, num_constants,
+		reinterpret_cast<u32*>(&m_tfx_pc_cache) + offset, offset);
 }
 
 void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox)
@@ -4329,7 +4522,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(init_pipe))
+	if (BindDrawPipeline(init_pipe, false))
 		Draw(config);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
@@ -4371,6 +4564,55 @@ void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 	}
 }
 
+bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
+{
+	// Note: this function does not catch certain pipeline combinations, such as those
+	// created by render pass restart optimizations, DATE setup, colclip resolve, etc.
+	// However, such combinations should be relatively rare.
+
+	bool compiling_async = false;
+
+	UpdateHWPipelineSelector(config);
+	if (!m_tfx_pipelines.contains(m_pipeline_selector))
+	{
+		AsyncReturn async(true);
+		GetTFXPipeline(m_pipeline_selector, false, &async);
+		compiling_async = true;
+	}
+
+	if (config.alpha_second_pass.enable)
+	{
+		// FIXME: Code duplication with RenderHW
+		m_pipeline_selector.ps = config.alpha_second_pass.ps;
+		m_pipeline_selector.cms = config.alpha_second_pass.colormask;
+		m_pipeline_selector.dss = config.alpha_second_pass.depth;
+		m_pipeline_selector.bs = config.blend;
+		if (!m_tfx_pipelines.contains(m_pipeline_selector))
+		{
+			AsyncReturn async(true);
+			GetTFXPipeline(m_pipeline_selector, false, &async);
+			compiling_async = true;
+		}
+	}
+
+	if (config.blend_multi_pass.enable)
+	{
+		// FIXME: Code duplication with RenderHW
+		m_pipeline_selector.bs = config.blend_multi_pass.blend;
+		m_pipeline_selector.ps.no_color1 = config.blend_multi_pass.no_color1;
+		m_pipeline_selector.ps.blend_hw = config.blend_multi_pass.blend_hw;
+		m_pipeline_selector.ps.dither = config.blend_multi_pass.dither;
+		if (!m_tfx_pipelines.contains(m_pipeline_selector))
+		{
+			AsyncReturn async(true);
+			GetTFXPipeline(m_pipeline_selector, false, &async);
+			compiling_async = true;
+		}
+	}
+
+	return compiling_async;
+}
+
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
@@ -4379,6 +4621,9 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
+
+	if (config.uber_shader)
+		SetSelectorPushConstants(config);
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
@@ -4532,13 +4777,14 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 	// Avoid restarting the render pass just to switch from rt+depth to rt and vice versa.
 	// Keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
-	if (InRenderPass() && !(draw_rt || draw_rt_rov) && draw_ds && m_current_render_target && config.tex != m_current_render_target && 
+	// Don't allow this with the uber shader because we don't want to create new uber pipelines.
+	if (InRenderPass() && !config.uber_shader && !(draw_rt || draw_rt_rov) && draw_ds && m_current_render_target && config.tex != m_current_render_target && 
 		m_current_render_target->GetSize() == draw_ds->GetSize())
 	{
 		draw_rt = m_current_render_target;
 		m_pipeline_selector.rt = true;
 	}
-	else if (InRenderPass() && !(draw_ds || draw_ds_rov) && draw_rt && m_current_depth_target && config.tex != m_current_depth_target &&
+	else if (InRenderPass() && !config.uber_shader && !(draw_ds || draw_ds_rov) && draw_rt && m_current_depth_target && config.tex != m_current_depth_target &&
 		m_current_depth_target->GetSize() == draw_rt->GetSize())
 	{
 		draw_ds = m_current_depth_target;
@@ -4675,7 +4921,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		pipe.ps.no_color1 = config.blend_multi_pass.no_color1;
 		pipe.ps.blend_hw = config.blend_multi_pass.blend_hw;
 		pipe.ps.dither = config.blend_multi_pass.dither;
-		if (BindDrawPipeline(pipe))
+		if (BindDrawPipeline(pipe, false))
 			Draw(config);
 	}
 
@@ -4749,7 +4995,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		if (BindDrawPipeline(pipe))
+		if (BindDrawPipeline(pipe, config.uber_shader))
 			Draw(config);
 		return;
 	}
@@ -4785,7 +5031,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				if (feedback_depth)
 					FeedbackBarrier(draw_ds);
 
-				if (BindDrawPipeline(pipe))
+				if (BindDrawPipeline(pipe, config.uber_shader))
 					Draw(config, p, count);
 				p += count;
 			}
@@ -4804,14 +5050,14 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		}
 	}
 
-	if (BindDrawPipeline(pipe))
+	if (BindDrawPipeline(pipe, config.uber_shader))
 		Draw(config);
 
 	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
-void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
+void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config)
 {
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
@@ -4824,9 +5070,15 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
+
+	if (config.uber_shader)
+	{
+		GSHWDrawConfig::UberizeSelector(m_pipeline_selector.ps);
+		GSHWDrawConfig::UberizeSelector(m_pipeline_selector.vs);
+	}
 }
 
-void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
+void GSDevice12::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)
 {
 	IASetVertexBuffer(config.verts, sizeof(GSVertex), config.nverts);
 	
