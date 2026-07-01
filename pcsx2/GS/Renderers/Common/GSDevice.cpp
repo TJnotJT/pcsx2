@@ -1879,6 +1879,454 @@ constinit const std::array<u8, NUM_REMAP_INPUTS> ShaderConvertSelector::INDEX_RE
 static constexpr auto PACKED_SHADERS = GetPackedShaders();
 const std::span<const ShaderConvertSelector> ShaderConvertSelector::SHADERS = PACKED_SHADERS;
 
+u32 GSHWDrawConfig::VSSelector::GetField(const std::string& name) const
+{
+	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			if (name == #NAME) return static_cast<u32>(NAME);
+		VSSEL_FIELDS_EXPAND
+	#undef EXPAND
+	return 0;
+}
+
+u32 GSHWDrawConfig::VSSelector::GetField(u32 index) const
+{
+	switch (index)
+	{
+		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			case INDEX: return static_cast<u32>(NAME);
+			VSSEL_FIELDS_EXPAND
+		#undef EXPAND
+			default:
+				pxAssert(false);
+				return 0;
+	}
+}
+
+void GSHWDrawConfig::VSSelector::ClearField(const std::string& name)
+{
+	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			if (name == #NAME) NAME = static_cast<decltype(NAME)>(0);
+		VSSEL_FIELDS_EXPAND
+	#undef EXPAND
+}
+
+void GSHWDrawConfig::VSSelector::ClearField(u32 index)
+{
+	switch (index)
+	{
+		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			case INDEX: \
+				NAME = static_cast<decltype(NAME)>(0); \
+				break;
+			VSSEL_FIELDS_EXPAND
+		#undef EXPAND
+			default:
+				pxAssert(false);
+				break;
+	}
+}
+
+u32 GSHWDrawConfig::PSSelector::GetField(const std::string& name) const
+{
+	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			if (name == #NAME) return static_cast<u32>(NAME);
+		PSSEL_FIELDS_EXPAND
+	#undef EXPAND
+	return 0;
+}
+
+u32 GSHWDrawConfig::PSSelector::GetField(u32 index) const
+{
+	switch (index)
+	{
+		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			case INDEX: return static_cast<u32>(NAME);
+			PSSEL_FIELDS_EXPAND
+		#undef EXPAND
+			default:
+				pxAssert(false);
+				return 0;
+	}
+}
+
+void GSHWDrawConfig::PSSelector::ClearField(const std::string& name)
+{
+	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			if (name == #NAME) NAME = static_cast<decltype(NAME)>(0);
+		PSSEL_FIELDS_EXPAND
+	#undef EXPAND
+}
+
+void GSHWDrawConfig::PSSelector::ClearField(u32 index)
+{
+	switch (index)
+	{
+		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+			case INDEX: \
+				NAME = static_cast<decltype(NAME)>(0); \
+				break;
+			PSSEL_FIELDS_EXPAND
+		#undef EXPAND
+			default:
+				pxAssert(false);
+				break;
+	}
+}
+
+using PipelineSelectorFieldDesc = GSHWDrawConfig::PipelineSelectorFieldDesc;
+struct PipelineSelectorFieldBitsDesc
+{
+	u32 index;
+	bool dynamic;
+	const char* name;
+	u32 bits;
+	const char* shader_name;
+
+	u32 selector_num;
+	u32 start_bit;
+	u32 end_bit;
+	u32 mask;
+	u32 start_bit_2;
+	u32 end_bit_2;
+	u32 mask_2;
+};
+using ShaderDefine = GSHWDrawConfig::ShaderDefine;
+
+template<size_t N>
+static constexpr std::array<PipelineSelectorFieldBitsDesc, N> GetSelectorFieldBits(
+		const std::array<PipelineSelectorFieldDesc, N>& selector_fields, u32 start_selector)
+{
+	std::array<PipelineSelectorFieldBitsDesc, N> arr;
+
+	u32 curr_bit = start_selector * 32;
+	for (u32 i = 0; i < N; i++)
+	{
+		const u32 bits = selector_fields[i].bits;
+
+		const u32 selector_num = curr_bit / 32; // Which 32 bit selector to use.
+
+		const u32 start_bit = curr_bit - selector_num * 32;
+		const u32 end_bit = std::min<u32>(start_bit + bits, 32);
+		const u32 mask = (1 << (end_bit - start_bit)) - 1;
+
+		const u32 start_bit_2 = 0;
+		const u32 end_bit_2 = std::max<u32>(start_bit + bits, 32) - 32;
+		const u32 mask_2 = (1 << (end_bit_2 - start_bit_2)) - 1;
+
+		curr_bit += bits;
+
+		arr[i] = PipelineSelectorFieldBitsDesc{
+			selector_fields[i].index,
+			selector_fields[i].dynamic,
+			selector_fields[i].name,
+			selector_fields[i].bits,
+			selector_fields[i].shader_name,
+			selector_num,
+			start_bit,
+			end_bit,
+			mask,
+			start_bit_2,
+			end_bit_2,
+			mask_2,
+		};
+	}
+
+	return arr;
+}
+
+template<size_t N>
+static constexpr size_t GetNumDynamicSelectorFields(const std::array<PipelineSelectorFieldDesc, N>& selector_fields)
+{
+	size_t n = 0;
+	for (const PipelineSelectorFieldDesc& field_desc : selector_fields)
+		n += static_cast<size_t>(field_desc.dynamic);
+	return n;
+}
+
+static constexpr size_t NUM_VS_FIELDS = std::size(GSHWDrawConfig::vs_selector_fields);
+static constexpr size_t NUM_DYNAMIC_VS_FIELDS = GetNumDynamicSelectorFields(GSHWDrawConfig::vs_selector_fields);
+static constexpr size_t NUM_PS_FIELDS = std::size(GSHWDrawConfig::ps_selector_fields);
+static constexpr size_t NUM_DYNAMIC_PS_FIELDS = GetNumDynamicSelectorFields(GSHWDrawConfig::ps_selector_fields);
+
+static constexpr std::array<PipelineSelectorFieldBitsDesc, NUM_VS_FIELDS> vs_selector_fields_bits =
+	GetSelectorFieldBits<NUM_VS_FIELDS>(GSHWDrawConfig::vs_selector_fields,
+		GSHWDrawConfig::ShaderPushConstants::VS_UBER_SELECTOR);
+
+static constexpr std::array<PipelineSelectorFieldBitsDesc, NUM_PS_FIELDS> ps_selector_fields_bits =
+	GetSelectorFieldBits<NUM_PS_FIELDS>(GSHWDrawConfig::ps_selector_fields,
+		GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR);
+
+template<size_t N_ALL, size_t N_DYNAMIC>
+static std::array<ShaderDefine, N_DYNAMIC> GetUberShaderSelectorDefines(
+	const std::array<PipelineSelectorFieldBitsDesc, N_ALL>& selector_fields,
+	u32 base_selector)
+{
+	std::array<ShaderDefine, N_DYNAMIC> defines;
+
+	u32 i = 0;
+	for (const PipelineSelectorFieldBitsDesc& field_desc : selector_fields)
+	{
+		if (field_desc.dynamic)
+		{
+			if (field_desc.end_bit_2 == 0)
+			{
+				// Within a single 32 bit selector.
+				defines[i++] = {
+					field_desc.index,
+					field_desc.name,
+					field_desc.shader_name,
+					fmt::format(
+						"((SELECTOR{} >> {}) & {})\n",
+						field_desc.selector_num, field_desc.start_bit, field_desc.mask),
+				};
+			}
+			else
+			{
+				// Straddles two 32 bit selectors.
+				defines[i++] = {
+					field_desc.index,
+					field_desc.name,
+					field_desc.shader_name,
+					fmt::format(
+						"( "
+						" ((SELECTOR{} >> {}) & {}) | "
+						" (((SELECTOR{} >> {}) & {}) << {}) "
+						")\n",
+						field_desc.selector_num, field_desc.start_bit, field_desc.mask,
+						field_desc.selector_num + 1, field_desc.start_bit_2, field_desc.mask_2,
+						field_desc.end_bit - field_desc.start_bit),
+				};
+			}
+		}
+	}
+
+	return defines;
+}
+
+static const std::array<ShaderDefine, NUM_DYNAMIC_VS_FIELDS> vs_uber_defines =
+	GetUberShaderSelectorDefines<NUM_VS_FIELDS, NUM_DYNAMIC_VS_FIELDS>(
+		vs_selector_fields_bits, GSHWDrawConfig::ShaderPushConstants::VS_UBER_SELECTOR);
+
+static const std::array<ShaderDefine, NUM_DYNAMIC_PS_FIELDS> ps_uber_defines =
+	GetUberShaderSelectorDefines<NUM_PS_FIELDS, NUM_DYNAMIC_PS_FIELDS>(
+		ps_selector_fields_bits, GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR);
+
+template<typename SelectorType, size_t N>
+static void GetUberShaderSelector(
+	const SelectorType& selector,
+	const std::array<PipelineSelectorFieldBitsDesc, N>& selector_fields,
+	u32 max_selectors,
+	u32 base_selector,
+	u32* selectors_out)
+{
+	for (const PipelineSelectorFieldBitsDesc& field_desc : selector_fields)
+	{
+		if (field_desc.dynamic)
+		{
+			u32 value = selector.GetField(field_desc.index);
+
+			pxAssert(field_desc.selector_num < max_selectors);
+			selectors_out[field_desc.selector_num] |= (value & field_desc.mask) << field_desc.start_bit;
+			if (field_desc.end_bit_2 > 0)
+			{
+				// Straddles two 32 bit selectors.
+				pxAssert(field_desc.selector_num + 1 < max_selectors);
+				selectors_out[field_desc.selector_num + 1] |=
+					((value >> field_desc.start_bit) & field_desc.mask_2) << field_desc.start_bit_2;
+			}
+		}
+	}
+}
+
+void GSHWDrawConfig::UberizeSelector(PSSelector& sel)
+{
+	sel.uber_enable = true;
+	sel.uber_date_init = (sel.date == 1 || sel.date == 2);
+	sel.uber_sw_depth = sel.IsFeedbackLoopDepth();
+	sel.uber_zwrite = sel.HasDepthOutput();
+	sel.iip = false; // ignored
+
+	// Clear dynamic state bits from the selector.
+	for (const ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
+		sel.ClearField(dynamic_define.index);
+}
+
+void GSHWDrawConfig::UberizeSelector(VSSelector& sel)
+{
+	sel.uber_enable = true;
+	sel.iip = false; // ignored
+
+	// Clear the dynamic state bits from the selector.
+	for (const ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+		sel.ClearField(dynamic_define.index);
+}
+
+std::span<const ShaderDefine> GSHWDrawConfig::GetUberShaderVSSelectorDefines()
+{
+	return vs_uber_defines;
+}
+
+std::span<const ShaderDefine> GSHWDrawConfig::GetUberShaderPSSelectorDefines()
+{
+	return ps_uber_defines;
+}
+
+void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out)
+{
+	::GetUberShaderSelector<VSSelector, NUM_VS_FIELDS>(
+		vs, vs_selector_fields_bits, ShaderPushConstants::NUM_UBER_SELECTORS,
+		ShaderPushConstants::VS_UBER_SELECTOR, pc_out.uber_selectors);
+
+	::GetUberShaderSelector<PSSelector, std::size(ps_selector_fields)>(
+		ps, ps_selector_fields_bits, ShaderPushConstants::NUM_UBER_SELECTORS,
+		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
+}
+
+struct UberVSSelector
+{
+	u8 iip; // 1 bit
+};
+
+struct UberPSSelector
+{
+	u8 no_color; // 1 bit
+	u8 no_color1; // 1 bit
+	u8 rov_color; // 1 bit
+	u8 rov_depth; // 2 bits
+	u8 uber_zwrite; // 1 bit
+	u8 uber_sw_depth; // 1 bit
+	u8 uber_date_init; // 1 bit
+	u8 iip; // 1 bit
+};
+
+static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 512;
+static constexpr u32 NUM_CANDIDATE_UBER_VS_SELECTORS = 2;
+
+static constexpr UberVSSelector GetUberVSSelector(u32 n)
+{
+	UberVSSelector sel;
+	sel.iip = (n & 1);
+	return sel;
+}
+
+static constexpr UberPSSelector GetUberPSSelector(u32 n)
+{
+	UberPSSelector sel;
+	sel.no_color = (n >> 0) & 1;
+	sel.no_color1 = (n >> 1) & 1;
+	sel.rov_color = (n >> 2) & 1;
+	sel.rov_depth = (n >> 3) & 3;
+	sel.uber_zwrite = (n >> 5) & 1;
+	sel.uber_sw_depth = (n >> 6) & 1;
+	sel.uber_date_init = (n >> 7) & 1;
+	sel.iip = (n >> 8) & 1;
+	return sel;
+}
+
+static constexpr bool IsUberVSSelectorValid(u32 n)
+{
+	UberVSSelector sel = GetUberVSSelector(n);
+	return !sel.iip; // Ignore the IIP bit (flat shading is handled specially).
+}
+
+static constexpr bool IsUberPSSelectorValid(u32 n)
+{
+	const UberPSSelector sel = GetUberPSSelector(n);
+	return
+		(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
+		(!sel.no_color || sel.rov_color) && // Only allow color ROV output.
+		(!sel.uber_zwrite || sel.rov_depth) && // Only allow depth ROV output.
+		(sel.rov_color || sel.rov_depth) && // Must have color or depth ROV.
+		sel.no_color1 && // Don't allow dual source blend.
+		!sel.uber_date_init && // Don't allow DATE init.
+		!sel.iip; // Ignore the IIP bit (flat shading is handled specially).
+}
+
+static constexpr u32 GetNumValidUberPSSelectors()
+{
+	u32 valid_count = 0;
+	for (u32 i = 0; i < NUM_CANDIDATE_UBER_PS_SELECTORS; i++)
+		valid_count += static_cast<u32>(IsUberPSSelectorValid(i));
+	return valid_count;
+}
+
+static constexpr u32 GetNumValidUberVSSelectors()
+{
+	u32 valid_count = 0;
+	for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
+		valid_count += static_cast<u32>(IsUberVSSelectorValid(i));
+	return valid_count;
+}
+
+static GSHWDrawConfig::PSSelector GetFullUberPSSelector(u32 n)
+{
+	UberPSSelector uber_sel = GetUberPSSelector(n);
+
+	GSHWDrawConfig::PSSelector sel{};
+	sel.no_color = uber_sel.no_color;
+	sel.no_color1 = uber_sel.no_color1;
+	sel.rov_color = uber_sel.rov_color;
+	sel.rov_depth = static_cast<GSHWDrawConfig::PS_ROV_DEPTH>(uber_sel.rov_depth);
+	sel.uber_enable = true;
+	sel.uber_zwrite = uber_sel.uber_zwrite;
+	sel.uber_sw_depth = uber_sel.uber_sw_depth;
+	sel.uber_date_init = uber_sel.uber_date_init;
+	sel.iip = uber_sel.iip;
+
+	return sel;
+}
+
+static GSHWDrawConfig::VSSelector GetFullUberVSSelector(u32 n)
+{
+	UberVSSelector uber_sel = GetUberVSSelector(n);
+
+	GSHWDrawConfig::VSSelector sel{};
+	sel.uber_enable = true;
+	sel.iip = uber_sel.iip;
+
+	return sel;
+}
+
+static constexpr u32 NUM_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
+static constexpr u32 NUM_UBER_VS_SELECTORS = GetNumValidUberVSSelectors();
+
+static std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> GetUberVSSelectors()
+{
+	std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> selectors;
+	u32 valid_i = 0;
+	for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
+	{
+		if (IsUberVSSelectorValid(i))
+			selectors[valid_i++] = GetFullUberVSSelector(i);
+	}
+	return selectors;
+}
+
+static std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> GetUberPSSelectors()
+{
+	std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> selectors;
+	u32 valid_i = 0;
+	for (u32 i = 0; i < NUM_CANDIDATE_UBER_PS_SELECTORS; i++)
+	{
+		if (IsUberPSSelectorValid(i))
+			selectors[valid_i++] = GetFullUberPSSelector(i);
+	}
+	return selectors;
+}
+
+static const std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> uber_vs_selectors = GetUberVSSelectors();
+static const std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> uber_ps_selectors = GetUberPSSelectors();
+
+std::span<const GSHWDrawConfig::VSSelector> GSHWDrawConfig::GetUberVSSelectors()
+{
+	return uber_vs_selectors;
+}
+
+std::span<const GSHWDrawConfig::PSSelector> GSHWDrawConfig::GetUberPSSelectors()
+{
+	return uber_ps_selectors;
+}
+
 // clang-format off
 
 // Maps PS2 blend modes to our best approximation of them with PC hardware

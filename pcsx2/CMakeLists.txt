@@ -688,6 +688,7 @@ if(WIN32)
 		GS/Renderers/DX12/D3D12Builders.cpp
 		GS/Renderers/DX12/D3D12DescriptorHeapManager.cpp
 		GS/Renderers/DX12/D3D12ShaderCache.cpp
+		GS/Renderers/DX12/D3D12CompilerAsync.cpp
 		GS/Renderers/DX12/D3D12StreamBuffer.cpp
 		GS/Renderers/DX12/GSDevice12.cpp
 		GS/Renderers/DX12/GSTexture12.cpp
@@ -700,6 +701,7 @@ if(WIN32)
 		GS/Renderers/DX12/D3D12Builders.h
 		GS/Renderers/DX12/D3D12DescriptorHeapManager.h
 		GS/Renderers/DX12/D3D12ShaderCache.h
+		GS/Renderers/DX12/D3D12CompilerAsync.h
 		GS/Renderers/DX12/D3D12StreamBuffer.h
 		GS/Renderers/DX12/GSDevice12.h
 		GS/Renderers/DX12/GSTexture12.h

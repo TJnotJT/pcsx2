@@ -216,6 +216,7 @@ private:
 
 	void ResetStates();
 	void HandleProvokingVertexFirst();
+	void HandleFlatShadedVertices();
 	void SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt);
 	void EmulateTextureShuffleAndFbmask(GSTextureCache::Target* rt, GSTextureCache::Source* tex);
 	u32 EmulateChannelShuffle(GSTextureCache::Target* src, bool test_only, GSTextureCache::Target* rt = nullptr);
@@ -258,6 +259,8 @@ private:
 	void ConfigureROV(bool color_rov, bool depth_rov); // Actual config for ROV
 	void ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Convert to RW capable textures if needed.
 	void ConvertTextureTypeROVSingle(GSTextureCache::Target* tgt, bool shader_write); // Helper to do the above.
+
+	void HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds);
 
 	void SetTCOffset();
 	bool NextDrawColClip() const;
@@ -340,6 +343,7 @@ private:
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
+	GSHWDrawConfig m_conf_uber = {};
 
 	// software sprite renderer state
 	std::vector<GSVertexSW> m_sw_vertex_buffer;

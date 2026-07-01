@@ -6,11 +6,11 @@
 namespace BuildVersion
 {
 	const char* GitTag = GIT_TAG;
-	bool GitTaggedCommit = GIT_TAGGED_COMMIT;
-	int GitTagHi = GIT_TAG_HI;
-	int GitTagMid = GIT_TAG_MID;
-	int GitTagLo = GIT_TAG_LO;
-	const char* GitRev = GIT_REV;
+	bool GitTaggedCommit = 0;
+	int GitTagHi = 0;
+	int GitTagMid = 0;
+	int GitTagLo = 0;
+	const char* GitRev = 0;
 	const char* GitHash = GIT_HASH;
 	const char* GitDate = GIT_DATE;
 } // namespace BuildVersion
