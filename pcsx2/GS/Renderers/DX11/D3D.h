@@ -56,6 +56,13 @@ namespace D3D
 	GSRendererType GetPreferredRenderer();
 
 	// D3DCompiler wrapper.
+	enum class CompileStatus
+	{
+		Failure,
+		NotAvailable,
+		Success,
+	};
+
 	enum class ShaderType
 	{
 		Vertex,

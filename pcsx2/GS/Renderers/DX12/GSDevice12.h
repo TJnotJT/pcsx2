@@ -8,6 +8,7 @@
 #include "GS/Renderers/DX12/GSTexture12.h"
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
 #include "GS/Renderers/DX12/D3D12StreamBuffer.h"
+#include "GS/Renderers/DX12/D3D12CompilerAsync.h"
 
 #include "common/HashCombine.h"
 
@@ -258,21 +259,6 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
-	union UberSelector
-	{
-		struct
-		{
-			u8 enable : 1;
-			u8 zwrite : 1;
-			u8 sw_depth : 1;
-			u8 date_init : 1;
-			u8 _free : 4;
-		};
-
-		u8 key;
-	};
-
-	static_assert(sizeof(UberSelector) == 1);
 
 	struct alignas(8) PipelineSelector
 	{
@@ -295,8 +281,6 @@ public:
 		GSHWDrawConfig::VSSelector vs;
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
-
-		UberSelector uber;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
@@ -487,10 +471,15 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, const UberSelector& uber_sel);
-	const ID3DBlob* GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, const UberSelector& uber_sel);
-	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p);
+	using ShaderJob = D3D12CompilerAsync::ShaderJob;
+	using PipelineJob = D3D12CompilerAsync::PipelineJob;
+
+	ShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool non_blocking = false,
+		D3D::CompileStatus* status = nullptr);
+	ShaderJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, bool non_blocking = false,
+		D3D::CompileStatus* status = nullptr);
+	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p, bool non_blocking = false, D3D::CompileStatus* status);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool non_blocking = false, D3D::CompileStatus* status);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);

@@ -207,6 +207,7 @@
     <ClCompile Include="GS\GSDrawingEnvironment.cpp" />
     <ClCompile Include="GS\Renderers\DX11\D3D11ShaderCache.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12Builders.cpp" />
+    <ClCompile Include="GS\Renderers\DX12\D3D12Compiler.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12DescriptorHeapManager.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12ShaderCache.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12StreamBuffer.cpp" />
@@ -655,6 +656,7 @@
     <ClInclude Include="GS\GSVector4_arm64.h" />
     <ClInclude Include="GS\Renderers\DX11\D3D11ShaderCache.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12Builders.h" />
+    <ClInclude Include="GS\Renderers\DX12\D3D12Compiler.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12DescriptorHeapManager.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12ShaderCache.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12StreamBuffer.h" />

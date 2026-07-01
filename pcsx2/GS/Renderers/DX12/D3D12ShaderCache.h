@@ -3,6 +3,7 @@
 
 #pragma once
 #include "GS/Renderers/DX11/D3D.h"
+#include "GS/Renderers/DX12/D3D12CompilerAsync.h"
 
 #include "common/Pcsx2Defs.h"
 #include "common/HashCombine.h"
@@ -14,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <thread>
 
 class D3D12ShaderCache
 {
@@ -38,29 +40,38 @@ public:
 	bool Open(D3D::ShaderModel shader_model, bool debug);
 	void Close();
 
+	// CONTINUE WITH NOT AVAILABLE SYSTEM
 	__fi ComPtr<ID3DBlob> GetVertexShader(
-		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main")
+		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
+		bool non_blocking = false, bool* not_available = nullptr)
 	{
-		return GetShaderBlob(EntryType::VertexShader, shader_code, macros, entry_point);
+		return GetShaderBlob(EntryType::VertexShader, shader_code, macros, entry_point, non_blocking, status);
 	}
 	__fi ComPtr<ID3DBlob> GetPixelShader(
-		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main")
+		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
+		bool non_blocking = false, bool* not_available = nullptr)
 	{
-		return GetShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point);
+		return GetShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point, non_blocking, status);
 	}
 	__fi ComPtr<ID3DBlob> GetComputeShader(
-		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main")
+		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
+		bool non_blocking = false, bool* not_available = nullptr)
 	{
-		return GetShaderBlob(EntryType::ComputeShader, shader_code, macros, entry_point);
+		return GetShaderBlob(EntryType::ComputeShader, shader_code, macros, entry_point, non_blocking, status);
 	}
 
 	ComPtr<ID3DBlob> GetShaderBlob(EntryType type, std::string_view shader_code,
-		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main");
+		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", bool non_blocking = false,
+		bool* not_available = nullptr);
 
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc);
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc);
 
-private:
+	void StartPipelineCompilationAsync(ID3D12Device* device,
+		std::string_view vs_code, GSDevice12::ShaderMacro vs_macros, const char* vs_entry_point,
+		std::string_view ps_code, GSDevice12::ShaderMacro ps_macros, const char* ps_entry_point,
+		const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc);
+
 	struct CacheIndexKey
 	{
 		u64 source_hash_low;
@@ -95,6 +106,8 @@ private:
 
 	using CacheIndex = std::unordered_map<CacheIndexKey, CacheIndexData, CacheIndexEntryHasher>;
 
+private:
+
 	static std::string GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model, bool debug);
 	static CacheIndexKey GetShaderCacheKey(
 		EntryType type, const std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point);
@@ -108,12 +121,15 @@ private:
 	void InvalidatePipelineCache();
 
 	ComPtr<ID3DBlob> CompileAndAddShaderBlob(const CacheIndexKey& key, std::string_view shader_code,
-		const D3D_SHADER_MACRO* macros, const char* entry_point);
+		const D3D_SHADER_MACRO* macros, const char* entry_point, D3D::CompileStatus* status = nullptr);
 	ComPtr<ID3D12PipelineState> CompileAndAddPipeline(
 		ID3D12Device* device, const CacheIndexKey& key, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc);
 	ComPtr<ID3D12PipelineState> CompileAndAddPipeline(
 		ID3D12Device* device, const CacheIndexKey& key, const D3D12_COMPUTE_PIPELINE_STATE_DESC& gpdesc);
 	bool AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso);
+
+	void AddShaderBlob(EntryType type, const std::string& source, const D3D_SHADER_MACRO* macros,
+		const char* entry_point, ComPtr<ID3DBlob> blob);
 
 	std::FILE* m_shader_index_file = nullptr;
 	std::FILE* m_shader_blob_file = nullptr;
@@ -125,4 +141,8 @@ private:
 
 	D3D::ShaderModel m_shader_model = D3D::ShaderModel::SM51;
 	bool m_debug = false;
+
+	std::unique_ptr<D3D12CompilerAsync> m_compiler_async;
+
+	void ProcessAsyncCompileJobs();
 };

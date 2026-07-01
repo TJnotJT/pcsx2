@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
+#include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/GS.h"
 #include "GS/GSShaderCompileIndicator.h"
 
@@ -394,12 +395,24 @@ D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetPipelineCacheKey(const D3D1
 }
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType type, std::string_view shader_code,
-	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */)
+	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */, bool non_blocking /* = false */,
+	D3D::CompileStatus* status /* = nullptr */)
 {
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
 	auto iter = m_shader_index.find(key);
 	if (iter == m_shader_index.end())
-		return CompileAndAddShaderBlob(key, shader_code, macros, entry_point);
+	{
+		if (non_blocking)
+		{
+			if (status)
+				*status = D3D::CompileStatus::NotAvailable;
+			return nullptr;
+		}
+		else
+		{
+			CompileAndAddShaderBlob(key, shader_code, macros, entry_point, status);
+		}
+	}
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
@@ -407,8 +420,13 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType typ
 		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_shader_blob_file) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
+		if (status)
+			*status = D3D::CompileStatus::Failure;
 		return {};
 	}
+
+	if (status)
+		*status = D3D::CompileStatus::Success;
 
 	return blob;
 }
@@ -482,7 +500,8 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 }
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
-	const CacheIndexKey& key, std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point)
+	const CacheIndexKey& key, std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point,
+	D3D::CompileStatus* status /* = nullptr */)
 {
 	ComPtr<ID3DBlob> blob;
 
@@ -505,10 +524,60 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	}
 
 	if (!blob)
+	{
+		if (status)
+			*status = D3D::CompileStatus::Failure;
 		return {};
+	}
 
 	if (!m_shader_blob_file || std::fseek(m_shader_blob_file, 0, SEEK_END) != 0)
+	{
+		if (status)
+			*status = D3D::CompileStatus::Success;
 		return blob;
+	}
+
+	CacheIndexData data;
+	data.file_offset = static_cast<u32>(std::ftell(m_shader_blob_file));
+	data.blob_size = static_cast<u32>(blob->GetBufferSize());
+
+	CacheIndexEntry entry = {};
+	entry.source_hash_low = key.source_hash_low;
+	entry.source_hash_high = key.source_hash_high;
+	entry.macro_hash_low = key.macro_hash_low;
+	entry.macro_hash_high = key.macro_hash_high;
+	entry.entry_point_low = key.entry_point_low;
+	entry.entry_point_high = key.entry_point_high;
+	entry.source_length = key.source_length;
+	entry.shader_type = static_cast<u32>(key.type);
+	entry.blob_size = data.blob_size;
+	entry.file_offset = data.file_offset;
+
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, m_shader_blob_file) != entry.blob_size ||
+		std::fflush(m_shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, m_shader_index_file) != 1 ||
+		std::fflush(m_shader_index_file) != 0)
+	{
+		if (status)
+			*status = D3D::CompileStatus::Failure;
+		Console.Error("Failed to write shader blob to file");
+		return blob;
+	}
+
+	if (status)
+		*status = D3D::CompileStatus::Success;
+
+	m_shader_index.emplace(key, data);
+	return blob;
+}
+
+// FIXME: Duplication with above
+void D3D12ShaderCache::AddShaderBlob(EntryType type, const std::string& shader_code, const D3D_SHADER_MACRO* macros,
+	const char* entry_point, ComPtr<ID3DBlob> blob)
+{
+	if (!blob || !m_shader_blob_file || std::fseek(m_shader_blob_file, 0, SEEK_END) != 0)
+		return;
+
+	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
 
 	CacheIndexData data;
 	data.file_offset = static_cast<u32>(std::ftell(m_shader_blob_file));
@@ -531,11 +600,9 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 		std::fflush(m_shader_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
-		return blob;
 	}
 
 	m_shader_index.emplace(key, data);
-	return blob;
 }
 
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPipeline(
@@ -607,4 +674,100 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 
 	m_shader_index.emplace(key, data);
 	return true;
+}
+
+void D3D12ShaderCache::StartPipelineCompilationAsync(ID3D12Device* device,
+	std::string_view vs_code, GSDevice12::ShaderMacro vs_macros, const char* vs_entry_point,
+	std::string_view ps_code, GSDevice12::ShaderMacro ps_macros, const char* ps_entry_point,
+	const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc)
+{
+	D3D12CompilerAsync::CompileJob compile_job{};
+
+	// VS
+	{
+		const auto key = GetShaderCacheKey(EntryType::VertexShader, vs_code, vs_macros.GetPtr(), vs_entry_point);
+		auto iter = m_shader_index.find(key);
+		if (iter == m_shader_index.end())
+		{
+			compile_job.vs_job.entry_point = vs_entry_point;
+			compile_job.vs_job.macros = vs_macros;
+			compile_job.vs_job.shader_code = vs_code;
+			compile_job.vs_job.type = EntryType::VertexShader;
+		}
+		else
+		{
+			// FIXME: Make a utility function
+			ComPtr<ID3DBlob> blob;
+			HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
+			if (FAILED(hr) || std::fseek(m_shader_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+				std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_shader_blob_file) != iter->second.blob_size)
+			{
+				Console.Error("Read blob from file failed");
+				return;
+			}
+			compile_job.vs_job.blob = blob;
+		}
+	}
+
+	// PS
+	{
+		const auto key = GetShaderCacheKey(EntryType::PixelShader, ps_code, ps_macros.GetPtr(), ps_entry_point);
+		auto iter = m_shader_index.find(key);
+		if (iter == m_shader_index.end())
+		{
+			compile_job.ps_job.entry_point = ps_entry_point;
+			compile_job.ps_job.macros = ps_macros;
+			compile_job.ps_job.shader_code = ps_code;
+			compile_job.ps_job.type = EntryType::PixelShader;
+		}
+		else
+		{
+			// FIXME: Make a utility function
+			ComPtr<ID3DBlob> blob;
+			HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
+			if (FAILED(hr) || std::fseek(m_shader_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+				std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_shader_blob_file) != iter->second.blob_size)
+			{
+				Console.Error("Read blob from file failed");
+				return;
+			}
+			compile_job.ps_job.blob = blob;
+		}
+	}
+
+	// Pipeline
+	{
+		compile_job.pipeline_job.type = D3D12CompilerAsync::PipelineJob::GRAPHICS;
+		compile_job.pipeline_job.desc = desc;
+		compile_job.pipeline_job.device = device;
+	}
+
+	if (!m_compiler_async)
+		m_compiler_async = std::make_unique<D3D12CompilerAsync>(m_shader_model, m_debug);
+
+	m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+}
+
+void D3D12ShaderCache::ProcessAsyncCompileJobs()
+{
+	if (m_compiler_async)
+	{
+		D3D12CompilerAsync::CompileJob compile_jobs[16];
+
+		u32 n_jobs = m_compiler_async->GetCompileResultsAsync(compile_jobs, 16);
+
+		for (u32 i = 0; i < n_jobs; i++)
+		{
+			AddShaderBlob(EntryType::VertexShader, compile_jobs[i].vs_job.shader_code,
+				compile_jobs[i].vs_job.macros.GetPtr(), compile_jobs[i].vs_job.entry_point.c_str(),
+				compile_jobs[i].vs_job.blob);
+
+			AddShaderBlob(EntryType::PixelShader, compile_jobs[i].ps_job.shader_code,
+				compile_jobs[i].ps_job.macros.GetPtr(), compile_jobs[i].ps_job.entry_point.c_str(),
+				compile_jobs[i].ps_job.blob);
+
+			const auto pipeline_key = GetPipelineCacheKey(compile_jobs[i].pipeline_job.desc);
+			AddPipelineToBlob(pipeline_key, compile_jobs[i].pipeline_job.pipeline.get());
+		}
+	}
 }
