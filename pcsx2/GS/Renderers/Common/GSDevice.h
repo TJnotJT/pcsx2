@@ -660,6 +660,90 @@ struct HWBlend
 	BlendFactor src, dst;
 };
 
+// The expansion macro must take the arguments
+// 1. Dynamic - whether the field can be used dynamically.
+// 2. Type - type of the field.
+// 3. Name - name of the field.
+// 4. Bits - number of bits in the field.
+// 4. Shader name - name of the shader macro.
+
+#define PSSEL_FIELDS_EXPAND \
+	EXPAND(true, u32, aem_fmt, 2, "PS_AEM_FMT") \
+	EXPAND(true, u32, pal_fmt, 2, "PS_PAL_FMT") \
+	EXPAND(true, u32, dst_fmt, 2, "PS_DST_FMT") \
+	EXPAND(true, u32, depth_fmt, 2, "PS_DEPTH_FMT") \
+	EXPAND(true, u32, aem, 1, "PS_AEM") \
+	EXPAND(true, u32, fba, 1, "PS_FBA") \
+	EXPAND(true, u32, fog, 1, "PS_FOG") \
+	EXPAND(true, u32, iip, 1, "PS_IIP") \
+	EXPAND(true, u32, date, 3, "PS_DATE") \
+	EXPAND(true, PS_ATST, atst, 3, "PS_ATST") \
+	EXPAND(true, PS_AFAIL, afail, 3, "PS_AFAIL") \
+	EXPAND(true, u32, ztst, 2, "PS_ZTST") \
+	EXPAND(true, u32, fst, 1, "PS_FST") \
+	EXPAND(true, u32, tfx, 3, "PS_TFX") \
+	EXPAND(true, u32, tcc, 1, "PS_TCC") \
+	EXPAND(true, u32, wms, 2, "PS_WMS") \
+	EXPAND(true, u32, wmt, 2, "PS_WMT") \
+	EXPAND(true, u32, adjs, 1, "PS_ADJS") \
+	EXPAND(true, u32, adjt, 1, "PS_ADJT") \
+	EXPAND(true, u32, ltf, 1, "PS_LTF") \
+	EXPAND(true, u32, shuffle, 1, "PS_SHUFFLE") \
+	EXPAND(true, u32, shuffle_same, 1, "PS_SHUFFLE_SAME") \
+	EXPAND(true, u32, real16src, 1, "PS_READ16_SRC") \
+	EXPAND(true, u32, process_ba, 2, "PS_PROCESS_BA") \
+	EXPAND(true, u32, process_rg, 2, "PS_PROCESS_RG") \
+	EXPAND(true, u32, shuffle_across, 1, "PS_SHUFFLE_ACROSS") \
+	EXPAND(true, u32, write_rg, 1, "PS_WRITE_RG") \
+	EXPAND(true, u32, fbmask, 1, "PS_FBMASK") \
+	EXPAND(true, u32, blend_a, 2, "PS_BLEND_A") \
+	EXPAND(true, u32, blend_b, 2, "PS_BLEND_B") \
+	EXPAND(true, u32, blend_c, 2, "PS_BLEND_C") \
+	EXPAND(true, u32, blend_d, 2, "PS_BLEND_D") \
+	EXPAND(true, u32, fixed_one_a, 1, "PS_FIXED_ONE_A") \
+	EXPAND(true, u32, blend_hw, 3, "PS_BLEND_HW") \
+	EXPAND(true, u32, a_masked, 1, "PS_A_MASKED") \
+	EXPAND(true, u32, colclip_hw, 1, "PS_COLCLIP_HW") \
+	EXPAND(true, u32, rta_correction, 1, "PS_RTA_CORRECTION") \
+	EXPAND(true, u32, rta_source_correction, 1, "PS_RTA_SRC_CORRECTION") \
+	EXPAND(true, u32, colclip, 1, "PS_COLCLIP") \
+	EXPAND(true, u32, blend_mix, 2, "PS_BLEND_MIX") \
+	EXPAND(true, u32, round_inv, 1, "PS_ROUND_INV") \
+	EXPAND(true, u32, pabe, 1, "PS_PABE") \
+	EXPAND(false, u32, no_color, 1, "PS_NO_COLOR") \
+	EXPAND(false, u32, no_color1, 1, "PS_NO_COLOR1") \
+	EXPAND(true, u32, channel, 3, "PS_CHANNEL_FETCH") \
+	EXPAND(true, u32, dither, 2, "PS_DITHER") \
+	EXPAND(true, u32, dither_adjust, 1, "PS_DITHER_ADJUST") \
+	EXPAND(true, u32, zclamp, 1, "PS_ZCLAMP") \
+	EXPAND(true, u32, zfloor, 1, "PS_ZFLOOR") \
+	EXPAND(true, u32, tcoffsethack, 1, "PS_TCOFFSETHACK") \
+	EXPAND(true, u32, urban_chaos_hle, 1, "PS_URBAN_CHAOS_HLE") \
+	EXPAND(true, u32, tales_of_abyss_hle, 1, "PS_TALES_OF_ABYSS_HLE") \
+	EXPAND(true, u32, tex_is_fb, 1, "PS_TEX_IS_FB") \
+	EXPAND(true, u32, automatic_lod, 1, "PS_AUTOMATIC_LOD") \
+	EXPAND(true, u32, manual_lod, 1, "PS_MANUAL_LOD") \
+	EXPAND(true, u32, point_sampler, 1, "PS_POINT_SAMPLER") \
+	EXPAND(true, u32, region_rect, 1, "PS_REGION_RECT") \
+	EXPAND(true, u32, scanmsk, 2, "PS_SCANMSK") \
+	EXPAND(true, PS_AA1, aa1, 2, "PS_AA1") \
+	EXPAND(true, u32, abe, 1, "PS_ABE") \
+	EXPAND(true, u32, sw_aniso, 5, "PS_ANISOTROPIC_FILTERING") \
+	EXPAND(false, u32, rov_color, 1, "PS_ROV_COLOR") \
+	EXPAND(false, PS_ROV_DEPTH, rov_depth, 2, "PS_ROV_DEPTH") \
+	EXPAND(false, u32, uber_enable, 1, "UBER_SHADER") \
+	EXPAND(false, u32, uber_zwrite, 1, "ZWRITE") \
+	EXPAND(false, u32, uber_sw_depth, 1, "SW_DEPTH") \
+	EXPAND(false, u32, uber_date_init, 1, "DATE_INIT")
+
+#define VSSEL_FIELDS_EXPAND \
+	EXPAND(true, u8, fst, 1, "VS_FST") \
+	EXPAND(true, u8, tme, 1, "VS_TME") \
+	EXPAND(true, u8, iip, 1, "VS_IIP") \
+	EXPAND(true, u8, point_size, 1, "VS_POINT_SIZE") \
+	EXPAND(true, VSExpand, expand, 2, "VS_EXPAND") \
+	EXPAND(false, u8, uber_enable, 1, "UBER_SHADER")
+
 struct alignas(16) GSHWDrawConfig
 {
 	enum class Topology: u8
@@ -673,6 +757,15 @@ struct alignas(16) GSHWDrawConfig
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
+
+	struct PipelineSelectorFieldDesc
+	{
+		bool dynamic;
+		const char* name;
+		u32 bits;
+		const char* shader_name;
+	};
+
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -680,17 +773,17 @@ struct alignas(16) GSHWDrawConfig
 		{
 			struct
 			{
-				u8 fst : 1;
-				u8 tme : 1;
-				u8 iip : 1;
-				u8 point_size : 1;		///< Set when points need to be expanded without VS expanding.
-				VSExpand expand : 3;
-				u8 _free : 1;
+				#define EXPAND(DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) TYPE NAME : WIDTH;
+					VSSEL_FIELDS_EXPAND
+				#undef EXPAND
 			};
 			u8 key;
 		};
 		VSSelector(): key(0) {}
 		VSSelector(u8 k): key(k) {}
+
+		u32 GetField(const std::string& name) const;
+		void ClearField(const std::string& name);
 
 		/// Returns true if the fixed index buffer should be used.
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
@@ -709,94 +802,9 @@ struct alignas(16) GSHWDrawConfig
 		{
 			struct
 			{
-				// Format
-				u32 aem_fmt   : 2;
-				u32 pal_fmt   : 2;
-				u32 dst_fmt   : 2; // 0 → 32-bit, 1 → 24-bit, 2 → 16-bit
-				u32 depth_fmt : 2; // 0 → None, 1 → 32-bit, 2 → 16-bit, 3 → RGBA
-				// Alpha extension/Correction
-				u32 aem : 1;
-				u32 fba : 1;
-				// Fog
-				u32 fog : 1;
-				// Flat/goround shading
-				u32 iip : 1;
-				// Pixel test
-				u32 date : 3;
-				PS_ATST atst : 3;
-				PS_AFAIL afail : 3;
-				u32 ztst : 2;
-				// Color sampling
-				u32 fst : 1; // Investigate to do it on the VS
-				u32 tfx : 3;
-				u32 tcc : 1;
-				u32 wms : 2;
-				u32 wmt : 2;
-				u32 adjs : 1;
-				u32 adjt : 1;
-				u32 ltf : 1;
-				// Shuffle and fbmask effect
-				u32 shuffle  : 1;
-				u32 shuffle_same : 1;
-				u32 real16src: 1;
-				u32 process_ba : 2;
-				u32 process_rg : 2;
-				u32 shuffle_across : 1;
-				u32 write_rg : 1;
-				u32 fbmask   : 1;
-
-				// Blend and Colclip
-				u32 blend_a        : 2;
-				u32 blend_b        : 2;
-				u32 blend_c        : 2;
-				u32 blend_d        : 2;
-				u32 fixed_one_a    : 1;
-				u32 blend_hw       : 3; /*HWBlendType*/
-				u32 a_masked       : 1;
-				u32 colclip_hw     : 1; // colclip (COLCLAMP off) emulation through HQ textures
-				u32 rta_correction : 1;
-				u32 rta_source_correction : 1;
-				u32 colclip        : 1; // COLCLAMP off (color blend outputs wrap around 0-255)
-				u32 blend_mix      : 2;
-				u32 round_inv      : 1; // Blending will invert the value, so rounding needs to go the other way
-				u32 pabe           : 1;
-				u32 no_color       : 1; // disables color output entirely (depth only)
-				u32 no_color1      : 1; // disables second color output (when unnecessary)
-
-				// Others ways to fetch the texture
-				u32 channel : 3;
-
-				// Dithering
-				u32 dither : 2;
-				u32 dither_adjust : 1;
-
-				// Depth writing
-				u32 zclamp : 1;
-				u32 zfloor : 1;
-
-				// Hack
-				u32 tcoffsethack : 1;
-				u32 urban_chaos_hle : 1;
-				u32 tales_of_abyss_hle : 1;
-				u32 tex_is_fb : 1; // Jak Shadows
-				u32 automatic_lod : 1;
-				u32 manual_lod : 1;
-				u32 point_sampler : 1;
-				u32 region_rect : 1;
-
-				// Scan mask
-				u32 scanmsk : 2;
-
-				// AA1
-				PS_AA1 aa1 : 2; // Pixel shader AA1 primitive. Must be used in conjunction with VS AA1 expand.
-				u32 abe : 1; // Alpha blend enabled. Currently only used for emulating AA1/ABE interaction.
-
-				// Anisotropic filtering
-				u32 sw_aniso : 5;
-				
-				// ROVs
-				u32 rov_color : 1;
-				PS_ROV_DEPTH rov_depth : 2;
+				#define EXPAND(DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) TYPE NAME : WIDTH;
+					PSSEL_FIELDS_EXPAND
+				#undef EXPAND
 			};
 
 			struct
@@ -810,6 +818,9 @@ struct alignas(16) GSHWDrawConfig
 		__fi bool operator==(const PSSelector& rhs) const { return (key_lo == rhs.key_lo && key_hi == rhs.key_hi); }
 		__fi bool operator!=(const PSSelector& rhs) const { return (key_lo != rhs.key_lo || key_hi != rhs.key_hi); }
 		__fi bool operator<(const PSSelector& rhs) const { return (key_lo < rhs.key_lo || key_hi < rhs.key_hi); }
+
+		u32 GetField(const std::string& name) const;
+		void ClearField(const std::string& name);
 
 		__fi bool IsSWBlending() const
 		{
@@ -906,9 +917,15 @@ struct alignas(16) GSHWDrawConfig
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
 		}
+
+		__fi bool HasDATEInit() const
+		{
+			return date == 1 || date == 2;
+		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
 #pragma pack(pop)
+
 	struct PSSelectorHash
 	{
 		std::size_t operator()(const PSSelector& p) const
@@ -918,6 +935,7 @@ struct alignas(16) GSHWDrawConfig
 			return h;
 		}
 	};
+
 #pragma pack(push, 1)
 	struct SamplerSelector
 	{
@@ -1001,6 +1019,13 @@ struct alignas(16) GSHWDrawConfig
 			out.ztst = ZTST_ALWAYS;
 			return out;
 		}
+		static constexpr DepthStencilSelector DepthWriteAlways()
+		{
+			DepthStencilSelector out;
+			out.zwe = true;
+			out.ztst = ZTST_ALWAYS;
+			return out;
+		}
 	};
 	struct ColorMaskSelector
 	{
@@ -1035,6 +1060,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector2 point_size;
 		u32 max_depth;
 		float line_aa1_width;
+		
 		__fi VSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
@@ -1066,35 +1092,39 @@ struct alignas(16) GSHWDrawConfig
 		}
 	};
 
-	struct alignas(16) VSPushConstants
+	struct alignas(16) ShaderPushConstants
 	{
+		static constexpr u32 VS_UBER_SELECTOR = 0; // First 32 bits
+		static constexpr u32 PS_UBER_SELECTOR = 1; // Remaining 32 x 4 bits
+		static constexpr u32 NUM_UBER_SELECTORS = 5;
+
 		u32 base_vertex;
 		u32 base_index;
-		u32 _pad0;
-		u32 _pad1;
+		u32 uber_selectors[NUM_UBER_SELECTORS];
+		u32 _pad_0;
 
-		__fi VSPushConstants()
+		__fi ShaderPushConstants()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
 		}
-		__fi VSPushConstants(const VSPushConstants& other)
+		__fi ShaderPushConstants(const ShaderPushConstants& other)
 		{
 			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
 		}
-		__fi VSPushConstants& operator=(const VSPushConstants& other)
+		__fi ShaderPushConstants& operator=(const ShaderPushConstants& other)
 		{
-			new (this) VSPushConstants(other);
+			new (this) ShaderPushConstants(other);
 			return *this;
 		}
-		__fi bool operator==(const VSPushConstants& other) const
+		__fi bool operator==(const ShaderPushConstants& other) const
 		{
 			return BitEqual(*this, other);
 		}
-		__fi bool operator!=(const VSPushConstants& other) const
+		__fi bool operator!=(const ShaderPushConstants& other) const
 		{
 			return !(*this == other);
 		}
-		__fi bool Update(const VSPushConstants& other)
+		__fi bool Update(const ShaderPushConstants& other)
 		{
 			if (*this == other)
 				return false;
@@ -1103,7 +1133,7 @@ struct alignas(16) GSHWDrawConfig
 			return true;
 		}
 	};
-	static_assert(sizeof(VSPushConstants) == 16, "VSPushConstants wrong size");
+	static_assert(sizeof(ShaderPushConstants) == 32, "ShaderPushConstants wrong size");
 
 	struct alignas(16) PSConstantBuffer
 	{
@@ -1124,6 +1154,7 @@ struct alignas(16) GSHWDrawConfig
 		GSVector4 DitherMatrix[4];
 
 		GSVector4 ScaleFactor;
+
 		float LineCovScale;
 		float _pad0;
 		float _pad1;
@@ -1255,6 +1286,7 @@ struct alignas(16) GSHWDrawConfig
 
 	alignas(8) PSSelector ps;
 	VSSelector vs;
+	bool uber_shader; ///< Use uber shader in the current draw.
 
 	BlendState blend;
 	SamplerSelector sampler;
@@ -1302,6 +1334,9 @@ struct alignas(16) GSHWDrawConfig
 	static_assert(sizeof(BlendMultiPass) == 8, "blend multi pass is 8 bytes");
 
 	BlendMultiPass blend_multi_pass;
+	
+	// Place push constants before constant buffer so that they're zeroed out ever draw.
+	ShaderPushConstants pc;
 
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
@@ -1330,6 +1365,42 @@ struct alignas(16) GSHWDrawConfig
 	static void DumpConfig(const std::string& path, const GSHWDrawConfig& conf,
 		bool ps = true, bool vs = true, bool bs = true, bool dss = true, bool ss = true, bool asp = true, bool bmp = true,
 		bool cbvs = true, bool cbps = true);
+
+	// Uber shader
+	struct ShaderDefine
+	{
+		const char* name;
+		const char* shader_name;
+		const std::string value;
+	};
+
+	static constexpr std::array<PipelineSelectorFieldDesc, 6> vs_selector_fields = {
+		#define EXPAND(DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+				PipelineSelectorFieldDesc{ DYNAMIC, #NAME, WIDTH, SHADER_NAME},
+			VSSEL_FIELDS_EXPAND
+		#undef EXPAND
+	};
+
+	static constexpr std::array<PipelineSelectorFieldDesc, 67> ps_selector_fields = {
+		#define EXPAND(DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
+				PipelineSelectorFieldDesc{ DYNAMIC, #NAME, WIDTH, SHADER_NAME },
+			PSSEL_FIELDS_EXPAND
+		#undef EXPAND
+	};
+
+	static void UberizeSelector(PSSelector& sel);
+	static void UberizeSelector(VSSelector& sel);
+
+	static const std::vector<ShaderDefine>& GetUberShaderPSSelectorDefines();
+	static const std::vector<ShaderDefine>& GetUberShaderVSSelectorDefines();
+
+	static void GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out);
+
+	static const u32 NumUberPSSelectors;
+	static const u32 NumUberVSSelectors;
+
+	static std::pair<PSSelector, bool> GetNthUberPSSelector(u32 n);
+	static std::pair<VSSelector, bool> GetNthUberVSSelector(u32 n);
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
@@ -1401,6 +1472,7 @@ public:
 		bool depth_feedback       : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
 		bool aa1                  : 1; ///< Supports the GS AA1 feature.
 		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
+		bool uber_shader          : 1; ///< Supports uber shader.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
@@ -1724,6 +1796,12 @@ public:
 	// Index is computed as ((((A * 3 + B) * 3) + C) * 3) + D. A, B, C, D taken from ALPHA register.
 	__ri static HWBlend GetBlend(u32 index) { return m_blendMap[index]; }
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
+
+	virtual bool StartPipelineCompilationAsync(const GSHWDrawConfig& conf)
+	{
+		pxFailRel("Not implemented");
+		return false;
+	}
 };
 
 template <>
