@@ -41,9 +41,9 @@ wil::com_ptr_nothrow<ID3D12PipelineState> D3D12::GraphicsPipelineBuilder::Create
 }
 
 wil::com_ptr_nothrow<ID3D12PipelineState> D3D12::GraphicsPipelineBuilder::Create(
-	ID3D12Device* device, D3D12ShaderCache& cache, bool clear /*= true*/)
+	ID3D12Device* device, D3D12ShaderCache& cache, bool uber, bool clear /*= true*/)
 {
-	wil::com_ptr_nothrow<ID3D12PipelineState> pso = cache.GetPipelineState(device, m_desc);
+	wil::com_ptr_nothrow<ID3D12PipelineState> pso = cache.GetPipelineState(device, m_desc, uber);
 	if (!pso)
 		return {};
 

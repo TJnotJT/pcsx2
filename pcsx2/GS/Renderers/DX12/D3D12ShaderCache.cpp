@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
+#include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/GS.h"
 #include "GS/GSShaderCompileIndicator.h"
 
-#include "Config.h"
 #include "ShaderCacheVersion.h"
 
 #include "common/FileSystem.h"
@@ -54,38 +54,46 @@ bool D3D12ShaderCache::CacheIndexKey::operator!=(const CacheIndexKey& key) const
 			source_length != key.source_length);
 }
 
-bool D3D12ShaderCache::Open(D3D::ShaderModel shader_model, bool debug)
+bool D3D12ShaderCache::Open(D3D::ShaderModel shader_model, bool debug, u32 compile_threads,
+	u32 compile_async_latency_ms)
 {
 	// Only support SM5.1 for now, which is the minimum for D3D12.
 	pxAssert(shader_model >= D3D::ShaderModel::SM51);
 	m_shader_model = shader_model;
 	m_debug = debug;
+	m_compile_threads = compile_threads;
+	m_compile_async_latency_ms = compile_async_latency_ms;
 
 	bool result = true;
 
-	if (!GSConfig.DisableShaderCache)
+	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
-		const std::string base_shader_filename = GetCacheBaseFileName("shaders", m_shader_model, debug);
-		const std::string shader_index_filename = base_shader_filename + ".idx";
-		const std::string shader_blob_filename = base_shader_filename + ".bin";
-
-		if (!ReadExisting(
-				shader_index_filename, shader_blob_filename, m_shader_index_file, m_shader_blob_file, m_shader_index))
+		for (u32 uber = 0; uber < 2; uber++)
 		{
-			result = CreateNew(shader_index_filename, shader_blob_filename, m_shader_index_file, m_shader_blob_file);
-		}
+			const std::string base_shader_filename = GetCacheBaseFileName("shaders", m_shader_model, debug, uber);
+			const std::string shader_index_filename = base_shader_filename + ".idx";
+			const std::string shader_blob_filename = base_shader_filename + ".bin";
 
-		if (result)
-		{
-			const std::string base_pipelines_filename = GetCacheBaseFileName("pipelines", m_shader_model, debug);
-			const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
-			const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
-
-			if (!ReadExisting(pipelines_index_filename, pipelines_blob_filename, m_pipeline_index_file,
-					m_pipeline_blob_file, m_pipeline_index))
+			if (!ReadExisting(
+				shader_index_filename, shader_blob_filename, GetShaderIndexFile(uber), GetShaderBlobFile(uber),
+				GetShaderIndex(uber)))
 			{
-				result = CreateNew(
-					pipelines_index_filename, pipelines_blob_filename, m_pipeline_index_file, m_pipeline_blob_file);
+				result = CreateNew(shader_index_filename, shader_blob_filename, GetShaderIndexFile(uber),
+					GetShaderBlobFile(uber));
+			}
+
+			if (result)
+			{
+				const std::string base_pipelines_filename = GetCacheBaseFileName("pipelines", m_shader_model, debug, uber);
+				const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
+				const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
+
+				if (!ReadExisting(pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber),
+					GetPipelineBlobFile(uber), GetPipelineIndex(uber)))
+				{
+					result = CreateNew(
+						pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber), GetPipelineBlobFile(uber));
+				}
 			}
 		}
 	}
@@ -95,50 +103,61 @@ bool D3D12ShaderCache::Open(D3D::ShaderModel shader_model, bool debug)
 
 void D3D12ShaderCache::Close()
 {
-	if (m_pipeline_index_file)
+	for (u32 uber = 0; uber < 2; uber++)
 	{
-		std::fclose(m_pipeline_index_file);
-		m_pipeline_index_file = nullptr;
+		if (GetPipelineIndexFile(uber))
+		{
+			std::fclose(GetPipelineIndexFile(uber));
+			GetPipelineIndexFile(uber) = nullptr;
+		}
+		if (GetPipelineBlobFile(uber))
+		{
+			std::fclose(GetPipelineBlobFile(uber));
+			GetPipelineBlobFile(uber) = nullptr;
+		}
+		if (GetShaderIndexFile(uber))
+		{
+			std::fclose(GetShaderIndexFile(uber));
+			GetShaderIndexFile(uber) = nullptr;
+		}
+		if (GetShaderBlobFile(uber))
+		{
+			std::fclose(GetShaderBlobFile(uber));
+			GetShaderBlobFile(uber) = nullptr;
+		}
 	}
-	if (m_pipeline_blob_file)
-	{
-		std::fclose(m_pipeline_blob_file);
-		m_pipeline_blob_file = nullptr;
-	}
-	if (m_shader_index_file)
-	{
-		std::fclose(m_shader_index_file);
-		m_shader_index_file = nullptr;
-	}
-	if (m_shader_blob_file)
-	{
-		std::fclose(m_shader_blob_file);
-		m_shader_blob_file = nullptr;
-	}
+
+	m_compiler_async.reset();
 }
 
 void D3D12ShaderCache::InvalidatePipelineCache()
 {
-	m_pipeline_index.clear();
-	if (m_pipeline_blob_file)
+	for (u32 uber = 0; uber < 2; uber++)
 	{
-		std::fclose(m_pipeline_blob_file);
-		m_pipeline_blob_file = nullptr;
+		GetPipelineIndex(uber).clear();
+		if (GetPipelineBlobFile(uber))
+		{
+			std::fclose(GetPipelineBlobFile(uber));
+			GetPipelineBlobFile(uber) = nullptr;
+		}
+
+		if (GetPipelineIndexFile(uber))
+		{
+			std::fclose(GetPipelineIndexFile(uber));
+			GetPipelineIndexFile(uber) = nullptr;
+		}
 	}
 
-	if (m_pipeline_index_file)
-	{
-		std::fclose(m_pipeline_index_file);
-		m_pipeline_index_file = nullptr;
-	}
-
-	if (GSConfig.DisableShaderCache)
+	if (GSConfig.ShaderCacheType == GSShaderCacheType::Disabled)
 		return;
 
-	const std::string base_pipelines_filename = GetCacheBaseFileName("pipelines", m_shader_model, m_debug);
-	const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
-	const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
-	CreateNew(pipelines_index_filename, pipelines_blob_filename, m_pipeline_index_file, m_pipeline_blob_file);
+	for (u32 uber = 0; uber < 2; uber++)
+	{
+		const std::string base_pipelines_filename = GetCacheBaseFileName("pipelines", m_shader_model, m_debug, uber);
+		const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
+		const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
+		CreateNew(pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber), GetPipelineBlobFile(uber));
+	}
 }
 
 bool D3D12ShaderCache::CreateNew(
@@ -255,9 +274,12 @@ bool D3D12ShaderCache::ReadExisting(const std::string& index_filename, const std
 	return true;
 }
 
-std::string D3D12ShaderCache::GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model, bool debug)
+std::string D3D12ShaderCache::GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model,
+	bool debug, bool uber)
 {
 	std::string base_filename = "d3d12_";
+	if (uber)
+		base_filename += "uber_";
 	base_filename += type;
 	base_filename += "_";
 	base_filename += D3D::ShaderModelToCacheString(shader_model);
@@ -394,17 +416,29 @@ D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetPipelineCacheKey(const D3D1
 }
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType type, std::string_view shader_code,
-	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */)
+	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */, bool uber,
+	AsyncReturn* async /* = nullptr */)
 {
+	AsyncReturn::ClearAsync(async);
+
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
-	auto iter = m_shader_index.find(key);
-	if (iter == m_shader_index.end())
-		return CompileAndAddShaderBlob(key, shader_code, macros, entry_point);
+	auto iter = GetShaderIndex(uber).find(key);
+	if (iter == GetShaderIndex(uber).end())
+	{
+		if (AsyncReturn::Enabled(async))
+		{
+			// Does not actually start async compilation. This is done higher up the call chain.
+			AsyncReturn::SetAsync(async);
+			return nullptr;
+		}
+
+		return CompileAndAddShaderBlob(key, shader_code, macros, entry_point, uber);
+	}
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(m_shader_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_shader_blob_file) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(GetShaderBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetShaderBlobFile(uber)) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -414,18 +448,31 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType typ
 }
 
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState(
-	ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc)
+	ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, bool uber, AsyncReturn* async)
 {
+	ProcessAsyncCompileJobs();
+
+	AsyncReturn::ClearAsync(async);
+
 	const auto key = GetPipelineCacheKey(desc);
 
-	auto iter = m_pipeline_index.find(key);
-	if (iter == m_pipeline_index.end())
-		return CompileAndAddPipeline(device, key, desc);
+	auto iter = GetPipelineIndex(uber).find(key);
+	if (iter == GetPipelineIndex(uber).end())
+	{
+		if (AsyncReturn::Enabled(async))
+		{
+			// Don't start async compilation here yet, just flag that the pipeline is not yet compiled.
+			AsyncReturn::SetAsync(async);
+			return nullptr;
+		}
+			
+		return CompileAndAddPipeline(device, key, desc, uber);
+	}
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(m_pipeline_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_pipeline_blob_file) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(GetPipelineBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetPipelineBlobFile(uber)) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -441,7 +488,7 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 	{
 		Console.Warning("Creating cached PSO failed: %08X. Invalidating cache.", hr);
 		InvalidatePipelineCache();
-		pso = CompileAndAddPipeline(device, key, desc);
+		pso = CompileAndAddPipeline(device, key, desc, uber);
 	}
 
 	return pso;
@@ -452,14 +499,14 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 {
 	const auto key = GetPipelineCacheKey(desc);
 
-	auto iter = m_pipeline_index.find(key);
-	if (iter == m_pipeline_index.end())
+	auto iter = GetPipelineIndex(false).find(key);
+	if (iter == GetPipelineIndex(false).end())
 		return CompileAndAddPipeline(device, key, desc);
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(m_pipeline_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, m_pipeline_blob_file) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(GetPipelineBlobFile(false), iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetPipelineBlobFile(false)) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -482,7 +529,8 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 }
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
-	const CacheIndexKey& key, std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point)
+	const CacheIndexKey& key, std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point,
+	bool uber)
 {
 	ComPtr<ID3DBlob> blob;
 
@@ -507,11 +555,11 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	if (!blob)
 		return {};
 
-	if (!m_shader_blob_file || std::fseek(m_shader_blob_file, 0, SEEK_END) != 0)
+	if (!GetShaderBlobFile(uber) || std::fseek(GetShaderBlobFile(uber), 0, SEEK_END) != 0)
 		return blob;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(m_shader_blob_file));
+	data.file_offset = static_cast<u32>(std::ftell(GetShaderBlobFile(uber)));
 	data.blob_size = static_cast<u32>(blob->GetBufferSize());
 
 	CacheIndexEntry entry = {};
@@ -526,22 +574,61 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, m_shader_blob_file) != entry.blob_size ||
-		std::fflush(m_shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, m_shader_index_file) != 1 ||
-		std::fflush(m_shader_index_file) != 0)
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetShaderBlobFile(uber)) != entry.blob_size ||
+		std::fflush(GetShaderBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetShaderIndexFile(uber)) != 1 ||
+		std::fflush(GetShaderIndexFile(uber)) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 		return blob;
 	}
 
-	m_shader_index.emplace(key, data);
+	GetShaderIndex(uber).emplace(key, data);
 	return blob;
 }
 
+// FIXME: Duplication with above
+void D3D12ShaderCache::AddShaderBlob(EntryType type, const std::string& shader_code, const D3D_SHADER_MACRO* macros,
+	const char* entry_point, ComPtr<ID3DBlob> blob, bool uber, bool only_new)
+{
+	if (!blob || !GetShaderBlobFile(uber) || std::fseek(GetShaderBlobFile(uber), 0, SEEK_END) != 0)
+		return;
+
+	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
+
+	if (only_new && GetShaderIndex(uber).contains(key))
+		return;
+
+	CacheIndexData data;
+	data.file_offset = static_cast<u32>(std::ftell(GetShaderBlobFile(uber)));
+	data.blob_size = static_cast<u32>(blob->GetBufferSize());
+
+	CacheIndexEntry entry = {};
+	entry.source_hash_low = key.source_hash_low;
+	entry.source_hash_high = key.source_hash_high;
+	entry.macro_hash_low = key.macro_hash_low;
+	entry.macro_hash_high = key.macro_hash_high;
+	entry.entry_point_low = key.entry_point_low;
+	entry.entry_point_high = key.entry_point_high;
+	entry.source_length = key.source_length;
+	entry.shader_type = static_cast<u32>(key.type);
+	entry.blob_size = data.blob_size;
+	entry.file_offset = data.file_offset;
+
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetShaderBlobFile(uber)) != entry.blob_size ||
+		std::fflush(GetShaderBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetShaderIndexFile(uber)) != 1 ||
+		std::fflush(GetShaderIndexFile(uber)) != 0)
+	{
+		Console.Error("Failed to write shader blob to file");
+	}
+
+	GetShaderIndex(uber).emplace(key, data);
+}
+
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPipeline(
-	ID3D12Device* device, const CacheIndexKey& key, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc)
+	ID3D12Device* device, const CacheIndexKey& key, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc, bool uber)
 {
 	const GSShaderCompileIndicator::CompileTimer compile_timer;
+	Common::Timer debug_timer;
 
 	ComPtr<ID3D12PipelineState> pso;
 	HRESULT hr = device->CreateGraphicsPipelineState(&gpdesc, IID_PPV_ARGS(pso.put()));
@@ -551,7 +638,9 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPip
 		return {};
 	}
 
-	AddPipelineToBlob(key, pso.get());
+	Console.WriteLn("Sync pipeline compile: uber=%d time=%.2fms", uber, debug_timer.GetTimeMilliseconds());
+
+	AddPipelineToBlob(key, pso.get(), uber);
 	return pso;
 }
 
@@ -568,14 +657,17 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPip
 		return {};
 	}
 
-	AddPipelineToBlob(key, pso.get());
+	AddPipelineToBlob(key, pso.get(), false);
 	return pso;
 }
 
-bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso)
+bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso, bool uber, bool only_new)
 {
-	if (!m_pipeline_blob_file || std::fseek(m_pipeline_blob_file, 0, SEEK_END) != 0)
+	if (!GetPipelineBlobFile(uber) || std::fseek(GetPipelineBlobFile(uber), 0, SEEK_END) != 0 ||
+		(only_new && GetPipelineIndex(uber).contains(key)))
+	{
 		return false;
+	}
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = pso->GetCachedBlob(blob.put());
@@ -586,7 +678,7 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 	}
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(m_pipeline_blob_file));
+	data.file_offset = static_cast<u32>(std::ftell(GetPipelineBlobFile(uber)));
 	data.blob_size = static_cast<u32>(blob->GetBufferSize());
 
 	CacheIndexEntry entry = {};
@@ -597,14 +689,128 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, m_pipeline_blob_file) != entry.blob_size ||
-		std::fflush(m_pipeline_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, m_pipeline_index_file) != 1 ||
-		std::fflush(m_pipeline_index_file) != 0)
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetPipelineBlobFile(uber)) != entry.blob_size ||
+		std::fflush(GetPipelineBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetPipelineIndexFile(uber)) != 1 ||
+		std::fflush(GetPipelineIndexFile(uber)) != 0)
 	{
 		Console.Error("Failed to write pipeline blob to file");
 		return false;
 	}
 
-	m_pipeline_index.emplace(key, data);
+	GetPipelineIndex(uber).emplace(key, data);
 	return true;
+}
+
+void D3D12ShaderCache::StartPipelineCompilationAsync(ID3D12Device* device,
+	ShaderJob vs_job, ShaderJob ps_job, D3D12::GraphicsPipelineBuilder gpb, bool uber, u64 hash)
+{
+	D3D12CompilerAsync::CompileJob compile_job{};
+
+	compile_job.uber = uber;
+	compile_job.hash = hash;
+
+	compile_job.vs_job = std::move(vs_job);
+	compile_job.ps_job = std::move(ps_job);
+
+	// VS
+	if (!compile_job.vs_job.blob)
+	{
+		const auto key = GetShaderCacheKey(
+			EntryType::VertexShader,
+			compile_job.vs_job.shader_code,
+			compile_job.vs_job.macros.GetPtr(),
+			compile_job.vs_job.entry_point.c_str());
+		auto iter = GetShaderIndex(uber).find(key);
+		if (iter != GetShaderIndex(uber).end())
+		{
+			// FIXME: Make a utility function
+			ComPtr<ID3DBlob> blob;
+			HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
+			if (FAILED(hr) || std::fseek(GetShaderBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
+				std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetShaderBlobFile(uber)) != iter->second.blob_size)
+			{
+				Console.Error("Read blob from file failed");
+				return;
+			}
+			compile_job.vs_job.blob = blob;
+		}
+	}
+
+	// PS
+	if (!compile_job.ps_job.blob)
+	{
+		const auto key = GetShaderCacheKey(
+			EntryType::PixelShader,
+			compile_job.ps_job.shader_code,
+			compile_job.ps_job.macros.GetPtr(),
+			compile_job.ps_job.entry_point.c_str());
+		auto iter = GetShaderIndex(uber).find(key);
+		if (iter != GetShaderIndex(uber).end())
+		{
+			// FIXME: Make a utility function
+			ComPtr<ID3DBlob> blob;
+			HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
+			if (FAILED(hr) || std::fseek(GetShaderBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
+				std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetShaderBlobFile(uber)) != iter->second.blob_size)
+			{
+				Console.Error("Read blob from file failed");
+				return;
+			}
+			compile_job.ps_job.blob = blob;
+		}
+	}
+
+	// Pipeline
+	{
+		compile_job.pipeline_job.type = D3D12CompilerAsync::PipelineJob::GRAPHICS;
+		compile_job.pipeline_job.gpb = std::move(gpb);
+		compile_job.pipeline_job.device = device;
+	}
+
+	if (!m_compiler_async)
+		m_compiler_async = std::make_unique<D3D12CompilerAsync>(m_shader_model, m_debug, m_compile_threads);
+
+	Console.WriteLn("Async pipeline compile: started  hash=0x%016llX uber=%d", compile_job.hash, compile_job.uber);
+
+	m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+}
+
+void D3D12ShaderCache::ProcessAsyncCompileJobs()
+{
+	if (m_compiler_async)
+	{
+		static constexpr int BATCH_MAX_SIZE = 16;
+
+		D3D12CompilerAsync::CompileJob compile_jobs[BATCH_MAX_SIZE];
+
+		const u32 n_jobs = m_compiler_async->GetCompileResultsAsync(compile_jobs, BATCH_MAX_SIZE);
+
+		if (n_jobs > 0)
+			Console.WriteLn("Async pipeline compile: processing %d jobs", n_jobs);
+
+		for (u32 i = 0; i < n_jobs; i++)
+		{
+			if (compile_jobs[i].vs_job.blob)
+			{
+				AddShaderBlob(EntryType::VertexShader, compile_jobs[i].vs_job.shader_code,
+					compile_jobs[i].vs_job.macros.GetPtr(), compile_jobs[i].vs_job.entry_point.c_str(),
+					compile_jobs[i].vs_job.blob, compile_jobs[i].uber, true);
+			}
+
+			if (compile_jobs[i].ps_job.blob)
+			{
+				AddShaderBlob(EntryType::PixelShader, compile_jobs[i].ps_job.shader_code,
+					compile_jobs[i].ps_job.macros.GetPtr(), compile_jobs[i].ps_job.entry_point.c_str(),
+					compile_jobs[i].ps_job.blob, compile_jobs[i].uber, true);
+			}
+
+			if (compile_jobs[i].pipeline_job.pipeline)
+			{
+				const auto pipeline_key = GetPipelineCacheKey(compile_jobs[i].pipeline_job.gpb.GetDesc());
+				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
+					compile_jobs[i].hash, compile_jobs[i].uber, compile_jobs[i].time_ms, compile_jobs[i].thread_id);
+				AddPipelineToBlob(pipeline_key, compile_jobs[i].pipeline_job.pipeline.get(), compile_jobs[i].uber, true);
+			}
+		}
+	}
 }

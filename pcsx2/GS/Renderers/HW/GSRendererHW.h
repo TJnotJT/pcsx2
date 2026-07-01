@@ -259,6 +259,8 @@ private:
 	void ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Convert to RW capable textures if needed.
 	void ConvertTextureTypeROVSingle(GSTextureCache::Target* tgt, bool shader_write); // Helper to do the above.
 
+	void HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds);
+
 	void SetTCOffset();
 	bool NextDrawColClip() const;
 	bool IsPossibleChannelShuffle() const;
@@ -340,6 +342,7 @@ private:
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
+	GSHWDrawConfig m_conf_uber = {};
 
 	// software sprite renderer state
 	std::vector<GSVertexSW> m_sw_vertex_buffer;
