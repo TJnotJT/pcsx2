@@ -5377,6 +5377,28 @@ void GSRendererHW::HandleProvokingVertexFirst()
 	}
 }
 
+void GSRendererHW::HandleFlatShadedVertices()
+{
+	// De-index the vertices using the copy buffer
+	while (m_vertex->maxcount < m_index->tail)
+		GrowVertexBuffer();
+	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
+	{
+		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
+		m_index->buff[i] = static_cast<u16>(i);
+	}
+	std::swap(m_vertex->buff, m_vertex->buff_copy);
+	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
+
+	// Put correct color in the first vertex
+	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	for (u32 i = 0; i < m_index->tail; i += n)
+	{
+		for (u32 j = 0; j < n - 1; j++)
+			m_vertex->buff[i + j].RGBAQ.U32[0] = m_vertex->buff[i + n - 1].RGBAQ.U32[0];
+	}
+}
+
 void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert_backup, const bool no_rt)
 {
 	GL_PUSH("HW: IA");
@@ -9474,6 +9496,22 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
+	if (!g_gs_device->PipelineExistsInCache(m_conf, true))
+	{
+		ConfigureROV(rt != nullptr, ds != nullptr);
+		ConvertTextureTypeROV(rt, ds);
+		if (IsFlatShaded())
+		{
+			HandleFlatShadedVertices();
+			SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
+		}
+
+		m_conf.uber_shader = true;
+
+		// Get the dynamic state bits.
+		GSHWDrawConfig::GetUberShaderSelector( m_conf.vs, m_conf.ps, m_conf.pc);
+	}
+
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
@@ -9490,7 +9528,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
 	}
-	
+
 	if (GSConfig.SaveHWConfig && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
