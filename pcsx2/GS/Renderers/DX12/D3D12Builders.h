@@ -57,6 +57,41 @@ namespace D3D12
 
 		GraphicsPipelineBuilder();
 
+		// FIXME: CLEAN THIS UP. MOVE TO CPP.
+		GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other)
+			: m_desc(other.m_desc)
+			, m_input_elements(other.m_input_elements)
+		{
+			if (m_desc.InputLayout.NumElements > 0)
+				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
+		}
+
+		GraphicsPipelineBuilder(const GraphicsPipelineBuilder&& other)
+			: m_desc(other.m_desc)
+			, m_input_elements(other.m_input_elements)
+		{
+			if (m_desc.InputLayout.NumElements > 0)
+				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
+		}
+
+		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder& other)
+		{
+			m_desc = other.m_desc;
+			m_input_elements = other.m_input_elements;
+			if (m_desc.InputLayout.NumElements > 0)
+				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
+			return *this;
+		}
+
+		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder&& other)
+		{
+			m_desc = other.m_desc;
+			m_input_elements = other.m_input_elements;
+			if (m_desc.InputLayout.NumElements > 0)
+				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
+			return *this;
+		}
+
 		~GraphicsPipelineBuilder() = default;
 
 		void Clear();
@@ -108,6 +143,7 @@ namespace D3D12
 
 		void SetDepthStencilFormat(DXGI_FORMAT format);
 
+		const D3D12_GRAPHICS_PIPELINE_STATE_DESC& GetDesc() { return m_desc; }
 	private:
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC m_desc;
 		std::array<D3D12_INPUT_ELEMENT_DESC, MAX_VERTEX_ATTRIBUTES> m_input_elements;

@@ -8,6 +8,7 @@
 #include "GS/Renderers/DX12/GSTexture12.h"
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
 #include "GS/Renderers/DX12/D3D12StreamBuffer.h"
+#include "GS/Renderers/DX12/D3D12CompilerAsync.h"
 
 #include "common/HashCombine.h"
 
@@ -258,21 +259,6 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
-	union UberSelector
-	{
-		struct
-		{
-			u8 enable : 1;
-			u8 zwrite : 1;
-			u8 sw_depth : 1;
-			u8 date_init : 1;
-			u8 _free : 4;
-		};
-
-		u8 key;
-	};
-
-	static_assert(sizeof(UberSelector) == 1);
 
 	struct alignas(8) PipelineSelector
 	{
@@ -296,8 +282,6 @@ public:
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
 
-		UberSelector uber;
-
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
 
@@ -310,42 +294,12 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.uber.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
 			return hash;
 		}
 	};
 
-	class ShaderMacro
-	{
-		struct mcstr
-		{
-			const char *name, *def;
-			mcstr(const char* n, const char* d)
-				: name(n)
-				, def(d)
-			{
-			}
-		};
-
-		struct mstring
-		{
-			std::string name, def;
-			mstring(const char* n, std::string d)
-				: name(n)
-				, def(d)
-			{
-			}
-		};
-
-		std::vector<mstring> mlist;
-		std::vector<mcstr> mout;
-
-	public:
-		ShaderMacro();
-		void AddMacro(const char* n, int d);
-		void AddMacro(const char* n, std::string d);
-		D3D_SHADER_MACRO* GetPtr(void);
-	};
+	using ShaderMacro = D3D::ShaderMacro;
 
 	enum : u32
 	{
@@ -487,10 +441,13 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, const UberSelector& uber_sel);
-	const ID3DBlob* GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, const UberSelector& uber_sel);
-	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p);
+	using ShaderJob = D3D12CompilerAsync::ShaderJob;
+	using ShaderEntryType = D3D12ShaderCache::EntryType;
+
+	ShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, AsyncReturn* async = nullptr);
+	ShaderJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, AsyncReturn* async = nullptr);
+	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p, bool uber = false, AsyncReturn* async = nullptr);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, AsyncReturn* async = nullptr);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);
@@ -604,7 +561,7 @@ public:
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	void SetSelectorPushConstants(const GSHWDrawConfig& config);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
-	bool BindDrawPipeline(const PipelineSelector& p);
+	bool BindDrawPipeline(const PipelineSelector& p, bool uber = false);
 
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,

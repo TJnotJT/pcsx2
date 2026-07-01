@@ -60,32 +60,6 @@ static D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE GetLoadOpForTexture(GSTexture12* 
 	// clang-format on
 }
 
-GSDevice12::ShaderMacro::ShaderMacro()
-{
-	mlist.emplace_back("DX12", "1");
-}
-
-void GSDevice12::ShaderMacro::AddMacro(const char* n, int d)
-{
-	AddMacro(n, std::to_string(d));
-}
-
-void GSDevice12::ShaderMacro::AddMacro(const char* n, std::string d)
-{
-	mlist.emplace_back(n, std::move(d));
-}
-
-D3D_SHADER_MACRO* GSDevice12::ShaderMacro::GetPtr(void)
-{
-	mout.clear();
-
-	for (auto& i : mlist)
-		mout.emplace_back(i.name.c_str(), i.def.c_str());
-
-	mout.emplace_back(nullptr, nullptr);
-	return (D3D_SHADER_MACRO*)mout.data();
-}
-
 GSDevice12::GSDevice12() = default;
 
 GSDevice12::~GSDevice12() = default;
@@ -3222,21 +3196,21 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
-const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, const UberSelector& uber_sel)
+GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, AsyncReturn* async)
 {
 	ShaderMacro sm;
 	sm.AddMacro("VERTEX_SHADER", 1);
-	if (uber_sel.enable)
+	if (uber)
 	{
+		// Add the uber selector bits.
+		sel.uber_enable = true;
+
 		// Do the dynamic macros and clear them from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
 		{
 			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
 			sel.ClearField(dynamic_define.name);
 		}
-
-		// Add the uber selector bits.
-		sel.uber_enable = 1;
 
 		// Do the static macros.
 		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::vs_selector_fields)
@@ -3253,40 +3227,57 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, c
 		sm.AddMacro("VS_EXPAND", static_cast<int>(sel.expand));
 	}
 
+	ShaderJob shader{};
+
 	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
-		return it->second.get();
+	{
+		shader.blob = it->second.get();
+		if (it->second == nullptr)
+			printf("");
+		return shader;
+	}
 
 	// FIXME: Make the Uber/Normal sources the same.
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
-	const std::string& source = uber_sel.enable ? m_tfx_uber_source : m_tfx_source;
-	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point));
+	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, async));
+	if (!vs && AsyncReturn::IsAsync(async))
+	{
+		// Shader does not exist in cache yet. Return info needed to compile it async.
+		shader.shader_code = source;
+		shader.entry_point = entry_point;
+		shader.macros = sm;
+		shader.type = D3D::ShaderCacheEntryType::VertexShader;
+		return shader;
+	}
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
-	return it->second.get();
+	shader.blob = it->second.get();
+	return shader;
 }
 
-const ID3DBlob* GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, const UberSelector& uber_sel)
+GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, AsyncReturn* async)
 {
 	ShaderMacro sm;
 	sm.AddMacro("PIXEL_SHADER", 1);
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_DEPTH_FEEDBACK_SUPPORT", 2);
 
-	if (uber_sel.enable)
+	if (uber)
 	{
+		// Add the uber selector bits.
+		sel.uber_enable = true;
+		sel.uber_date_init = (sel.date == 1 || sel.date == 2);
+		sel.uber_sw_depth = sel.IsFeedbackLoopDepth();
+		sel.uber_zwrite = sel.HasDepthOutput();
+
 		// Do the dynamic macros and clear them from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
 		{
 			sm.AddMacro(dynamic_define.shader_name, dynamic_define.value);
 			sel.ClearField(dynamic_define.name);
 		}
-
-		// Add the uber selector bits.
-		sel.uber_enable = 1;
-		sel.uber_sw_depth = uber_sel.sw_depth;
-		sel.uber_zwrite = uber_sel.zwrite;
-		sel.uber_date_init = uber_sel.date_init;
 
 		// Do the static macros.
 		for (const GSHWDrawConfig::PipelineSelectorFieldDesc& field_desc : GSHWDrawConfig::ps_selector_fields)
@@ -3363,20 +3354,40 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, co
 		sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	}
 
+	ShaderJob shader{};
+
 	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_pixel_shaders.find(sel);
 	if (it != m_tfx_pixel_shaders.end())
-		return it->second.get();
+	{
+		shader.blob = it->second.get();
+		if (it->second == nullptr)
+			printf("");
+		return shader;
+	}
 
 	// FIXME: Make the Uber/Normal sources the same.
-	const std::string& source = uber_sel.enable ? m_tfx_uber_source : m_tfx_source;
-	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main"));
+	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", async));
+	if (!ps && AsyncReturn::IsAsync(async))
+	{
+		// Shader does not exist in cache yet. Return info needed to compile it async.
+		shader.entry_point = "ps_main";
+		shader.macros = sm;
+		shader.shader_code = source;
+		shader.type = ShaderEntryType::PixelShader;
+		return shader;
+	}
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
-	return it->second.get();
+	shader.blob = it->second.get();
+	return shader;
 }
 
-GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const PipelineSelector& p)
+GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
+	const PipelineSelector& p, bool uber, AsyncReturn* async)
 {
+	AsyncReturn::ClearAsync(async);
+
 	static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY_TYPE, 3> topology_lookup = {{
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT, // Point
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE, // Line
@@ -3392,10 +3403,16 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		pps.no_color1 = true;
 	}
 
-	const ID3DBlob* vs = GetTFXVertexShader(p.vs, p.uber);
-	const ID3DBlob* ps = GetTFXPixelShader(pps, p.uber);
-	if (!vs || !ps)
-		return nullptr;
+	AsyncReturn vs_async(AsyncReturn::Enabled(async));
+	AsyncReturn ps_async(AsyncReturn::Enabled(async));
+
+	ShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
+	ShaderJob ps = GetTFXPixelShader(pps, uber, &ps_async);
+
+	const bool vs_failed = !vs.blob && !AsyncReturn::IsAsync(&vs_async);
+	const bool ps_failed = !ps.blob && !AsyncReturn::IsAsync(&ps_async);
+	if (vs_failed || ps_failed)
+		return nullptr; // Failed
 
 	// Common state
 	D3D12::GraphicsPipelineBuilder gpb;
@@ -3422,8 +3439,10 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 		gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
 
 	// Shaders
-	gpb.SetVertexShader(vs);
-	gpb.SetPixelShader(ps);
+	if (vs.blob)
+		gpb.SetVertexShader(vs.blob.get());
+	if (ps.blob)
+		gpb.SetPixelShader(ps.blob.get());
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
@@ -3492,6 +3511,29 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 	}
 
+	if (AsyncReturn::Enabled(async))
+	{
+		// Check if the pipeline is already in the cache.
+		if (vs.blob && ps.blob)
+		{
+			AsyncReturn pipeline_async(true);
+			ComPtr<ID3D12PipelineState> pso = m_shader_cache.GetPipelineState(
+				m_device.get(), gpb.GetDesc(), &pipeline_async);
+
+			const bool pipeline_found = pso != nullptr;
+			const bool pipeline_failed = pso == nullptr && !AsyncReturn::IsAsync(&pipeline_async);
+			if (pipeline_found || pipeline_failed)
+				return pso;
+		}
+
+		// Create pipeline async
+		printf("Starting async pipeline compile\n");
+		AsyncReturn::SetAsync(async);
+		m_shader_cache.StartPipelineCompilationAsync(m_device.get(), std::move(vs), std::move(ps), std::move(gpb));
+
+		return nullptr;
+	}
+
 	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache));
 	if (pipeline)
 	{
@@ -3502,20 +3544,24 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	return pipeline;
 }
 
-const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p)
+const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, AsyncReturn* async)
 {
 	auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
 		return it->second.get();
 
-	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p));
+	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p, uber, async));
+	if (!pipeline && AsyncReturn::IsAsync(async))
+		return nullptr; // Async compilation in progress
 	it = m_tfx_pipelines.emplace(p, std::move(pipeline)).first;
 	return it->second.get();
 }
 
-bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
+bool GSDevice12::BindDrawPipeline(const PipelineSelector& p, bool uber)
 {
-	const ID3D12PipelineState* pipeline = GetTFXPipeline(p);
+	AsyncReturn async(true);
+	// FIXME Implement hybrid selection here!!
+	const ID3D12PipelineState* pipeline = GetTFXPipeline(p, uber, &async);
 	if (!pipeline)
 		return false;
 
@@ -4919,15 +4965,6 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
-
-	m_pipeline_selector.uber.key = 0;
-	if (config.uber_shader)
-	{
-		m_pipeline_selector.uber.enable = 1;
-		m_pipeline_selector.uber.sw_depth = config.ps.IsFeedbackLoopDepth();
-		m_pipeline_selector.uber.zwrite = config.ps.HasDepthOutput();
-		m_pipeline_selector.uber.date_init = config.ps.HasDATEInit();
-	}
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
