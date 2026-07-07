@@ -634,11 +634,6 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPip
 		return {};
 	}
 
-	if (debug_timer.GetTimeMilliseconds() >= 400)
-		printf("");
-	if (debug_timer.GetTimeMilliseconds() <= 50)
-		printf("");
-
 	printf("Compiled pipeline in %.2fms (uber=%d)\n", debug_timer.GetTimeMilliseconds(), uber);
 
 	AddPipelineToBlob(key, pso.get(), uber);

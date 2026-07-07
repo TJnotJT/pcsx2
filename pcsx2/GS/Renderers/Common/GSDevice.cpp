@@ -2024,6 +2024,27 @@ static void GetUberShaderSelector(
 	DoPipelineFieldActions(selector_fields, base_selector, WriteSelectorBits);
 }
 
+void GSHWDrawConfig::UberizeSelector(PSSelector& sel)
+{
+	sel.uber_enable = true;
+	sel.uber_date_init = (sel.date == 1 || sel.date == 2);
+	sel.uber_sw_depth = sel.IsFeedbackLoopDepth();
+	sel.uber_zwrite = sel.HasDepthOutput();
+
+	// Clear dynamic state bits from the selector.
+	for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
+		sel.ClearField(dynamic_define.name);
+}
+
+void GSHWDrawConfig::UberizeSelector(VSSelector& sel)
+{
+	sel.uber_enable = true;
+
+	// Clear the dynamic state bits from the selector.
+	for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+		sel.ClearField(dynamic_define.name);
+}
+
 const std::vector<GSHWDrawConfig::ShaderDefine>& GSHWDrawConfig::GetUberShaderPSSelectorDefines()
 {
 	static std::vector<GSHWDrawConfig::ShaderDefine> defines;
@@ -2040,34 +2061,27 @@ const std::vector<GSHWDrawConfig::ShaderDefine>& GSHWDrawConfig::GetUberShaderVS
 	return defines;
 }
 
-void GSHWDrawConfig::GetUberShaderVSSelector(const VSSelector& sel, u32 max_selectors, u32* selectors_out)
+void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out)
 {
-	GetUberShaderSelector(sel, vs_selector_fields, max_selectors,
-		GSHWDrawConfig::ShaderPushConstants::VS_UBER_SELECTOR, selectors_out);
+	::GetUberShaderSelector(vs, vs_selector_fields, ShaderPushConstants::NUM_UBER_SELECTORS,
+		ShaderPushConstants::VS_UBER_SELECTOR, pc_out.uber_selectors);
+	::GetUberShaderSelector(ps, ps_selector_fields, ShaderPushConstants::NUM_UBER_SELECTORS,
+		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
 }
 
-void GSHWDrawConfig::GetUberShaderPSSelector(const PSSelector& sel, u32 max_selectors, u32* selectors_out)
-{
-	GetUberShaderSelector(sel, ps_selector_fields, max_selectors,
-		GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR, selectors_out);
-}
-
-const constinit u32 GSHWDrawConfig::NumUberPSSelectors = 512;
-const constinit u32 GSHWDrawConfig::NumUberVSSelectors = 8;
+const constinit u32 GSHWDrawConfig::NumUberPSSelectors = 128;
+const constinit u32 GSHWDrawConfig::NumUberVSSelectors = 1;
 
 GSHWDrawConfig::PSSelector GSHWDrawConfig::GetNthUberPSSelector(u32 n)
 {
-	const u32 iip = (n >> 0) & 1;
-	const u32 no_color = (n >> 1) & 1;
-	const u32 no_color1 = (n >> 2) & 1;
-	const u32 rov_color = (n >> 3) & 1;
-	const u32 rov_depth = (n >> 4) & 3;
-	const u32 uber_zwrite = (n >> 6) & 1;
-	const u32 uber_sw_depth = (n >> 7) & 1;
-	const u32 uber_date_init = (n >> 8) & 1;
+	const u32 no_color = (n >> 0) & 1;
+	const u32 no_color1 = (n >> 1) & 1;
+	const u32 rov_color = (n >> 2) & 1;
+	const u32 rov_depth = (n >> 3) & 3;
+	const u32 uber_zwrite = (n >> 5) & 1;
+	const u32 uber_sw_depth = (n >> 6) & 1;
 
 	PSSelector sel{};
-	sel.iip = iip;
 	sel.no_color = no_color;
 	sel.no_color1 = no_color1;
 	sel.rov_color = rov_color;
@@ -2075,21 +2089,14 @@ GSHWDrawConfig::PSSelector GSHWDrawConfig::GetNthUberPSSelector(u32 n)
 	sel.uber_enable = true;
 	sel.uber_zwrite = uber_zwrite;
 	sel.uber_sw_depth = uber_sw_depth;
-	sel.uber_date_init = uber_date_init;
 
 	return sel;
 }
 
 GSHWDrawConfig::VSSelector GSHWDrawConfig::GetNthUberVSSelector(u32 n)
 {
-	const u32 iip = (n >> 0) & 1;
-	const u32 expand = (n >> 1) & 3;
-	
 	VSSelector sel{};
-	sel.iip = iip;
-	sel.expand = static_cast<VSExpand>(expand);
 	sel.uber_enable = true;
-
 	return sel;
 }
 

@@ -675,7 +675,7 @@ struct HWBlend
 	EXPAND(true, u32, aem, 1, "PS_AEM") \
 	EXPAND(true, u32, fba, 1, "PS_FBA") \
 	EXPAND(true, u32, fog, 1, "PS_FOG") \
-	EXPAND(false, u32, iip, 1, "PS_IIP") \
+	EXPAND(true, u32, iip, 1, "PS_IIP") \
 	EXPAND(true, u32, date, 3, "PS_DATE") \
 	EXPAND(true, PS_ATST, atst, 3, "PS_ATST") \
 	EXPAND(true, PS_AFAIL, afail, 3, "PS_AFAIL") \
@@ -739,9 +739,9 @@ struct HWBlend
 #define VSSEL_FIELDS_EXPAND \
 	EXPAND(true, u8, fst, 1, "VS_FST") \
 	EXPAND(true, u8, tme, 1, "VS_TME") \
-	EXPAND(false, u8, iip, 1, "VS_IIP") \
+	EXPAND(true, u8, iip, 1, "VS_IIP") \
 	EXPAND(true, u8, point_size, 1, "VS_POINT_SIZE") \
-	EXPAND(false, VSExpand, expand, 2, "VS_EXPAND") \
+	EXPAND(true, VSExpand, expand, 2, "VS_EXPAND") \
 	EXPAND(false, u8, uber_enable, 1, "UBER_SHADER")
 
 struct alignas(16) GSHWDrawConfig
@@ -1286,6 +1286,7 @@ struct alignas(16) GSHWDrawConfig
 
 	alignas(8) PSSelector ps;
 	VSSelector vs;
+	bool uber_shader; ///< Use uber shader in the current draw.
 
 	BlendState blend;
 	SamplerSelector sampler;
@@ -1333,6 +1334,9 @@ struct alignas(16) GSHWDrawConfig
 	static_assert(sizeof(BlendMultiPass) == 8, "blend multi pass is 8 bytes");
 
 	BlendMultiPass blend_multi_pass;
+	
+	// Place push constants before constant buffer so that they're zeroed out ever draw.
+	ShaderPushConstants pc;
 
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
@@ -1384,11 +1388,13 @@ struct alignas(16) GSHWDrawConfig
 		#undef EXPAND
 	};
 
+	static void UberizeSelector(PSSelector& sel);
+	static void UberizeSelector(VSSelector& sel);
+
 	static const std::vector<ShaderDefine>& GetUberShaderPSSelectorDefines();
 	static const std::vector<ShaderDefine>& GetUberShaderVSSelectorDefines();
 
-	static void GetUberShaderVSSelector(const VSSelector& sel, u32 max_selectors, u32* selectors_out);
-	static void GetUberShaderPSSelector(const PSSelector& sel, u32 max_selectors, u32* selectors_out);
+	static void GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out);
 
 	static const u32 NumUberPSSelectors;
 	static const u32 NumUberVSSelectors;

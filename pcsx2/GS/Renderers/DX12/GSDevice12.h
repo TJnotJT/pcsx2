@@ -564,7 +564,7 @@ public:
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	void SetSelectorPushConstants(const GSHWDrawConfig& config);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
-	bool BindDrawPipeline(const PipelineSelector& p);
+	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
 
 	bool PipelineExistsInCache(const GSHWDrawConfig& config, bool start_async_compile) override;
 	void RenderHW(GSHWDrawConfig& config) override;
