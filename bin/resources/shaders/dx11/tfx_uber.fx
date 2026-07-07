@@ -914,17 +914,18 @@ float4 sample_color(float2 st, float uv_w, int2 xy)
 			c = sample_4c(uv, uv_w, xy);
 	}
 
-	[unroll]
-	for (uint i = 0; i < 4; i++)
+	
+	if(PS_AEM_FMT == FMT_24)
 	{
-		if(PS_AEM_FMT == FMT_24)
-		{
+		[unroll]
+		for (uint i = 0; i < 4; i++)
 			c[i].a = !PS_AEM || any(c[i].rgb) ? TA.x : 0;
-		}
-		else if(PS_AEM_FMT == FMT_16)
-		{
+	}
+	else if(PS_AEM_FMT == FMT_16)
+	{
+		[unroll]
+		for (uint i = 0; i < 4; i++)
 			c[i].a = c[i].a >= 0.5 ? TA.y : !PS_AEM || any(int3(c[i].rgb * 255.0f) & 0xF8) ? TA.x : 0;
-		}
 	}
 
 	if (PS_LTF)
