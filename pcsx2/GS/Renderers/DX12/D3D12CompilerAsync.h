@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Common/Timer.h"
+
 #include "GS/Renderers/DX11/D3D.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
 #include <d3d12.h>
@@ -19,6 +21,7 @@ public:
 		std::string shader_code;
 		D3D::ShaderMacro macros;
 		std::string entry_point;
+		bool uber;
 		ComPtr<ID3DBlob> blob;
 	};
 
@@ -32,10 +35,14 @@ public:
 
 	struct CompileJob
 	{
+		u64 hash; // Pipeline selector has for debugging.
+		float time_ms; // Compile time in ms for debugging.
+
+		// Job info
 		ShaderJob vs_job;
 		ShaderJob ps_job;
 		PipelineJob pipeline_job;
-		u64 job_hash;
+		bool uber;
 	};
 
 	D3D12CompilerAsync(D3D::ShaderModel shader_model, bool debug)
@@ -46,13 +53,13 @@ public:
 	bool IsJobQueueFull();
 	u32 GetCompileResultsAsync(CompileJob* out, u32 max_count);
 	void StartCompileJobAsync(CompileJob job);
-
+private:
 	void DoCompileJobSync(CompileJob& job);
 
-private:
 	static constexpr int MAX_JOBS = 1024;
 
 	std::array<CompileJob, MAX_JOBS> m_job_queue;
+	std::array<Common::Timer, MAX_JOBS> m_timer_queue;
 	u32 m_job_head = 0; // head <= done <= tail
 	u32 m_job_done = 0;
 	u32 m_job_tail = 0;
@@ -76,9 +83,8 @@ struct AsyncReturn
 private:
 	const bool enabled; // Enable async return.
 	bool async_return; // Call returned after dispatching async processing.
-
 public:
-	AsyncReturn(bool enabled = true) : enabled(enabled), async_return(false) {}
+	AsyncReturn(bool enabled) : enabled(enabled), async_return(false) {}
 
 	static bool Enabled(AsyncReturn* async)
 	{

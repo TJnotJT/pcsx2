@@ -9474,6 +9474,12 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
+	if (/*GSConfig.UseHybridShaderCache && */!g_gs_device->PipelineExistsInCache(m_conf, true))
+	{
+		ConfigureROV(rt != nullptr, ds != nullptr);
+		ConvertTextureTypeROV(rt, ds);
+	}
+
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
@@ -9490,13 +9496,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
 	}
-	
+
 	if (GSConfig.SaveHWConfig && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
 	}
-
-	m_conf.uber_shader = true;
 
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);

@@ -98,7 +98,7 @@ namespace D3D12
 
 		wil::com_ptr_nothrow<ID3D12PipelineState> Create(ID3D12Device* device, bool clear = true);
 		wil::com_ptr_nothrow<ID3D12PipelineState> Create(
-			ID3D12Device* device, D3D12ShaderCache& cache, bool clear = true);
+			ID3D12Device* device, D3D12ShaderCache& cache, bool uber, bool clear = true);
 
 		void SetRootSignature(ID3D12RootSignature* rs);
 

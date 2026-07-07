@@ -37,35 +37,35 @@ public:
 
 	__fi ComPtr<ID3DBlob> GetVertexShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		AsyncReturn* async = nullptr)
+		bool uber = false, AsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
-		return GetShaderBlob(EntryType::VertexShader, shader_code, macros, entry_point, async);
+		return GetShaderBlob(EntryType::VertexShader, shader_code, macros, entry_point, uber, async);
 	}
 	__fi ComPtr<ID3DBlob> GetPixelShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		AsyncReturn* async = nullptr)
+		bool uber = false, AsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
-		return GetShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point, async);
+		return GetShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point, uber, async);
 	}
 	__fi ComPtr<ID3DBlob> GetComputeShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		AsyncReturn* async = nullptr)
+		bool uber = false, AsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
-		return GetShaderBlob(EntryType::ComputeShader, shader_code, macros, entry_point, async);
+		return GetShaderBlob(EntryType::ComputeShader, shader_code, macros, entry_point, uber, async);
 	}
 
 	ComPtr<ID3DBlob> GetShaderBlob(EntryType type, std::string_view shader_code,
-		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", AsyncReturn* async = nullptr);
+		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", bool uber = false, AsyncReturn* async = nullptr);
 
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc,
-		AsyncReturn* async = nullptr);
+		bool uber, AsyncReturn* async = nullptr);
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc);
 
 	void StartPipelineCompilationAsync(ID3D12Device* device, ShaderJob vs_job, ShaderJob ps_job,
-		D3D12::GraphicsPipelineBuilder gpb);
+		D3D12::GraphicsPipelineBuilder gpb, bool uber, u64 hash);
 
 	struct CacheIndexKey
 	{
@@ -103,7 +103,7 @@ public:
 
 private:
 
-	static std::string GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model, bool debug);
+	static std::string GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model, bool debug, bool uber);
 	static CacheIndexKey GetShaderCacheKey(
 		EntryType type, const std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point);
 	static CacheIndexKey GetPipelineCacheKey(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc);
@@ -116,15 +116,15 @@ private:
 	void InvalidatePipelineCache();
 
 	ComPtr<ID3DBlob> CompileAndAddShaderBlob(const CacheIndexKey& key, std::string_view shader_code,
-		const D3D_SHADER_MACRO* macros, const char* entry_point);
-	ComPtr<ID3D12PipelineState> CompileAndAddPipeline(
-		ID3D12Device* device, const CacheIndexKey& key, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc);
+		const D3D_SHADER_MACRO* macros, const char* entry_point, bool uber);
+	ComPtr<ID3D12PipelineState> CompileAndAddPipeline(ID3D12Device* device, const CacheIndexKey& key,
+		const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc, bool uber);
 	ComPtr<ID3D12PipelineState> CompileAndAddPipeline(
 		ID3D12Device* device, const CacheIndexKey& key, const D3D12_COMPUTE_PIPELINE_STATE_DESC& gpdesc);
-	bool AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso, bool if_new = false);
+	bool AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso, bool uber, bool only_new = false);
 
 	void AddShaderBlob(EntryType type, const std::string& source, const D3D_SHADER_MACRO* macros,
-		const char* entry_point, ComPtr<ID3DBlob> blob, bool if_new = false);
+		const char* entry_point, ComPtr<ID3DBlob> blob, bool uber, bool only_new = false);
 
 	std::FILE* m_shader_index_file = nullptr;
 	std::FILE* m_shader_blob_file = nullptr;
@@ -133,6 +133,21 @@ private:
 	std::FILE* m_pipeline_index_file = nullptr;
 	std::FILE* m_pipeline_blob_file = nullptr;
 	CacheIndex m_pipeline_index;
+
+	std::FILE* m_uber_shader_index_file = nullptr;
+	std::FILE* m_uber_shader_blob_file = nullptr;
+	CacheIndex m_uber_shader_index;
+
+	std::FILE* m_uber_pipeline_index_file = nullptr;
+	std::FILE* m_uber_pipeline_blob_file = nullptr;
+	CacheIndex m_uber_pipeline_index;
+
+	std::FILE*& GetShaderIndexFile(bool uber) { return uber ? m_uber_shader_index_file : m_shader_index_file; }
+	std::FILE*& GetShaderBlobFile(bool uber) { return uber ? m_uber_shader_blob_file : m_shader_blob_file; }
+	CacheIndex& GetShaderIndex(bool uber) { return uber ? m_uber_shader_index : m_shader_index; }
+	std::FILE*& GetPipelineIndexFile(bool uber) { return uber ? m_uber_pipeline_index_file : m_pipeline_index_file; }
+	std::FILE*& GetPipelineBlobFile(bool uber) { return uber ? m_uber_pipeline_blob_file : m_pipeline_blob_file; }
+	CacheIndex& GetPipelineIndex(bool uber) { return uber ? m_uber_pipeline_index : m_pipeline_index; }
 
 	D3D::ShaderModel m_shader_model = D3D::ShaderModel::SM51;
 	bool m_debug = false;

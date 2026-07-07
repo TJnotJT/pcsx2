@@ -2052,6 +2052,47 @@ void GSHWDrawConfig::GetUberShaderPSSelector(const PSSelector& sel, u32 max_sele
 		GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR, selectors_out);
 }
 
+const constinit u32 GSHWDrawConfig::NumUberPSSelectors = 512;
+const constinit u32 GSHWDrawConfig::NumUberVSSelectors = 8;
+
+GSHWDrawConfig::PSSelector GSHWDrawConfig::GetNthUberPSSelector(u32 n)
+{
+	const u32 iip = (n >> 0) & 1;
+	const u32 no_color = (n >> 1) & 1;
+	const u32 no_color1 = (n >> 2) & 1;
+	const u32 rov_color = (n >> 3) & 1;
+	const u32 rov_depth = (n >> 4) & 3;
+	const u32 uber_zwrite = (n >> 6) & 1;
+	const u32 uber_sw_depth = (n >> 7) & 1;
+	const u32 uber_date_init = (n >> 8) & 1;
+
+	PSSelector sel{};
+	sel.iip = iip;
+	sel.no_color = no_color;
+	sel.no_color1 = no_color1;
+	sel.rov_color = rov_color;
+	sel.rov_depth = static_cast<PS_ROV_DEPTH>(rov_depth);
+	sel.uber_enable = true;
+	sel.uber_zwrite = uber_zwrite;
+	sel.uber_sw_depth = uber_sw_depth;
+	sel.uber_date_init = uber_date_init;
+
+	return sel;
+}
+
+GSHWDrawConfig::VSSelector GSHWDrawConfig::GetNthUberVSSelector(u32 n)
+{
+	const u32 iip = (n >> 0) & 1;
+	const u32 expand = (n >> 1) & 3;
+	
+	VSSelector sel{};
+	sel.iip = iip;
+	sel.expand = static_cast<VSExpand>(expand);
+	sel.uber_enable = true;
+
+	return sel;
+}
+
 // clang-format off
 
 // Maps PS2 blend modes to our best approximation of them with PC hardware

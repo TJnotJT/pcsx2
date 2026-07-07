@@ -340,6 +340,7 @@ private:
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
+	GSHWDrawConfig m_conf_uber = {};
 
 	// software sprite renderer state
 	std::vector<GSVertexSW> m_sw_vertex_buffer;

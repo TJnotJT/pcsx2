@@ -975,7 +975,7 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		return false;
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
-		!CompileMergePipelines() || !CompilePostProcessingPipelines())
+		!CompileMergePipelines() || !CompilePostProcessingPipelines() || !CompileUberTFXPipelines())
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
@@ -2334,7 +2334,7 @@ bool GSDevice12::CompileImGuiPipeline()
 		D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 	gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
 
-	m_imgui_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+	m_imgui_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 	if (!m_imgui_pipeline)
 	{
 		Console.Error("D3D12: Failed to compile ImGui pipeline");
@@ -2342,6 +2342,67 @@ bool GSDevice12::CompileImGuiPipeline()
 	}
 
 	D3D12::SetObjectName(m_imgui_pipeline.get(), "ImGui pipeline");
+	return true;
+}
+
+bool GSDevice12::CompileUberTFXPipelines()
+{
+	Common::Timer timer;
+
+	// Uber pixel shaders.
+	for (u32 ps = 0; ps < GSHWDrawConfig::NumUberPSSelectors; ps++)
+	{
+		GSHWDrawConfig::PSSelector ps_sel = GSHWDrawConfig::GetNthUberPSSelector(ps);
+		ShaderJob job = GetTFXPixelShader(ps_sel, true);
+		if (!job.blob)
+			return false;
+	}
+
+	Console.WriteLn("Compiled %u uber pixel shader in %.2f seconds",
+		GSHWDrawConfig::NumUberPSSelectors, timer.GetTimeSecondsAndReset());
+
+	// Uber vertex shaders.
+	for (u32 vs = 0; vs < GSHWDrawConfig::NumUberVSSelectors; vs++)
+	{
+		GSHWDrawConfig::VSSelector vs_sel = GSHWDrawConfig::GetNthUberVSSelector(vs);
+		ShaderJob job = GetTFXVertexShader(vs_sel, true);
+		if (!job.blob)
+			return false;
+	}
+
+	Console.WriteLn("Compiled %u uber vertex shader in %.2f seconds",
+		GSHWDrawConfig::NumUberVSSelectors, timer.GetTimeSecondsAndReset());
+
+	// Uber ROV pipelines.
+	u32 num_pipelines = 0;
+	GSHWDrawConfig config{};
+	for (u32 ps = 0; ps < GSHWDrawConfig::NumUberPSSelectors; ps++)
+	{
+		GSHWDrawConfig::PSSelector ps_sel = GSHWDrawConfig::GetNthUberPSSelector(ps);
+		if (ps_sel.HasColorOutput() && !ps_sel.HasColorROV())
+			continue;
+		if (ps_sel.HasDepthOutput() && !ps_sel.HasDepthROV())
+			continue;
+		for (u32 vs = 0; vs < GSHWDrawConfig::NumUberVSSelectors; vs++)
+		{
+			GSHWDrawConfig::VSSelector vs_sel = GSHWDrawConfig::GetNthUberVSSelector(vs);
+
+			for (u32 topology = 0; topology < 3; topology++)
+			{
+				config.ps = ps_sel;
+				config.vs = vs_sel;
+				config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
+
+				UpdateHWPipelineSelector(config);
+
+				GetTFXPipeline(m_pipeline_selector, true);
+				num_pipelines++;
+			}
+		}
+	}
+
+	Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
+
 	return true;
 }
 
@@ -2881,7 +2942,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false);
+		ComPtr<ID3D12PipelineState> pipe = gpb.Create(m_device.get(), m_shader_cache, false, false);
 					
 		if (!pipe)
 			return false;
@@ -2903,7 +2964,7 @@ bool GSDevice12::CompileConvertPipelines()
 
 				gpb.SetRenderTarget(0, is_setup ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
 				gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false);
+				arr[ds] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 				if (!arr[ds])
 					return false;
 
@@ -2937,7 +2998,7 @@ bool GSDevice12::CompileConvertPipelines()
 		for (u32 ds = 0; ds < 2; ds++)
 		{
 			gpb.SetDepthStencilFormat(ds ? DXGI_FORMAT_D32_FLOAT_S8X24_UINT : DXGI_FORMAT_UNKNOWN);
-			m_primid_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false);
+			m_primid_image_setup_pipelines[ds][datm] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 			if (!m_primid_image_setup_pipelines[ds][datm])
 				return false;
 
@@ -2982,7 +3043,7 @@ bool GSDevice12::CompilePresentPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_present[index] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_present[index] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_present[index])
 			return false;
 
@@ -3018,7 +3079,7 @@ bool GSDevice12::CompileInterlacePipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_interlace[i] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_interlace[i] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_interlace[i])
 			return false;
 
@@ -3055,7 +3116,7 @@ bool GSDevice12::CompileMergePipelines()
 		gpb.SetBlendState(0, true, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD,
 			D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 
-		m_merge[i] = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_merge[i] = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_merge[i])
 			return false;
 
@@ -3092,7 +3153,7 @@ bool GSDevice12::CompilePostProcessingPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_fxaa_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_fxaa_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_fxaa_pipeline)
 			return false;
 
@@ -3113,7 +3174,7 @@ bool GSDevice12::CompilePostProcessingPipelines()
 
 		gpb.SetPixelShader(ps.get());
 
-		m_shadeboost_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+		m_shadeboost_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 		if (!m_shadeboost_pipeline)
 			return false;
 
@@ -3234,15 +3295,13 @@ GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector 
 	if (it != m_tfx_vertex_shaders.end())
 	{
 		shader.blob = it->second.get();
-		if (it->second == nullptr)
-			printf("");
 		return shader;
 	}
 
 	// FIXME: Make the Uber/Normal sources the same.
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None) ? "vs_main_expand" : "vs_main";
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
-	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, async));
+	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber, async));
 	if (!vs && AsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
@@ -3361,14 +3420,12 @@ GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector s
 	if (it != m_tfx_pixel_shaders.end())
 	{
 		shader.blob = it->second.get();
-		if (it->second == nullptr)
-			printf("");
 		return shader;
 	}
 
 	// FIXME: Make the Uber/Normal sources the same.
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
-	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", async));
+	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", uber, async));
 	if (!ps && AsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
@@ -3511,34 +3568,48 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 	}
 
+	// Handle async compilation if requested.
 	if (AsyncReturn::Enabled(async))
 	{
-		// Check if the pipeline is already in the cache.
+		// Check if the pipeline has finished compiling from a previous submission.
 		if (vs.blob && ps.blob)
 		{
 			AsyncReturn pipeline_async(true);
-			ComPtr<ID3D12PipelineState> pso = m_shader_cache.GetPipelineState(
-				m_device.get(), gpb.GetDesc(), &pipeline_async);
+			ComPtr<ID3D12PipelineState> pipeline = m_shader_cache.GetPipelineState(
+				m_device.get(), gpb.GetDesc(), uber, &pipeline_async);
 
-			const bool pipeline_found = pso != nullptr;
-			const bool pipeline_failed = pso == nullptr && !AsyncReturn::IsAsync(&pipeline_async);
-			if (pipeline_found || pipeline_failed)
-				return pso;
+			const bool pipeline_found = pipeline != nullptr;
+			const bool pipeline_failed = pipeline == nullptr && !AsyncReturn::IsAsync(&pipeline_async);
+			if (pipeline_found)
+			{
+				D3D12::SetObjectName(
+					pipeline.get(), TinyString::from_format("{}TFX Pipeline {:08X}/{:016X}_{:016X}",
+						uber ? "Uber " :"", p.vs.key, p.ps.key_hi, p.ps.key_lo));
+				return pipeline;
+			}
+
+			if (pipeline_failed)
+				return nullptr;
 		}
 
-		// Create pipeline async
-		printf("Starting async pipeline compile\n");
 		AsyncReturn::SetAsync(async);
-		m_shader_cache.StartPipelineCompilationAsync(m_device.get(), std::move(vs), std::move(ps), std::move(gpb));
+		if (!m_tfx_pipelines_async_submitted.contains(p)) // Don't resubmit the same pipeline twice.
+		{
+			// Submit pipeline async compilation.
+			m_tfx_pipelines_async_submitted.insert(p);
+			m_shader_cache.StartPipelineCompilationAsync(
+				m_device.get(), std::move(vs), std::move(ps), std::move(gpb), uber, PipelineSelectorHash()(p));
+		}
 
 		return nullptr;
 	}
 
-	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache));
+	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache, uber));
 	if (pipeline)
 	{
 		D3D12::SetObjectName(
-			pipeline.get(), TinyString::from_format("TFX Pipeline {:08X}/{:016X}_{:016X}", p.vs.key, p.ps.key_hi, p.ps.key_lo));
+			pipeline.get(), TinyString::from_format("{}TFX Pipeline {:08X}/{:016X}_{:016X}",
+				uber ? "Uber " : "", p.vs.key, p.ps.key_hi, p.ps.key_lo));
 	}
 
 	return pipeline;
@@ -3551,17 +3622,27 @@ const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p,
 		return it->second.get();
 
 	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p, uber, async));
+	
 	if (!pipeline && AsyncReturn::IsAsync(async))
-		return nullptr; // Async compilation in progress
+		return nullptr; // Async compilation in progress.
+	
 	it = m_tfx_pipelines.emplace(p, std::move(pipeline)).first;
 	return it->second.get();
 }
 
-bool GSDevice12::BindDrawPipeline(const PipelineSelector& p, bool uber)
+bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
 {
-	AsyncReturn async(true);
-	// FIXME Implement hybrid selection here!!
-	const ID3D12PipelineState* pipeline = GetTFXPipeline(p, uber, &async);
+	AsyncReturn async(GSConfig.UseHybridShaderCache);
+	
+	//const ID3D12PipelineState* pipeline = GetTFXPipeline(p, false, &async);
+	const ID3D12PipelineState* pipeline = GetTFXPipeline(p, true, &async);
+
+	if (GSConfig.UseHybridShaderCache && !pipeline && AsyncReturn::IsAsync(&async))
+	{
+		// Pipeline is not available; default to compiling the uber shader synchronously.
+		pipeline = GetTFXPipeline(p, true);
+	}
+
 	if (!pipeline)
 		return false;
 
@@ -4506,6 +4587,18 @@ void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 	}
 }
 
+bool GSDevice12::PipelineExistsInCache(const GSHWDrawConfig& config, bool start_async_compile)
+{
+	UpdateHWPipelineSelector(config);
+	const bool exists = m_tfx_pipelines.contains(m_pipeline_selector);
+	if (!exists && start_async_compile)
+	{
+		AsyncReturn async(true);
+		GetTFXPipeline(m_pipeline_selector, false, &async);
+	}
+	return exists;
+}
+
 void GSDevice12::RenderHW(GSHWDrawConfig& config)
 {
 	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
@@ -4515,8 +4608,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
 
-	if (config.uber_shader)
-		SetSelectorPushConstants(config);
+	SetSelectorPushConstants(config); // FIXME: use this only when needed.
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
@@ -4952,7 +5044,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
-void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
+void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config)
 {
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
@@ -4967,7 +5059,7 @@ void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
 }
 
-void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
+void GSDevice12::UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config)
 {
 	IASetVertexBuffer(config.verts, sizeof(GSVertex), config.nverts);
 	

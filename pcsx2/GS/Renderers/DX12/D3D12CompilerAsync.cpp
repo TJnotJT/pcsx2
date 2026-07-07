@@ -23,7 +23,9 @@ u32 D3D12CompilerAsync::GetCompileResultsAsync(CompileJob* out, u32 max_count)
 	{
 		CompileJob result;
 
-		out[i++] = std::move(m_job_queue[m_job_head]);
+		out[i] = std::move(m_job_queue[m_job_head]);
+		out[i].time_ms = static_cast<float>(m_timer_queue[m_job_head].GetTimeMilliseconds());
+		i++;
 
 		m_job_queue[m_job_head] = {};
 
@@ -53,6 +55,7 @@ void D3D12CompilerAsync::StartCompileJobAsync(CompileJob job)
 	if (m_queued_jobs < MAX_JOBS)
 	{
 		m_job_queue[m_job_tail] = std::move(job);
+		m_timer_queue[m_job_tail].Reset();
 
 		m_job_tail = (m_job_tail + 1) % MAX_JOBS;
 		m_queued_jobs++;

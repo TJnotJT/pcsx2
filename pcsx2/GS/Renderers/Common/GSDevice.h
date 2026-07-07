@@ -1019,6 +1019,13 @@ struct alignas(16) GSHWDrawConfig
 			out.ztst = ZTST_ALWAYS;
 			return out;
 		}
+		static constexpr DepthStencilSelector DepthWriteAlways()
+		{
+			DepthStencilSelector out;
+			out.zwe = true;
+			out.ztst = ZTST_ALWAYS;
+			return out;
+		}
 	};
 	struct ColorMaskSelector
 	{
@@ -1335,8 +1342,6 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
-	bool uber_shader;
-
 	__fi bool IsFeedbackLoopRT(const PSSelector& ps) const
 	{
 		return ps.IsFeedbackLoopRT() || (tex_hazard == TEX_HAZARD_RT);
@@ -1384,6 +1389,12 @@ struct alignas(16) GSHWDrawConfig
 
 	static void GetUberShaderVSSelector(const VSSelector& sel, u32 max_selectors, u32* selectors_out);
 	static void GetUberShaderPSSelector(const PSSelector& sel, u32 max_selectors, u32* selectors_out);
+
+	static const u32 NumUberPSSelectors;
+	static const u32 NumUberVSSelectors;
+
+	static PSSelector GetNthUberPSSelector(u32 n);
+	static VSSelector GetNthUberVSSelector(u32 n);
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
@@ -1779,6 +1790,11 @@ public:
 	// Index is computed as ((((A * 3 + B) * 3) + C) * 3) + D. A, B, C, D taken from ALPHA register.
 	__ri static HWBlend GetBlend(u32 index) { return m_blendMap[index]; }
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
+
+	virtual bool PipelineExistsInCache(const GSHWDrawConfig& conf, bool start_async_compile)
+	{
+		return true;
+	}
 };
 
 template <>

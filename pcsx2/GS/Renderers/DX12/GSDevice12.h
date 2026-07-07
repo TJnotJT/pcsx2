@@ -15,6 +15,7 @@
 #include <array>
 #include <dxgi1_5.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace D3D12MA
 {
@@ -400,6 +401,7 @@ private:
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
+	std::unordered_set<PipelineSelector, PipelineSelectorHash> m_tfx_pipelines_async_submitted;
 
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
@@ -465,6 +467,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileUberTFXPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -561,15 +564,16 @@ public:
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	void SetSelectorPushConstants(const GSHWDrawConfig& config);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
-	bool BindDrawPipeline(const PipelineSelector& p, bool uber = false);
+	bool BindDrawPipeline(const PipelineSelector& p);
 
+	bool PipelineExistsInCache(const GSHWDrawConfig& config, bool start_async_compile) override;
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
 		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
-	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config);
+	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
 
 public:
 	/// Ends any render pass, executes the command buffer, and invalidates cached state.
