@@ -672,6 +672,7 @@ struct alignas(16) GSHWDrawConfig
 	using PS_ATST  = GSShader::PS_ATST;
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
+	using PS_ROV_COLOR = GSShader::PS_ROV_COLOR;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
 #pragma pack(push, 1)
 	struct VSSelector
@@ -795,8 +796,8 @@ struct alignas(16) GSHWDrawConfig
 				u32 sw_aniso : 5;
 				
 				// ROVs
-				u32 rov_color : 1;
-				PS_ROV_DEPTH rov_depth : 2;
+				PS_ROV_COLOR rov_color : 2;
+				PS_ROV_DEPTH rov_depth : 3;
 			};
 
 			struct
@@ -876,7 +877,7 @@ struct alignas(16) GSHWDrawConfig
 				aa1 = PS_AA1::TRIANGLE;
 			}
 
-			if (rov_depth == PS_ROV_DEPTH::READ_WRITE)
+			if (rov_depth == PS_ROV_DEPTH::READ_WRITE || rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE)
 			{
 				rov_depth = PS_ROV_DEPTH::READ_ONLY;
 			}
@@ -889,12 +890,14 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasDepthOutput() const
 		{
-			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
+			return zfloor || zclamp || IsFeedbackLoopDepth() ||
+				(rov_depth == PS_ROV_DEPTH::READ_WRITE) ||
+				(rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE);
 		}
 
 		__fi bool HasColorROV() const
 		{
-			return rov_color != 0;
+			return rov_color != PS_ROV_COLOR::NONE;
 		}
 
 		__fi bool HasDepthROV() const
@@ -904,7 +907,8 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasDepthROVWrite() const
 		{
-			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
+			// Covers both oneshot and non-oneshot unlike other methods.
+			return rov_depth == PS_ROV_DEPTH::READ_WRITE || rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE;
 		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
@@ -1248,6 +1252,7 @@ struct alignas(16) GSHWDrawConfig
 	u32 indices_per_prim;  ///< Number of indices that make up one primitive
 	const std::vector<size_t>* drawlist;          ///< For reducing barriers on sprites
 	const std::vector<GSVector4i>* drawlist_bbox; ///< For RT copy when barriers not available.
+	const std::vector<GSVector4i>* draw_coarse_rasterize; ///< For cutting down on copy area.
 	GSVector4i scissor; ///< Scissor rect
 	GSVector4i drawarea; ///< Area in the framebuffer which will be modified.
 	GSVector4i samplearea; ///< Area in the texture which will be sampled.
@@ -1263,6 +1268,46 @@ struct alignas(16) GSHWDrawConfig
 
 	bool require_one_barrier;  ///< Require texture barrier before draw (also used to requst an rt copy if texture barrier isn't supported)
 	bool require_full_barrier; ///< Require texture barrier between all prims
+
+	// Single draw "oneshot" ROV for high barrier draws.
+	enum ROVType { NO_ROV, CONTINUOUS_ROV, ONESHOT_ROV };
+	ROVType rov_color;
+	ROVType rov_depth;
+
+	bool HasOneshotColorROV() const
+	{
+		return rov_color == ONESHOT_ROV;
+	}
+
+	bool HasOneshotDepthROV() const
+	{
+		return rov_depth == ONESHOT_ROV;
+	}
+
+	bool HasOneshotROV() const
+	{
+		return HasOneshotColorROV() || HasOneshotDepthROV();
+	}
+
+	bool HasContinuousColorROV() const
+	{
+		return rov_color == CONTINUOUS_ROV;
+	}
+
+	bool HasContinuousDepthROV() const
+	{
+		return rov_depth == CONTINUOUS_ROV;
+	}
+
+	bool HasContinuousROV() const
+	{
+		return HasContinuousColorROV() || HasContinuousDepthROV();
+	}
+
+	bool HasROV() const
+	{
+		return HasContinuousROV() || HasOneshotROV();
+	}
 
 	enum : u32
 	{
