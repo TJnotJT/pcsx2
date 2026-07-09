@@ -456,6 +456,10 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 
 	const auto key = GetPipelineCacheKey(desc);
 
+	Console.WriteLn("Lookup state %p %p 0x%016llX 0x%016llX",
+		desc.VS.pShaderBytecode, desc.PS.pShaderBytecode,
+		key.source_hash_high, key.source_hash_low);
+
 	auto iter = GetPipelineIndex(uber).find(key);
 	if (iter == GetPipelineIndex(uber).end())
 	{
@@ -809,6 +813,10 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 				const auto pipeline_key = GetPipelineCacheKey(compile_jobs[i].pipeline_job.gpb.GetDesc());
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
 					compile_jobs[i].hash, compile_jobs[i].uber, compile_jobs[i].time_ms, compile_jobs[i].thread_id);
+				Console.WriteLn("Add state %p %p 0x%016llX 0x%016llX 0x%016llX",
+					compile_jobs[i].pipeline_job.gpb.GetDesc().VS.pShaderBytecode,
+					compile_jobs[i].pipeline_job.gpb.GetDesc().PS.pShaderBytecode,
+					compile_jobs[i].hash, pipeline_key.source_hash_high, pipeline_key.source_hash_low);
 				AddPipelineToBlob(pipeline_key, compile_jobs[i].pipeline_job.pipeline.get(), compile_jobs[i].uber, true);
 			}
 		}
