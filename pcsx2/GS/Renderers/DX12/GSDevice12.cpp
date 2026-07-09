@@ -2348,54 +2348,76 @@ bool GSDevice12::CompileImGuiPipeline()
 
 bool GSDevice12::CompileUberTFXPipelines()
 {
-	Common::Timer timer;
-
-	// Uber pixel shaders.
-	u32 num_ps = 0;
-	for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
+	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
-		ShaderJob job = GetTFXPixelShader(ps_sel, true);
-		if (!job.blob)
-			return false;
-		num_ps++;
-	}
+		Common::Timer timer;
 
-	Console.WriteLn("Compiled %u uber pixel shaders in %.2f seconds", num_ps, timer.GetTimeSecondsAndReset());
+		// Uber pixel shaders.
+		/*u32 num_ps = 0;
+		for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
+		{
+			ShaderJob job = GetTFXPixelShader(ps_sel, true);
+			if (!job.blob)
+				return false;
+			num_ps++;
+		}
 
-	// Uber vertex shaders.
-	u32 num_vs = 0;
-	for (const GSHWDrawConfig::VSSelector& vs_sel : GSHWDrawConfig::GetUberVSSelectors())
-	{
-		ShaderJob job = GetTFXVertexShader(vs_sel, true);
-		if (!job.blob)
-			return false;
-		num_vs++;
-	}
+		Console.WriteLn("Compiled %u uber pixel shaders in %.2f seconds", num_ps, timer.GetTimeSecondsAndReset());*/
 
-	Console.WriteLn("Compiled %u uber vertex shaders in %.2f seconds", num_vs, timer.GetTimeSecondsAndReset());
-
-	// Uber ROV pipelines.
-	size_t num_pipelines = 0;
-	GSHWDrawConfig config{};
-	for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
-	{
+		// Uber vertex shaders.
+		/*u32 num_vs = 0;
 		for (const GSHWDrawConfig::VSSelector& vs_sel : GSHWDrawConfig::GetUberVSSelectors())
 		{
-			for (u32 topology = 0; topology < 3; topology++)
+			ShaderJob job = GetTFXVertexShader(vs_sel, true);
+			if (!job.blob)
+				return false;
+			num_vs++;
+		}*/
+
+		//Console.WriteLn("Compiled %u uber vertex shaders in %.2f seconds", num_vs, timer.GetTimeSecondsAndReset());
+
+		// Start uber pipelines async.
+		for (u32 stage = 0; stage < 2; stage++)
+		{
+			size_t num_pipelines = 0;
+			GSHWDrawConfig config{};
+			for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
 			{
-				config.ps = ps_sel;
-				config.vs = vs_sel;
-				config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
+				for (const GSHWDrawConfig::VSSelector& vs_sel : GSHWDrawConfig::GetUberVSSelectors())
+				{
+					for (u32 topology = 0; topology < 3; topology++)
+					{
+						config.ps = ps_sel;
+						config.vs = vs_sel;
+						config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
 
-				UpdateHWPipelineSelector(config);
+						UpdateHWPipelineSelector(config);
 
-				GetTFXPipeline(m_pipeline_selector, true);
-				num_pipelines++;
+						AsyncReturn async(true);
+						if (stage == 0)
+						{
+							// Compile
+							const ID3D12PipelineState* pipeline = GetTFXPipeline(m_pipeline_selector, true, &async);
+							if (!pipeline && !AsyncReturn::IsAsync(&async))
+								return false;
+						}
+						else
+						{
+							// Wait for compile to finish
+							Console.WriteLn("Waiting for %llX to finish", PipelineSelectorHash()(m_pipeline_selector));
+							while (!GetTFXPipeline(m_pipeline_selector, true, &async))
+								std::this_thread::sleep_for(std::chrono::milliseconds(20));
+						}
+						num_pipelines++;
+					}
+				}
 			}
-		}
-	}
 
-	Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
+			if (stage == 1)
+				Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
+		}
+
+	}
 
 	return true;
 }
