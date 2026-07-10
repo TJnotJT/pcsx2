@@ -1,6 +1,5 @@
 #include "GS/Renderers/DX12/D3D12CompilerAsync.h"
 
-
 D3D12CompilerAsync::D3D12CompilerAsync(
 	D3D::ShaderModel shader_model, bool debug, u32 num_threads, u32 check_latency_ms)
 	: m_shader_model(shader_model)
@@ -77,36 +76,34 @@ void D3D12CompilerAsync::StartCompileJobAsync(CompileJob job)
 
 void D3D12CompilerAsync::DoCompileJobSync(D3D12CompilerAsync::CompileJob& job)
 {
-	if (!job.vs_job.blob)
+	if (std::holds_alternative<ShaderJob>(job.job))
 	{
-		job.vs_job.blob = D3D::CompileShader(D3D::ShaderType::Vertex, m_shader_model, m_debug,
-			job.vs_job.shader_code, job.vs_job.macros.GetPtr(), job.vs_job.entry_point.c_str());
-	}
-
-	if (!job.ps_job.blob)
-	{
-		job.ps_job.blob = D3D::CompileShader(D3D::ShaderType::Pixel, m_shader_model, m_debug,
-			job.ps_job.shader_code, job.ps_job.macros.GetPtr(), job.ps_job.entry_point.c_str());
-	}
-
-	if (!job.pipeline_job.pipeline && (job.vs_job.blob && job.ps_job.blob))
-	{
-		if (!job.pipeline_job.gpb.GetDesc().VS.pShaderBytecode)
-			job.pipeline_job.gpb.SetVertexShader(job.vs_job.blob.get());
-
-		if (!job.pipeline_job.gpb.GetDesc().PS.pShaderBytecode)
-			job.pipeline_job.gpb.SetPixelShader(job.ps_job.blob.get());
-
-		if (job.pipeline_job.type == PipelineJob::GRAPHICS &&
-			job.pipeline_job.gpb.GetDesc().VS.pShaderBytecode &&
-			job.pipeline_job.gpb.GetDesc().PS.pShaderBytecode)
+		ShaderJob& shader_job = std::get<ShaderJob>(job.job);
+		if (shader_job.type == D3D::ShaderCacheEntryType::VertexShader)
 		{
-			job.pipeline_job.pipeline = job.pipeline_job.gpb.Create(job.pipeline_job.device, false);
+			shader_job.blob = D3D::CompileShader(D3D::ShaderType::Vertex, m_shader_model, m_debug,
+				shader_job.shader_code, shader_job.macros.GetPtr(), shader_job.entry_point.c_str());
+		}
+		else if (shader_job.type == D3D::ShaderCacheEntryType::PixelShader)
+		{
+			shader_job.blob = D3D::CompileShader(D3D::ShaderType::Pixel, m_shader_model, m_debug,
+				shader_job.shader_code, shader_job.macros.GetPtr(), shader_job.entry_point.c_str());
 		}
 		else
 		{
-			pxAssert(false); // Not supported yet
+			pxFailRel("Unknown shader type");
 		}
+	}
+	else if (std::holds_alternative<PipelineJob>(job.job))
+	{
+		PipelineJob& pipeline_job = std::get<PipelineJob>(job.job);
+		pxAssert(pipeline_job.gpb.GetDesc().VS.pShaderBytecode &&
+			pipeline_job.gpb.GetDesc().PS.pShaderBytecode);
+		pipeline_job.pipeline = pipeline_job.gpb.Create(pipeline_job.device, false);
+	}
+	else
+	{
+		pxFailRel("Unknown job type");
 	}
 }
 
@@ -147,6 +144,7 @@ void D3D12CompilerAsync::DoWorker(u32 thread_id)
 
 D3D12CompilerAsync::~D3D12CompilerAsync()
 {
+	// Stop worker threads.
 	{
 		std::unique_lock lock(m_mutex);
 
@@ -155,6 +153,7 @@ D3D12CompilerAsync::~D3D12CompilerAsync()
 		m_worker_cv.notify_all();
 	}
 
+	// Join threads.
 	for (std::thread& t : m_worker_threads)
 	{
 		if (t.joinable())

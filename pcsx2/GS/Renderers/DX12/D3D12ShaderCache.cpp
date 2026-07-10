@@ -708,22 +708,21 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 void D3D12ShaderCache::StartPipelineCompilationAsync(ID3D12Device* device,
 	ShaderJob vs_job, ShaderJob ps_job, D3D12::GraphicsPipelineBuilder gpb, bool uber, u64 hash)
 {
+	if (!m_compiler_async)
+		m_compiler_async = std::make_unique<D3D12CompilerAsync>(m_shader_model, m_debug, m_compile_threads);
+
 	D3D12CompilerAsync::CompileJob compile_job{};
 
 	compile_job.uber = uber;
-	compile_job.hash = hash;
-
-	compile_job.vs_job = std::move(vs_job);
-	compile_job.ps_job = std::move(ps_job);
 
 	// VS
-	if (!compile_job.vs_job.blob)
+	if (!vs_job.blob)
 	{
 		const auto key = GetShaderCacheKey(
 			EntryType::VertexShader,
-			compile_job.vs_job.shader_code,
-			compile_job.vs_job.macros.GetPtr(),
-			compile_job.vs_job.entry_point.c_str());
+			vs_job.shader_code,
+			vs_job.macros.GetPtr(),
+			vs_job.entry_point.c_str());
 		auto iter = GetShaderIndex(uber).find(key);
 		if (iter != GetShaderIndex(uber).end())
 		{
@@ -736,18 +735,24 @@ void D3D12ShaderCache::StartPipelineCompilationAsync(ID3D12Device* device,
 				Console.Error("Read blob from file failed");
 				return;
 			}
-			compile_job.vs_job.blob = blob;
+			vs_job.blob = blob;
+		}
+		else
+		{
+			compile_job.job = std::move(vs_job);
+			m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+			std::memset(&vs_job, 0, sizeof(vs_job));
 		}
 	}
 
 	// PS
-	if (!compile_job.ps_job.blob)
+	if (!ps_job.blob)
 	{
 		const auto key = GetShaderCacheKey(
 			EntryType::PixelShader,
-			compile_job.ps_job.shader_code,
-			compile_job.ps_job.macros.GetPtr(),
-			compile_job.ps_job.entry_point.c_str());
+			ps_job.shader_code,
+			ps_job.macros.GetPtr(),
+			ps_job.entry_point.c_str());
 		auto iter = GetShaderIndex(uber).find(key);
 		if (iter != GetShaderIndex(uber).end())
 		{
@@ -760,23 +765,40 @@ void D3D12ShaderCache::StartPipelineCompilationAsync(ID3D12Device* device,
 				Console.Error("Read blob from file failed");
 				return;
 			}
-			compile_job.ps_job.blob = blob;
+			ps_job.blob = blob;
+		}
+		else
+		{
+			compile_job.job = std::move(ps_job);
+			m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+			std::memset(&ps_job, 0, sizeof(ps_job));
 		}
 	}
 
+	// Add the VS/PS if they're not already in the pipeline builder.
+	if (!gpb.GetDesc().VS.pShaderBytecode && vs_job.blob)
+		gpb.SetVertexShader(vs_job.blob.get());
+
+	if (!gpb.GetDesc().PS.pShaderBytecode && ps_job.blob)
+		gpb.SetPixelShader(ps_job.blob.get());
+
 	// Pipeline
+	PipelineJob pipeline_job;
+	pipeline_job.device = device;
+	pipeline_job.hash = hash;
+	pipeline_job.gpb = std::move(gpb);
+	if (pipeline_job.gpb.GetDesc().VS.pShaderBytecode &&
+		pipeline_job.gpb.GetDesc().PS.pShaderBytecode)
 	{
-		compile_job.pipeline_job.type = D3D12CompilerAsync::PipelineJob::GRAPHICS;
-		compile_job.pipeline_job.gpb = std::move(gpb);
-		compile_job.pipeline_job.device = device;
+		compile_job.job = std::move(pipeline_job);
+		m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+		Console.WriteLn("Async pipeline compile: started  hash=0x%016llX uber=%d", compile_job.hash, compile_job.uber);
 	}
-
-	if (!m_compiler_async)
-		m_compiler_async = std::make_unique<D3D12CompilerAsync>(m_shader_model, m_debug, m_compile_threads);
-
-	Console.WriteLn("Async pipeline compile: started  hash=0x%016llX uber=%d", compile_job.hash, compile_job.uber);
-
-	m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+	else
+	{
+		// Need to wait for vertex and/or pixel shader.
+		m_pipeline_jobs.push_back(std::move(pipeline_job));
+	}
 }
 
 void D3D12ShaderCache::ProcessAsyncCompileJobs()
@@ -794,6 +816,7 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 
 		for (u32 i = 0; i < n_jobs; i++)
 		{
+			// CONTINUE HERE!!!! Need to dispatch based on the typeeeee
 			if (compile_jobs[i].vs_job.blob)
 			{
 				AddShaderBlob(EntryType::VertexShader, compile_jobs[i].vs_job.shader_code,

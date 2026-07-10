@@ -28,6 +28,8 @@ public:
 
 	using EntryType = D3D::ShaderCacheEntryType;
 	using ShaderJob = D3D12CompilerAsync::ShaderJob;
+	using PipelineJob = D3D12CompilerAsync::PipelineJob;
+	using CompileJob = D3D12CompilerAsync::CompileJob;
 
 	D3D12ShaderCache();
 	~D3D12ShaderCache();
@@ -155,10 +157,12 @@ private:
 
 	D3D::ShaderModel m_shader_model = D3D::ShaderModel::SM51;
 	bool m_debug = false;
-	u32 m_compile_threads = 1;
-	u32 m_compile_async_latency_ms = 100;
+	u32 m_compile_threads = Pcsx2Config::GSOptions::DEFAULT_HYBRID_SHADER_CACHE_THREADS;
+	u32 m_compile_async_latency_ms = Pcsx2Config::GSOptions::DEFAULT_HYBRID_SHADER_CACHE_LATENCY_MS;
 
 	std::unique_ptr<D3D12CompilerAsync> m_compiler_async;
+
+	std::vector<PipelineJob> m_pipeline_jobs; // Hold these until vertex/pixel shaders are done.
 
 	void ProcessAsyncCompileJobs();
 };
