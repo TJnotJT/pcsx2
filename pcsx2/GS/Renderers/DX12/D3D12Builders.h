@@ -57,40 +57,10 @@ namespace D3D12
 
 		GraphicsPipelineBuilder();
 
-		// FIXME: CLEAN THIS UP. MOVE TO CPP.
-		GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other)
-			: m_desc(other.m_desc)
-			, m_input_elements(other.m_input_elements)
-		{
-			if (m_desc.InputLayout.NumElements > 0)
-				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-		}
-
-		GraphicsPipelineBuilder(const GraphicsPipelineBuilder&& other)
-			: m_desc(other.m_desc)
-			, m_input_elements(other.m_input_elements)
-		{
-			if (m_desc.InputLayout.NumElements > 0)
-				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-		}
-
-		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder& other)
-		{
-			m_desc = other.m_desc;
-			m_input_elements = other.m_input_elements;
-			if (m_desc.InputLayout.NumElements > 0)
-				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-			return *this;
-		}
-
-		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder&& other)
-		{
-			m_desc = other.m_desc;
-			m_input_elements = other.m_input_elements;
-			if (m_desc.InputLayout.NumElements > 0)
-				m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-			return *this;
-		}
+		GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other);
+		GraphicsPipelineBuilder(const GraphicsPipelineBuilder&& other);
+		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder& other);
+		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder&& other);
 
 		~GraphicsPipelineBuilder() = default;
 
@@ -109,6 +79,10 @@ namespace D3D12
 		void SetVertexShader(const ID3DBlob* blob);
 		void SetGeometryShader(const ID3DBlob* blob);
 		void SetPixelShader(const ID3DBlob* blob);
+
+		bool HasVertexShader() const;
+		bool HasGeometryShader() const;
+		bool HasPixelShader() const;
 
 		void AddVertexAttribute(
 			const char* semantic_name, u32 semantic_index, DXGI_FORMAT format, u32 buffer, u32 offset);

@@ -122,5 +122,6 @@ namespace D3D
 		void AddMacro(const char* n, int d);
 		void AddMacro(const char* n, std::string d);
 		D3D_SHADER_MACRO* GetPtr(void);
+		bool operator==(const ShaderMacro& other) const;
 	};
 }; // namespace D3D

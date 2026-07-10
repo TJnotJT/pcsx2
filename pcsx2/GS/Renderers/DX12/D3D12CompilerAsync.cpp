@@ -1,5 +1,19 @@
 #include "GS/Renderers/DX12/D3D12CompilerAsync.h"
 
+bool D3D12CompilerAsync::ShaderJob::Matches(const ShaderJob& other) const
+{
+	bool matches =
+		type == other.type &&
+		shader_code == other.shader_code &&
+		macros == other.macros &&
+		entry_point == other.entry_point;
+
+	// Sanity check, make sure debugging fields are same also.
+	pxAssert(!matches || ((hash == other.hash) && (uber == other.uber)));
+
+	return matches;
+}
+
 D3D12CompilerAsync::D3D12CompilerAsync(
 	D3D::ShaderModel shader_model, bool debug, u32 num_threads, u32 check_latency_ms)
 	: m_shader_model(shader_model)

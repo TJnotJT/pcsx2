@@ -3320,6 +3320,7 @@ GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector 
 		shader.entry_point = entry_point;
 		shader.macros = sm;
 		shader.type = D3D::ShaderCacheEntryType::VertexShader;
+		shader.hash = sel.key;
 		return shader;
 	}
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
@@ -3434,6 +3435,7 @@ GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector s
 		shader.macros = sm;
 		shader.shader_code = source;
 		shader.type = ShaderEntryType::PixelShader;
+		shader.hash = GSHWDrawConfig::PSSelectorHash()(sel);
 		return shader;
 	}
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;

@@ -17,7 +17,7 @@
 #include <directx/d3d12.h>
 #include <string_view>
 #include <unordered_map>
-#include <vector>
+#include <deque>
 #include <thread>
 
 class D3D12ShaderCache
@@ -70,8 +70,8 @@ public:
 		bool uber, AsyncReturn* async = nullptr);
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc);
 
-	void StartPipelineCompilationAsync(ID3D12Device* device, ShaderJob vs_job, ShaderJob ps_job,
-		D3D12::GraphicsPipelineBuilder gpb, bool uber, u64 hash);
+	void StartPipelineCompilationAsync(ID3D12Device* device, ShaderJob vs_job, bool start_vs,
+		ShaderJob ps_job, bool start_ps, PipelineJob pipeline_job);
 
 	struct CacheIndexKey
 	{
@@ -162,7 +162,18 @@ private:
 
 	std::unique_ptr<D3D12CompilerAsync> m_compiler_async;
 
-	std::vector<PipelineJob> m_pipeline_jobs; // Hold these until vertex/pixel shaders are done.
+	struct QueuedPipelineJob
+	{
+		ShaderJob vs_job; // Vertex shader job needed to start.
+		ShaderJob ps_job; // Pixel shader job needed to start.
+		PipelineJob pipeline_job; // Pipeline jobs that needs to start.
+	};
 
-	void ProcessAsyncCompileJobs();
+	// Pipelines waiting for vertex/pixel shaders to finish compiling.
+	std::deque<QueuedPipelineJob> m_queued_pipeline_jobs;
+
+	void ProcessAsyncCompileJobs(); // Process jobs that have compiled.
+
+	// Start pipeline jobs that are waiting on the given vertex and/or pixel shader.
+	void StartQueuedPipelineJobs(const std::optional<ShaderJob>& vs_job, const std::optional<ShaderJob>& ps_job);
 };

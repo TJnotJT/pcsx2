@@ -22,23 +22,26 @@ public:
 		std::string shader_code;
 		D3D::ShaderMacro macros;
 		std::string entry_point;
-		u64 hash;
 		ComPtr<ID3DBlob> blob;
+		u64 hash; // For debugging
+		bool uber; // For debugging
+
+		bool Matches(const ShaderJob& other) const;
 	};
 
 	struct PipelineJob
 	{
 		ID3D12Device* device;
 		D3D12::GraphicsPipelineBuilder gpb;
-		u64 hash;
 		ComPtr<ID3D12PipelineState> pipeline;
+		u64 hash; // For debugging
+		bool uber; // For debugging
 	};
 
 	struct CompileJob
 	{
 		float time_ms; // Compile time in ms for debugging.
 		u32 thread_id; // Thread ID for debugging.
-		bool uber; // Uber shader or not, for debugging.
 
 		// Job info
 		std::variant<ShaderJob, PipelineJob> job;
