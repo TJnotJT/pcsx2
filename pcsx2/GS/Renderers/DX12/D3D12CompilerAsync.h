@@ -8,6 +8,7 @@
 
 #include <thread>
 #include <mutex>
+#include <variant>
 
 class D3D12CompilerAsync
 {
@@ -21,29 +22,26 @@ public:
 		std::string shader_code;
 		D3D::ShaderMacro macros;
 		std::string entry_point;
-		bool uber;
+		u64 hash;
 		ComPtr<ID3DBlob> blob;
 	};
 
 	struct PipelineJob
 	{
 		ID3D12Device* device;
-		enum { GRAPHICS, COMPUTE } type;
 		D3D12::GraphicsPipelineBuilder gpb;
+		u64 hash;
 		ComPtr<ID3D12PipelineState> pipeline;
 	};
 
 	struct CompileJob
 	{
-		u64 hash; // Pipeline selector has for debugging.
 		float time_ms; // Compile time in ms for debugging.
 		u32 thread_id; // Thread ID for debugging.
+		bool uber; // Uber shader or not, for debugging.
 
 		// Job info
-		ShaderJob vs_job;
-		ShaderJob ps_job;
-		PipelineJob pipeline_job;
-		bool uber;
+		std::variant<ShaderJob, PipelineJob> job;
 	};
 
 	D3D12CompilerAsync(D3D::ShaderModel shader_model, bool debug, u32 num_threads = 1,
