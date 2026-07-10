@@ -592,3 +592,15 @@ D3D_SHADER_MACRO* D3D::ShaderMacro::GetPtr(void)
 	mout.emplace_back(nullptr, nullptr);
 	return (D3D_SHADER_MACRO*)mout.data();
 }
+
+bool D3D::ShaderMacro::operator==(const ShaderMacro& other) const
+{
+	if (mlist.size() != other.mlist.size())
+		return false;
+	for (size_t i = 0; i < mlist.size(); i++)
+	{
+		if (mlist[i].name != other.mlist[i].name || mlist[i].def != other.mlist[i].def)
+			return false;
+	}
+	return true;
+}
