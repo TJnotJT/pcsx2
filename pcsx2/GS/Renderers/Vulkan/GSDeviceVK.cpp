@@ -5219,10 +5219,8 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_AA1", static_cast<u32>(sel.aa1));
 	AddMacro(ss, "PS_ABE", sel.abe);
 	AddMacro(ss, "PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
-	AddMacro(ss, "PS_ROV_COLOR", sel.rov_color);
+	AddMacro(ss, "PS_ROV_COLOR", static_cast<u32>(sel.rov_color));
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
-	AddMacro(ss, "PS_ROV_ONESHOT_COLOR", sel.rov_oneshot_color);
-	AddMacro(ss, "PS_ROV_ONESHOT_DEPTH", static_cast<u32>(sel.rov_oneshot_depth));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());

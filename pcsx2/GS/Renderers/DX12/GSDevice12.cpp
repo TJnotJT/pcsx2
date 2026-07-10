@@ -3495,10 +3495,8 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
 	sm.AddMacro("PS_ABE", sel.abe);
 	sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
-	sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
+	sm.AddMacro("PS_ROV_COLOR", static_cast<u32>(sel.rov_color));
 	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
-	sm.AddMacro("PS_ROV_ONESHOT_COLOR", sel.rov_oneshot_color);
-	sm.AddMacro("PS_ROV_ONESHOT_DEPTH", static_cast<u32>(sel.rov_oneshot_depth));
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;

@@ -7660,12 +7660,16 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov, bool oneshot)
 		if (oneshot)
 		{
 			// Don't disable real depth; we write to it simultaneously with ROV depth.
-			m_conf.ps.rov_oneshot_depth = depth_write ? GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE : GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
+			m_conf.ps.rov_depth = depth_write ?
+				GSHWDrawConfig::PS_ROV_DEPTH::ONESHOT_READ_WRITE :
+				GSHWDrawConfig::PS_ROV_DEPTH::ONESHOT_READ_ONLY;
 		}
 		else
 		{
 			m_conf.depth = GSHWDrawConfig::DepthStencilSelector::NoDepth(); // Disable real depth.
-			m_conf.ps.rov_depth = depth_write ? GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE : GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
+			m_conf.ps.rov_depth = depth_write ?
+				GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE :
+				GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY;
 		}
 		ConfigureDepthFeedback(true);
 	}
@@ -7795,10 +7799,9 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov, bool oneshot)
 			}
 		}
 
-		if (oneshot)
-			m_conf.ps.rov_oneshot_color = true;
-		else
-			m_conf.ps.rov_color = true;
+		m_conf.ps.rov_color = oneshot ?
+			GSHWDrawConfig::PS_ROV_COLOR::ONESHOT_ENABLED :
+			GSHWDrawConfig::PS_ROV_COLOR::ENABLED;
 	}
 
 	// Remove regular barriers.

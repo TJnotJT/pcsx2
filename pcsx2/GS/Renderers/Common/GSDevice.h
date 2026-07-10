@@ -672,6 +672,7 @@ struct alignas(16) GSHWDrawConfig
 	using PS_ATST  = GSShader::PS_ATST;
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
+	using PS_ROV_COLOR = GSShader::PS_ROV_COLOR;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
 #pragma pack(push, 1)
 	struct VSSelector
@@ -795,10 +796,8 @@ struct alignas(16) GSHWDrawConfig
 				u32 sw_aniso : 5;
 				
 				// ROVs
-				u32 rov_color : 1;
-				PS_ROV_DEPTH rov_depth : 2;
-				u32 rov_oneshot_color : 1;
-				PS_ROV_DEPTH rov_oneshot_depth : 2;
+				PS_ROV_COLOR rov_color : 2;
+				PS_ROV_DEPTH rov_depth : 3;
 			};
 
 			struct
@@ -882,6 +881,11 @@ struct alignas(16) GSHWDrawConfig
 			{
 				rov_depth = PS_ROV_DEPTH::READ_ONLY;
 			}
+
+			if (rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE)
+			{
+				rov_depth = PS_ROV_DEPTH::ONESHOT_READ_ONLY;
+			}
 		}
 
 		__fi bool HasColorOutput() const
@@ -891,32 +895,35 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasDepthOutput() const
 		{
-			return zfloor || zclamp || IsFeedbackLoopDepth() || (rov_depth == PS_ROV_DEPTH::READ_WRITE);
+			return zfloor || zclamp || IsFeedbackLoopDepth() ||
+				(rov_depth == PS_ROV_DEPTH::READ_WRITE) ||
+				(rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE);
 		}
 
 		__fi bool HasColorROV() const
 		{
-			return rov_color != 0;
+			return rov_color == PS_ROV_COLOR::ENABLED;
 		}
 
 		__fi bool HasDepthROV() const
 		{
-			return rov_depth != PS_ROV_DEPTH::NONE;
+			return rov_depth == PS_ROV_DEPTH::READ_WRITE || rov_depth == PS_ROV_DEPTH::READ_ONLY;
 		}
 
 		__fi bool HasDepthROVWrite() const
 		{
-			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
+			// Covers both oneshot and non-oneshot unlike other methods.
+			return rov_depth == PS_ROV_DEPTH::READ_WRITE || rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE;
 		}
 
 		__fi bool HasOneshotColorROV() const
 		{
-			return rov_oneshot_color;
+			return rov_color == PS_ROV_COLOR::ONESHOT_ENABLED;
 		}
 
 		__fi bool HasOneshotDepthROV() const
 		{
-			return rov_oneshot_depth == PS_ROV_DEPTH::READ_ONLY || rov_oneshot_depth == PS_ROV_DEPTH::READ_WRITE;
+			return rov_depth == PS_ROV_DEPTH::ONESHOT_READ_ONLY || rov_depth == PS_ROV_DEPTH::ONESHOT_READ_WRITE;
 		}
 
 		__fi bool HasOneshotROV() const
