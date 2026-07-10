@@ -1304,6 +1304,35 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		setFnConstantB(m_fn_constants, shader.DepthOutput(), GSMTLConstantIndex_DEPTH_OUT);
 		m_convert_pipeline[shader.Index()] = MakePipeline(pdesc, vs_convert, LoadShader(shader_name), name);
 	}
+
+	if (m_features.rov)
+	{
+		pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatInvalid;
+		pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+		pdesc.stencilAttachmentPixelFormat = MTLPixelFormatInvalid;
+
+		for (u32 rt_copy = 0; rt_copy < 2; rt_copy++)
+		{
+			for (u32 ds_copy = 0; ds_copy < 2; ds_copy++)
+			{
+				if (!rt_copy && !ds_copy)
+					continue;
+
+				setFnConstantB(m_fn_constants, rt_copy, GSMTLConstantIndex_ROV_COPY_COLOR);
+				setFnConstantB(m_fn_constants, ds_copy, GSMTLConstantIndex_ROV_COPY_DEPTH);
+
+				constexpr std::array<const char*, 3> debug_str = {
+					"None",
+					"Copied",
+				};
+
+				NSString* name = [NSString stringWithFormat:@"ROV Copy (RT=%s, DS=%s)", debug_str[rt_copy], debug_str[ds_copy]];
+
+				m_rov_copy_pipelines[rt_copy][ds_copy] = MakePipeline(pdesc, vs_convert, LoadShader(@"ps_rov_copy"), name);
+			}
+		}
+	}
+
 	pdesc.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
 	pdesc.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
 	for (size_t i = 0; i < std::size(m_present_pipeline); i++)
@@ -1845,6 +1874,105 @@ void GSDeviceMTL::DrawMultiStretchRects(const MultiStretchRect* rects, u32 num_r
 	flush(num_rects);
 }}
 
+void GSDeviceMTL::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureMTL* rt, GSTextureMTL* ds,
+		const std::vector<GSVector4i>& rects, const GSVector2i& size_i)
+{
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+	g_perfmon.Put(GSPerfMon::TextureCopiesROV, 1);
+	g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
+
+	bool rt_copy = config.ps.HasOneshotColorROV();
+	bool ds_copy = config.ps.HasOneshotDepthROV();
+
+	// Create ROV textures
+	if (rt_copy && (!m_rov_rt || m_rov_rt->GetSize() != size_i))
+	{
+		if (m_rov_rt)
+			Recycle(m_rov_rt.release());
+		m_rov_rt.reset(static_cast<GSTextureMTL*>(CreateShaderWriteTarget(size_i, GSTexture::Format::Color, false)));
+#if PCSX2_DEVBUILD
+		m_rov_rt->SetDebugName(fmt::format("RT for oneshot ROV {}x{}", size_i.x, size_i.y));
+#endif
+	}
+	if (ds_copy && (!m_rov_ds || m_rov_ds->GetSize() != size_i))
+	{
+		if (m_rov_ds)
+			Recycle(m_rov_ds.release());
+		m_rov_ds.reset(static_cast<GSTextureMTL*>(CreateShaderWriteTarget(size_i, GSTexture::Format::DepthColor, false)));
+#if PCSX2_DEVBUILD
+		m_rov_ds->SetDebugName(fmt::format("DS for oneshot ROV {}x{}", size_i.x, size_i.y));
+#endif
+	}
+
+	// Avoid copies if the original is cleared.
+	if (rt_copy && rt->GetState() == GSTexture::State::Cleared)
+	{
+		m_rov_rt->SetClearColor(rt->GetClearColor());
+		m_rov_rt->FlushClears();
+		rt_copy = false;
+	}
+	if (ds_copy && ds->GetState() == GSTexture::State::Cleared)
+	{
+		m_rov_ds->SetClearDepth(ds->GetClearDepth());
+		m_rov_ds->FlushClears();
+		ds_copy = false;
+	}
+
+	if (!(rt_copy || ds_copy))
+		return; // Copy handled with clear.
+
+	// Vertices / IA
+	const u32 num_rects = static_cast<u32>(rects.size());
+	const Map allocation = Allocate(m_vertex_upload_buf, sizeof(ConvertShaderVertex) * 4 * num_rects);
+	std::array<GSVector4, 4>* write = static_cast<std::array<GSVector4, 4>*>(allocation.cpu_buffer);
+	const id<MTLRenderCommandEncoder> enc = m_current_render.encoder;
+	[enc setVertexBuffer:allocation.gpu_buffer
+	              offset:allocation.gpu_offset
+	             atIndex:GSMTLBufferIndexVertices];
+
+	const GSVector2 size(static_cast<float>(size_i.x), static_cast<float>(size_i.y));
+	for (const GSVector4i& rect_i : rects)
+	{
+		GSVector4 rect(rect_i);
+		*write++ = CalcStrechRectPoints(rect, rect, size);
+	}
+
+	// Render pass
+	BeginRenderPass(@"ROV Copy", nullptr, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare, false);
+
+	FlushDebugEntries(m_current_render.encoder);
+	MREClearScissor();
+	MRESetDSS(DepthStencilSelector::NoDepth());
+
+	// Pipeline
+	MRESetPipeline(m_rov_copy_pipelines[rt_copy ? 1 : 0][ds_copy ? 1 : 0]);
+
+	// Shader resources
+	if (rt_copy)
+	{
+		MRESetTexture(rt, GSMTLTextureIndexROVCopyColorSrc);
+		MRESetTexture(m_rov_rt.get(), GSMTLTextureIndexROVCopyColorDst);
+	}
+	if (ds_copy)
+	{
+		MRESetTexture(ds, GSMTLTextureIndexROVCopyDepthSrc);
+		MRESetTexture(m_rov_ds.get(), GSMTLTextureIndexROVCopyDepthDst);
+	}
+
+	[enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+	                indexCount:num_rects * 6
+	                 indexType:MTLIndexTypeUInt16
+	               indexBuffer:m_expand_index_buffer
+	         indexBufferOffset:0
+	             instanceCount:1
+	                baseVertex:0
+	              baseInstance:0];
+
+	[enc memoryBarrierWithScope:MTLBarrierScopeTextures
+	                afterStages:MTLRenderStageFragment
+	               beforeStages:MTLRenderStageFragment];
+}
+
 void GSDeviceMTL::UpdateCLUTTexture(GSTexture* sTex, float sScale, u32 offsetX, u32 offsetY, GSTexture* dTex, u32 dOffset, u32 dSize)
 {
 	GSMTLCLUTConvertPSUniform uniform = { sScale, {offsetX, offsetY}, dOffset };
@@ -2060,7 +2188,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		setFnConstantI(m_fn_constants, pssel.aa1,                   GSMTLConstantIndex_PS_AA1);
 		setFnConstantB(m_fn_constants, pssel.abe,                   GSMTLConstantIndex_PS_ABE);
 		setFnConstantI(m_fn_constants, pssel.sw_aniso,              GSMTLConstantIndex_PS_SW_ANISO);
-		setFnConstantB(m_fn_constants, pssel.rov_color,             GSMTLConstantIndex_PS_ROV_COLOR);
+		setFnConstantI(m_fn_constants, pssel.rov_color,             GSMTLConstantIndex_PS_ROV_COLOR);
 		setFnConstantI(m_fn_constants, pssel.rov_depth,             GSMTLConstantIndex_PS_ROV_DEPTH);
 		bool eft = pssel.HasColorROV() && !pssel.HasDepthROV() && !pssel.HasDepthOutput();
 		auto newps = LoadShader(eft ? @"ps_main_rov_eft" : @"ps_main");
@@ -2347,6 +2475,14 @@ __fi void GSDeviceMTL::PrepareROVTexture(GSTexture** ptex)
 
 void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 { @autoreleasepool {
+	if (config.ps.HasOneshotROV())
+	{
+		// Do this first since it requires a different vertex upload from the main draw.
+		const GSVector2i rtsize = (config.rt ? config.rt : config.ds)->GetSize();
+		SetupOneshotROV(config, static_cast<GSTextureMTL*>(config.rt), static_cast<GSTextureMTL*>(config.ds),
+			*config.draw_coarse_rasterize, rtsize);
+	}
+
 	if (config.tex && (config.ds == config.tex || config.rt == config.tex))
 		EndRenderPass(); // Barrier
 

@@ -250,6 +250,7 @@ public:
 	// Functions and Pipeline States
 	MRCOwned<id<MTLComputePipelineState>> m_cas_pipeline[2];
 	std::vector<MRCOwned<id<MTLRenderPipelineState>>> m_convert_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_rov_copy_pipelines[2][2]; // [color][depth]
 	MRCOwned<id<MTLRenderPipelineState>> m_present_pipeline[static_cast<int>(PresentShader::Count)];
 	MRCOwned<id<MTLRenderPipelineState>> m_merge_pipeline[4];
 	MRCOwned<id<MTLRenderPipelineState>> m_interlace_pipeline[NUM_INTERLACE_SHADERS];
@@ -335,6 +336,8 @@ public:
 	GSTexture* m_ds_as_rt_gstexture = nullptr;
 	MRCOwned<id<MTLTexture>> m_rov_dummy_texture;
 	struct { u32 w, h; } m_rov_dummy_texture_size = {};
+	std::unique_ptr<GSTextureMTL> m_rov_rt;
+	std::unique_ptr<GSTextureMTL> m_rov_ds;
 
 	struct DebugEntry
 	{
@@ -464,6 +467,8 @@ public:
 
 	// MARK: Render HW
 
+void SetupOneshotROV(const GSHWDrawConfig& config, GSTextureMTL* rt, GSTextureMTL* ds,
+		const std::vector<GSVector4i>& rects, const GSVector2i& size);
 	void SetupDestinationAlpha(GSTexture* rt, GSTexture* ds, const GSVector4i& r, SetDATM datm);
 	void PrepareROVTexture(GSTexture** ptex);
 	void RenderHW(GSHWDrawConfig& config) override;

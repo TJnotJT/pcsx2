@@ -23,6 +23,11 @@ enum GSMTLTextureIndex
 	GSMTLTextureIndexPrimIDs,
 	GSMTLTextureIndexDepthTarget,
 	GSMTLTextureIndexCount,
+
+	GSMTLTextureIndexROVCopyColorSrc = 0,
+	GSMTLTextureIndexROVCopyDepthSrc = 1,
+	GSMTLTextureIndexROVCopyColorDst = 2,
+	GSMTLTextureIndexROVCopyDepthDst = 3,
 };
 
 struct GSMTLConvertPSUniform
@@ -162,6 +167,8 @@ enum GSMTLFnConstants
 {
 	GSMTLConstantIndex_BILN,
 	GSMTLConstantIndex_DEPTH_OUT,
+	GSMTLConstantIndex_ROV_COPY_COLOR,
+	GSMTLConstantIndex_ROV_COPY_DEPTH,
 	GSMTLConstantIndex_CAS_SHARPEN_ONLY,
 	GSMTLConstantIndex_FRAMEBUFFER_FETCH,
 	GSMTLConstantIndex_DEPTH_FEEDBACK,

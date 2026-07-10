@@ -8,6 +8,8 @@ using namespace metal;
 constant bool BILN      [[function_constant(GSMTLConstantIndex_BILN)]];
 constant bool DEPTH_OUT [[function_constant(GSMTLConstantIndex_DEPTH_OUT)]];
 constant bool COLOR_OUT = !DEPTH_OUT;
+constant bool ROV_COPY_COLOR [[function_constant(GSMTLConstantIndex_ROV_COPY_COLOR)]];
+constant bool ROV_COPY_DEPTH [[function_constant(GSMTLConstantIndex_ROV_COPY_DEPTH)]];
 
 struct ConvertVSIn
 {
@@ -563,4 +565,30 @@ fragment float4 ps_shadeboost(float4 p [[position]], DirectReadTextureIn<float> 
 	float3 csb = pow(conColor, float3(1.0 / gam));
 
 	return float4(csb, 1);
+}
+
+struct ConvertROVCopyRes
+{
+	texture2d<float> color_src [[texture(GSMTLTextureIndexROVCopyColorSrc), function_constant(ROV_COPY_COLOR)]];
+	texture2d<float> depth_src [[texture(GSMTLTextureIndexROVCopyDepthSrc), function_constant(ROV_COPY_DEPTH)]];
+	texture2d<float, access::read_write> color_dst [[texture(GSMTLTextureIndexROVCopyColorDst), function_constant(ROV_COPY_COLOR)]];
+	texture2d<float, access::read_write> depth_dst [[texture(GSMTLTextureIndexROVCopyDepthDst), function_constant(ROV_COPY_DEPTH)]];
+
+	float4 read_color(float2 pos)
+	{
+		return color_src.read(uint2(pos));
+	}
+
+	float read_depth(float2 pos)
+	{
+		return depth_src.read(uint2(pos)).r;
+	}
+};
+
+fragment void ps_rov_copy(ConvertShaderData data [[stage_in]], ConvertROVCopyRes res)
+{
+	if (ROV_COPY_COLOR)
+		res.color_dst.write(res.read_color(data.p.xy), uint2(data.p.xy));
+	if (ROV_COPY_DEPTH)
+		res.depth_dst.write(float4(res.read_depth(data.p.xy), 0.0f, 0.0f, 0.0f), uint2(data.p.xy));
 }
