@@ -2352,31 +2352,7 @@ bool GSDevice12::CompileUberTFXPipelines()
 	{
 		Common::Timer timer;
 
-		// Uber pixel shaders.
-		/*u32 num_ps = 0;
-		for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
-		{
-			ShaderJob job = GetTFXPixelShader(ps_sel, true);
-			if (!job.blob)
-				return false;
-			num_ps++;
-		}
-
-		Console.WriteLn("Compiled %u uber pixel shaders in %.2f seconds", num_ps, timer.GetTimeSecondsAndReset());*/
-
-		// Uber vertex shaders.
-		/*u32 num_vs = 0;
-		for (const GSHWDrawConfig::VSSelector& vs_sel : GSHWDrawConfig::GetUberVSSelectors())
-		{
-			ShaderJob job = GetTFXVertexShader(vs_sel, true);
-			if (!job.blob)
-				return false;
-			num_vs++;
-		}*/
-
-		//Console.WriteLn("Compiled %u uber vertex shaders in %.2f seconds", num_vs, timer.GetTimeSecondsAndReset());
-
-		// Start uber pipelines async.
+		// Compile uber pipelines async (stage 0 to start compilatino, stage 1 to wait).
 		for (u32 stage = 0; stage < 2; stage++)
 		{
 			size_t num_pipelines = 0;
@@ -2396,17 +2372,16 @@ bool GSDevice12::CompileUberTFXPipelines()
 						AsyncReturn async(true);
 						if (stage == 0)
 						{
-							// Compile
+							// Start compilation
 							const ID3D12PipelineState* pipeline = GetTFXPipeline(m_pipeline_selector, true, &async);
 							if (!pipeline && !AsyncReturn::IsAsync(&async))
-								return false;
+								return false; // failed
 						}
 						else
 						{
-							// Wait for compile to finish
-							Console.WriteLn("Waiting for %llX to finish", PipelineSelectorHash()(m_pipeline_selector));
+							// Wait for compilation to finish
 							while (!GetTFXPipeline(m_pipeline_selector, true, &async))
-								std::this_thread::sleep_for(std::chrono::milliseconds(20));
+								std::this_thread::sleep_for(std::chrono::milliseconds(100));
 						}
 						num_pipelines++;
 					}
@@ -3320,6 +3295,7 @@ GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector 
 		shader.entry_point = entry_point;
 		shader.macros = sm;
 		shader.type = D3D::ShaderCacheEntryType::VertexShader;
+		shader.uber = uber;
 		shader.hash = sel.key;
 		return shader;
 	}
@@ -3435,6 +3411,7 @@ GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector s
 		shader.macros = sm;
 		shader.shader_code = source;
 		shader.type = ShaderEntryType::PixelShader;
+		shader.uber = uber;
 		shader.hash = GSHWDrawConfig::PSSelectorHash()(sel);
 		return shader;
 	}
@@ -3599,9 +3576,23 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 		if (!m_tfx_pipelines_async_submitted.contains(p)) // Don't resubmit the same pipeline twice.
 		{
 			// Submit pipeline async compilation.
+			const bool start_vs = !vs.blob && !m_tfx_vertex_shaders_async_submitted.contains(p.vs.key);
+			const bool start_ps = !ps.blob && !m_tfx_pixel_shaders_async_submitted.contains(p.ps);
+
+			m_tfx_vertex_shaders_async_submitted.insert(p.vs.key);
+			m_tfx_pixel_shaders_async_submitted.insert(p.ps);
 			m_tfx_pipelines_async_submitted.insert(p);
+
+			D3D12ShaderCache::PipelineJob pipeline_job;
+			pipeline_job.device = m_device.get();
+			pipeline_job.vs_blob = vs.blob;
+			pipeline_job.ps_blob = ps.blob;
+			pipeline_job.gpb = std::move(gpb);
+			pipeline_job.uber = uber;
+			pipeline_job.hash = PipelineSelectorHash()(p);
+
 			m_shader_cache.StartPipelineCompilationAsync(
-				m_device.get(), std::move(vs), std::move(ps), std::move(gpb), uber, PipelineSelectorHash()(p));
+				std::move(vs), start_vs, std::move(ps), start_ps, std::move(pipeline_job));
 		}
 
 		return nullptr;

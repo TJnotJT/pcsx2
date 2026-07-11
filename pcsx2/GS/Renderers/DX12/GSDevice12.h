@@ -401,6 +401,9 @@ private:
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
+	
+	std::unordered_set<u32> m_tfx_vertex_shaders_async_submitted;
+	std::unordered_set<GSHWDrawConfig::PSSelector, GSHWDrawConfig::PSSelectorHash> m_tfx_pixel_shaders_async_submitted;
 	std::unordered_set<PipelineSelector, PipelineSelectorHash> m_tfx_pipelines_async_submitted;
 
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;

@@ -18,24 +18,32 @@ public:
 
 	struct ShaderJob
 	{
+		// Inputs
 		D3D::ShaderCacheEntryType type;
 		std::string shader_code;
 		D3D::ShaderMacro macros;
 		std::string entry_point;
-		ComPtr<ID3DBlob> blob;
 		u64 hash; // For debugging
 		bool uber; // For debugging
+		
+		// Output
+		ComPtr<ID3DBlob> blob;
 
 		bool Matches(const ShaderJob& other) const;
 	};
 
 	struct PipelineJob
 	{
+		// Inputs
 		ID3D12Device* device;
 		D3D12::GraphicsPipelineBuilder gpb;
-		ComPtr<ID3D12PipelineState> pipeline;
+		ComPtr<ID3DBlob> vs_blob;
+		ComPtr<ID3DBlob> ps_blob;
 		u64 hash; // For debugging
 		bool uber; // For debugging
+		
+		// Output
+		ComPtr<ID3D12PipelineState> pipeline;
 	};
 
 	struct CompileJob

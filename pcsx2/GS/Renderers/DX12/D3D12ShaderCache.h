@@ -70,7 +70,7 @@ public:
 		bool uber, AsyncReturn* async = nullptr);
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc);
 
-	void StartPipelineCompilationAsync(ID3D12Device* device, ShaderJob vs_job, bool start_vs,
+	void StartPipelineCompilationAsync(ShaderJob vs_job, bool start_vs,
 		ShaderJob ps_job, bool start_ps, PipelineJob pipeline_job);
 
 	struct CacheIndexKey
@@ -175,5 +175,5 @@ private:
 	void ProcessAsyncCompileJobs(); // Process jobs that have compiled.
 
 	// Start pipeline jobs that are waiting on the given vertex and/or pixel shader.
-	void StartQueuedPipelineJobs(const std::optional<ShaderJob>& vs_job, const std::optional<ShaderJob>& ps_job);
+	void StartQueuedPipelineJobs(const ShaderJob& shader_job);
 };

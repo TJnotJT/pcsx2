@@ -5335,7 +5335,7 @@ void GSRendererHW::HandleFlatShadedVertices()
 {
 	// These cases might need fixing.
 	const bool maybe_fix_vertices = !m_conf.vs.iip &&
-		(!g_gs_device->Features().provoking_vertex_last || IsCoverageAlphaSupported());
+		(!g_gs_device->Features().provoking_vertex_last || IsCoverageAlphaSupported() || m_conf.uber_shader);
 
 	// These cases definitely don't need fixing.
 	const bool dont_fix_vertices = m_vt.m_primclass == GS_POINT_CLASS || m_vt.m_primclass == GS_SPRITE_CLASS;
@@ -5375,28 +5375,6 @@ void GSRendererHW::HandleFlatShadedVertices()
 	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
 
 	// Make all vertices the same color to simplify handling in expand shaders.
-	for (u32 i = 0; i < m_index->tail; i += n)
-	{
-		for (u32 j = 0; j < n - 1; j++)
-			m_vertex->buff[i + j].RGBAQ.U32[0] = m_vertex->buff[i + n - 1].RGBAQ.U32[0];
-	}
-}
-
-void GSRendererHW::HandleFlatShadedVertices()
-{
-	// De-index the vertices using the copy buffer
-	while (m_vertex->maxcount < m_index->tail)
-		GrowVertexBuffer();
-	for (int i = static_cast<int>(m_index->tail) - 1; i >= 0; i--)
-	{
-		m_vertex->buff_copy[i] = m_vertex->buff[m_index->buff[i]];
-		m_index->buff[i] = static_cast<u16>(i);
-	}
-	std::swap(m_vertex->buff, m_vertex->buff_copy);
-	m_vertex->head = m_vertex->next = m_vertex->tail = m_index->tail;
-
-	// Put correct color in the first vertex
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
 	for (u32 i = 0; i < m_index->tail; i += n)
 	{
 		for (u32 j = 0; j < n - 1; j++)
