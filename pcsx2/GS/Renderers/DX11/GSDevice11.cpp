@@ -2684,11 +2684,11 @@ void GSDevice11::VSSetShader(ID3D11VertexShader* vs, ID3D11Buffer* vs_cb)
 
 void GSDevice11::VSSetPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::VSPushConstants vs_pc;
+	GSHWDrawConfig::ShaderPushConstants vs_pc;
 	vs_pc.base_vertex = base_vertex;
 	vs_pc.base_index = base_index;
 
-	if (m_vs_pc_cache.Update(vs_pc) || force_update)
+	if (m_tfx_pc_cache.Update(vs_pc) || force_update)
 	{
 		m_ctx->UpdateSubresource(m_vs_pc.get(), 0, NULL, &vs_pc, 0, 0);
 	}
