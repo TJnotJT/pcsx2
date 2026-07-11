@@ -6,7 +6,6 @@
 #include "common/RedtapeWindows.h"
 #include "common/RedtapeWilCom.h"
 
-#include "Config.h"
 #include "GS/GS.h"
 
 #include <d3d11_1.h>
@@ -56,11 +55,27 @@ namespace D3D
 	GSRendererType GetPreferredRenderer();
 
 	// D3DCompiler wrapper.
+	enum class CompileStatus
+	{
+		Failure,
+		NotAvailable,
+		Success,
+	};
+
 	enum class ShaderType
 	{
 		Vertex,
 		Pixel,
 		Compute
+	};
+
+	enum class ShaderCacheEntryType
+	{
+		VertexShader,
+		PixelShader,
+		ComputeShader,
+		GraphicsPipeline,
+		ComputePipeline,
 	};
 
 	enum class ShaderModel
@@ -75,4 +90,37 @@ namespace D3D
 
 	wil::com_ptr_nothrow<ID3DBlob> CompileShader(ShaderType type, ShaderModel shader_model, bool debug,
 		const std::string_view code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main");
+
+	class ShaderMacro
+	{
+		struct mcstr
+		{
+			const char* name, * def;
+			mcstr(const char* n, const char* d)
+				: name(n)
+				, def(d)
+			{
+			}
+		};
+
+		struct mstring
+		{
+			std::string name, def;
+			mstring(const char* n, std::string d)
+				: name(n)
+				, def(d)
+			{
+			}
+		};
+
+		std::vector<mstring> mlist;
+		std::vector<mcstr> mout;
+
+	public:
+		ShaderMacro();
+		void AddMacro(const char* n, int d);
+		void AddMacro(const char* n, std::string d);
+		D3D_SHADER_MACRO* GetPtr(void);
+		bool operator==(const ShaderMacro& other) const;
+	};
 }; // namespace D3D

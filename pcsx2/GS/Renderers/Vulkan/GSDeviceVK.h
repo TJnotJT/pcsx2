@@ -8,6 +8,7 @@
 #include "GS/Renderers/Vulkan/GSTextureVK.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
+#include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
 #include "common/ReadbackSpinManager.h"
@@ -22,6 +23,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <unordered_set>
 
 class VKSwapChain;
 
@@ -75,6 +77,8 @@ public:
 	{
 		return static_cast<u32>(m_device_properties.limits.optimalBufferCopyRowPitchAlignment);
 	}
+
+	u32 GetExpandIndexStreamBufferSize() const;
 
 	/// Returns true if running on an NVIDIA GPU.
 	__fi bool IsDeviceNVIDIA() const { return (m_device_properties.vendorID == 0x10DE); }
@@ -462,6 +466,18 @@ private:
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
+	u64 m_tfx_pipelines_async_uid = 0;
+	struct AsyncSubmittedPipeline
+	{
+		u64 uid;
+		PipelineSelector sel;
+	};
+	std::deque<AsyncSubmittedPipeline> m_tfx_pipelines_async_submitted;
+	std::unordered_set<u8> m_tfx_vertex_shaders_async_submitted;
+	std::unordered_set<GSHWDrawConfig::PSSelector, GSHWDrawConfig::PSSelectorHash> m_tfx_fragment_shaders_async_submitted;
+
+	void GetAsyncFinishedPipelines();
+
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_discard = VK_NULL_HANDLE;
@@ -480,9 +496,10 @@ private:
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
-	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
+	GSHWDrawConfig::ShaderPushConstants m_tfx_pc_cache;
 
 	std::string m_tfx_source;
+	std::string m_uber_tfx_source;
 
 	GSTexture* CreateSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format) override;
 
@@ -499,10 +516,13 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
-	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
-	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
-	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
-	VkPipeline GetTFXPipeline(const PipelineSelector& p);
+	using VKShaderJob = VKShaderCompilerAsync::VKShaderJob;
+	using VKPipelineJob = VKShaderCompilerAsync::VKPipelineJob;
+
+	VKShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
+	VKShaderJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber = false, GSAsyncReturn* async = nullptr);
+	VkPipeline CreateTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
+	VkPipeline GetTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
 
 	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
 	VkShaderModule GetUtilityFragmentShader(const std::string& source, const char* replace_main);
@@ -520,6 +540,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileUberTFXPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -636,10 +657,14 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	bool BindDrawPipeline(const PipelineSelector& p);
+	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void WriteTFXPushConstants(u32 offset, u32 num_constants);
+
+	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
+	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe);
+	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe, bool uberize_vs_ps = false);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
@@ -706,7 +731,7 @@ private:
 		DIRTY_FLAG_PIPELINE = (1 << 14),
 		DIRTY_FLAG_VS_CONSTANT_BUFFER = (1 << 15),
 		DIRTY_FLAG_PS_CONSTANT_BUFFER = (1 << 16),
-		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 17),
+		DIRTY_FLAG_TFX_PUSH_CONSTANTS = (1 << 17),
 
 		DIRTY_FLAG_TFX_TEXTURE_TEX = (DIRTY_FLAG_TFX_TEXTURE_0 << 0),
 		DIRTY_FLAG_TFX_TEXTURE_PALETTE = (DIRTY_FLAG_TFX_TEXTURE_0 << 1),
@@ -725,7 +750,7 @@ private:
 		                   DIRTY_FLAG_BLEND_CONSTANTS | DIRTY_FLAG_LINE_WIDTH,
 		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES,
 		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_UTILITY_TEXTURE,
-		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_VS_PUSH_CONSTANTS,
+		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_TFX_PUSH_CONSTANTS,
 		ALL_DIRTY_STATE = DIRTY_BASE_STATE | DIRTY_TFX_STATE | DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE,
 	};
 

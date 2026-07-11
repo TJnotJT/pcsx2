@@ -91,6 +91,7 @@
     <None Include="..\bin\resources\shaders\dx11\merge.fx" />
     <None Include="..\bin\resources\shaders\dx11\shadeboost.fx" />
     <None Include="..\bin\resources\shaders\dx11\tfx.fx" />
+    <None Include="..\bin\resources\shaders\dx11\tfx_uber.fx" />
     <None Include="..\bin\resources\shaders\dx11\imgui.fx" />
     <None Include="..\bin\resources\shaders\dx11\present.fx" />
     <None Include="GS\Renderers\Vulkan\VKEntryPoints.inl">
@@ -204,9 +205,11 @@
     <ClCompile Include="DEV9\net.cpp" />
     <ClCompile Include="DEV9\Win32\tap-win32.cpp" />
     <ClCompile Include="GameList.cpp" />
+    <ClCompile Include="GS\GSShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\GSDrawingEnvironment.cpp" />
     <ClCompile Include="GS\Renderers\DX11\D3D11ShaderCache.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12Builders.cpp" />
+    <ClCompile Include="GS\Renderers\DX12\D3D12ShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12DescriptorHeapManager.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12ShaderCache.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12StreamBuffer.cpp" />
@@ -234,12 +237,14 @@
     <ClCompile Include="GS\Renderers\Vulkan\VKBuilders.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\Vulkan\VKDynamicShaderc.cpp" />
     <ClCompile Include="GS\Renderers\Vulkan\VKLoader.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="GS\Renderers\Vulkan\VKShaderCache.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\Vulkan\VKShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\Renderers\Vulkan\VKStreamBuffer.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
@@ -651,10 +656,12 @@
     <ClInclude Include="DEV9\Win32\pcap_io_win32_funcs.h" />
     <ClInclude Include="DEV9\Win32\tap.h" />
     <ClInclude Include="GameList.h" />
+    <ClInclude Include="GS\GSShaderCompilerAsync.h" />
     <ClInclude Include="GS\GSVector4i_arm64.h" />
     <ClInclude Include="GS\GSVector4_arm64.h" />
     <ClInclude Include="GS\Renderers\DX11\D3D11ShaderCache.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12Builders.h" />
+    <ClInclude Include="GS\Renderers\DX12\D3D12ShaderCompilerAsync.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12DescriptorHeapManager.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12ShaderCache.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12StreamBuffer.h" />
@@ -683,6 +690,7 @@
     <ClInclude Include="GS\Renderers\Vulkan\VKBuilders.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="GS\Renderers\Vulkan\VKDynamicShaderc.h" />
     <ClInclude Include="GS\Renderers\Vulkan\VKEntryPoints.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
@@ -692,6 +700,7 @@
     <ClInclude Include="GS\Renderers\Vulkan\VKShaderCache.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="GS\Renderers\Vulkan\VKShaderCompilerAsync.h" />
     <ClInclude Include="GS\Renderers\Vulkan\VKStreamBuffer.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>

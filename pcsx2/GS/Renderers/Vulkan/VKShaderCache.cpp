@@ -6,6 +6,7 @@
 #include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "GS/Renderers/Vulkan/VKBuilders.h"
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
+#include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
 
 #include "Config.h"
 #include "ShaderCacheVersion.h"
@@ -100,98 +101,6 @@ static void FillPipelineCacheHeader(VK_PIPELINE_CACHE_HEADER* header)
 	std::memcpy(header->uuid, GSDeviceVK::GetInstance()->GetDeviceProperties().pipelineCacheUUID, VK_UUID_SIZE);
 }
 
-#define SHADERC_FUNCTIONS(X) \
-	X(shaderc_compiler_initialize) \
-	X(shaderc_compiler_release) \
-	X(shaderc_compile_options_initialize) \
-	X(shaderc_compile_options_release) \
-	X(shaderc_compile_options_set_source_language) \
-	X(shaderc_compile_options_set_generate_debug_info) \
-	X(shaderc_compile_options_set_optimization_level) \
-	X(shaderc_compile_options_set_target_env) \
-	X(shaderc_compile_into_spv) \
-	X(shaderc_result_release) \
-	X(shaderc_result_get_length) \
-	X(shaderc_result_get_num_warnings) \
-	X(shaderc_result_get_bytes) \
-	X(shaderc_result_get_error_message) \
-	X(shaderc_result_get_compilation_status)
-
-// TODO: NOT thread safe, yet.
-namespace dyn_shaderc
-{
-	static bool Open();
-	static void Close();
-
-	static DynamicLibrary s_library;
-	static shaderc_compiler_t s_compiler = nullptr;
-
-#define ADD_FUNC(F) static decltype(&::F) F;
-	SHADERC_FUNCTIONS(ADD_FUNC)
-#undef ADD_FUNC
-
-} // namespace dyn_shaderc
-
-bool dyn_shaderc::Open()
-{
-	if (s_library.IsOpen())
-		return true;
-
-	Error error;
-
-#ifdef _WIN32
-	const std::string libname = DynamicLibrary::GetVersionedFilename("shaderc_shared");
-#else
-	// Use versioned, bundle post-processing adds it..
-	const std::string libname = DynamicLibrary::GetVersionedFilename("shaderc_shared", 1);
-#endif
-	if (!s_library.Open(libname.c_str(), &error))
-	{
-		ERROR_LOG("Failed to load shaderc: {}", error.GetDescription());
-		return false;
-	}
-
-#define LOAD_FUNC(F) \
-	if (!s_library.GetSymbol(#F, &F)) \
-	{ \
-		ERROR_LOG("Failed to find function {}", #F); \
-		Close(); \
-		return false; \
-	}
-
-	SHADERC_FUNCTIONS(LOAD_FUNC)
-#undef LOAD_FUNC
-
-	s_compiler = shaderc_compiler_initialize();
-	if (!s_compiler)
-	{
-		ERROR_LOG("shaderc_compiler_initialize() failed");
-		Close();
-		return false;
-	}
-
-	std::atexit(&dyn_shaderc::Close);
-	return true;
-}
-
-void dyn_shaderc::Close()
-{
-	if (s_compiler)
-	{
-		shaderc_compiler_release(s_compiler);
-		s_compiler = nullptr;
-	}
-
-#define UNLOAD_FUNC(F) F = nullptr;
-	SHADERC_FUNCTIONS(UNLOAD_FUNC)
-#undef UNLOAD_FUNC
-
-	s_library.Close();
-}
-
-#undef SHADERC_FUNCTIONS
-#undef SHADERC_INIT_FUNCTIONS
-
 static void DumpBadShader(std::string_view code, std::string_view errors)
 {
 	const std::string filename = Path::Combine(EmuFolders::Logs, fmt::format("pcsx2_bad_shader_{}.txt", ++s_next_bad_shader_id));
@@ -206,75 +115,43 @@ static void DumpBadShader(std::string_view code, std::string_view errors)
 	}
 }
 
-static const char* compilation_status_to_string(shaderc_compilation_status status)
+shaderc_compiler_t VKShaderCache::m_compiler_sync = {};
+bool VKShaderCache::m_shaderc_failed = false;
+
+bool VKShaderCache::InitShadercCompiler()
 {
-	switch (status)
-	{
-#define CASE(x) case shaderc_compilation_status_##x: return #x
-		CASE(success);
-		CASE(invalid_stage);
-		CASE(compilation_error);
-		CASE(internal_error);
-		CASE(null_result_object);
-		CASE(invalid_assembly);
-		CASE(validation_error);
-		CASE(transformation_error);
-		CASE(configuration_error);
-#undef CASE
-	}
-	return "unknown_error";
+	if (!VKDynamicShaderc::Open())
+		return false;
+
+	if (m_shaderc_failed)
+		return false;
+
+	if (m_compiler_sync)
+		return true;
+
+	m_compiler_sync = VKDynamicShaderc::CreateCompiler();
+
+	m_shaderc_failed = !m_compiler_sync;
+
+	return m_compiler_sync;
 }
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileShaderToSPV(u32 stage, std::string_view source, bool debug)
 {
 	std::optional<VKShaderCache::SPIRVCodeVector> ret;
-	if (!dyn_shaderc::Open())
+	if (!InitShadercCompiler())
 		return ret;
 
 	const GSShaderCompileIndicator::CompileTimer compile_timer;
 
-	shaderc_compile_options_t options = dyn_shaderc::shaderc_compile_options_initialize();
-	pxAssertRel(options, "shaderc_compile_options_initialize() failed");
+	std::string errors;
 
-	dyn_shaderc::shaderc_compile_options_set_source_language(options, shaderc_source_language_glsl);
-	dyn_shaderc::shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, 0);
-#ifdef SHADERC_PCSX2_CUSTOM
-	dyn_shaderc::shaderc_compile_options_set_generate_debug_info(options, debug,
-		debug && GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info);
-#else
-	if (debug)
-		dyn_shaderc::shaderc_compile_options_set_generate_debug_info(options);
-#endif
-	dyn_shaderc::shaderc_compile_options_set_optimization_level(
-		options, debug ? shaderc_optimization_level_zero : shaderc_optimization_level_performance);
+	ret = VKDynamicShaderc::CompileShaderToSPV(m_compiler_sync, stage, source, debug,
+		GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info, &errors);
 
-	const shaderc_compilation_result_t result = dyn_shaderc::shaderc_compile_into_spv(
-		dyn_shaderc::s_compiler, source.data(), source.length(), static_cast<shaderc_shader_kind>(stage), "source",
-		"main", options);
-
-	shaderc_compilation_status status = shaderc_compilation_status_null_result_object;
-	if (!result || (status = dyn_shaderc::shaderc_result_get_compilation_status(result)) != shaderc_compilation_status_success)
-	{
-		const std::string_view errors(result ? dyn_shaderc::shaderc_result_get_error_message(result)
-		                                     : "null result object");
-		ERROR_LOG("Failed to compile shader to SPIR-V: {}\n{}", compilation_status_to_string(status), errors);
+	if (!ret)
 		DumpBadShader(source, errors);
-	}
-	else
-	{
-		const size_t num_warnings = dyn_shaderc::shaderc_result_get_num_warnings(result);
-		if (num_warnings > 0)
-			WARNING_LOG("Shader compiled with warnings:\n{}", dyn_shaderc::shaderc_result_get_error_message(result));
 
-		const size_t spirv_size = dyn_shaderc::shaderc_result_get_length(result);
-		const char* bytes = dyn_shaderc::shaderc_result_get_bytes(result);
-		pxAssert(spirv_size > 0 && ((spirv_size % sizeof(u32)) == 0));
-		ret = VKShaderCache::SPIRVCodeVector(reinterpret_cast<const u32*>(bytes),
-			reinterpret_cast<const u32*>(bytes + spirv_size));
-	}
-
-	dyn_shaderc::shaderc_result_release(result);
-	dyn_shaderc::shaderc_compile_options_release(options);
 	return ret;
 }
 
@@ -313,36 +190,40 @@ void VKShaderCache::Destroy()
 
 void VKShaderCache::Open()
 {
-	if (!GSConfig.DisableShaderCache)
+	if (GSConfig.ShaderCacheType != GSShaderCacheType::Disabled)
 	{
-		m_pipeline_cache_filename = GetPipelineCacheBaseFileName(GSConfig.UseDebugDevice);
+		for (u32 uber = 0; uber < 2; uber++)
+		{
+			GetPipelineCacheFilename(uber) = GetPipelineCacheBaseFileName(uber, GSConfig.UseDebugDevice);
 
-		const std::string base_filename = GetShaderCacheBaseFileName(GSConfig.UseDebugDevice);
-		const std::string index_filename = base_filename + ".idx";
-		const std::string blob_filename = base_filename + ".bin";
+			const std::string base_filename = GetShaderCacheBaseFileName(uber, GSConfig.UseDebugDevice);
+			const std::string index_filename = base_filename + ".idx";
+			const std::string blob_filename = base_filename + ".bin";
 
-		if (!ReadExistingShaderCache(index_filename, blob_filename))
-			CreateNewShaderCache(index_filename, blob_filename);
+			if (!ReadExistingShaderCache(index_filename, blob_filename, uber))
+				CreateNewShaderCache(index_filename, blob_filename, uber);
 
-		if (!ReadExistingPipelineCache())
-			CreateNewPipelineCache();
+			if (!ReadExistingPipelineCache(uber))
+				CreateNewPipelineCache(uber);
+		}
 	}
 	else
 	{
-		CreateNewPipelineCache();
+		for (u32 uber = 0; uber < 2; uber++)
+			CreateNewPipelineCache(uber);
 	}
 }
 
-VkPipelineCache VKShaderCache::GetPipelineCache(bool set_dirty /*= true*/)
+VkPipelineCache VKShaderCache::GetPipelineCache(bool set_dirty /*= true*/, bool uber /*= false*/)
 {
-	if (m_pipeline_cache == VK_NULL_HANDLE)
-		return VK_NULL_HANDLE;
+	if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE)
+		return GetPipelineCachePrivate(uber);
 
-	m_pipeline_cache_dirty |= set_dirty;
-	return m_pipeline_cache;
+	GetPipelineCacheDirty(uber) |= set_dirty;
+	return GetPipelineCachePrivate(uber);
 }
 
-bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, const std::string& blob_filename)
+bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, const std::string& blob_filename, bool uber)
 {
 	if (FileSystem::FileExists(index_filename.c_str()))
 	{
@@ -355,8 +236,8 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 		FileSystem::DeleteFilePath(blob_filename.c_str());
 	}
 
-	m_index_file = FileSystem::OpenCFile(index_filename.c_str(), "wb");
-	if (!m_index_file)
+	GetIndexFile(uber) = FileSystem::OpenCFile(index_filename.c_str(), "wb");
+	if (!GetIndexFile(uber))
 	{
 		Console.Error("Failed to open index file '%s' for writing", index_filename.c_str());
 		return false;
@@ -366,22 +247,22 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 	VK_PIPELINE_CACHE_HEADER header;
 	FillPipelineCacheHeader(&header);
 
-	if (std::fwrite(&file_version, sizeof(file_version), 1, m_index_file) != 1 ||
-		std::fwrite(&header, sizeof(header), 1, m_index_file) != 1)
+	if (std::fwrite(&file_version, sizeof(file_version), 1, GetIndexFile(uber)) != 1 ||
+		std::fwrite(&header, sizeof(header), 1, GetIndexFile(uber)) != 1)
 	{
 		Console.Error("Failed to write header to index file '%s'", index_filename.c_str());
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
+		std::fclose(GetIndexFile(uber));
+		GetIndexFile(uber) = nullptr;
 		FileSystem::DeleteFilePath(index_filename.c_str());
 		return false;
 	}
 
-	m_blob_file = FileSystem::OpenCFile(blob_filename.c_str(), "w+b");
-	if (!m_blob_file)
+	GetBlobFile(uber) = FileSystem::OpenCFile(blob_filename.c_str(), "w+b");
+	if (!GetBlobFile(uber))
 	{
 		Console.Error("Failed to open blob file '%s' for writing", blob_filename.c_str());
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
+		std::fclose(GetIndexFile(uber));
+		GetIndexFile(uber) = nullptr;
 		FileSystem::DeleteFilePath(index_filename.c_str());
 		return false;
 	}
@@ -389,10 +270,10 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 	return true;
 }
 
-bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, const std::string& blob_filename)
+bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, const std::string& blob_filename, bool uber)
 {
-	m_index_file = FileSystem::OpenCFile(index_filename.c_str(), "r+b");
-	if (!m_index_file)
+	GetIndexFile(uber) = FileSystem::OpenCFile(index_filename.c_str(), "r+b");
+	if (!GetIndexFile(uber))
 	{
 		// special case here: when there's a sharing violation (i.e. two instances running),
 		// we don't want to blow away the cache. so just continue without a cache.
@@ -406,108 +287,111 @@ bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, c
 	}
 
 	u32 file_version = 0;
-	if (std::fread(&file_version, sizeof(file_version), 1, m_index_file) != 1 || file_version != SHADER_CACHE_VERSION)
+	if (std::fread(&file_version, sizeof(file_version), 1, GetIndexFile(uber)) != 1 || file_version != SHADER_CACHE_VERSION)
 	{
 		Console.Error("Bad file/data version in '%s'", index_filename.c_str());
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
+		std::fclose(GetIndexFile(uber));
+		GetIndexFile(uber) = nullptr;
 		return false;
 	}
 
 	VK_PIPELINE_CACHE_HEADER header;
-	if (std::fread(&header, sizeof(header), 1, m_index_file) != 1 || !ValidatePipelineCacheHeader(header))
+	if (std::fread(&header, sizeof(header), 1, GetIndexFile(uber)) != 1 || !ValidatePipelineCacheHeader(header))
 	{
 		Console.Error("Mismatched pipeline cache header in '%s' (GPU/driver changed?)", index_filename.c_str());
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
+		std::fclose(GetIndexFile(uber));
+		GetIndexFile(uber) = nullptr;
 		return false;
 	}
 
-	m_blob_file = FileSystem::OpenCFile(blob_filename.c_str(), "a+b");
-	if (!m_blob_file)
+	GetBlobFile(uber) = FileSystem::OpenCFile(blob_filename.c_str(), "a+b");
+	if (!GetBlobFile(uber))
 	{
 		Console.Error("Blob file '%s' is missing", blob_filename.c_str());
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
+		std::fclose(GetIndexFile(uber));
+		GetIndexFile(uber) = nullptr;
 		return false;
 	}
 
-	std::fseek(m_blob_file, 0, SEEK_END);
-	const u32 blob_file_size = static_cast<u32>(std::ftell(m_blob_file));
+	std::fseek(GetBlobFile(uber), 0, SEEK_END);
+	const u32 blob_file_size = static_cast<u32>(std::ftell(GetBlobFile(uber)));
 
 	for (;;)
 	{
 		CacheIndexEntry entry;
-		if (std::fread(&entry, sizeof(entry), 1, m_index_file) != 1 ||
+		if (std::fread(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
 			(entry.file_offset + entry.blob_size) > blob_file_size)
 		{
-			if (std::feof(m_index_file))
+			if (std::feof(GetIndexFile(uber)))
 				break;
 
 			Console.Error("Failed to read entry from '%s', corrupt file?", index_filename.c_str());
-			m_index.clear();
-			std::fclose(m_blob_file);
-			m_blob_file = nullptr;
-			std::fclose(m_index_file);
-			m_index_file = nullptr;
+			GetIndex(uber).clear();
+			std::fclose(GetBlobFile(uber));
+			GetBlobFile(uber) = nullptr;
+			std::fclose(GetIndexFile(uber));
+			GetIndexFile(uber) = nullptr;
 			return false;
 		}
 
 		const CacheIndexKey key{entry.source_hash_low, entry.source_hash_high, entry.source_length, entry.shader_type};
 		const CacheIndexData data{entry.file_offset, entry.blob_size};
-		m_index.emplace(key, data);
+		GetIndex(uber).emplace(key, data);
 	}
 
 	// ensure we don't write before seeking
-	std::fseek(m_index_file, 0, SEEK_END);
+	std::fseek(GetIndexFile(uber), 0, SEEK_END);
 
-	Console.WriteLn("Read %zu entries from '%s'", m_index.size(), index_filename.c_str());
+	Console.WriteLn("Read %zu entries from '%s'", GetIndex(uber).size(), index_filename.c_str());
 	return true;
 }
 
 void VKShaderCache::CloseShaderCache()
 {
-	if (m_index_file)
+	for (u32 uber = 0; uber < 2; uber++)
 	{
-		std::fclose(m_index_file);
-		m_index_file = nullptr;
-	}
-	if (m_blob_file)
-	{
-		std::fclose(m_blob_file);
-		m_blob_file = nullptr;
+		if (GetIndexFile(uber))
+		{
+			std::fclose(GetIndexFile(uber));
+			GetIndexFile(uber) = nullptr;
+		}
+		if (GetBlobFile(uber))
+		{
+			std::fclose(GetBlobFile(uber));
+			GetBlobFile(uber) = nullptr;
+		}
 	}
 }
 
-bool VKShaderCache::CreateNewPipelineCache()
+bool VKShaderCache::CreateNewPipelineCache(bool uber)
 {
-	if (!m_pipeline_cache_filename.empty() && FileSystem::FileExists(m_pipeline_cache_filename.c_str()))
+	if (!GetPipelineCacheFilename(uber).empty() && FileSystem::FileExists(GetPipelineCacheFilename(uber).c_str()))
 	{
-		Console.Warning("Removing existing pipeline cache '%s'", m_pipeline_cache_filename.c_str());
-		FileSystem::DeleteFilePath(m_pipeline_cache_filename.c_str());
+		Console.Warning("Removing existing pipeline cache '%s'", GetPipelineCacheFilename(uber).c_str());
+		FileSystem::DeleteFilePath(GetPipelineCacheFilename(uber).c_str());
 	}
 
 	const VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, 0, nullptr};
-	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &m_pipeline_cache);
+	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
 		return false;
 	}
 
-	m_pipeline_cache_dirty = true;
+	GetPipelineCacheDirty(uber) = true;
 	return true;
 }
 
-bool VKShaderCache::ReadExistingPipelineCache()
+bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 {
-	std::optional<std::vector<u8>> data = FileSystem::ReadBinaryFile(m_pipeline_cache_filename.c_str());
+	std::optional<std::vector<u8>> data = FileSystem::ReadBinaryFile(GetPipelineCacheFilename(uber).c_str());
 	if (!data.has_value())
 		return false;
 
 	if (data->size() < sizeof(VK_PIPELINE_CACHE_HEADER))
 	{
-		Console.Error("Pipeline cache at '%s' is too small", m_pipeline_cache_filename.c_str());
+		Console.Error("Pipeline cache at '%s' is too small", GetPipelineCacheFilename(uber).c_str());
 		return false;
 	}
 
@@ -518,7 +402,7 @@ bool VKShaderCache::ReadExistingPipelineCache()
 
 	const VkPipelineCacheCreateInfo ci{
 		VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, data->size(), data->data()};
-	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &m_pipeline_cache);
+	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
@@ -530,60 +414,69 @@ bool VKShaderCache::ReadExistingPipelineCache()
 
 bool VKShaderCache::FlushPipelineCache()
 {
-	if (m_pipeline_cache == VK_NULL_HANDLE || !m_pipeline_cache_dirty || m_pipeline_cache_filename.empty())
-		return false;
-
-	size_t data_size;
-	VkResult res =
-		vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), m_pipeline_cache, &data_size, nullptr);
-	if (res != VK_SUCCESS)
+	for (u32 uber = 0; uber < 2; uber++)
 	{
-		LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() failed: ");
-		return false;
-	}
+		if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE || !GetPipelineCacheDirty(uber) || GetPipelineCacheFilename(uber).empty())
+			return false;
 
-	std::vector<u8> data(data_size);
-	res = vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), m_pipeline_cache, &data_size, data.data());
-	if (res != VK_SUCCESS)
-	{
-		LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() (2) failed: ");
-		return false;
-	}
-
-	data.resize(data_size);
-
-	// Save disk writes if it hasn't changed, think of the poor SSDs.
-	FILESYSTEM_STAT_DATA sd;
-	if (!FileSystem::StatFile(m_pipeline_cache_filename.c_str(), &sd) || sd.Size != static_cast<s64>(data_size))
-	{
-		Console.WriteLn("Writing %zu bytes to '%s'", data_size, m_pipeline_cache_filename.c_str());
-		if (!FileSystem::WriteBinaryFile(m_pipeline_cache_filename.c_str(), data.data(), data.size()))
+		size_t data_size;
+		VkResult res =
+			vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), &data_size, nullptr);
+		if (res != VK_SUCCESS)
 		{
-			Console.Error("Failed to write pipeline cache to '%s'", m_pipeline_cache_filename.c_str());
+			LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() failed: ");
 			return false;
 		}
-	}
-	else
-	{
-		Console.WriteLn("Skipping updating pipeline cache '%s' due to no changes.", m_pipeline_cache_filename.c_str());
-	}
 
-	m_pipeline_cache_dirty = false;
+		std::vector<u8> data(data_size);
+		res = vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), &data_size, data.data());
+		if (res != VK_SUCCESS)
+		{
+			LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() (2) failed: ");
+			return false;
+		}
+
+		data.resize(data_size);
+
+		// Save disk writes if it hasn't changed, think of the poor SSDs.
+		FILESYSTEM_STAT_DATA sd;
+		if (!FileSystem::StatFile(GetPipelineCacheFilename(uber).c_str(), &sd) || sd.Size != static_cast<s64>(data_size))
+		{
+			Console.WriteLn("Writing %zu bytes to '%s'", data_size, GetPipelineCacheFilename(uber).c_str());
+			if (!FileSystem::WriteBinaryFile(GetPipelineCacheFilename(uber).c_str(), data.data(), data.size()))
+			{
+				Console.Error("Failed to write pipeline cache to '%s'", GetPipelineCacheFilename(uber).c_str());
+				return false;
+			}
+		}
+		else
+		{
+			Console.WriteLn("Skipping updating pipeline cache '%s' due to no changes.", GetPipelineCacheFilename(uber).c_str());
+		}
+
+		GetPipelineCacheDirty(uber) = false;
+	}
 	return true;
 }
 
 void VKShaderCache::ClosePipelineCache()
 {
-	if (m_pipeline_cache == VK_NULL_HANDLE)
-		return;
+	for (u32 uber = 0; uber < 2; uber++)
+	{
+		if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE)
+			return;
 
-	vkDestroyPipelineCache(GSDeviceVK::GetInstance()->GetDevice(), m_pipeline_cache, nullptr);
-	m_pipeline_cache = VK_NULL_HANDLE;
+		vkDestroyPipelineCache(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), nullptr);
+		GetPipelineCachePrivate(uber) = VK_NULL_HANDLE;
+	}
 }
 
-std::string VKShaderCache::GetShaderCacheBaseFileName(bool debug)
+std::string VKShaderCache::GetShaderCacheBaseFileName(bool uber, bool debug)
 {
 	std::string base_filename = "vulkan_shaders";
+
+	if (uber)
+		base_filename += "_uber";
 
 	if (debug)
 		base_filename += "_debug";
@@ -591,9 +484,12 @@ std::string VKShaderCache::GetShaderCacheBaseFileName(bool debug)
 	return Path::Combine(EmuFolders::Cache, base_filename);
 }
 
-std::string VKShaderCache::GetPipelineCacheBaseFileName(bool debug)
+std::string VKShaderCache::GetPipelineCacheBaseFileName(bool uber, bool debug)
 {
 	std::string base_filename = "vulkan_pipelines";
+
+	if (uber)
+		base_filename += "_uber";
 
 	if (debug)
 		base_filename += "_debug";
@@ -623,17 +519,27 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::str
 	return CacheIndexKey{h.hash_low, h.hash_high, static_cast<u32>(shader_code.length()), type};
 }
 
-std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code)
+std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code,
+	bool uber, GSAsyncReturn* async)
 {
 	const auto key = GetCacheKey(type, shader_code);
-	auto iter = m_index.find(key);
-	if (iter == m_index.end())
-		return CompileAndAddShaderSPV(key, shader_code);
+	auto iter = GetIndex(uber).find(key);
+	if (iter == GetIndex(uber).end())
+	{
+		if (GSAsyncReturn::Enabled(async))
+		{
+			// Don't start async compilation here yet, just flag that the shader is not yet compiled.
+			GSAsyncReturn::SetAsync(async);
+			return std::nullopt;
+		}
+
+		return CompileAndAddShaderSPV(key, shader_code, uber);
+	}
 
 	std::optional<SPIRVCodeVector> spv = SPIRVCodeVector(iter->second.blob_size);
 
-	if (std::fseek(m_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, m_blob_file) != iter->second.blob_size)
+	if (std::fseek(GetBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, GetBlobFile(uber)) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed, recompiling");
 		spv = CompileShaderToSPV(type, shader_code, GSConfig.UseDebugDevice);
@@ -642,9 +548,9 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 ty
 	return spv;
 }
 
-VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code)
+VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code, bool uber, GSAsyncReturn* async)
 {
-	std::optional<SPIRVCodeVector> spv = GetShaderSPV(type, shader_code);
+	std::optional<SPIRVCodeVector> spv = GetShaderSPV(type, shader_code, uber, async);
 	if (!spv.has_value())
 		return VK_NULL_HANDLE;
 
@@ -662,33 +568,36 @@ VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_
 	return mod;
 }
 
-VkShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code)
+VkShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code, bool uber, GSAsyncReturn* async)
 {
-	return GetShaderModule(shaderc_glsl_vertex_shader, std::move(shader_code));
+	ProcessAsyncCompileJobs();
+	return GetShaderModule(shaderc_glsl_vertex_shader, std::move(shader_code), uber, async);
 }
 
-VkShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code)
+VkShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code, bool uber, GSAsyncReturn* async)
 {
-	return GetShaderModule(shaderc_glsl_fragment_shader, std::move(shader_code));
+	ProcessAsyncCompileJobs();
+	return GetShaderModule(shaderc_glsl_fragment_shader, std::move(shader_code), uber, async);
 }
 
 VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 {
-	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code));
+	ProcessAsyncCompileJobs();
+	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false);
 }
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShaderSPV(
-	const CacheIndexKey& key, std::string_view shader_code)
+	const CacheIndexKey& key, std::string_view shader_code, bool uber)
 {
 	std::optional<SPIRVCodeVector> spv = CompileShaderToSPV(key.shader_type, shader_code, GSConfig.UseDebugDevice);
 	if (!spv.has_value())
 		return {};
 
-	if (!m_blob_file || std::fseek(m_blob_file, 0, SEEK_END) != 0)
+	if (!GetBlobFile(uber) || std::fseek(GetBlobFile(uber), 0, SEEK_END) != 0)
 		return spv;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(m_blob_file));
+	data.file_offset = static_cast<u32>(std::ftell(GetBlobFile(uber)));
 	data.blob_size = static_cast<u32>(spv->size());
 
 	CacheIndexEntry entry = {};
@@ -699,14 +608,197 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShader
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(spv->data(), sizeof(SPIRVCodeType), entry.blob_size, m_blob_file) != entry.blob_size ||
-		std::fflush(m_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, m_index_file) != 1 ||
-		std::fflush(m_index_file) != 0)
+	if (std::fwrite(spv->data(), sizeof(SPIRVCodeType), entry.blob_size, GetBlobFile(uber)) != entry.blob_size ||
+		std::fflush(GetBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
+		std::fflush(GetIndexFile(uber)) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 		return spv;
 	}
 
-	m_index.emplace(key, data);
+	GetIndex(uber).emplace(key, data);
 	return spv;
+}
+
+void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const SPIRVCodeVector& spv,
+	bool uber, bool only_new)
+{
+	// FIXME: Duplication with CompileAndAddShaderSPV();
+
+	const auto key = GetCacheKey(type, shader_code);
+
+	if (only_new && GetIndex(uber).contains(key))
+		return;
+
+	if (!GetBlobFile(uber) || std::fseek(GetBlobFile(uber), 0, SEEK_END) != 0)
+		return;
+
+	CacheIndexData data;
+	data.file_offset = static_cast<u32>(std::ftell(GetBlobFile(uber)));
+	data.blob_size = static_cast<u32>(spv.size());
+
+	CacheIndexEntry entry = {};
+	entry.source_hash_low = key.source_hash_low;
+	entry.source_hash_high = key.source_hash_high;
+	entry.source_length = key.source_length;
+	entry.shader_type = static_cast<u32>(key.shader_type);
+	entry.blob_size = data.blob_size;
+	entry.file_offset = data.file_offset;
+
+	if (std::fwrite(spv.data(), sizeof(SPIRVCodeType), entry.blob_size, GetBlobFile(uber)) != entry.blob_size ||
+		std::fflush(GetBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
+		std::fflush(GetIndexFile(uber)) != 0)
+	{
+		Console.Error("Failed to write shader blob to file");
+	}
+
+	GetIndex(uber).emplace(key, data);
+}
+
+void VKShaderCache::ProcessAsyncCompileJobs()
+{
+	if (m_compiler_async)
+	{
+		const u32 n_jobs = m_compiler_async->GetCompletedJobs();
+
+		if (n_jobs > 0)
+			Console.WriteLn("Async pipeline compile: processing %d jobs", n_jobs);
+
+		for (u32 i = 0; i < n_jobs; i++)
+		{
+			VKCompileJob& compile_job = m_compile_jobs_async.front();
+
+			// The async compiler completes jobs in FIFO order so the first n_jobs entries must be done.
+			pxAssert(compile_job.done);
+
+			if (std::holds_alternative<VKShaderJob>(compile_job.job))
+			{
+				VKShaderJob& shader_job = std::get<VKShaderJob>(compile_job.job);
+				AddShaderSPV(shader_job.kind, shader_job.shader_code, shader_job.spv, shader_job.uber, true);
+
+				pxAssert(shader_job.kind == shaderc_vertex_shader || shader_job.kind == shaderc_fragment_shader);
+				const char* kind_str = (shader_job.kind == shaderc_vertex_shader) ? "vertex" : "fragment";
+				Console.WriteLn("Async %s shader compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
+					kind_str, shader_job.hash, shader_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
+
+				// Notify any pipelines waiting on this shader.
+				StartQueuedPipelineJobs(shader_job);
+			}
+			else if (std::holds_alternative<VKPipelineJob>(compile_job.job))
+			{
+				VKPipelineJob& pipeline_job = std::get<VKPipelineJob>(compile_job.job);
+				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
+					pipeline_job.hash, pipeline_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
+
+				FinishedPipelineJob finished_job;
+				finished_job.uid = pipeline_job.uid;
+				finished_job.pipeline = pipeline_job.pipeline;
+				
+				m_finished_pipeline_jobs.push_back(finished_job);
+			}
+			else
+			{
+				pxFailRel("Unknown job type");
+			}
+
+			m_compile_jobs_async.pop_front();
+		}
+	}
+}
+
+void VKShaderCache::StartPipelineCompilationAsync(VKShaderJob vs_job, bool start_vs,
+	VKShaderJob fs_job, bool start_fs, VKPipelineJob pipeline_job)
+{
+	if (!m_compiler_async)
+		m_compiler_async = std::make_unique<VKShaderCompilerAsync>(
+			GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS);
+
+	// If the job queue is full we may drop jobs since we don't allow resubmitting the same pipeline
+	// for compilation twice.
+	pxAssert(!m_compiler_async->IsJobQueueFull());
+
+	// VS
+	if (start_vs)
+	{
+		Console.WriteLn("Async vertex shader compile: started hash=0x%016llX uber=%d", vs_job.hash, vs_job.uber);
+		m_compile_jobs_async.emplace_back(vs_job);
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
+	}
+
+	// FS
+	if (start_fs)
+	{
+		Console.WriteLn("Async fragment shader compile: started hash=0x%016llX uber=%d", fs_job.hash, fs_job.uber);
+		m_compile_jobs_async.emplace_back(fs_job);
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
+	}
+
+	// Pipeline
+	if (pipeline_job.vs_module && pipeline_job.fs_module)
+	{
+		Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job.hash, pipeline_job.uber);
+		m_compile_jobs_async.emplace_back(std::move(pipeline_job));
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
+	}
+	else
+	{
+		// Need to wait for vertex and/or pixel shader.
+		Console.WriteLn("Async pipeline compile: queued hash=0x%016llX uber=%d vs_hash=0x%016llX fs_hash=0x%016llX",
+			pipeline_job.hash, pipeline_job.uber, vs_job.hash, fs_job.hash);
+		QueuedPipelineJob queued_job{ std::move(vs_job), std::move(fs_job), std::move(pipeline_job) };
+		m_queued_pipeline_jobs.push_back(std::move(queued_job));
+	}
+}
+
+void VKShaderCache::StartQueuedPipelineJobs(const VKShaderJob& shader_job)
+{
+	for (auto it = m_queued_pipeline_jobs.begin(); it != m_queued_pipeline_jobs.end(); )
+	{
+		QueuedPipelineJob& queued_job = *it;
+		if (shader_job.kind == shaderc_vertex_shader)
+		{
+			if (!queued_job.pipeline_job.vs_module && queued_job.vs_job.Matches(shader_job))
+			{
+				queued_job.pipeline_job.vs_module = shader_job.module;
+				queued_job.pipeline_job.gpb.SetVertexShader(shader_job.module);
+			}
+		}
+		else if (shader_job.kind == shaderc_fragment_shader)
+		{
+			if (!queued_job.pipeline_job.fs_module && queued_job.fs_job.Matches(shader_job))
+			{
+				queued_job.pipeline_job.fs_module = shader_job.module;
+				queued_job.pipeline_job.gpb.SetFragmentShader(shader_job.module);
+			}
+		}
+		else
+		{
+			pxFailRel("Unknown shader type");
+		}
+
+		if (queued_job.pipeline_job.vs_module && queued_job.pipeline_job.fs_module)
+		{
+			// Vertex and pixel shaders compiled so start pipeline creating.
+			Console.WriteLn("Async pipeline compile: got vs=%016X and ps=%016X for pipeline=%016X uber=%d",
+				queued_job.vs_job.hash, queued_job.fs_job.hash, queued_job.pipeline_job.hash, queued_job.pipeline_job.uber);
+			StartPipelineCompilationAsync({}, false, {}, false, std::move(queued_job.pipeline_job));
+			it = m_queued_pipeline_jobs.erase(it);
+		}
+		else
+		{
+			it++;
+		}
+	}
+}
+
+std::optional<VKShaderCache::FinishedPipelineJob> VKShaderCache::GetAsyncCompiledPipeline()
+{
+	ProcessAsyncCompileJobs();
+	if (!m_finished_pipeline_jobs.empty())
+	{
+		FinishedPipelineJob job = m_finished_pipeline_jobs.front();
+		m_finished_pipeline_jobs.pop_front();
+		return job;
+	}
+	return std::nullopt;
 }
