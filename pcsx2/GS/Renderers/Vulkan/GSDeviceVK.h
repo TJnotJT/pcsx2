@@ -8,6 +8,8 @@
 #include "GS/Renderers/Vulkan/GSTextureVK.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
+#include "GS/Renderers/Vulkan/VKShaderCache.h"
+#include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
 #include "common/ReadbackSpinManager.h"
@@ -22,6 +24,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <unordered_set>
 
 class VKSwapChain;
 
@@ -75,6 +78,8 @@ public:
 	{
 		return static_cast<u32>(m_device_properties.limits.optimalBufferCopyRowPitchAlignment);
 	}
+
+	u32 GetExpandIndexStreamBufferSize() const;
 
 	/// Returns true if running on an NVIDIA GPU.
 	__fi bool IsDeviceNVIDIA() const { return (m_device_properties.vendorID == 0x10DE); }
@@ -340,6 +345,7 @@ public:
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
+		GSHWDrawConfig::UberPSSelector uber_ps;
 
 		union
 		{
@@ -377,7 +383,7 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key);
 			return hash;
 		}
 	};
@@ -457,10 +463,22 @@ private:
 		return m_convert[ShaderConvertSelector(shader).Index()];
 	}
 
-	std::unordered_map<u32, VkShaderModule> m_tfx_vertex_shaders;
-	std::unordered_map<GSHWDrawConfig::PSSelector, VkShaderModule, GSHWDrawConfig::PSSelectorHash>
+	using VKCachedShaderModule = VKShaderCache::VKCachedShaderModule;
+	using VKCachedPipeline = VKShaderCache::VKCachedPipeline;
+
+	std::unordered_map<u32, VKCachedShaderModule> m_tfx_vertex_shaders;
+	std::unordered_map<GSHWDrawConfig::PSSelector, VKCachedShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
-	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
+	std::unordered_map<u8, VKCachedShaderModule> m_tfx_uber_fragment_shaders;
+	std::unordered_map<PipelineSelector, VKCachedPipeline, PipelineSelectorHash> m_tfx_pipelines;
+
+	std::unordered_map<PipelineSelector, std::shared_ptr<VKPipelineJob>, PipelineSelectorHash>
+		m_tfx_pipelines_async;
+	std::unordered_map<u32, std::shared_ptr<VKShaderJob>>
+		m_tfx_vertex_shaders_async;
+	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<VKShaderJob>, GSHWDrawConfig::PSSelectorHash>
+		m_tfx_fragment_shaders_async;
+	std::unordered_map<u8, std::shared_ptr<VKShaderJob>> m_tfx_uber_fragment_shaders_async;
 
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
@@ -480,9 +498,10 @@ private:
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
-	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
+	GSHWDrawConfig::ShaderPushConstants m_tfx_pc_cache;
 
 	std::string m_tfx_source;
+	std::string m_uber_tfx_source;
 
 	GSTexture* CreateSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format) override;
 
@@ -499,10 +518,39 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
-	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
-	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
-	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
-	VkPipeline GetTFXPipeline(const PipelineSelector& p);
+	using VKShaderModuleOrJob = std::variant<VKCachedShaderModule, std::shared_ptr<VKShaderJob>>;
+	using VKPipelineOrJob = std::variant<VKCachedPipeline, VKPipelineJob*>;
+
+	static VKCachedShaderModule& GetShaderModule(VKShaderModuleOrJob& x) { return std::get<VKCachedShaderModule>(x); }
+	static std::shared_ptr<VKShaderJob>& GetShaderJob(VKShaderModuleOrJob& x) {
+		return std::get<std::shared_ptr<VKShaderJob>>(x);
+	}
+	static bool IsShaderModule(VKShaderModuleOrJob& x) { return std::holds_alternative<VKCachedShaderModule>(x); }
+	static bool IsNullShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x).module == VK_NULL_HANDLE; }
+	static bool IsShaderJob(VKShaderModuleOrJob& x) { return std::holds_alternative<std::shared_ptr<VKShaderJob>>(x); }
+
+	static VKCachedPipeline& GetPipeline(VKPipelineOrJob& x) { return std::get<VKCachedPipeline>(x); }
+	static VKPipelineJob*& GetPipelineJob(VKPipelineOrJob& x) { return std::get<VKPipelineJob*>(x); }
+	static bool IsPipeline(VKPipelineOrJob& x) { return std::holds_alternative<VKCachedPipeline>(x); }
+	static bool IsPipelineJob(VKPipelineOrJob& x) { return std::holds_alternative<VKPipelineJob*>(x); }
+
+	static VKCachedShaderModule GetJobOutput(const VKShaderJob& job)
+	{
+		return { job.GetModule(), job.GetCacheKey() };
+	}
+	static VKCachedPipeline GetJobOutput(const VKPipelineJob& job)
+	{
+		return { job.GetPipeline(), job.GetPipelineCacheKey() };
+	}
+
+	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
+
+	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
+	VKShaderModuleOrJob GetTFXUberFragmentShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
+	VKPipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
+	VkPipeline GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
 	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
 	VkShaderModule GetUtilityFragmentShader(const std::string& source, const char* replace_main);
@@ -520,6 +568,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileUberTFXPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -636,10 +685,14 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	bool BindDrawPipeline(const PipelineSelector& p);
+	void SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void WriteTFXPushConstants(u32 offset, u32 num_constants);
+
+	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
+	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe);
+	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe, bool uberize_vs_ps = false);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
@@ -706,7 +759,7 @@ private:
 		DIRTY_FLAG_PIPELINE = (1 << 14),
 		DIRTY_FLAG_VS_CONSTANT_BUFFER = (1 << 15),
 		DIRTY_FLAG_PS_CONSTANT_BUFFER = (1 << 16),
-		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 17),
+		DIRTY_FLAG_TFX_PUSH_CONSTANTS = (1 << 17),
 
 		DIRTY_FLAG_TFX_TEXTURE_TEX = (DIRTY_FLAG_TFX_TEXTURE_0 << 0),
 		DIRTY_FLAG_TFX_TEXTURE_PALETTE = (DIRTY_FLAG_TFX_TEXTURE_0 << 1),
@@ -725,7 +778,7 @@ private:
 		                   DIRTY_FLAG_BLEND_CONSTANTS | DIRTY_FLAG_LINE_WIDTH,
 		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES,
 		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_UTILITY_TEXTURE,
-		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_VS_PUSH_CONSTANTS,
+		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_TFX_PUSH_CONSTANTS,
 		ALL_DIRTY_STATE = DIRTY_BASE_STATE | DIRTY_TFX_STATE | DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE,
 	};
 
