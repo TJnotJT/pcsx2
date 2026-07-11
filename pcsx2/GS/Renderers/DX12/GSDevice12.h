@@ -8,12 +8,14 @@
 #include "GS/Renderers/DX12/GSTexture12.h"
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
 #include "GS/Renderers/DX12/D3D12StreamBuffer.h"
+#include "GS/Renderers/DX12/D3D12ShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
 
 #include <array>
 #include <dxgi1_5.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace D3D12MA
 {
@@ -258,6 +260,7 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
+
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
@@ -297,37 +300,7 @@ public:
 		}
 	};
 
-	class ShaderMacro
-	{
-		struct mcstr
-		{
-			const char *name, *def;
-			mcstr(const char* n, const char* d)
-				: name(n)
-				, def(d)
-			{
-			}
-		};
-
-		struct mstring
-		{
-			std::string name, def;
-			mstring(const char* n, std::string d)
-				: name(n)
-				, def(d)
-			{
-			}
-		};
-
-		std::vector<mstring> mlist;
-		std::vector<mcstr> mout;
-
-	public:
-		ShaderMacro();
-		void AddMacro(const char* n, int d);
-		void AddMacro(const char* n, std::string d);
-		D3D_SHADER_MACRO* GetPtr(void);
-	};
+	using ShaderMacro = D3D::ShaderMacro;
 
 	enum : u32
 	{
@@ -429,17 +402,27 @@ private:
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
 
+	using ShaderEntryType = D3D12ShaderCache::EntryType;
+
+	std::unordered_map<PipelineSelector, std::shared_ptr<D3D12PipelineJob>, PipelineSelectorHash>
+		m_tfx_pipelines_async;
+	std::unordered_map<u8, std::shared_ptr<D3D12ShaderJob>>
+		m_tfx_vertex_shaders_async;
+	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<D3D12ShaderJob>, GSHWDrawConfig::PSSelectorHash>
+		m_tfx_pixel_shaders_async;
+
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
 	ComPtr<ID3D12PipelineState> m_cas_sharpen_pipeline;
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
-	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
+	GSHWDrawConfig::ShaderPushConstants m_tfx_pc_cache;
 
 	D3D12ShaderCache m_shader_cache;
 	ComPtr<ID3DBlob> m_convert_vs;
 	std::string m_tfx_source;
+	std::string m_tfx_uber_source;
 
 	void LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
 		DXGI_FORMAT* rtv_format, DXGI_FORMAT* dsv_format, DXGI_FORMAT* uav_format) const;
@@ -467,10 +450,34 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
-	const ID3DBlob* GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel);
-	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p);
+	using D3D12ShaderBlobOrJob = std::variant<ID3DBlob*, std::shared_ptr<D3D12ShaderJob>>;
+	using D3D12PipelineOrJob = std::variant<ComPtr<ID3D12PipelineState>, D3D12PipelineJob*>;
+
+	static ID3DBlob*& GetShaderBlob(D3D12ShaderBlobOrJob& x) { return std::get<ID3DBlob*>(x); }
+	static std::shared_ptr<D3D12ShaderJob>& GetShaderJob(D3D12ShaderBlobOrJob& x)
+	{
+		return std::get<std::shared_ptr<D3D12ShaderJob>>(x);
+	}
+	static bool IsShaderBlob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<ID3DBlob*>(x); }
+	static bool IsNullShaderBlob(D3D12ShaderBlobOrJob& x) { return IsShaderBlob(x) && GetShaderBlob(x) == nullptr; }
+	static bool IsShaderJob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<std::shared_ptr<D3D12ShaderJob>>(x); }
+
+	static ComPtr<ID3D12PipelineState>& GetPipeline(D3D12PipelineOrJob& x) { return std::get<ComPtr<ID3D12PipelineState>>(x); }
+	static D3D12PipelineJob*& GetPipelineJob(D3D12PipelineOrJob& x) { return std::get<D3D12PipelineJob*>(x); }
+	static bool IsPipeline(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
+	static bool IsPipelineJob(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
+
+	// Overloads for templated functions.
+	static ComPtr<ID3D12PipelineState> GetJobOutput(const D3D12PipelineJob& job) { return job.GetPipeline(); }
+	static ComPtr<ID3DBlob> GetJobOutput(const D3D12ShaderJob& job) { return job.GetBlob(); }
+
+	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
+
+	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, bool async = false);
+	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);
@@ -488,6 +495,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
+	bool CompileUberTFXPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();
@@ -582,15 +590,18 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	bool BindDrawPipeline(const PipelineSelector& p);
+	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void WriteTFXPushConstants(u32 offset, u32 num_constants);
+	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
+	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
 		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
-	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool uberize_vs_ps = true);
+	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
 
 public:
 	/// Ends any render pass, executes the command buffer, and invalidates cached state.
@@ -656,7 +667,7 @@ private:
 		DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE = (1 << 9),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE = (1 << 10),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 = (1 << 11),
-		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 12),
+		DIRTY_FLAG_TFX_PUSH_CONSTANTS = (1 << 12),
 
 		DIRTY_FLAG_VERTEX_BUFFER = (1 << 13),
 		DIRTY_FLAG_INDEX_BUFFER = (1 << 14),
@@ -671,7 +682,7 @@ private:
 		DIRTY_ROOT_PARAMS = DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		                    DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING | DIRTY_FLAG_VS_INDEX_BUFFER_BINDING |
 		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
-		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_VS_PUSH_CONSTANTS,
+		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_TFX_PUSH_CONSTANTS,
 
 		DIRTY_BASE_STATE = DIRTY_FLAG_VERTEX_BUFFER | DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PRIMITIVE_TOPOLOGY |
 		                   DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR | DIRTY_FLAG_RENDER_TARGET | DIRTY_FLAG_PIPELINE |
