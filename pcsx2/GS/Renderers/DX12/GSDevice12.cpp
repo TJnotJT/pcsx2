@@ -2365,6 +2365,7 @@ bool GSDevice12::CompileUberTFXPipelines()
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
+						config.uber_shader = true;
 						config.ps = ps_sel;
 						config.vs = vs_sel;
 						config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
@@ -5070,9 +5071,12 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config)
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
 	m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
-	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
-	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
+	const bool uber_rt = config.uber_shader && !config.ps.no_color;
+	const bool uber_ds = config.uber_shader && (config.ps.uber_zwrite || config.ps.uber_sw_depth);
+	const bool uber_ds_as_rt = config.uber_shader && config.ps.IsFeedbackLoopDepth();
+	m_pipeline_selector.rt = (config.rt != nullptr || uber_rt) && !config.ps.HasColorROV();
+	m_pipeline_selector.ds = (config.ds != nullptr || uber_ds) && !config.ps.HasDepthROV();
+	m_pipeline_selector.ds_as_rt = (m_ds_as_rt != nullptr || uber_ds_as_rt) && !config.ps.HasDepthROV();
 
 	if (config.uber_shader)
 	{

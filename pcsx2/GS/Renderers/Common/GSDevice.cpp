@@ -2233,10 +2233,17 @@ static constexpr bool IsUberPSSelectorValid(u32 n)
 {
 	const UberPSSelector sel = GetUberPSSelector(n);
 	return
+		// Make sure ROV depth is a valid enum.
 		(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
-		(sel.no_color || sel.rov_color) && // Only allow color ROV output.
-		(!sel.uber_zwrite || sel.rov_depth) && // Only allow depth ROV output.
-		(sel.rov_color || sel.rov_depth) && // Must have color or depth ROV.
+		
+		// Don't allow depth ROV without some form of depth processing.
+		(!sel.rov_depth || sel.uber_zwrite || sel.uber_sw_depth) &&
+
+		// Don't allow depth ROV write without Z write.
+		(sel.rov_depth != static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE) || sel.uber_zwrite) &&
+		
+		(!sel.rov_depth || sel.no_color || sel.rov_color) && // Don't allow depth ROV with non-ROV color output.
+		(!sel.rov_color || !sel.no_color) && // Don't allow color ROV without colot output.
 		sel.no_color1 && // Don't allow dual source blend.
 		!sel.uber_date_init && // Don't allow DATE init.
 		!sel.iip; // Ignore the IIP bit (flat shading is handled specially).
