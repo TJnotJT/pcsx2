@@ -1452,6 +1452,9 @@
     <ClCompile Include="GS\GSDrawingEnvironment.cpp">
       <Filter>System\Ps2\GS\Renderers\Software</Filter>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\DX12\D3D12Compiler.cpp">
+      <Filter>System\Ps2\GS\Renderers\Direct3D12</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Patch.h">
@@ -2418,6 +2421,9 @@
     </ClInclude>
     <ClInclude Include="SIO\Pad\PadNegcon.h">
       <Filter>System\Ps2\Iop\SIO\PAD</Filter>
+    </ClInclude>
+    <ClInclude Include="GS\Renderers\DX12\D3D12Compiler.h">
+      <Filter>System\Ps2\GS\Renderers\Direct3D12</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

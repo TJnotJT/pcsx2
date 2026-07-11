@@ -5333,14 +5333,16 @@ bool GSRendererHW::VerifyIndices()
 
 void GSRendererHW::HandleFlatShadedVertices()
 {
-	// These cases might need fixing.
-	const bool maybe_fix_vertices = !m_conf.vs.iip &&
-		(!g_gs_device->Features().provoking_vertex_last || IsCoverageAlphaSupported());
+	const bool fix_vertices = !m_conf.vs.iip && // Flat shading
 
-	// These cases definitely don't need fixing.
-	const bool dont_fix_vertices = m_vt.m_primclass == GS_POINT_CLASS || m_vt.m_primclass == GS_SPRITE_CLASS;
+		((!g_gs_device->Features().provoking_vertex_last && // Provoking vertex first and lines/triangle.
+			(m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS)) ||
 
-	if (!maybe_fix_vertices || dont_fix_vertices)
+			IsCoverageAlphaSupported() || // AA1 (hard to get HW flat shading right in expand shader).
+
+			GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid); // Hybrid/uber shader (can't handle HW flat shading).
+
+	if (!fix_vertices)
 		return;
 
 	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
@@ -7890,6 +7892,22 @@ void GSRendererHW::ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCa
 	}
 }
 
+void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds)
+{
+	if ((GSConfig.ShaderCacheType == GSShaderCacheType::Uber) || // Always use uber shader.
+		(GSConfig.ShaderCacheType == GSShaderCacheType::Hybrid && // Only use uber shader if normal shader is still compiling.
+			g_gs_device->StartPipelineCompilationAsync(m_conf)))
+	{
+		ConfigureROV(rt != nullptr, ds != nullptr);
+		ConvertTextureTypeROV(rt, ds);
+
+		m_conf.uber_shader = true;
+
+		// Get the dynamic state bits.
+		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);
+	}
+}
+
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
 {
 	// Don't shader sample when the clamp/repeat is configured to the texture size.
@@ -9453,7 +9471,6 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	// Call before computing the full drawlist in case ROV is used and we don't need it.
 	DetermineROVUsage(rt, ds);
-	ConvertTextureTypeROV(rt, ds);
 
 	// Barriers must be determined before indices are modified via HandleFlatShadedVertices/SetupIA.
 	// This also computes the drawlist if needed.
@@ -9484,6 +9501,11 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
+	HandleUberOrHybridShader(rt, ds);
+
+	// Convert textures types after hybrid/uber shader setup in case they use ROV.
+	ConvertTextureTypeROV(rt, ds);
+
 	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
@@ -9500,7 +9522,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
 	}
-	
+
 	if (GSConfig.SaveHWConfig && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);

@@ -259,6 +259,8 @@ private:
 	void ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCache::Target* ds); // Convert to RW capable textures if needed.
 	void ConvertTextureTypeROVSingle(GSTextureCache::Target* tgt, bool shader_write); // Helper to do the above.
 
+	void HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds);
+
 	void SetTCOffset();
 	bool NextDrawColClip() const;
 	bool IsPossibleChannelShuffle() const;
@@ -337,6 +339,8 @@ private:
 	GSVector2i m_lod = {}; // Min & Max level of detail
 
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
+
+	bool m_flat_expanded = false; // Whether we expanded vertices to accomodate flat shading.
 
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
