@@ -1503,7 +1503,7 @@ void GSDeviceVK::ExecuteCommandBuffer(WaitType wait_for_completion)
 	}
 
 	// Push constants need to be refreshed each command buffer.
-	m_dirty_flags |= DIRTY_FLAG_VS_PUSH_CONSTANTS;
+	m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
 }
 
 void GSDeviceVK::DeferBufferDestruction(VkBuffer object, VmaAllocation allocation)
@@ -4004,7 +4004,7 @@ bool GSDeviceVK::CreatePipelineLayouts()
 	if (m_features.vs_expand)
 	{
 		dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
-		plb.AddPushConstants(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GSHWDrawConfig::VSPushConstants));
+		plb.AddPushConstants(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GSHWDrawConfig::ShaderPushConstants));
 	}
 	if (m_features.aa1)
 		dslb.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
@@ -5723,7 +5723,7 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 	if (m_current_pipeline_layout != PipelineLayout::TFX)
 	{
 		m_current_pipeline_layout = PipelineLayout::TFX;
-		flags |= DIRTY_FLAG_TFX_UBO | DIRTY_FLAG_TFX_TEXTURES | DIRTY_FLAG_VS_PUSH_CONSTANTS;
+		flags |= DIRTY_FLAG_TFX_UBO | DIRTY_FLAG_TFX_TEXTURES | DIRTY_FLAG_TFX_PUSH_CONSTANTS;
 
 		// Clear out the RT/DS binding if feedback loop isn't on, because it'll be in the wrong state and make
 		// the validation layer cranky. Not a big deal since we need to write it anyway.
@@ -5743,8 +5743,8 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 			&m_tfx_ubo_descriptor_set, NUM_TFX_DYNAMIC_OFFSETS, m_tfx_dynamic_offsets.data());
 	}
 
-	if (m_features.vs_expand && (flags & DIRTY_FLAG_VS_PUSH_CONSTANTS))
-		SetVSPushConstants(m_vs_pc_cache.base_vertex, m_vs_pc_cache.base_index, true);
+	if (m_features.vs_expand && (flags & DIRTY_FLAG_TFX_PUSH_CONSTANTS))
+		SetVSPushConstants(m_tfx_pc_cache.base_vertex, m_tfx_pc_cache.base_index, true);
 
 	if (flags & DIRTY_FLAG_TFX_TEXTURES)
 	{
@@ -5846,11 +5846,11 @@ void GSDeviceVK::SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb)
 
 void GSDeviceVK::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::VSPushConstants pc;
+	GSHWDrawConfig::ShaderPushConstants pc;
 	pc.base_vertex = base_vertex;
 	pc.base_index = base_index;
 
-	if (m_vs_pc_cache.Update(pc) || force_update)
+	if (m_tfx_pc_cache.Update(pc) || force_update)
 	{
 		vkCmdPushConstants(GetCurrentCommandBuffer(), m_tfx_pipeline_layout,
 			VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
