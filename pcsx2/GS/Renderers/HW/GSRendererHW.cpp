@@ -5403,7 +5403,9 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 	pxAssert(VerifyIndices());
 
-	const bool shader_uv_rounding = m_conf.vs.round_uv || m_conf.vs.clamp_uv || m_conf.vs.align_uv;
+	const bool shader_uv_rounding = m_conf.vs.round_uv ||
+		(m_conf.vs.clamp_uv != GSHWDrawConfig::VS_CLAMP_UV::NONE) ||
+		m_conf.vs.align_uv;
 
 	switch (m_vt.m_primclass)
 	{
@@ -11088,7 +11090,7 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 
 	const bool rounding = GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
 	const bool aligning = GSConfig.SpriteAlign != GSSpriteAlignMode::Off;
-	const bool clamping = GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp;
+	const bool clamping = (GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp) && (rt && rt->GetScale() != 1.0f);
 
 	bool pixel_centers_aligned = true;
 
@@ -11101,7 +11103,7 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 
 		if (tex_enabled)
 		{
-			// Hackfix - make shuffle/deswizzle always round up since they usually use powers of 2.
+			// Hackfix: make shuffle/deswizzle always round up since they usually use powers of 2.
 			if (m_channel_shuffle || m_texture_shuffle || m_manual_deswizzle)
 			{
 				for (int i = 0; i < static_cast<int>(m_index->tail); i++)
@@ -11123,15 +11125,16 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 			m_conf.ps.round_uv = rounding ?
 				(linear ? GSHWDrawConfig::PS_ROUND_UV::LINEAR : GSHWDrawConfig::PS_ROUND_UV::NEAREST) :
 				GSHWDrawConfig::PS_ROUND_UV::NONE;
+
 			m_conf.vs.round_uv = rounding;
 
-			m_conf.vs.clamp_uv = m_conf.ps.clamp_uv = (rt_scale != 1.0f) && clamping;
+			m_conf.ps.clamp_uv = clamping;
 
-			if (m_conf.vs.clamp_uv && linear)
-			{
-				m_conf.vs.clamp_uv = 2; // Bilinear clamping.
-			}
+			m_conf.vs.clamp_uv = clamping ?
+				(linear ? GSHWDrawConfig::VS_CLAMP_UV::LINEAR : GSHWDrawConfig::VS_CLAMP_UV::NEAREST) :
+				GSHWDrawConfig::VS_CLAMP_UV::NONE;
 
+			// STQ coordinates are projected down to UVs in the vertex shader.
 			m_conf.ps.fst = true;
 			m_conf.vs.fst = true;
 
@@ -11144,5 +11147,8 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 		}
 
 		m_conf.vs.align_uv = aligning;
+
+		// PS align UV flag must be set in all cases because it's responsible for swapping UVs for rotated textures.
+		m_conf.ps.align_uv = true;
 	}
 }

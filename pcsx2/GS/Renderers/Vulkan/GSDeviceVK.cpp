@@ -5014,6 +5014,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	AddMacro(ss, "PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	AddMacro(ss, "PS_ROUND_UV", static_cast<u32>(sel.round_uv));
 	AddMacro(ss, "PS_CLAMP_UV", sel.clamp_uv);
+	AddMacro(ss, "PS_ALIGN_UV", sel.align_uv);
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str());

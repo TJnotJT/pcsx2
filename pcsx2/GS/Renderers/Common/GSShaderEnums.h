@@ -67,8 +67,15 @@ enum class PS_ROV_DEPTH : uint32_t
 enum class PS_ROUND_UV : uint32_t
 {
 	NONE    = 0, // No special rounding.
-	NEAREST = 1, // Rounding for correct nearest sampling.
-	LINEAR  = 2, // Rounding for correct bilinear sampling. 
+	NEAREST = 1, // Rounding for nearest sampling.
+	LINEAR  = 2, // Rounding for bilinear sampling.
+};
+
+enum class VS_CLAMP_UV : uint32_t
+{
+	NONE = 0, // No special rounding.
+	NEAREST = 1, // Clamping for nearest sampling.
+	LINEAR = 2, // Clamping for bilinear sampling.
 };
 
 } // namespace GSShader

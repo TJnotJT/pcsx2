@@ -14,6 +14,8 @@
 #define VS_TME 1
 #define VS_FST 1
 #define VS_ROUND_UV 0
+#define VS_CLAMP_UV 0
+#define VS_ALIGN_UV 0
 #endif
 
 #ifndef GS_IIP
@@ -127,6 +129,8 @@
 #define PS_ROV_COLOR 0
 #define PS_ROV_DEPTH 0
 #define PS_ROUND_UV 0
+#define PS_CLAMP_UV 0
+#define PS_ALIGN_UV 0
 #endif
 
 #ifndef VS_EXPAND_NONE
@@ -137,6 +141,12 @@
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
 #define VS_EXPAND_TRIANGLE 6
+#endif
+
+#ifndef VS_CLAMP_UV_NONE
+#define VS_CLAMP_UV_NONE 0
+#define VS_CLAMP_UV_NEAREST 1
+#define VS_CLAMP_UV_LINEAR 2
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -181,12 +191,15 @@ struct VS_OUTPUT
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 
-#if VS_ROUND_UV != 0
+#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 	nointerpolation uint4 rounduv : TEXCOORD3;
+#endif
+
+#if VS_ROUND_UV
 	nointerpolation float4 scaleuv : TEXCOORD4;
 #endif
 
-#if VS_CLAMP_UV != 0
+#if VS_CLAMP_UV
 	nointerpolation float4 clampuv : TEXCOORD5;
 #endif
 };
@@ -215,11 +228,13 @@ struct PS_INPUT
 #endif
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-#if PS_ROUND_UV
+#if PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 	nointerpolation uint4 rounduv : TEXCOORD3;
+#endif
+#if PS_ROUND_UV
 	nointerpolation float4 scaleuv : TEXCOORD4;
 #endif
-#if PS_CLAMP_UV != 0
+#if PS_CLAMP_UV
 	nointerpolation float4 clampuv : TEXCOORD5;
 #endif
 #if (PS_DATE >= 1 && PS_DATE <= 3) || GS_FORWARD_PRIMID
@@ -707,7 +722,7 @@ float4 round_and_clamp_uv(PS_INPUT input)
 	uv = clamp(uv, input.clampuv.xy, input.clampuv.zw);
 #endif
 
-#if PS_ROUND_UV
+#if PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 	uv = bool2(input.rounduv.zw & ROUND_UV_SWAP) ? uv.yx : uv;
 #endif
 
@@ -1148,7 +1163,7 @@ float4 ps_color(PS_INPUT input)
 #if PS_FST == 0
 	float2 st = input.t.xy / input.t.w;
 	float2 st_int = input.ti.zw / input.t.w;
-#elif PS_ROUND_UV || PS_CLAMP_UV != 0
+#elif PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 	float4 ti_rounded = round_and_clamp_uv(input);
 	float2 st = ti_rounded.xy;
 	float2 st_int = ti_rounded.zw;
@@ -1834,7 +1849,7 @@ VS_PROCESSED vs_main(VS_INPUT input)
 		output.t.w = input.q;
 
 		// Get UV rounding info saved in Q.
-		#if VS_ROUND_UV || VS_CLAMP_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			output.rounduv = extract_round_uv_bits(input.q);
 		#elif VS_EXPAND
 			output.rounduv = 0u;
@@ -1916,10 +1931,10 @@ float4 sprite_clamp_uv_range(float4 pos, float4 tex, uint4 round_info)
 
 	tex = float4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
-	#if VS_CLAMP_UV == 2
+	#if VS_CLAMP_UV == VS_CLAMP_UV_LINEAR
 		// Bilinear: truncate to 1/16 texel;
 		tex = floor(tex) + ROUND_UV_THRESHOLD;
-	#elif VS_CLAMP_UV == 1
+	#elif VS_CLAMP_UV == VS_CLAMP_UV_NEAREST
 		// Nearest: place in texel center, accounting for upscaling.
 		tex = float4(floor(tex / 16.0f) * 16.0f) + float2(8.0f / ScaleTex, 16.0f - 8.0f / ScaleTex).xxyy;
 	#endif
@@ -2113,8 +2128,11 @@ VS_OUTPUT get_output(VS_PROCESSED vp)
 	vo.inv_cov = vp.inv_cov;
 	vo.interior = vp.interior;
 	
-#if VS_ROUND_UV
+#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 	vo.rounduv = vp.rounduv;
+#endif
+
+#if VS_ROUND_UV
 	vo.scaleuv = 0.0f;
 #endif
 
@@ -2182,7 +2200,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_PROCESSED lt = vs_main(load_vertex(vid_lt));
 	VS_PROCESSED rb = vs_main(load_vertex(vid_rb));
 
-	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
+	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 		float4 pos = float4(lt.pos_raw, rb.pos_raw);
 		float4 tex = float4(lt.ti.zw, rb.ti.zw);
 
@@ -2240,7 +2258,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_PROCESSED v1 = vs_main(load_vertex(vid_1));
 	VS_PROCESSED v2 = vs_main(load_vertex(vid_2));
 
-	#if VS_CLAMP_UV || VS_ALIGN_UV || VS_ROUND_UV
+	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 		float4 pos = float4(v0.pos_raw, v1.pos_raw.x, v2.pos_raw.y);
 		float4 tex = float4(v0.ti.zw, v1.ti.z, v2.ti.w);
 
@@ -2264,10 +2282,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 			v1.ti.zw = tex.zy;
 			v2.ti.zw = tex.xw;
 
-			float2 texscale = TextureScale;
-			#if VS_ROUND_UV
-				texscale = bool2(v0.rounduv.zw & ROUND_UV_SWAP) ? texscale.yx : texscale;
-			#endif
+			// Swapping for rotated textures.
+			float2 texscale = bool2(v0.rounduv.zw & ROUND_UV_SWAP) ? TextureScale.yx : TextureScale;
 			v0.ti.xy = v0.ti.zw * texscale;
 			v1.ti.xy = v1.ti.zw * texscale;
 			v2.ti.xy = v2.ti.zw * texscale;

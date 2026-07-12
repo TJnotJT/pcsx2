@@ -17,6 +17,12 @@
 #define VS_EXPAND_TRIANGLE 6
 #endif
 
+#ifndef VS_CLAMP_UV_NONE
+#define VS_CLAMP_UV_NONE 0
+#define VS_CLAMP_UV_NEAREST 1
+#define VS_CLAMP_UV_LINEAR 2
+#endif
+
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -45,12 +51,15 @@ layout(location = 0) out VSOutput
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 
-	#if VS_ROUND_UV != 0
+	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 		flat uvec4 rounduv;
+	#endif
+
+	#if VS_ROUND_UV
 		flat vec4 scaleuv;
 	#endif
 
-	#if VS_CLAMP_UV != 0
+	#if VS_CLAMP_UV
 		flat vec4 clampuv;
 	#endif
 } vsOut;
@@ -119,14 +128,14 @@ void main()
 		vsOut.t.w = a_q;
 
 		// Get UV rounding info saved in Q.
-		#if VS_ROUND_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vsOut.rounduv = extract_round_uv_bits(a_q);
 			vsOut.t.w = 1.0f;
 		#endif
 	#else
 		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vsOut.ti = vec4(0.0f);
-		#if VS_ROUND_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vsOut.rounduv = uvec4(0);
 		#endif
 	#endif
@@ -185,8 +194,6 @@ struct ProcessedVertex
 	uvec4 rounduv;
 };
 
-// VS_CLAMP_UV == 1: Nearest sampling.
-// VS_CLAMP_UV == 2: Bilinear sampling (don't clamp as aggressively).
 vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 {
 	bool rev_x = pos.x > pos.z;
@@ -224,10 +231,10 @@ vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
 
 	tex = vec4(min(tex.xy, tex.zw), max(tex.xy, tex.zw));
 
-	#if VS_CLAMP_UV == 2
+	#if VS_CLAMP_UV == VS_CLAMP_UV_LINEAR
 		// Bilinear: truncate to 1/16 texel;
 		tex = floor(tex) + vec4(ROUND_UV_THRESHOLD);
-	#elif VS_CLAMP_UV == 1
+	#elif VS_CLAMP_UV == VS_CLAMP_UV_NEAREST
 		// Nearest: place in texel center, accounting for upscaling.
 		tex = vec4(floor(tex / 16.0f) * 16.0f) + vec2(8.0f / ScaleTex, 16.0f - 8.0f / ScaleTex).xxyy;
 	#endif
@@ -325,7 +332,7 @@ ProcessedVertex load_vertex(uint index)
 		vtx.t.w = a_q;
 	
 		// Get UV rounding info saved in Q.
-		#if VS_ROUND_UV || VS_CLAMP_UV
+		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vtx.rounduv = extract_round_uv_bits(a_q);
 		#else
 			vtx.rounduv = uvec4(0);
@@ -675,10 +682,8 @@ void main()
 			v1.ti.zw = tex.zy;
 			v2.ti.zw = tex.xw;
 
-			vec2 texscale = TextureScale;
-			#if VS_ROUND_UV
-				texscale = mix(texscale, texscale.yx, bvec2(v0.rounduv.zw & ROUND_UV_SWAP));
-			#endif
+			// Swapping for rotated textures.
+			vec2 texscale = mix(TextureScale, TextureScale.yx, bvec2(v0.rounduv.zw & ROUND_UV_SWAP));
 			v0.ti.xy = v0.ti.zw * texscale;
 			v1.ti.xy = v1.ti.zw * texscale;
 			v2.ti.xy = v2.ti.zw * texscale;
@@ -706,8 +711,10 @@ void main()
 	vsOut.t = vtx.t;
 	vsOut.ti = vtx.ti;
 	vsOut.c = vtx.c;
-#if VS_ROUND_UV
+#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 	vsOut.rounduv = vtx.rounduv;
+#endif
+#if VS_ROUND_UV
 	vsOut.scaleuv = scaleuv;
 #endif
 #if VS_CLAMP_UV
@@ -837,6 +844,8 @@ void main()
 #define PS_ROV_COLOR 0
 #define PS_ROV_DEPTH 0
 #define PS_ROUND_UV 0
+#define PS_CLAMP_UV 0
+#define PS_ALIGN_UV 0
 #endif
 
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
@@ -898,11 +907,13 @@ layout(location = 0) in VSOutput
 	#endif
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
-	#if PS_ROUND_UV
+	#if PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 		flat uvec4 rounduv;
+	#endif
+	#if PS_ROUND_UV
 		flat vec4 scaleuv;
 	#endif
-	#if PS_CLAMP_UV != 0
+	#if PS_CLAMP_UV
 		flat vec4 clampuv;
 	#endif
 } vsIn;
@@ -1308,7 +1319,7 @@ vec4 round_and_clamp_uv()
 	uv = clamp(uv, vsIn.clampuv.xy, vsIn.clampuv.zw);
 #endif
 
-#if PS_ROUND_UV
+#if PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 	uv = mix(uv, uv.yx, bvec2(vsIn.rounduv.zw & uvec2(ROUND_UV_SWAP)));
 #endif
 
@@ -1734,7 +1745,7 @@ vec4 ps_color()
 #if PS_FST == 0
 	vec2 st = vsIn.t.xy / vsIn.t.w;
 	vec2 st_int = vsIn.ti.zw / vsIn.t.w;
-#elif PS_ROUND_UV || PS_CLAMP_UV != 0
+#elif PS_ROUND_UV || PS_CLAMP_UV || PS_ALIGN_UV
 	vec4 ti_rounded = round_and_clamp_uv();
 	vec2 st = ti_rounded.xy;
 	vec2 st_int = ti_rounded.zw;

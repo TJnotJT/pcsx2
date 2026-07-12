@@ -3317,6 +3317,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	sm.AddMacro("PS_ROUND_UV", static_cast<u32>(sel.round_uv));
 	sm.AddMacro("PS_CLAMP_UV", sel.clamp_uv);
+	sm.AddMacro("PS_ALIGN_UV", sel.align_uv);
 
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_tfx_source, sm.GetPtr(), "ps_main"));
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
