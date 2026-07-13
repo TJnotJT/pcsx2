@@ -1583,6 +1583,16 @@ if (bad)
 		DISCARD_DEPTH; // No depth update for triangle edges.
 #endif
 
+	// SW channel masking
+#if !PS_NO_COLOR && PS_CMASK
+	o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
+#endif
+
+	// SW depth masking
+#if SW_DEPTH && PS_ZMASK
+	DISCARD_DEPTH;
+#endif
+
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 	PS_OUTPUT output;
 #endif
@@ -1594,7 +1604,6 @@ if (bad)
 		output.c1 = o_col1;
 	#endif
 #elif PS_RETURN_COLOR_ROV
-	o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
 	if (!rov_discard_color)
 		RtWrite(input.p.xy, o_col0);
 #endif

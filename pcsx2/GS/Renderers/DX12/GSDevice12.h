@@ -564,7 +564,7 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	void SetSelectorPushConstants(const GSHWDrawConfig& config);
+	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
 
@@ -574,7 +574,7 @@ public:
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
 		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
-	void UpdateHWPipelineSelector(const GSHWDrawConfig& config);
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool uberize_vs_ps = true);
 	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
 
 public:

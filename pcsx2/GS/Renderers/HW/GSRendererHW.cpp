@@ -6197,7 +6197,7 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	m_conf.vs.iip = !IsFlatShaded();
 }
 
-void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Source* tex)
+void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -6237,7 +6237,7 @@ void GSRendererHW::DetermineBarriers(GSTextureCache::Target* rt, GSTextureCache:
 
 	if (m_conf.require_full_barrier && features.feedback_loops())
 	{
-		ComputeDrawlistGetSize(rt->m_scale);
+		ComputeDrawlistGetSize((rt ? rt : ds)->GetScale());
 		m_conf.drawlist = &m_drawlist;
 		m_conf.drawlist_bbox = &m_drawlist_bbox;
 	}
@@ -7664,14 +7664,14 @@ void GSRendererHW::ConfigureFullSW(bool color, bool depth)
 	// Do the actual config for color.
 	if (color)
 	{
-		// FbMask setup
+		// Color mask setup
 		if (m_conf.colormask.wrgba != 0)
 		{
 			const GSVector4i fbmask = GSVector4i(m_conf.colormask.wr ? 0 : 0xFF, m_conf.colormask.wg ? 0 : 0xFF,
 				m_conf.colormask.wb ? 0 : 0xFF, m_conf.colormask.wa ? 0 : 0xFF);
 			if (!m_conf.ps.fbmask)
 			{
-				// Don't enable FB mask emulation, just use the mask for ROV.
+				m_conf.ps.cmask = true;
 				m_conf.cb_ps.FbMask = fbmask;
 			}
 			else
@@ -7916,25 +7916,39 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 		{
 			ConvertTextureTypeROV(rt, ds);
 		}
-		else if (!g_gs_device->Features().framebuffer_fetch && !m_conf.require_full_barrier)
+		else if (!g_gs_device->Features().framebuffer_fetch)
 		{
 			// Use full shader emulation to cutdown number of pipelines.
 			ConfigureFullSW(rt != nullptr, ds != nullptr);
 			m_conf.require_full_barrier = true; // FIXME: Only enable full barriers if they are needed.
-			DetermineBarriers(rt, tex);
+			DetermineBarriers(rt, ds, tex);
 		}
 
-		// Get the dynamic state bits.
-		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);
+		// Depth setup.
+		if (!m_conf.ps.HasDepthROV() && m_conf.ds)
+		{
+			if (!m_conf.ps.HasDepthOutput() && !m_conf.ps.IsFeedbackLoopDepth())
+			{
+				// Force pixel shader Z clamp to let pipeline know we're attaching DS.
+				// We don't use a separate flag to reduce pipeline combinations.
+				m_conf.ps.zclamp = true;
+				m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
+			}
+
+			// Mask depth with SW depth feedack.
+			m_conf.ps.zmask = !m_conf.depth.zwe;
+		}
+
+		// Color setup.
+		m_conf.ps.uber_enable = true;
+
+		// Remove HW depth.
+		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
+
+		// Remove HW color mask.
+		m_conf.colormask = GSHWDrawConfig::ColorMaskSelector();
 
 		m_conf.uber_shader = true;
-		
-		// Hack: we need some form of depth export with Uber depth.
-		if (!m_conf.ps.HasDepthROV() && m_conf.depth.zwe && !m_conf.ps.HasDepthOutput())
-		{
-			m_conf.ps.zclamp = true;
-			m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
-		}
 	}
 }
 
@@ -9504,7 +9518,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	// Barriers must be determined before indices are modified via HandleFlatShadedVertices/SetupIA.
 	// This also computes the drawlist if needed.
-	DetermineBarriers(rt, tex);
+	DetermineBarriers(rt, ds, tex);
 
 	// Perform second pass setup here once barriers are determined.
 	EmulateAlphaTestSecondPass();

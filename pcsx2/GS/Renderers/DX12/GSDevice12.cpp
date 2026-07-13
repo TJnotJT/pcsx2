@@ -2369,8 +2369,10 @@ bool GSDevice12::CompileUberTFXPipelines()
 						config.ps = ps_sel;
 						config.vs = vs_sel;
 						config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
+						config.depth = GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
+						config.colormask = GSHWDrawConfig::ColorMaskSelector();
 
-						UpdateHWPipelineSelector(config);
+						UpdateHWPipelineSelector(config, false);
 
 						AsyncReturn async(COMPILE_ASYNC);
 						if (stage == 0)
@@ -3400,6 +3402,8 @@ GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector s
 		sm.AddMacro("PS_AA1", static_cast<u32>(sel.aa1));
 		sm.AddMacro("PS_ABE", sel.abe);
 		sm.AddMacro("PS_ANISOTROPIC_FILTERING", sel.sw_aniso);
+		sm.AddMacro("PS_ZMASK", static_cast<u32>(sel.zmask));
+		sm.AddMacro("PS_CMASK", static_cast<u32>(sel.cmask));
 		sm.AddMacro("PS_ROV_COLOR", sel.rov_color);
 		sm.AddMacro("PS_ROV_DEPTH", static_cast<u32>(sel.rov_depth));
 	}
@@ -4418,9 +4422,9 @@ void GSDevice12::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
 		WriteTFXPushConstants(start, end - start + 1);
 }
 
-void GSDevice12::SetSelectorPushConstants(const GSHWDrawConfig& config)
+void GSDevice12::SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc)
 {
-	if (m_tfx_pc_cache.Update(config.pc))
+	if (m_tfx_pc_cache.Update(pc))
 		m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS;
 }
 
@@ -4625,9 +4629,6 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
 	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
 	GSTexture12* draw_rt_clone = nullptr;
-
-	if (config.uber_shader)
-		SetSelectorPushConstants(config);
 
 	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
 
@@ -5061,7 +5062,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
-void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config)
+void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool uberize_vs_ps)
 {
 	m_pipeline_selector.vs.key = config.vs.key;
 	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
@@ -5073,15 +5074,24 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config)
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
 	const bool uber_rt = config.uber_shader && !config.ps.no_color;
 	const bool uber_ds = config.uber_shader && (config.ps.uber_zwrite || config.ps.uber_sw_depth);
-	const bool uber_ds_as_rt = config.uber_shader && config.ps.IsFeedbackLoopDepth();
+	const bool uber_ds_as_rt = config.uber_shader && config.ps.uber_sw_depth;
+	
 	m_pipeline_selector.rt = (config.rt != nullptr || uber_rt) && !config.ps.HasColorROV();
 	m_pipeline_selector.ds = (config.ds != nullptr || uber_ds) && !config.ps.HasDepthROV();
 	m_pipeline_selector.ds_as_rt = (m_ds_as_rt != nullptr || uber_ds_as_rt) && !config.ps.HasDepthROV();
 
 	if (config.uber_shader)
 	{
-		GSHWDrawConfig::UberizeSelector(m_pipeline_selector.ps);
-		GSHWDrawConfig::UberizeSelector(m_pipeline_selector.vs);
+		// Get the dynamic state bits.
+		GSHWDrawConfig::ShaderPushConstants pc;
+		GSHWDrawConfig::GetUberShaderSelector(m_pipeline_selector.vs, m_pipeline_selector.ps, pc);
+		SetSelectorPushConstants(pc);
+
+		if (uberize_vs_ps)
+		{
+			GSHWDrawConfig::UberizeVSSelector(m_pipeline_selector.vs);
+			GSHWDrawConfig::UberizePSSelector(m_pipeline_selector.ps);
+		}
 	}
 }
 

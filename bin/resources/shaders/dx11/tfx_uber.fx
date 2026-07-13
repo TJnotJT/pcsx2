@@ -68,7 +68,7 @@
 #define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
 
 #if !UBER_SHADER
-#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1)
+#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1 || PS_ZMASK)
 #define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH)
 #define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
 #endif
@@ -1570,6 +1570,18 @@ void ps_main(PS_INPUT input)
 			DISCARD_DEPTH; // No depth update for triangle edges.
 	}
 
+	// SW channel masking
+#if !PS_NO_COLOR
+	if (PS_CMASK)
+		o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
+#endif
+
+	// SW depth masking
+#if SW_DEPTH
+	if (PS_ZMASK)
+		DISCARD_DEPTH;
+#endif
+
 #if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
 	PS_OUTPUT output;
 #endif
@@ -1581,7 +1593,6 @@ void ps_main(PS_INPUT input)
 		output.c1 = o_col1;
 	#endif
 #elif PS_RETURN_COLOR_ROV
-	o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
 	if (!rov_discard_color)
 		RtWrite(input.p.xy, o_col0);
 #endif

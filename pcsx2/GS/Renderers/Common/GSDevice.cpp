@@ -2138,7 +2138,17 @@ static void GetUberShaderSelector(
 	}
 }
 
-void GSHWDrawConfig::UberizeSelector(PSSelector& sel)
+void GSHWDrawConfig::UberizeVSSelector(VSSelector& sel)
+{
+	sel.uber_enable = true;
+	sel.iip = false; // ignored
+
+	// Clear dynamic state bits from the selector.
+	for (const ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+		sel.ClearField(dynamic_define.index);
+}
+
+void GSHWDrawConfig::UberizePSSelector(PSSelector& sel)
 {
 	sel.uber_enable = true;
 	sel.uber_date_init = (sel.date == 1 || sel.date == 2);
@@ -2148,16 +2158,6 @@ void GSHWDrawConfig::UberizeSelector(PSSelector& sel)
 
 	// Clear dynamic state bits from the selector.
 	for (const ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
-		sel.ClearField(dynamic_define.index);
-}
-
-void GSHWDrawConfig::UberizeSelector(VSSelector& sel)
-{
-	sel.uber_enable = true;
-	sel.iip = false; // ignored
-
-	// Clear the dynamic state bits from the selector.
-	for (const ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
 		sel.ClearField(dynamic_define.index);
 }
 
