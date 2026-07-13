@@ -7922,6 +7922,8 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 		// FB fetch shouldn't require additional setup.
 		if (m_conf.ps.HasColorROV() || m_conf.ps.HasDepthROV())
 		{
+			// If we're using ROV for either color/depth, use it for both.
+			ConfigureROV(true, true);
 			ConvertTextureTypeROV(rt, ds);
 		}
 		else if (!g_gs_device->Features().framebuffer_fetch)
@@ -7930,21 +7932,21 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			ConfigureFullSW(rt != nullptr, ds != nullptr);
 			m_conf.require_full_barrier = true; // FIXME: Only enable full barriers if they are needed.
 			DetermineBarriers(rt, ds, tex);
-		}
 
-		// Depth setup.
-		if (!m_conf.ps.HasDepthROV() && m_conf.ds)
-		{
-			if (!m_conf.ps.HasDepthOutput() && !m_conf.ps.IsFeedbackLoopDepth())
+			// Depth setup.
+			if (m_conf.ds)
 			{
-				// Force pixel shader Z clamp to let pipeline know we're attaching DS.
-				// To reduce pipeline combinations don't use a separate flag.
-				m_conf.ps.zclamp = true;
-				m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
-			}
+				if (!m_conf.ps.HasDepthOutput() && !m_conf.ps.IsFeedbackLoopDepth())
+				{
+					// Force pixel shader Z clamp to let pipeline know we're attaching DS.
+					// (To reduce pipeline combinations, we don't use a separate flag.)
+					m_conf.ps.zclamp = true;
+					m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
+				}
 
-			// Mask depth with SW depth feedback.
-			m_conf.ps.zmask = !m_conf.depth.zwe;
+				// Mask depth with SW depth feedback.
+				m_conf.ps.zmask = !m_conf.depth.zwe;
+			}
 		}
 
 		// Color setup.
