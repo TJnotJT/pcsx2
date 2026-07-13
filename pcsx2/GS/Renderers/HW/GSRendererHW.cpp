@@ -7657,6 +7657,42 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 
 void GSRendererHW::ConfigureFullSW(bool color, bool depth)
 {
+	// Do config that affects both color and depth.
+	if (color || depth)
+	{
+		// Alpha test setup. KEEP will already be fine.
+		if (m_cached_ctx.TEST.ATE && m_conf.alpha_test != GSHWDrawConfig::AlphaTestMode::KEEP)
+		{
+			GL_INS("HW: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
+				" and disabling alpha second pass" : "");
+
+			m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::FEEDBACK;
+
+			GSHWDrawConfig::PS_ATST ps_atst;
+			float ps_aref;
+			GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
+			m_conf.ps.atst = ps_atst;
+			m_conf.ps.afail = static_cast<GSHWDrawConfig::PS_AFAIL>(m_cached_ctx.TEST.AFAIL);
+			if (m_cached_ctx.DepthWrite() && m_cached_ctx.TEST.AFAIL == AFAIL_RGB_ONLY)
+			{
+				pxAssert(depth); // Should have enabled depth ROV for depth feedback loop.
+				m_conf.ps.afail = PS_AFAIL::RGB_ONLY_SW_Z;
+			}
+			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
+
+			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, static_cast<u32>(m_conf.ps.afail), ps_aref);
+
+			if (m_conf.alpha_second_pass.enable)
+			{
+				// Add back the write bits from alpha second pass.
+				m_conf.colormask.wrgba |= m_conf.alpha_second_pass.colormask.wrgba;
+				m_conf.depth.zwe |= m_conf.alpha_second_pass.depth.zwe;
+
+				m_conf.alpha_second_pass = {};
+			}
+		}
+	}
+
 	// Do the actual config for depth.
 	if (depth)
 		ConfigureDepthFeedback(true); // Configure SW depth.
@@ -7756,34 +7792,6 @@ void GSRendererHW::ConfigureFullSW(bool color, bool depth)
 		{
 			GL_INS("HW: Enabling PABE");
 			m_conf.ps.pabe = true;
-		}
-
-		// Alpha test setup. KEEP will already be fine.
-		if (m_cached_ctx.TEST.ATE && m_conf.alpha_test != GSHWDrawConfig::AlphaTestMode::KEEP)
-		{
-			GL_INS("HW: Using SW feedback alpha test%s", m_conf.alpha_second_pass.enable ?
-				" and disabling alpha second pass" : "");
-
-			m_conf.alpha_test = GSHWDrawConfig::AlphaTestMode::FEEDBACK;
-
-			GSHWDrawConfig::PS_ATST ps_atst;
-			float ps_aref;
-			GetAlphaTestConfigPS(m_cached_ctx.TEST.ATST, m_cached_ctx.TEST.AREF, false, ps_atst, ps_aref);
-			m_conf.ps.atst = ps_atst;
-			m_conf.ps.afail = static_cast<GSHWDrawConfig::PS_AFAIL>(m_cached_ctx.TEST.AFAIL);
-			if (m_cached_ctx.DepthWrite() && m_cached_ctx.TEST.AFAIL == AFAIL_RGB_ONLY)
-			{
-				pxAssert(depth); // Should have enabled depth ROV for depth feedback loop.
-				m_conf.ps.afail = PS_AFAIL::RGB_ONLY_SW_Z;
-			}
-			m_conf.cb_ps.FogColor_AREF.a = ps_aref;
-
-			GL_INS("ROV: Using ATST=%d, AFAIL=%d, AREF=%.2f", ps_atst, static_cast<u32>(m_conf.ps.afail), ps_aref);
-
-			if (m_conf.alpha_second_pass.enable)
-			{
-				m_conf.alpha_second_pass = {};
-			}
 		}
 	}
 }
@@ -7930,12 +7938,12 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			if (!m_conf.ps.HasDepthOutput() && !m_conf.ps.IsFeedbackLoopDepth())
 			{
 				// Force pixel shader Z clamp to let pipeline know we're attaching DS.
-				// We don't use a separate flag to reduce pipeline combinations.
+				// To reduce pipeline combinations don't use a separate flag.
 				m_conf.ps.zclamp = true;
 				m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
 			}
 
-			// Mask depth with SW depth feedack.
+			// Mask depth with SW depth feedback.
 			m_conf.ps.zmask = !m_conf.depth.zwe;
 		}
 
