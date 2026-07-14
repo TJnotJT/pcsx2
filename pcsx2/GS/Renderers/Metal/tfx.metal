@@ -1800,9 +1800,19 @@ fragment MainPSOut ps_main(
 	return out;
 }
 
+struct MainPSOutEFT
+{
+	float4 c0 [[color(0), index(0), function_constant(PS_OUTPUT_COLOR0)]];
+	MainPSOutEFT(MainResult res)
+	{
+		if (PS_OUTPUT_COLOR0)
+			c0 = res.c0;
+	}
+};
+
 // Metal doesn't let you toggle eft with function constants so we need a separate function for it
 [[early_fragment_tests]]
-fragment void ps_main_rov_eft(
+fragment MainPSOutEFT ps_main_rov_eft(
 	MainPSIn in [[stage_in]],
 	constant GSMTLMainPSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]],
 	sampler s [[sampler(0)]],
@@ -1826,7 +1836,7 @@ fragment void ps_main_rov_eft(
 		main.current_color = unpack_unorm4x8_to_float(rt_u32.read(coord).x);
 	else
 		main.current_color = rt_rov.read(coord);
-	MainPSOut out = main.ps_main();
+	MainResult out = main.ps_main();
 	if (!main.color_discarded)
 	{
 		if (!PS_FBMASK)
@@ -1836,6 +1846,7 @@ fragment void ps_main_rov_eft(
 		else
 			rt_rov.write(out.c0, coord);
 	}
+	return out;
 }
 
 #if PRIMID_SUPPORT

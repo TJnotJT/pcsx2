@@ -593,7 +593,7 @@ void GSDeviceMTL::BeginROVCopy(GSTextureMTL* color, GSTextureMTL* depth)
 	color1.texture = depth->GetTexture();
 	PrepareBeginRenderPass();
 	m_current_render.encoder = MRCRetain([GetRenderCmdBuf() renderCommandEncoderWithDescriptor:desc]);
-	[m_current_render.encoder setLabel:@"ROV Clear"];
+	[m_current_render.encoder setLabel:@"ROV Copy"];
 	if (!m_dev.features.unified_memory)
 		[m_current_render.encoder waitForFence:m_draw_sync_fence
 		                          beforeStages:MTLRenderStageVertex];
@@ -1139,10 +1139,13 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		const bool depth   = i & 2;
 		const bool stencil = i & 4;
 		const bool rt1     = i & 8;
-		if (rt1 && m_features.depth_feedback)
-			continue;
-		if (rt1 && !depth)
-			continue;
+		if (!m_features.rov || i != 9) // Color + RT1 is used for ROV oneshot double-clear
+		{
+			if (rt1 && m_features.depth_feedback)
+				continue;
+			if (rt1 && !depth)
+				continue;
+		}
 		if (stencil && m_features.framebuffer_fetch)
 			continue;
 		auto desc = MRCTransfer([MTLRenderPassDescriptor new]);
@@ -1947,6 +1950,7 @@ void GSDeviceMTL::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureMTL* rt
 		MRESetTexture(rt, 0);
 		MRESetTexture(ds, 1);
 		MRESetPipeline(m_rov_copy_both_pipeline);
+		// BeginROVCopy always starts a new render pass, so no need to clear scissor or set dss
 	}
 	else
 	{
@@ -1955,11 +1959,9 @@ void GSDeviceMTL::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureMTL* rt
 		BeginRenderPass(@"ROV Copy", dst, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare, false);
 		MRESetTexture(src, GSMTLTextureIndexNonHW);
 		MRESetPipeline(m_rov_copy_one_pipeline[rt_copy]);
+		MREClearScissor();
+		MRESetDSS(DepthStencilSelector::NoDepth());
 	}
-
-	FlushDebugEntries(m_current_render.encoder);
-	MREClearScissor();
-	MRESetDSS(DepthStencilSelector::NoDepth());
 
 	const id<MTLRenderCommandEncoder> enc = m_current_render.encoder;
 	[enc setVertexBuffer:allocation.gpu_buffer
