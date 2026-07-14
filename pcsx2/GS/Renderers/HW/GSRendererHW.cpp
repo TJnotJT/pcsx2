@@ -2844,7 +2844,11 @@ void GSRendererHW::Draw()
 
 				m_last_rt->UpdateValidity(valid_area);
 
+				BeginDSAsRT();
+
 				g_gs_device->RenderHW(m_conf);
+
+				EndDSAsRT();
 
 				if (GSConfig.DumpGSData)
 				{
@@ -7962,6 +7966,29 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 	}
 }
 
+void GSRendererHW::BeginDSAsRT()
+{
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && m_conf.depth.zwe && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
+	{
+		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
+
+		// Should not be hw blending with multiple render targets.
+		pxAssert(!m_conf.blend.enable && !m_conf.blend_multi_pass.blend.enable);
+		// HW depth test should be disabled in place of SW depth test
+		pxAssert(m_conf.depth.ztst == ZTST_ALWAYS);
+		// Second pass alpha shouldn't be enabled
+		pxAssert(!m_conf.alpha_second_pass.enable);
+
+		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
+	}
+}
+
+void GSRendererHW::EndDSAsRT()
+{
+	if (g_gs_device->IsDSInRTActive())
+		g_gs_device->EndDSAsRT();
+}
+
 __ri static constexpr bool IsRedundantClamp(u8 clamp, u32 clamp_min, u32 clamp_max, u32 tsize)
 {
 	// Don't shader sample when the clamp/repeat is configured to the texture size.
@@ -9560,32 +9587,22 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 	// Convert textures types after hybrid/uber shader setup in case they use ROV.
 	ConvertTextureTypeROV(rt, ds);
 
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && m_conf.depth.zwe && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
-	{
-		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
-
-		// Should not be hw blending with multiple render targets.
-		pxAssert(!m_conf.blend.enable && !m_conf.blend_multi_pass.blend.enable);
-		// HW depth test should be disabled in place of SW depth test
-		pxAssert(m_conf.depth.ztst == ZTST_ALWAYS);
-		// Second pass alpha shouldn't be enabled
-		pxAssert(!m_conf.alpha_second_pass.enable);
-
-		g_gs_device->BeginDSAsRT(m_conf.ds, m_conf.drawarea);
-	}
-
 	if (GSConfig.SaveHWConfig && GSConfig.ShouldDump(s_n, g_perfmon.GetFrame()))
 	{
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
 	}
 
-	if (!m_channel_shuffle_width)
-		g_gs_device->RenderHW(m_conf);
-	else
+	if (m_channel_shuffle_width)
+	{
 		m_last_rt = rt;
+		return;
+	}
+	
+	BeginDSAsRT();
 
-	if (g_gs_device->IsDSInRTActive())
-		g_gs_device->EndDSAsRT();
+	g_gs_device->RenderHW(m_conf);
+
+	EndDSAsRT();
 }
 
 // If the EE uploaded a new CLUT since the last draw, use that.

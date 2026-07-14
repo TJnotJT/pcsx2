@@ -264,6 +264,9 @@ private:
 	void HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds,
 		GSTextureCache::Source* tex);
 
+	void BeginDSAsRT();
+	void EndDSAsRT();
+
 	void SetTCOffset();
 	bool NextDrawColClip() const;
 	bool IsPossibleChannelShuffle() const;
