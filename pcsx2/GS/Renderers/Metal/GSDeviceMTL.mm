@@ -1888,8 +1888,8 @@ void GSDeviceMTL::SetupOneshotROV(const GSHWDrawConfig& config, GSTextureMTL* rt
 	g_perfmon.Put(GSPerfMon::TextureCopiesROV, 1);
 	g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 
-	bool rt_copy = config.HasOneshotColorROV();
-	bool ds_copy = config.HasOneshotDepthROV();
+	bool rt_copy = config.ps.HasOneshotColorROV();
+	bool ds_copy = config.ps.HasOneshotDepthROV();
 
 	// Create ROV textures
 	if (rt_copy && (!m_rov_rt || m_rov_rt->GetSize() != size_i))
@@ -2193,8 +2193,9 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		setFnConstantI(m_fn_constants, pssel.aa1,                   GSMTLConstantIndex_PS_AA1);
 		setFnConstantB(m_fn_constants, pssel.abe,                   GSMTLConstantIndex_PS_ABE);
 		setFnConstantI(m_fn_constants, pssel.sw_aniso,              GSMTLConstantIndex_PS_SW_ANISO);
-		setFnConstantI(m_fn_constants, pssel.rov_color,             GSMTLConstantIndex_PS_ROV_COLOR);
+		setFnConstantB(m_fn_constants, pssel.rov_color,             GSMTLConstantIndex_PS_ROV_COLOR);
 		setFnConstantI(m_fn_constants, pssel.rov_depth,             GSMTLConstantIndex_PS_ROV_DEPTH);
+		setFnConstantB(m_fn_constants, pssel.rov_oneshot,           GSMTLConstantIndex_PS_ROV_ONESHOT);
 		bool eft = pssel.HasColorROV() && !pssel.HasDepthROV() && !pssel.HasDepthOutput();
 		auto newps = LoadShader(eft ? @"ps_main_rov_eft" : @"ps_main");
 		ps = newps;
@@ -2480,7 +2481,7 @@ __fi void GSDeviceMTL::PrepareROVTexture(GSTexture** ptex)
 
 void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 { @autoreleasepool {
-	if (config.HasOneshotROV())
+	if (config.ps.HasOneshotROV())
 	{
 		// Do this first since it requires a different vertex upload from the main draw.
 		const GSVector2i rtsize = (config.rt ? config.rt : config.ds)->GetSize();
@@ -2621,7 +2622,7 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// Try to reduce render pass restarts
-	if (!config.HasContinuousColorROV() && !config.ds && m_current_render.color_target == rt && stencil == m_current_render.stencil_target && m_current_render.depth_target != config.tex)
+	if (!config.ps.HasContinuousColorROV() && !config.ds && m_current_render.color_target == rt && stencil == m_current_render.stencil_target && m_current_render.depth_target != config.tex)
 		config.ds = m_current_render.depth_target;
 	if (!rt && config.ds == m_current_render.depth_target && m_current_render.color_target != config.tex)
 		rt = m_current_render.color_target;
@@ -2636,12 +2637,12 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	}
 
 	const bool feedback_depth = config.ps.IsFeedbackLoopDepth();
-	const bool rt1 = feedback_depth && !m_features.depth_feedback && !config.HasContinuousDepthROV();
+	const bool rt1 = feedback_depth && !m_features.depth_feedback && !config.ps.HasContinuousDepthROV();
 	GSTexture* rt_bind = rt;
 	GSTexture* ds_bind = config.ds;
 	GSTexture* rt_size = rt_bind ? rt_bind : ds_bind;
-	if (config.HasContinuousColorROV() && rt_bind) PrepareROVTexture(&rt_bind);
-	if (config.HasContinuousDepthROV() && ds_bind) PrepareROVTexture(&ds_bind);
+	if (config.ps.HasContinuousColorROV() && rt_bind) PrepareROVTexture(&rt_bind);
+	if (config.ps.HasContinuousDepthROV() && ds_bind) PrepareROVTexture(&ds_bind);
 	if (!rt_bind && !ds_bind && !stencil)
 		BeginFullROV(@"RenderHWROV", rt_size->GetWidth(), rt_size->GetHeight());
 	else
@@ -2651,13 +2652,13 @@ void GSDeviceMTL::RenderHW(GSHWDrawConfig& config)
 	if (usesStencil(config.destination_alpha))
 		[mtlenc setStencilReferenceValue:1];
 	MREInitHWDraw(config, allocation);
-	if (config.HasContinuousColorROV() && m_dev.features.rov_requires_r32)
+	if (config.ps.HasContinuousColorROV() && m_dev.features.rov_requires_r32)
 		MRESetTexture(reinterpret_cast<GSTextureMTL*>(rt)->GetROVTexture(), GSMTLTextureIndexRenderTarget);
-	else if (config.require_one_barrier || config.require_full_barrier || config.HasColorROV())
-		MRESetTexture(config.HasOneshotColorROV() ? m_rov_rt.get() : rt, GSMTLTextureIndexRenderTarget);
-	if (config.HasDepthROV())
+	else if (config.require_one_barrier || config.require_full_barrier || config.ps.HasColorROV())
+		MRESetTexture(config.ps.HasOneshotColorROV() ? m_rov_rt.get() : rt, GSMTLTextureIndexRenderTarget);
+	if (config.ps.HasDepthROV())
 	{
-		MRESetTexture(config.HasOneshotDepthROV() ? m_rov_ds.get() : config.ds, GSMTLTextureIndexDepthTarget);
+		MRESetTexture(config.ps.HasOneshotDepthROV() ? m_rov_ds.get() : config.ds, GSMTLTextureIndexDepthTarget);
 	}
 	else if (feedback_depth)
 	{
@@ -2786,6 +2787,8 @@ void GSDeviceMTL::SendHWDraw(GSHWDrawConfig& config, id<MTLRenderCommandEncoder>
 
 	EncodeDraw(enc, topology, config.nindices, buffer, off, 0);
 	g_perfmon.Put(GSPerfMon::DrawCalls, 1);
+	if (config.ps.HasROV())
+		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
 // tbh I'm not a fan of the current debug groups

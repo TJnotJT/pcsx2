@@ -76,22 +76,21 @@ constant uint PS_SCANMSK            [[function_constant(GSMTLConstantIndex_PS_SC
 constant uint PS_AA1_RAW            [[function_constant(GSMTLConstantIndex_PS_AA1)]];
 constant bool PS_ABE                [[function_constant(GSMTLConstantIndex_PS_ABE)]];
 constant uint PS_SW_ANISO           [[function_constant(GSMTLConstantIndex_PS_SW_ANISO)]];
-constant uint PS_ROV_COLOR_RAW      [[function_constant(GSMTLConstantIndex_PS_ROV_COLOR)]];
+constant bool PS_ROV_COLOR          [[function_constant(GSMTLConstantIndex_PS_ROV_COLOR)]];
 constant uint PS_ROV_DEPTH_RAW      [[function_constant(GSMTLConstantIndex_PS_ROV_DEPTH)]];
+constant bool PS_ROV_ONESHOT        [[function_constant(GSMTLConstantIndex_PS_ROV_ONESHOT)]];
 
 using GSShader::VSExpand;
 using AFAIL = GSShader::PS_AFAIL;
 using ATST = GSShader::PS_ATST;
 using GSShader::ZTST;
 using AA1 = GSShader::PS_AA1;
-using ROV_COLOR = GSShader::PS_ROV_COLOR;
 using ROV_DEPTH = GSShader::PS_ROV_DEPTH;
 constant VSExpand VS_EXPAND_TYPE = static_cast<VSExpand>(VS_EXPAND_TYPE_RAW);
 constant AFAIL PS_AFAIL = static_cast<AFAIL>(PS_AFAIL_RAW);
 constant ATST  PS_ATST  = static_cast<ATST>(PS_ATST_RAW);
 constant ZTST  PS_ZTST  = static_cast<ZTST>(PS_ZTST_RAW);
 constant AA1   PS_AA1   = static_cast<AA1>(PS_AA1_RAW);
-constant ROV_COLOR PS_ROV_COLOR = static_cast<ROV_COLOR>(PS_ROV_COLOR_RAW);
 constant ROV_DEPTH PS_ROV_DEPTH = static_cast<ROV_DEPTH>(PS_ROV_DEPTH_RAW);
 
 #if defined(__METAL_MACOS__) && __METAL_VERSION__ >= 220
@@ -126,9 +125,12 @@ constant bool NEEDS_DEPTH_FOR_ZTST  = PS_ZTST == ZTST::GEQUAL || PS_ZTST == ZTST
 constant bool NEEDS_DEPTH_FOR_AA1   = PS_AA1 == AA1::TRIANGLE_SW_Z;
 constant bool SW_DEPTH = NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1;
 
-constant bool PS_OUTPUT_COLOR0 = !PS_NO_COLOR  && PS_ROV_COLOR != ROV_COLOR::ENABLED;
-constant bool PS_OUTPUT_COLOR1 = !PS_NO_COLOR1 && PS_ROV_COLOR == ROV_COLOR::NONE;
-constant bool PS_ZOUTPUT = (PS_ZCLAMP || PS_ZFLOOR || SW_DEPTH) && PS_ROV_DEPTH != ROV_DEPTH::READ_WRITE && PS_ROV_DEPTH != ROV_DEPTH::READ_ONLY;
+constant bool ROV_COLOR_CONTINUOUS = (PS_ROV_COLOR && !PS_ROV_ONESHOT);
+constant bool ROV_DEPTH_CONTINUOUS = (PS_ROV_DEPTH != ROV_DEPTH::NONE && !PS_ROV_ONESHOT);
+
+constant bool PS_OUTPUT_COLOR0 = !PS_NO_COLOR  && !ROV_COLOR_CONTINUOUS;
+constant bool PS_OUTPUT_COLOR1 = !PS_NO_COLOR1 && !PS_ROV_COLOR;
+constant bool PS_ZOUTPUT = (PS_ZCLAMP || PS_ZFLOOR || SW_DEPTH) && !ROV_DEPTH_CONTINUOUS;
 constant bool PS_ZOUTPUT_LESS = PS_ZOUTPUT && !SW_DEPTH;
 constant bool PS_ZOUTPUT_ANY  = PS_ZOUTPUT && SW_DEPTH;
 constant bool PS_ZOUTPUT_COLOR = PS_ZOUTPUT_ANY && !DEPTH_FEEDBACK;
@@ -585,7 +587,7 @@ struct PSMain
 
 	void discard()
 	{
-		if (PS_ROV_COLOR != ROV_COLOR::NONE || PS_ROV_DEPTH != ROV_DEPTH::NONE)
+		if (PS_ROV_COLOR || PS_ROV_DEPTH != ROV_DEPTH::NONE)
 			color_discarded = depth_discarded = true;
 		else
 			discard_fragment();
@@ -593,7 +595,7 @@ struct PSMain
 
 	void discard_color(thread float4& output)
 	{
-		if (PS_ROV_COLOR != ROV_COLOR::NONE)
+		if (PS_ROV_COLOR)
 			color_discarded = true;
 		else
 			output = current_color;
@@ -601,7 +603,7 @@ struct PSMain
 
 	void discard_depth(thread float& output)
 	{
-		if (PS_ROV_DEPTH == ROV_DEPTH::READ_WRITE || PS_ROV_DEPTH == ROV_DEPTH::ONESHOT_READ_WRITE)
+		if (PS_ROV_DEPTH == ROV_DEPTH::READ_WRITE)
 			depth_discarded = true;
 		else
 			output = current_depth;
@@ -1695,18 +1697,18 @@ fragment float4 fbfetch_test(float4 in [[color(0), raster_order_group(0)]])
 	return in * 2;
 }
 
-constant bool NEEDS_RT_TEX = NEEDS_RT && !HAS_FBFETCH && PS_ROV_COLOR == ROV_COLOR::NONE;
-constant bool NEEDS_RT_FBF = NEEDS_RT &&  HAS_FBFETCH && PS_ROV_COLOR == ROV_COLOR::NONE;
+constant bool NEEDS_RT_TEX = NEEDS_RT && !HAS_FBFETCH && !PS_ROV_COLOR;
+constant bool NEEDS_RT_FBF = NEEDS_RT &&  HAS_FBFETCH && !PS_ROV_COLOR;
 constant bool NEEDS_DS_FBF = SW_DEPTH &&  HAS_FBFETCH && !DEPTH_FEEDBACK && PS_ROV_DEPTH == ROV_DEPTH::NONE;
 #else
-constant bool NEEDS_RT_TEX = NEEDS_RT && (PS_ROV_COLOR != ROV_COLOR::NONE);
+constant bool NEEDS_RT_TEX = NEEDS_RT && !PS_ROV_COLOR;
 constant bool NEEDS_DS_FBF = false;
 constant float ds_fbf = 0;
 #endif
 constant bool NEEDS_DS_TEX   = SW_DEPTH && !DEPTH_FEEDBACK && !NEEDS_DS_FBF && PS_ROV_DEPTH == ROV_DEPTH::NONE;
 constant bool NEEDS_DS_DEPTH = (SW_DEPTH && DEPTH_FEEDBACK || NEEDS_DS_FBF) && PS_ROV_DEPTH == ROV_DEPTH::NONE;
-constant bool NEEDS_RT_ROV = PS_ROV_COLOR != ROV_COLOR::NONE && !ROV_NEEDS_R32;
-constant bool NEEDS_RT_U32 = PS_ROV_COLOR != ROV_COLOR::NONE &&  ROV_NEEDS_R32;
+constant bool NEEDS_RT_ROV = PS_ROV_COLOR && !ROV_NEEDS_R32;
+constant bool NEEDS_RT_U32 = PS_ROV_COLOR &&  ROV_NEEDS_R32;
 constant bool NEEDS_DS_ROV = PS_ROV_DEPTH != ROV_DEPTH::NONE;
 
 fragment MainPSOut ps_main(
@@ -1760,9 +1762,9 @@ fragment MainPSOut ps_main(
 			main.current_depth = ds_tex.read(coord).x;
 	}
 
-	if (NEEDS_RT || (PS_ROV_COLOR != ROV_COLOR::NONE && any(cb.fbmask == 0xff)))
+	if (NEEDS_RT || (PS_ROV_COLOR && any(cb.fbmask == 0xff)))
 	{
-		if (PS_ROV_COLOR != ROV_COLOR::NONE)
+		if (PS_ROV_COLOR)
 		{
 			if (ROV_NEEDS_R32)
 				main.current_color = unpack_unorm4x8_to_float(rt_u32.read(coord).x);
@@ -1784,9 +1786,9 @@ fragment MainPSOut ps_main(
 	}
 
 	MainResult out = main.ps_main();
-	if ((PS_ROV_DEPTH == ROV_DEPTH::READ_WRITE || PS_ROV_DEPTH == ROV_DEPTH::ONESHOT_READ_WRITE) && !main.depth_discarded)
+	if (PS_ROV_DEPTH == ROV_DEPTH::READ_WRITE && !main.depth_discarded)
 		ds_rov.write(out.depth, coord);
-	if (PS_ROV_COLOR != ROV_COLOR::NONE && !main.color_discarded)
+	if (PS_ROV_COLOR && !main.color_discarded)
 	{
 		if (!PS_FBMASK)
 			out.c0 = select(out.c0, main.current_color, cb.fbmask == 0xff);
