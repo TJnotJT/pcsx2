@@ -8,7 +8,7 @@
 #include "GS/Renderers/DX12/GSTexture12.h"
 #include "GS/Renderers/DX12/D3D12ShaderCache.h"
 #include "GS/Renderers/DX12/D3D12StreamBuffer.h"
-#include "GS/Renderers/DX12/D3D12CompilerAsync.h"
+#include "GS/Renderers/DX12/D3D12ShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
 
@@ -445,13 +445,14 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	using ShaderJob = D3D12CompilerAsync::ShaderJob;
+	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
+	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
 	using ShaderEntryType = D3D12ShaderCache::EntryType;
 
-	ShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, AsyncReturn* async = nullptr);
-	ShaderJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, AsyncReturn* async = nullptr);
-	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p, bool uber = false, AsyncReturn* async = nullptr);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, AsyncReturn* async = nullptr);
+	D3D12ShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
+	D3D12ShaderJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
+	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);

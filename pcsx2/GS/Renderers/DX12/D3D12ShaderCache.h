@@ -3,7 +3,7 @@
 
 #pragma once
 #include "GS/Renderers/DX11/D3D.h"
-#include "GS/Renderers/DX12/D3D12CompilerAsync.h"
+#include "GS/Renderers/DX12/D3D12ShaderCompilerAsync.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
 
 #include "Config.h"
@@ -27,9 +27,9 @@ public:
 	using ComPtr = wil::com_ptr_nothrow<T>;
 
 	using EntryType = D3D::ShaderCacheEntryType;
-	using ShaderJob = D3D12CompilerAsync::ShaderJob;
-	using PipelineJob = D3D12CompilerAsync::PipelineJob;
-	using CompileJob = D3D12CompilerAsync::CompileJob;
+	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
+	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
+	using D3D12CompileJob = D3D12ShaderCompilerAsync::D3D12CompileJob;
 
 	D3D12ShaderCache();
 	~D3D12ShaderCache();
@@ -43,35 +43,35 @@ public:
 
 	__fi ComPtr<ID3DBlob> GetVertexShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		bool uber = false, AsyncReturn* async = nullptr)
+		bool uber = false, GSAsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
 		return GetShaderBlob(EntryType::VertexShader, shader_code, macros, entry_point, uber, async);
 	}
 	__fi ComPtr<ID3DBlob> GetPixelShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		bool uber = false, AsyncReturn* async = nullptr)
+		bool uber = false, GSAsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
 		return GetShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point, uber, async);
 	}
 	__fi ComPtr<ID3DBlob> GetComputeShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main",
-		bool uber = false, AsyncReturn* async = nullptr)
+		bool uber = false, GSAsyncReturn* async = nullptr)
 	{
 		ProcessAsyncCompileJobs();
 		return GetShaderBlob(EntryType::ComputeShader, shader_code, macros, entry_point, uber, async);
 	}
 
 	ComPtr<ID3DBlob> GetShaderBlob(EntryType type, std::string_view shader_code,
-		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", bool uber = false, AsyncReturn* async = nullptr);
+		const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", bool uber = false, GSAsyncReturn* async = nullptr);
 
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc,
-		bool uber, AsyncReturn* async = nullptr);
+		bool uber, GSAsyncReturn* async = nullptr);
 	ComPtr<ID3D12PipelineState> GetPipelineState(ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc);
 
-	void StartPipelineCompilationAsync(ShaderJob vs_job, bool start_vs,
-		ShaderJob ps_job, bool start_ps, PipelineJob pipeline_job);
+	void StartPipelineCompilationAsync(D3D12ShaderJob vs_job, bool start_vs,
+		D3D12ShaderJob ps_job, bool start_ps, D3D12PipelineJob pipeline_job);
 
 	struct CacheIndexKey
 	{
@@ -160,15 +160,14 @@ private:
 	u32 m_compile_threads = Pcsx2Config::GSOptions::DEFAULT_HYBRID_SHADER_CACHE_THREADS;
 	u32 m_compile_async_latency_ms = Pcsx2Config::GSOptions::DEFAULT_HYBRID_SHADER_CACHE_LATENCY_MS;
 
-	std::unique_ptr<D3D12CompilerAsync> m_compiler_async;
-	std::vector<CompileJob> m_compile_job_buffer;
-	static constexpr size_t MAX_BUFFERED_COMPILE_JOBS = 16;
+	std::unique_ptr<D3D12ShaderCompilerAsync> m_compiler_async;
+	std::deque<D3D12CompileJob> m_compile_jobs_async;
 
 	struct QueuedPipelineJob
 	{
-		ShaderJob vs_job; // Vertex shader job needed to start.
-		ShaderJob ps_job; // Pixel shader job needed to start.
-		PipelineJob pipeline_job; // Pipeline jobs that needs to start.
+		D3D12ShaderJob vs_job; // Vertex shader job needed to start.
+		D3D12ShaderJob ps_job; // Pixel shader job needed to start.
+		D3D12PipelineJob pipeline_job; // Pipeline jobs that needs to start.
 	};
 
 	// Pipelines waiting for vertex/pixel shaders to finish compiling.
@@ -177,5 +176,5 @@ private:
 	void ProcessAsyncCompileJobs(); // Process jobs that have compiled.
 
 	// Start pipeline jobs that are waiting on the given vertex and/or pixel shader.
-	void StartQueuedPipelineJobs(const ShaderJob& shader_job);
+	void StartQueuedPipelineJobs(const D3D12ShaderJob& shader_job);
 };

@@ -2374,12 +2374,12 @@ bool GSDevice12::CompileUberTFXPipelines()
 
 						UpdateHWPipelineSelector(config, false);
 
-						AsyncReturn async(COMPILE_ASYNC);
+						GSAsyncReturn async(COMPILE_ASYNC);
 						if (stage == 0)
 						{
 							// Start compilation
 							const ID3D12PipelineState* pipeline = GetTFXPipeline(m_pipeline_selector, true, &async);
-							if (!pipeline && !AsyncReturn::IsAsync(&async))
+							if (!pipeline && !GSAsyncReturn::IsAsync(&async))
 								return false; // failed
 						}
 						else
@@ -3251,16 +3251,16 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
-GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, AsyncReturn* async)
+GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, GSAsyncReturn* async)
 {
-	ShaderJob shader{};
+	D3D12ShaderJob shader_job{};
 
 	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
 	{
-		shader.blob = it->second.get();
-		return shader;
+		shader_job.blob = it->second.get();
+		return shader_job;
 	}
 
 	ShaderMacro sm;
@@ -3291,31 +3291,31 @@ GSDevice12::ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None || uber) ? "vs_main_expand" : "vs_main";
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber, async));
-	if (!vs && AsyncReturn::IsAsync(async))
+	if (!vs && GSAsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader.shader_code = source;
-		shader.entry_point = entry_point;
-		shader.macros = sm;
-		shader.type = D3D::ShaderCacheEntryType::VertexShader;
-		shader.uber = uber;
-		shader.hash = sel.key;
-		return shader;
+		shader_job.shader_code = source;
+		shader_job.entry_point = entry_point;
+		shader_job.macros = sm;
+		shader_job.type = D3D::ShaderCacheEntryType::VertexShader;
+		shader_job.uber = uber;
+		shader_job.hash = sel.key;
+		return shader_job;
 	}
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
-	shader.blob = it->second.get();
-	return shader;
+	shader_job.blob = it->second.get();
+	return shader_job;
 }
 
-GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, AsyncReturn* async)
+GSDevice12::D3D12ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, GSAsyncReturn* async)
 {
-	ShaderJob shader{};
+	D3D12ShaderJob shader_job{};
 
 	auto it = m_tfx_pixel_shaders.find(sel);
 	if (it != m_tfx_pixel_shaders.end())
 	{
-		shader.blob = it->second.get();
-		return shader;
+		shader_job.blob = it->second.get();
+		return shader_job;
 	}
 
 	ShaderMacro sm;
@@ -3409,26 +3409,26 @@ GSDevice12::ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector s
 	// FIXME: Make the Uber/Normal sources the same.
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", uber, async));
-	if (!ps && AsyncReturn::IsAsync(async))
+	if (!ps && GSAsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader.entry_point = "ps_main";
-		shader.macros = sm;
-		shader.shader_code = source;
-		shader.type = ShaderEntryType::PixelShader;
-		shader.uber = uber;
-		shader.hash = GSHWDrawConfig::PSSelectorHash()(sel);
-		return shader;
+		shader_job.entry_point = "ps_main";
+		shader_job.macros = sm;
+		shader_job.shader_code = source;
+		shader_job.type = ShaderEntryType::PixelShader;
+		shader_job.uber = uber;
+		shader_job.hash = GSHWDrawConfig::PSSelectorHash()(sel);
+		return shader_job;
 	}
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
-	shader.blob = it->second.get();
-	return shader;
+	shader_job.blob = it->second.get();
+	return shader_job;
 }
 
 GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
-	const PipelineSelector& p, bool uber, AsyncReturn* async)
+	const PipelineSelector& p, bool uber, GSAsyncReturn* async)
 {
-	AsyncReturn::ClearAsync(async);
+	GSAsyncReturn::ClearAsync(async);
 
 	static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY_TYPE, 3> topology_lookup = {{
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT, // Point
@@ -3445,14 +3445,14 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 		pps.no_color1 = true;
 	}
 
-	AsyncReturn vs_async(AsyncReturn::Enabled(async));
-	AsyncReturn ps_async(AsyncReturn::Enabled(async));
+	GSAsyncReturn vs_async(GSAsyncReturn::Enabled(async));
+	GSAsyncReturn ps_async(GSAsyncReturn::Enabled(async));
 
-	ShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
-	ShaderJob ps = GetTFXPixelShader(pps, uber, &ps_async);
+	D3D12ShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
+	D3D12ShaderJob ps = GetTFXPixelShader(pps, uber, &ps_async);
 
-	const bool vs_failed = !vs.blob && !AsyncReturn::IsAsync(&vs_async);
-	const bool ps_failed = !ps.blob && !AsyncReturn::IsAsync(&ps_async);
+	const bool vs_failed = !vs.blob && !GSAsyncReturn::IsAsync(&vs_async);
+	const bool ps_failed = !ps.blob && !GSAsyncReturn::IsAsync(&ps_async);
 	if (vs_failed || ps_failed)
 		return nullptr; // Failed
 
@@ -3554,17 +3554,17 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 	}
 
 	// Handle async compilation if requested.
-	if (AsyncReturn::Enabled(async))
+	if (GSAsyncReturn::Enabled(async))
 	{
 		// Check if the pipeline has finished compiling from a previous submission.
 		if (vs.blob && ps.blob)
 		{
-			AsyncReturn pipeline_async(true);
+			GSAsyncReturn pipeline_async(true);
 			ComPtr<ID3D12PipelineState> pipeline = m_shader_cache.GetPipelineState(
 				m_device.get(), gpb.GetDesc(), uber, &pipeline_async);
 
 			const bool pipeline_found = pipeline != nullptr;
-			const bool pipeline_failed = pipeline == nullptr && !AsyncReturn::IsAsync(&pipeline_async);
+			const bool pipeline_failed = pipeline == nullptr && !GSAsyncReturn::IsAsync(&pipeline_async);
 			if (pipeline_found)
 			{
 				D3D12::SetObjectName(
@@ -3577,7 +3577,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 				return nullptr;
 		}
 
-		AsyncReturn::SetAsync(async);
+		GSAsyncReturn::SetAsync(async);
 		if (!m_tfx_pipelines_async_submitted.contains(p)) // Don't resubmit the same pipeline twice.
 		{
 			// Submit pipeline async compilation.
@@ -3588,7 +3588,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 			m_tfx_pixel_shaders_async_submitted.insert(p.ps);
 			m_tfx_pipelines_async_submitted.insert(p);
 
-			D3D12ShaderCache::PipelineJob pipeline_job;
+			D3D12ShaderCache::D3D12PipelineJob pipeline_job;
 			pipeline_job.device = m_device.get();
 			pipeline_job.vs_blob = vs.blob;
 			pipeline_job.ps_blob = ps.blob;
@@ -3614,7 +3614,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 	return pipeline;
 }
 
-const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, AsyncReturn* async)
+const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, GSAsyncReturn* async)
 {
 	auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
@@ -3622,7 +3622,7 @@ const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p,
 
 	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p, uber, async));
 	
-	if (!pipeline && AsyncReturn::IsAsync(async))
+	if (!pipeline && GSAsyncReturn::IsAsync(async))
 		return nullptr; // Async compilation in progress.
 	
 	it = m_tfx_pipelines.emplace(p, std::move(pipeline)).first;
@@ -4581,7 +4581,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 	UpdateHWPipelineSelector(config);
 	if (!m_tfx_pipelines.contains(m_pipeline_selector))
 	{
-		AsyncReturn async(true);
+		GSAsyncReturn async(true);
 		GetTFXPipeline(m_pipeline_selector, false, &async);
 		compiling_async = true;
 	}
@@ -4595,7 +4595,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 		m_pipeline_selector.bs = config.blend;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			AsyncReturn async(true);
+			GSAsyncReturn async(true);
 			GetTFXPipeline(m_pipeline_selector, false, &async);
 			compiling_async = true;
 		}
@@ -4610,7 +4610,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 		m_pipeline_selector.ps.dither = config.blend_multi_pass.dither;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			AsyncReturn async(true);
+			GSAsyncReturn async(true);
 			GetTFXPipeline(m_pipeline_selector, false, &async);
 			compiling_async = true;
 		}

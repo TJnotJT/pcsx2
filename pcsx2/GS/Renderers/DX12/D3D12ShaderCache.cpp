@@ -419,18 +419,18 @@ D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetPipelineCacheKey(const D3D1
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType type, std::string_view shader_code,
 	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */, bool uber,
-	AsyncReturn* async /* = nullptr */)
+	GSAsyncReturn* async /* = nullptr */)
 {
-	AsyncReturn::ClearAsync(async);
+	GSAsyncReturn::ClearAsync(async);
 
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
 	auto iter = GetShaderIndex(uber).find(key);
 	if (iter == GetShaderIndex(uber).end())
 	{
-		if (AsyncReturn::Enabled(async))
+		if (GSAsyncReturn::Enabled(async))
 		{
 			// Does not actually start async compilation. This is done higher up the call chain.
-			AsyncReturn::SetAsync(async);
+			GSAsyncReturn::SetAsync(async);
 			return nullptr;
 		}
 
@@ -450,21 +450,21 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType typ
 }
 
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState(
-	ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, bool uber, AsyncReturn* async)
+	ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, bool uber, GSAsyncReturn* async)
 {
 	ProcessAsyncCompileJobs();
 
-	AsyncReturn::ClearAsync(async);
+	GSAsyncReturn::ClearAsync(async);
 
 	const auto key = GetPipelineCacheKey(desc);
 
 	auto iter = GetPipelineIndex(uber).find(key);
 	if (iter == GetPipelineIndex(uber).end())
 	{
-		if (AsyncReturn::Enabled(async))
+		if (GSAsyncReturn::Enabled(async))
 		{
 			// Don't start async compilation here yet, just flag that the pipeline is not yet compiled.
-			AsyncReturn::SetAsync(async);
+			GSAsyncReturn::SetAsync(async);
 			return nullptr;
 		}
 			
@@ -704,10 +704,11 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 }
 
 void D3D12ShaderCache::StartPipelineCompilationAsync(
-	ShaderJob vs_job, bool start_vs, ShaderJob ps_job, bool start_ps, PipelineJob pipeline_job)
+	D3D12ShaderJob vs_job, bool start_vs, D3D12ShaderJob ps_job, bool start_ps, D3D12PipelineJob pipeline_job)
 {
 	if (!m_compiler_async)
-		m_compiler_async = std::make_unique<D3D12CompilerAsync>(m_shader_model, m_debug, m_compile_threads);
+		m_compiler_async = std::make_unique<D3D12ShaderCompilerAsync>(
+			m_compile_threads, m_compile_async_latency_ms, m_shader_model, m_debug);
 
 	// If the job queue is full we may drop jobs since we don't allow resubmitting the same pipeline
 	// for compilation twice.
@@ -717,27 +718,24 @@ void D3D12ShaderCache::StartPipelineCompilationAsync(
 	if (start_vs)
 	{
 		Console.WriteLn("Async vertex shader compile: started hash=0x%016llX uber=%d", vs_job.hash, vs_job.uber);
-		CompileJob compile_job;
-		compile_job.job = vs_job;
-		m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+		m_compile_jobs_async.emplace_back(vs_job);
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
 	}
 
 	// PS
 	if (start_ps)
 	{
 		Console.WriteLn("Async pixel shader compile: started hash=0x%016llX uber=%d", ps_job.hash, ps_job.uber);
-		CompileJob compile_job;
-		compile_job.job = ps_job;
-		m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+		m_compile_jobs_async.emplace_back(ps_job);
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
 	}
 
 	// Pipeline
 	if (pipeline_job.vs_blob && pipeline_job.ps_blob)
 	{
 		Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job.hash, pipeline_job.uber);
-		CompileJob compile_job;
-		compile_job.job = std::move(pipeline_job);
-		m_compiler_async->StartCompileJobAsync(std::move(compile_job));
+		m_compile_jobs_async.emplace_back(std::move(pipeline_job));
+		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
 	}
 	else
 	{
@@ -753,29 +751,28 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 {
 	if (m_compiler_async)
 	{
-		if (m_compile_job_buffer.empty())
-			m_compile_job_buffer.resize(MAX_BUFFERED_COMPILE_JOBS);
-
-		const u32 n_jobs = m_compiler_async->GetCompileResultsAsync(
-			m_compile_job_buffer.data(), MAX_BUFFERED_COMPILE_JOBS);
+		const u32 n_jobs = m_compiler_async->GetCompletedJobs();
 
 		if (n_jobs > 0)
 			Console.WriteLn("Async pipeline compile: processing %d jobs", n_jobs);
 
 		for (u32 i = 0; i < n_jobs; i++)
 		{
-			CompileJob& compile_job = m_compile_job_buffer[i];
+			D3D12CompileJob& compile_job = m_compile_jobs_async.front();
 
-			if (std::holds_alternative<ShaderJob>(compile_job.job))
+			// The async compiler completes jobs in FIFO order so the first n_jobs entries must be done.
+			pxAssert(compile_job.done);
+
+			if (std::holds_alternative<D3D12ShaderJob>(compile_job.job))
 			{
-				ShaderJob& shader_job = std::get<ShaderJob>(compile_job.job);
+				D3D12ShaderJob& shader_job = std::get<D3D12ShaderJob>(compile_job.job);
 				if (shader_job.type == EntryType::VertexShader)
 				{
 					AddShaderBlob(EntryType::VertexShader, shader_job.shader_code,
 						shader_job.macros.GetPtr(), shader_job.entry_point.c_str(),
 						shader_job.blob, shader_job.uber, true);
 					Console.WriteLn("Async vertex shader compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-						shader_job.hash, shader_job.uber, compile_job.time_ms, compile_job.thread_id);
+						shader_job.hash, shader_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
 				}
 				else if (shader_job.type == D3D::ShaderCacheEntryType::PixelShader)
 				{
@@ -783,7 +780,7 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 						shader_job.macros.GetPtr(), shader_job.entry_point.c_str(),
 						shader_job.blob, shader_job.uber, true);
 					Console.WriteLn("Async pixel shader compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-						shader_job.hash, shader_job.uber, compile_job.time_ms, compile_job.thread_id);
+						shader_job.hash, shader_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
 				}
 				else
 				{
@@ -793,23 +790,25 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 				// Notify any pipelines waiting on this shader.
 				StartQueuedPipelineJobs(shader_job);
 			}
-			else if (std::holds_alternative<PipelineJob>(compile_job.job))
+			else if (std::holds_alternative<D3D12PipelineJob>(compile_job.job))
 			{
-				PipelineJob& pipeline_job = std::get<PipelineJob>(compile_job.job);
+				D3D12PipelineJob& pipeline_job = std::get<D3D12PipelineJob>(compile_job.job);
 				const auto pipeline_key = GetPipelineCacheKey(pipeline_job.gpb.GetDesc());
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-					pipeline_job.hash, pipeline_job.uber, compile_job.time_ms, compile_job.thread_id);
+					pipeline_job.hash, pipeline_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
 				AddPipelineToBlob(pipeline_key, pipeline_job.pipeline.get(), pipeline_job.uber, true);
 			}
 			else
 			{
 				pxFailRel("Unknown job type");
 			}
+
+			m_compile_jobs_async.pop_front();
 		}
 	}
 }
 
-void D3D12ShaderCache::StartQueuedPipelineJobs(const ShaderJob& shader_job)
+void D3D12ShaderCache::StartQueuedPipelineJobs(const D3D12ShaderJob& shader_job)
 {
 	for (auto it = m_queued_pipeline_jobs.begin(); it != m_queued_pipeline_jobs.end(); )
 	{
