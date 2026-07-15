@@ -124,6 +124,9 @@ constant bool NEEDS_DEPTH_FOR_AFAIL = PS_AFAIL == AFAIL::FB_ONLY || PS_AFAIL == 
 constant bool NEEDS_DEPTH_FOR_ZTST  = PS_ZTST == ZTST::GEQUAL || PS_ZTST == ZTST::GREATER;
 constant bool NEEDS_DEPTH_FOR_AA1   = PS_AA1 == AA1::TRIANGLE_SW_Z;
 constant bool SW_DEPTH = NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1;
+constant bool DISCARD_COLOR = PS_AFAIL == AFAIL::ZB_ONLY;
+constant bool DISCARD_DEPTH = PS_AA1 == AA1::TRIANGLE_SW_Z || PS_AFAIL == AFAIL::RGB_ONLY_SW_Z || PS_AFAIL == AFAIL::FB_ONLY;
+constant bool DISCARD_FULL = NEEDS_DEPTH_FOR_ZTST || (PS_SCANMSK & 2) || PS_AFAIL == AFAIL::KEEP || PS_DATE >= 5 || PS_DATE == 3;
 
 constant bool ROV_COLOR_CONTINUOUS = (PS_ROV_COLOR && !PS_ROV_ONESHOT);
 constant bool ROV_DEPTH_CONTINUOUS = (PS_ROV_DEPTH != ROV_DEPTH::NONE && !PS_ROV_ONESHOT);
@@ -1797,6 +1800,15 @@ fragment MainPSOut ps_main(
 		else
 			rt_rov.write(out.c0, coord);
 	}
+	if (PS_ROV_ONESHOT)
+	{
+		if (DISCARD_FULL && main.color_discarded && main.depth_discarded)
+			discard_fragment();
+		else if (DISCARD_COLOR && main.color_discarded)
+			out.c0 = main.current_color;
+		else if (DISCARD_DEPTH && main.depth_discarded)
+			out.depth = main.current_depth;
+	}
 	return out;
 }
 
@@ -1837,7 +1849,11 @@ fragment MainPSOutEFT ps_main_rov_eft(
 	else
 		main.current_color = rt_rov.read(coord);
 	MainResult out = main.ps_main();
-	if (!main.color_discarded)
+	if (main.color_discarded)
+	{
+		out.c0 = main.current_color;
+	}
+	else
 	{
 		if (!PS_FBMASK)
 			out.c0 = select(out.c0, main.current_color, cb.fbmask == 0xff);
