@@ -1547,6 +1547,9 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 	Console.WriteLnFmt("D3D12: Rasterizer Ordered Views: {}", m_features.rov ? "Supported" : "Not Supported");
 
 	Console.WriteLnFmt("D3D12: Tight Alignment: {}", m_allocator->IsTightAlignmentSupported() ? "Supported" : "Not Supported");
+
+	m_features.uber_shader = m_features.vs_expand;
+
 	return true;
 }
 
@@ -2346,6 +2349,174 @@ bool GSDevice12::CompileImGuiPipeline()
 	return true;
 }
 
+namespace DX12UberShader
+{
+	struct UberVSSelector
+	{
+		u8 iip; // 1 bit
+	};
+
+	struct UberPSSelector
+	{
+		u8 no_color; // 1 bit
+		u8 no_color1; // 1 bit
+		u8 rov_color; // 1 bit
+		u8 rov_depth; // 2 bits
+		u8 uber_zwrite; // 1 bit
+		u8 uber_sw_depth; // 1 bit
+		u8 uber_date_init; // 1 bit
+		u8 iip; // 1 bit
+	};
+
+	static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 512;
+	static constexpr u32 NUM_CANDIDATE_UBER_VS_SELECTORS = 2;
+
+	static constexpr UberVSSelector GetUberVSSelector(u32 n)
+	{
+		UberVSSelector sel;
+		sel.iip = (n & 1);
+		return sel;
+	}
+
+	static constexpr UberPSSelector GetUberPSSelector(u32 n)
+	{
+		UberPSSelector sel;
+		sel.no_color = (n >> 0) & 1;
+		sel.no_color1 = (n >> 1) & 1;
+		sel.rov_color = (n >> 2) & 1;
+		sel.rov_depth = (n >> 3) & 3;
+		sel.uber_zwrite = (n >> 5) & 1;
+		sel.uber_sw_depth = (n >> 6) & 1;
+		sel.uber_date_init = (n >> 7) & 1;
+		sel.iip = (n >> 8) & 1;
+		return sel;
+	}
+
+	static constexpr bool IsUberVSSelectorValid(u32 n)
+	{
+		UberVSSelector sel = GetUberVSSelector(n);
+		return sel.iip != 0; // Always use interpolated color (flat shading is handled specially).
+	}
+
+	static constexpr bool IsUberPSSelectorValid(u32 n)
+	{
+		const UberPSSelector sel = GetUberPSSelector(n);
+		return
+			// Make sure ROV depth is a valid enum.
+			(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
+
+			// Don't allow depth ROV without some form of depth processing.
+			(!sel.rov_depth || sel.uber_zwrite || sel.uber_sw_depth) &&
+
+			// Don't allow depth ROV write without Z write.
+			(sel.rov_depth != static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE) || sel.uber_zwrite) &&
+
+			(!sel.rov_depth || sel.no_color || sel.rov_color) && // Don't allow depth ROV with non-ROV color output.
+			(!sel.rov_color || !sel.no_color) && // Don't allow color ROV without color output.
+			sel.no_color1 && // Don't allow dual source blend.
+			!sel.uber_date_init && // Don't allow DATE init.
+			sel.iip; // Always use interpolated color (flat shading is handled specially).
+	}
+
+	static constexpr u32 GetNumValidUberPSSelectors()
+	{
+		u32 valid_count = 0;
+		for (u32 i = 0; i < NUM_CANDIDATE_UBER_PS_SELECTORS; i++)
+			valid_count += static_cast<u32>(IsUberPSSelectorValid(i));
+		return valid_count;
+	}
+
+	static constexpr u32 GetNumValidUberVSSelectors()
+	{
+		u32 valid_count = 0;
+		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
+			valid_count += static_cast<u32>(IsUberVSSelectorValid(i));
+		return valid_count;
+	}
+
+	static GSHWDrawConfig::PSSelector GetFullUberPSSelector(u32 n)
+	{
+		UberPSSelector uber_sel = GetUberPSSelector(n);
+
+		GSHWDrawConfig::PSSelector sel{};
+		sel.no_color = uber_sel.no_color;
+		sel.no_color1 = uber_sel.no_color1;
+		sel.rov_color = uber_sel.rov_color;
+		sel.rov_depth = static_cast<GSHWDrawConfig::PS_ROV_DEPTH>(uber_sel.rov_depth);
+		sel.uber_enable = true;
+		sel.uber_zwrite = uber_sel.uber_zwrite;
+		sel.uber_sw_depth = uber_sel.uber_sw_depth;
+		sel.uber_date_init = uber_sel.uber_date_init;
+		sel.iip = uber_sel.iip;
+
+		return sel;
+	}
+
+	static GSHWDrawConfig::VSSelector GetFullUberVSSelector(u32 n)
+	{
+		UberVSSelector uber_sel = GetUberVSSelector(n);
+
+		GSHWDrawConfig::VSSelector sel{};
+		sel.uber_enable = true;
+		sel.iip = uber_sel.iip;
+
+		return sel;
+	}
+
+	static constexpr u32 NUM_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
+	static constexpr u32 NUM_UBER_VS_SELECTORS = GetNumValidUberVSSelectors();
+
+	static std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> GetUberVSSelectors()
+	{
+		std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> selectors;
+		u32 valid_i = 0;
+		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
+		{
+			if (IsUberVSSelectorValid(i))
+				selectors[valid_i++] = GetFullUberVSSelector(i);
+		}
+		return selectors;
+	}
+
+	static std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> GetUberPSSelectors()
+	{
+		std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> selectors;
+		u32 valid_i = 0;
+		for (u32 i = 0; i < NUM_CANDIDATE_UBER_PS_SELECTORS; i++)
+		{
+			if (IsUberPSSelectorValid(i))
+				selectors[valid_i++] = GetFullUberPSSelector(i);
+		}
+		return selectors;
+	}
+
+	static const std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> uber_vs_selectors = GetUberVSSelectors();
+	static const std::array<GSHWDrawConfig::PSSelector, NUM_UBER_PS_SELECTORS> uber_ps_selectors = GetUberPSSelectors();
+
+	static void UberizeVSSelector(GSHWDrawConfig::VSSelector& sel)
+	{
+		sel.uber_enable = true;
+		sel.iip = true;
+
+		// Clear dynamic state bits from the selector.
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
+			sel.ClearField(dynamic_define.index);
+	}
+
+	static void UberizePSSelector(GSHWDrawConfig::PSSelector& sel)
+	{
+		sel.uber_enable = true;
+		sel.uber_date_init = (sel.date == 1 || sel.date == 2);
+		sel.uber_sw_depth = sel.IsFeedbackLoopDepth();
+		sel.uber_zwrite = sel.HasDepthOutput();
+		sel.iip = true;
+
+		// Clear dynamic state bits from the selector.
+		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
+			sel.ClearField(dynamic_define.index);
+	}
+}
+
 bool GSDevice12::CompileUberTFXPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
@@ -2359,9 +2530,9 @@ bool GSDevice12::CompileUberTFXPipelines()
 		{
 			size_t num_pipelines = 0;
 			GSHWDrawConfig config{};
-			for (const GSHWDrawConfig::PSSelector& ps_sel : GSHWDrawConfig::GetUberPSSelectors())
+			for (const GSHWDrawConfig::PSSelector& ps_sel : DX12UberShader::uber_ps_selectors)
 			{
-				for (const GSHWDrawConfig::VSSelector& vs_sel : GSHWDrawConfig::GetUberVSSelectors())
+				for (const GSHWDrawConfig::VSSelector& vs_sel : DX12UberShader::uber_vs_selectors)
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
@@ -3255,7 +3426,6 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSele
 {
 	D3D12ShaderJob shader_job{};
 
-	// Do the lookup after uber shader has a chance to clear dynamic bits from selector.
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
 	{
@@ -3289,8 +3459,11 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSele
 	}
 
 	const char* entry_point = (sel.expand != GSHWDrawConfig::VSExpand::None || uber) ? "vs_main_expand" : "vs_main";
+	
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+	
 	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber, async));
+
 	if (!vs && GSAsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
@@ -3302,8 +3475,10 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSele
 		shader_job.hash = sel.key;
 		return shader_job;
 	}
+	
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
 	shader_job.blob = it->second.get();
+	
 	return shader_job;
 }
 
@@ -3408,7 +3583,9 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelec
 
 	// FIXME: Make the Uber/Normal sources the same.
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
+
 	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", uber, async));
+	
 	if (!ps && GSAsyncReturn::IsAsync(async))
 	{
 		// Shader does not exist in cache yet. Return info needed to compile it async.
@@ -3420,8 +3597,11 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelec
 		shader_job.hash = GSHWDrawConfig::PSSelectorHash()(sel);
 		return shader_job;
 	}
+	
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
+	
 	shader_job.blob = it->second.get();
+	
 	return shader_job;
 }
 
@@ -3559,6 +3739,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 		// Check if the pipeline has finished compiling from a previous submission.
 		if (vs.blob && ps.blob)
 		{
+			// FIXME: Handle this the VK way of using UIDs.
 			GSAsyncReturn pipeline_async(true);
 			ComPtr<ID3D12PipelineState> pipeline = m_shader_cache.GetPipelineState(
 				m_device.get(), gpb.GetDesc(), uber, &pipeline_async);
@@ -5070,6 +5251,7 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
 	m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	m_pipeline_selector.topology = static_cast<u32>(config.topology);
+	
 	const bool uber_rt = config.uber_shader && !config.ps.no_color;
 	const bool uber_ds = config.uber_shader && (config.ps.uber_zwrite || config.ps.uber_sw_depth);
 	const bool uber_ds_as_rt = config.uber_shader && config.ps.uber_sw_depth;
@@ -5087,8 +5269,8 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 
 		if (uberize_vs_ps)
 		{
-			GSHWDrawConfig::UberizeVSSelector(m_pipeline_selector.vs);
-			GSHWDrawConfig::UberizePSSelector(m_pipeline_selector.ps);
+			DX12UberShader::UberizeVSSelector(m_pipeline_selector.vs);
+			DX12UberShader::UberizePSSelector(m_pipeline_selector.ps);
 		}
 	}
 }

@@ -568,8 +568,8 @@ public:
 	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
-
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
+
 	void RenderHW(GSHWDrawConfig& config) override;
 	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,

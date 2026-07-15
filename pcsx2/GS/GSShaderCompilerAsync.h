@@ -16,7 +16,7 @@ public:
 		u32 thread_id = UINT_MAX; // Thread ID for debugging.
 	};
 
-	GSShaderCompilerAsync(u32 num_threads = 1, u32 check_latency_ms = 20);
+	GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms);
 	virtual ~GSShaderCompilerAsync();
 
 	bool IsJobQueueFull();
@@ -24,7 +24,10 @@ public:
 	void StartCompileJobAsync(GSCompileJob* job);
 
 protected:
-	virtual void DoCompileJobSync(GSCompileJob* job) = 0;
+	virtual void DoCompileJobSync(GSCompileJob* job, u32 thread_id) = 0;
+	virtual void OnWorkersStarted() {}
+
+	size_t GetNumThreads() { return m_worker_threads.size(); }
 
 private:
 	void StopWorkerThreads();
@@ -41,7 +44,6 @@ private:
 	u32 m_acquired_jobs = 0; // Count from acquire to tail
 
 	Common::Timer m_check_timer;
-	bool m_check_timer_init = false;
 	u32 m_check_latency_ms = 20;
 
 	std::vector<std::thread> m_worker_threads;
@@ -82,4 +84,4 @@ public:
 	{
 		return async && async->enabled && async->async_return;
 	}
-}
+};

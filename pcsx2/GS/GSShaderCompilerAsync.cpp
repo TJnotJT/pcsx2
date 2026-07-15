@@ -53,10 +53,11 @@ void GSShaderCompilerAsync::StartCompileJobAsync(GSCompileJob* job)
 		u32 thread_id = 0;
 		for (std::thread& t : m_worker_threads)
 			t = std::thread([this, id = thread_id++]() { WorkerThreadFunc(id); });
-	}
 
-	if (!m_check_timer_init)
+		OnWorkersStarted();
+
 		m_check_timer.Reset();
+	}
 
 	std::lock_guard lock(m_mutex);
 
@@ -96,7 +97,7 @@ void GSShaderCompilerAsync::WorkerThreadFunc(u32 thread_id)
 		}
 
 		// Compile the job.
-		DoCompileJobSync(m_job_queue[curr]);
+		DoCompileJobSync(m_job_queue[curr], thread_id);
 		m_job_queue[curr]->thread_id = thread_id; // For debugging
 
 		// Release the completed job.

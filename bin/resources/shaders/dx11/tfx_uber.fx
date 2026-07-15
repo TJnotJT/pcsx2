@@ -71,6 +71,10 @@
 #define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1 || PS_ZMASK)
 #define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH)
 #define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
+#else
+#define SW_DEPTH UBER_SW_DEPTH
+#define ZWRITE UBER_ZWRITE
+#define DATE_INIT UBER_DATE_INIT
 #endif
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
@@ -96,14 +100,10 @@ struct VS_OUTPUT
 	float4 t : TEXCOORD0;
 	float4 ti : TEXCOORD2;
 
-	#if UBER_SHADER
+	#if VS_IIP != 0
 		float4 c : COLOR0;
 	#else
-		#if VS_IIP != 0
-			float4 c : COLOR0;
-		#else
-			nointerpolation float4 c : COLOR0;
-		#endif
+		nointerpolation float4 c : COLOR0;
 	#endif
 
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
@@ -115,14 +115,10 @@ struct PS_INPUT
 	noperspective centroid float4 p : SV_Position;
 	float4 t : TEXCOORD0;
 	float4 ti : TEXCOORD2;
-	#if UBER_SHADER
+	#if PS_IIP != 0
 		float4 c : COLOR0;
 	#else
-		#if PS_IIP != 0
-			float4 c : COLOR0;
-		#else
-			nointerpolation float4 c : COLOR0;
-		#endif
+		nointerpolation float4 c : COLOR0;
 	#endif
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;

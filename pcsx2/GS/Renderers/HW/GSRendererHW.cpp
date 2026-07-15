@@ -7917,6 +7917,9 @@ void GSRendererHW::ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCa
 void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds,
 	GSTextureCache::Source* tex)
 {
+	if (!g_gs_device->Features().uber_shader)
+		return;
+
 	if ((GSConfig.ShaderCacheType == GSShaderCacheType::Uber) || // Always use uber shader.
 		(GSConfig.ShaderCacheType == GSShaderCacheType::Hybrid && // Only use uber shader if normal shader is still compiling.
 			g_gs_device->StartPipelineCompilationAsync(m_conf)))

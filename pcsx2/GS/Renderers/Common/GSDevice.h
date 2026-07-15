@@ -735,15 +735,17 @@ struct HWBlend
 	EXPAND(63, false, u32, rov_color, 1, "PS_ROV_COLOR") \
 	EXPAND(64, false, PS_ROV_DEPTH, rov_depth, 2, "PS_ROV_DEPTH") \
 	EXPAND(65, false, u32, uber_enable, 1, "UBER_SHADER") \
-	EXPAND(66, false, u32, uber_zwrite, 1, "ZWRITE") \
-	EXPAND(67, false, u32, uber_sw_depth, 1, "SW_DEPTH") \
-	EXPAND(68, false, u32, uber_date_init, 1, "DATE_INIT")
+	EXPAND(66, false, u32, uber_zwrite, 1, "UBER_ZWRITE") \
+	EXPAND(67, false, u32, uber_sw_depth, 1, "UBER_SW_DEPTH") \
+	EXPAND(68, false, u32, uber_date_init, 1, "UBER_DATE_INIT") \
+	EXPAND(69, false, u32, uber_feedback_rt, 1, "UBER_FEEDBACK_RT") \
+	EXPAND(70, false, u32, uber_feedback_depth, 1, "UBER_FEEDBACK_DEPTH")
 
 #define VSSEL_FIELDS_EXPAND \
 	EXPAND(0, true, u8, fst, 1, "VS_FST") \
 	EXPAND(1, true, u8, tme, 1, "VS_TME") \
 	EXPAND(2, false, u8, iip, 1, "VS_IIP") \
-	EXPAND(3, true, u8, point_size, 1, "VS_POINT_SIZE") \
+	EXPAND(3, false, u8, point_size, 1, "VS_POINT_SIZE") \
 	EXPAND(4, true, VSExpand, expand, 3, "VS_EXPAND") \
 	EXPAND(5, false, u8, uber_enable, 1, "UBER_SHADER")
 
@@ -850,7 +852,7 @@ struct alignas(16) GSHWDrawConfig
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
 			const bool afail_needs_rt = afail == PS_AFAIL::ZB_ONLY || afail == PS_AFAIL::RGB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
-			return tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || afail_needs_rt || cmask;
+			return tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || afail_needs_rt || cmask || uber_feedback_rt;
 		}
 
 		__fi bool IsFeedbackLoopDepth() const
@@ -858,7 +860,7 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zmask;
+			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zmask || uber_feedback_depth;
 		}
 
 		__fi bool HasShaderDiscard() const
@@ -1390,23 +1392,17 @@ struct alignas(16) GSHWDrawConfig
 		#undef EXPAND
 	};
 
-	static constexpr std::array<PipelineSelectorFieldDesc, 69> ps_selector_fields = {
+	static constexpr std::array<PipelineSelectorFieldDesc, 71> ps_selector_fields = {
 		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
 				PipelineSelectorFieldDesc{ INDEX, DYNAMIC, #NAME, WIDTH, SHADER_NAME },
 			PSSEL_FIELDS_EXPAND
 		#undef EXPAND
 	};
 
-	static void UberizeVSSelector(VSSelector& sel);
-	static void UberizePSSelector(PSSelector& sel);
-
 	static std::span<const ShaderDefine> GetUberShaderVSSelectorDefines();
 	static std::span<const ShaderDefine> GetUberShaderPSSelectorDefines();
 
 	static void GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out);
-
-	static std::span<const VSSelector> GetUberVSSelectors();
-	static std::span<const PSSelector> GetUberPSSelectors();
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)

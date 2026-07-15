@@ -2,11 +2,9 @@
 
 bool D3D12ShaderCompilerAsync::D3D12ShaderJob::Matches(const D3D12ShaderJob& other) const
 {
-	bool matches =
-		type == other.type &&
-		shader_code == other.shader_code &&
-		macros == other.macros &&
-		entry_point == other.entry_point;
+	const bool matches =
+		type == other.type && shader_code == other.shader_code &&
+		macros == other.macros && entry_point == other.entry_point;
 
 	// Sanity check, make sure debugging fields are same also.
 	pxAssert(!matches || ((hash == other.hash) && (uber == other.uber)));
@@ -22,7 +20,7 @@ D3D12ShaderCompilerAsync::D3D12ShaderCompilerAsync(
 {
 }
 
-void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job_)
+void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job_, u32 thread_id)
 {
 	D3D12CompileJob* job = static_cast<D3D12CompileJob*>(job_);
 
@@ -47,8 +45,7 @@ void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job_)
 	else if (std::holds_alternative<D3D12PipelineJob>(job->job))
 	{
 		D3D12PipelineJob& pipeline_job = std::get<D3D12PipelineJob>(job->job);
-		pxAssert(pipeline_job.gpb.GetDesc().VS.pShaderBytecode &&
-			pipeline_job.gpb.GetDesc().PS.pShaderBytecode);
+		pxAssert(pipeline_job.gpb.HasVertexShader() && pipeline_job.gpb.HasPixelShader());
 		pipeline_job.pipeline = pipeline_job.gpb.Create(pipeline_job.device, false);
 	}
 	else

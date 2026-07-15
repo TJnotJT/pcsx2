@@ -6,7 +6,6 @@
 #include "common/RedtapeWindows.h"
 #include "common/RedtapeWilCom.h"
 
-#include "Config.h"
 #include "GS/GS.h"
 
 #include <d3d11_1.h>

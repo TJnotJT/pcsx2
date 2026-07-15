@@ -237,12 +237,14 @@
     <ClCompile Include="GS\Renderers\Vulkan\VKBuilders.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\Vulkan\VKDynamicShaderc.cpp" />
     <ClCompile Include="GS\Renderers\Vulkan\VKLoader.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="GS\Renderers\Vulkan\VKShaderCache.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="GS\Renderers\Vulkan\VKShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\Renderers\Vulkan\VKStreamBuffer.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
@@ -688,6 +690,7 @@
     <ClInclude Include="GS\Renderers\Vulkan\VKBuilders.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="GS\Renderers\Vulkan\VKDynamicShaderc.h" />
     <ClInclude Include="GS\Renderers\Vulkan\VKEntryPoints.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
@@ -697,6 +700,7 @@
     <ClInclude Include="GS\Renderers\Vulkan\VKShaderCache.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="GS\Renderers\Vulkan\VKShaderCompilerAsync.h" />
     <ClInclude Include="GS\Renderers\Vulkan\VKStreamBuffer.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClInclude>

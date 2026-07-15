@@ -61,7 +61,7 @@ public:
 	D3D12ShaderCompilerAsync(u32 num_threads, u32 check_latency_ms, D3D::ShaderModel shader_model, bool debug);
 
 protected:
-	void DoCompileJobSync(GSCompileJob* job) override;
+	void DoCompileJobSync(GSCompileJob* job, u32 thread_id) override;
 
 private:
 	D3D::ShaderModel m_shader_model;
