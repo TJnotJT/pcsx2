@@ -959,8 +959,7 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		m_tfx_uber_source = std::move(*shader);
 	}
 
-	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice, GSConfig.HybridShaderCacheThreads,
-		GSConfig.HybridShaderCacheLatencyMS))
+	if (!m_shader_cache.Open(D3D::ShaderModel::SM51, GSConfig.UseDebugDevice))
 	{
 		Console.Warning("D3D12: Shader cache failed to open.");
 	}
@@ -2349,7 +2348,7 @@ bool GSDevice12::CompileImGuiPipeline()
 	return true;
 }
 
-namespace DX12UberShader
+namespace D3D12UberShader
 {
 	struct UberVSSelector
 	{
@@ -2405,11 +2404,11 @@ namespace DX12UberShader
 			// Make sure ROV depth is a valid enum.
 			(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
 
-			// Don't allow depth ROV without some form of depth processing.
-			(!sel.rov_depth || sel.uber_zwrite || sel.uber_sw_depth) &&
+			// Don't allow depth ROV without SW depth.
+			(!sel.rov_depth || sel.uber_sw_depth) &&
 
-			// Don't allow depth ROV write without Z write.
-			(sel.rov_depth != static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE) || sel.uber_zwrite) &&
+			// Don't allow ROV depth with Z write.
+			(!sel.rov_depth || !sel.uber_zwrite) &&
 
 			(!sel.rov_depth || sel.no_color || sel.rov_color) && // Don't allow depth ROV with non-ROV color output.
 			(!sel.rov_color || !sel.no_color) && // Don't allow color ROV without color output.
@@ -2530,9 +2529,9 @@ bool GSDevice12::CompileUberTFXPipelines()
 		{
 			size_t num_pipelines = 0;
 			GSHWDrawConfig config{};
-			for (const GSHWDrawConfig::PSSelector& ps_sel : DX12UberShader::uber_ps_selectors)
+			for (const GSHWDrawConfig::PSSelector& ps_sel : D3D12UberShader::uber_ps_selectors)
 			{
-				for (const GSHWDrawConfig::VSSelector& vs_sel : DX12UberShader::uber_vs_selectors)
+				for (const GSHWDrawConfig::VSSelector& vs_sel : D3D12UberShader::uber_vs_selectors)
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
@@ -2545,19 +2544,22 @@ bool GSDevice12::CompileUberTFXPipelines()
 
 						UpdateHWPipelineSelector(config, false);
 
-						GSAsyncReturn async(COMPILE_ASYNC);
 						if (stage == 0)
 						{
 							// Start compilation
-							const ID3D12PipelineState* pipeline = GetTFXPipeline(m_pipeline_selector, true, &async);
-							if (!pipeline && !GSAsyncReturn::IsAsync(&async))
+							const ID3D12PipelineState* pipeline = GetTFXPipeline(m_pipeline_selector, true, COMPILE_ASYNC);
+							if (!pipeline && !m_tfx_pipelines_async.contains(m_pipeline_selector))
 								return false; // failed
 						}
 						else
 						{
 							// Wait for compilation to finish
-							while (!GetTFXPipeline(m_pipeline_selector, true, &async))
+							while (!GetTFXPipeline(m_pipeline_selector, true))
+							{
+								if (!m_tfx_pipelines_async.contains(m_pipeline_selector))
+									return false; // failed
 								std::this_thread::sleep_for(std::chrono::milliseconds(100));
+							}
 						}
 						num_pipelines++;
 					}
@@ -3360,6 +3362,9 @@ void GSDevice12::DestroyResources()
 	m_tfx_pipelines.clear();
 	m_tfx_pixel_shaders.clear();
 	m_tfx_vertex_shaders.clear();
+	m_tfx_pipelines_async.clear();
+	m_tfx_pixel_shaders_async.clear();
+	m_tfx_vertex_shaders_async.clear();
 	m_interlace = {};
 	m_merge = {};
 	m_present = {};
@@ -3422,16 +3427,45 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
-GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, GSAsyncReturn* async)
+template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+std::shared_ptr<ReturnType> GSDevice12::GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map)
 {
-	D3D12ShaderJob shader_job{};
+	if (!async_map.empty())
+	{
+		m_shader_cache.ProcessAsyncCompileJobs(); // Let shader cache catch up with async compiler.
+
+		const auto it_async = async_map.find(sel);
+		if (it_async != async_map.end())
+		{
+			const std::shared_ptr<ReturnType>& job = it_async->second;
+
+			if (job->IsDone())
+			{
+				// Remove from async map and add to map.
+				map.emplace(sel, D3D12ShaderCompilerAsync::GetOutput(*job));
+				async_map.erase(it_async);
+			}
+			else
+			{
+				return job;
+			}
+		}
+	}
+	return nullptr;
+}
+
+GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, bool async)
+{
+	// Check async results first.
+	if (std::shared_ptr<D3D12ShaderJob> async_job =
+		GetAsyncJobIfExists<D3D12ShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
+	{
+		return async_job; // Forward incomplete job for pipeline creation.
+	}
 
 	auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
-	{
-		shader_job.blob = it->second.get();
-		return shader_job;
-	}
+		return it->second.get();
 
 	ShaderMacro sm;
 	sm.AddMacro("VERTEX_SHADER", 1);
@@ -3462,36 +3496,35 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSele
 	
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
 	
-	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber, async));
-
-	if (!vs && GSAsyncReturn::IsAsync(async))
+	// Start async compilation if needed.
+	if (async && !m_shader_cache.HasVertexShader(source, sm.GetPtr(), entry_point, uber))
 	{
-		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader_job.shader_code = source;
-		shader_job.entry_point = entry_point;
-		shader_job.macros = sm;
-		shader_job.type = D3D::ShaderCacheEntryType::VertexShader;
-		shader_job.uber = uber;
-		shader_job.hash = sel.key;
-		return shader_job;
+		std::shared_ptr<D3D12ShaderJob> job = std::make_shared<D3D12ShaderJob>(
+			ShaderEntryType::VertexShader, source, sm, entry_point, sel.key, uber);
+		m_shader_cache.StartPipelineCompilationAsync(job);
+		m_tfx_vertex_shaders_async.emplace(sel.key, job);
+		return job;
 	}
+
+	ComPtr<ID3DBlob> vs(m_shader_cache.GetVertexShader(source, sm.GetPtr(), entry_point, uber));
 	
 	it = m_tfx_vertex_shaders.emplace(sel.key, std::move(vs)).first;
-	shader_job.blob = it->second.get();
 	
-	return shader_job;
+	return it->second.get();
 }
 
-GSDevice12::D3D12ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, GSAsyncReturn* async)
+GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber, bool async)
 {
-	D3D12ShaderJob shader_job{};
+	// Check async results first.
+	if (std::shared_ptr<D3D12ShaderJob> async_job =
+		GetAsyncJobIfExists<D3D12ShaderJob>(sel, m_tfx_pixel_shaders_async, m_tfx_pixel_shaders))
+	{
+		return async_job; // Forward incomplete job for pipeline creation.
+	}
 
 	auto it = m_tfx_pixel_shaders.find(sel);
 	if (it != m_tfx_pixel_shaders.end())
-	{
-		shader_job.blob = it->second.get();
-		return shader_job;
-	}
+		return it->second.get();
 
 	ShaderMacro sm;
 	sm.AddMacro("PIXEL_SHADER", 1);
@@ -3584,32 +3617,27 @@ GSDevice12::D3D12ShaderJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::PSSelec
 	// FIXME: Make the Uber/Normal sources the same.
 	const std::string& source = uber ? m_tfx_uber_source : m_tfx_source;
 
-	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), "ps_main", uber, async));
-	
-	if (!ps && GSAsyncReturn::IsAsync(async))
+	const char* entry_point = "ps_main";
+
+	// Start async compilation if needed.
+	if (async && !m_shader_cache.HasPixelShader(source, sm.GetPtr(), entry_point, uber))
 	{
-		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader_job.entry_point = "ps_main";
-		shader_job.macros = sm;
-		shader_job.shader_code = source;
-		shader_job.type = ShaderEntryType::PixelShader;
-		shader_job.uber = uber;
-		shader_job.hash = GSHWDrawConfig::PSSelectorHash()(sel);
-		return shader_job;
+		std::shared_ptr<D3D12ShaderJob> job = std::make_shared<D3D12ShaderJob>(
+			ShaderEntryType::PixelShader, source, sm, entry_point, GSHWDrawConfig::PSSelectorHash()(sel), uber);
+		m_shader_cache.StartPipelineCompilationAsync(job);
+		m_tfx_pixel_shaders_async.emplace(sel, job);
+		return std::move(job);
 	}
-	
+
+	ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(source, sm.GetPtr(), entry_point, uber));
+
 	it = m_tfx_pixel_shaders.emplace(sel, std::move(ps)).first;
 	
-	shader_job.blob = it->second.get();
-	
-	return shader_job;
+	return it->second.get();
 }
 
-GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
-	const PipelineSelector& p, bool uber, GSAsyncReturn* async)
+GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelector& p, bool uber, bool async)
 {
-	GSAsyncReturn::ClearAsync(async);
-
 	static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY_TYPE, 3> topology_lookup = {{
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT, // Point
 		D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE, // Line
@@ -3625,15 +3653,10 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 		pps.no_color1 = true;
 	}
 
-	GSAsyncReturn vs_async(GSAsyncReturn::Enabled(async));
-	GSAsyncReturn ps_async(GSAsyncReturn::Enabled(async));
+	D3D12ShaderBlobOrJob vs = GetTFXVertexShader(p.vs, uber, async);
+	D3D12ShaderBlobOrJob ps = GetTFXPixelShader(pps, uber, async);
 
-	D3D12ShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
-	D3D12ShaderJob ps = GetTFXPixelShader(pps, uber, &ps_async);
-
-	const bool vs_failed = !vs.blob && !GSAsyncReturn::IsAsync(&vs_async);
-	const bool ps_failed = !ps.blob && !GSAsyncReturn::IsAsync(&ps_async);
-	if (vs_failed || ps_failed)
+	if (IsNullShaderBlob(vs) || IsNullShaderBlob(ps))
 		return nullptr; // Failed
 
 	// Common state
@@ -3661,10 +3684,10 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 		gpb.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT_S8X24_UINT);
 
 	// Shaders
-	if (vs.blob)
-		gpb.SetVertexShader(vs.blob.get());
-	if (ps.blob)
-		gpb.SetPixelShader(ps.blob.get());
+	if (IsShaderBlob(vs))
+		gpb.SetVertexShader(GetShaderBlob(vs));
+	if (IsShaderBlob(ps))
+		gpb.SetPixelShader(GetShaderBlob(ps));
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
@@ -3734,55 +3757,37 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 	}
 
 	// Handle async compilation if requested.
-	if (GSAsyncReturn::Enabled(async))
+	if (async && !m_shader_cache.HasPipelineState(gpb.GetDesc(), uber))
 	{
-		// Check if the pipeline has finished compiling from a previous submission.
-		if (vs.blob && ps.blob)
+		const auto it = m_tfx_pipelines_async.find(p);
+		if (it != m_tfx_pipelines_async.end())
 		{
-			// FIXME: Handle this the VK way of using UIDs.
-			GSAsyncReturn pipeline_async(true);
-			ComPtr<ID3D12PipelineState> pipeline = m_shader_cache.GetPipelineState(
-				m_device.get(), gpb.GetDesc(), uber, &pipeline_async);
-
-			const bool pipeline_found = pipeline != nullptr;
-			const bool pipeline_failed = pipeline == nullptr && !GSAsyncReturn::IsAsync(&pipeline_async);
-			if (pipeline_found)
-			{
-				D3D12::SetObjectName(
-					pipeline.get(), TinyString::from_format("{}TFX Pipeline {:08X}/{:016X}_{:016X}",
-						uber ? "Uber " :"", p.vs.key, p.ps.key_hi, p.ps.key_lo));
-				return pipeline;
-			}
-
-			if (pipeline_failed)
-				return nullptr;
+			return it->second.get();
 		}
-
-		GSAsyncReturn::SetAsync(async);
-		if (!m_tfx_pipelines_async_submitted.contains(p)) // Don't resubmit the same pipeline twice.
+		else
 		{
 			// Submit pipeline async compilation.
-			const bool start_vs = !vs.blob && !m_tfx_vertex_shaders_async_submitted.contains(p.vs.key);
-			const bool start_ps = !ps.blob && !m_tfx_pixel_shaders_async_submitted.contains(p.ps);
+			std::shared_ptr<D3D12PipelineJob> job = std::make_shared<D3D12PipelineJob>(
+				m_device.get(),
+				gpb,
+				PipelineSelectorHash()(p),
+				uber);
 
-			m_tfx_vertex_shaders_async_submitted.insert(p.vs.key);
-			m_tfx_pixel_shaders_async_submitted.insert(p.ps);
-			m_tfx_pipelines_async_submitted.insert(p);
+			if (IsShaderJob(vs))
+				job->SetVSJob(GetShaderJob(vs));
 
-			D3D12ShaderCache::D3D12PipelineJob pipeline_job;
-			pipeline_job.device = m_device.get();
-			pipeline_job.vs_blob = vs.blob;
-			pipeline_job.ps_blob = ps.blob;
-			pipeline_job.gpb = std::move(gpb);
-			pipeline_job.uber = uber;
-			pipeline_job.hash = PipelineSelectorHash()(p);
+			if (IsShaderJob(ps))
+				job->SetPSJob(GetShaderJob(ps));
 
-			m_shader_cache.StartPipelineCompilationAsync(
-				std::move(vs), start_vs, std::move(ps), start_ps, std::move(pipeline_job));
+			m_tfx_pipelines_async.emplace(p, job);
+			m_shader_cache.StartPipelineCompilationAsync(job);
+
+			return job.get();
 		}
-
-		return nullptr;
 	}
+
+	if (uber && !m_shader_cache.HasPipelineState(gpb.GetDesc(), uber))
+		Console.Error("ERROR: Creating an uber pipeline synchronously!");
 
 	ComPtr<ID3D12PipelineState> pipeline(gpb.Create(m_device.get(), m_shader_cache, uber));
 	if (pipeline)
@@ -3795,18 +3800,25 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(
 	return pipeline;
 }
 
-const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, GSAsyncReturn* async)
+const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p, bool uber, bool async)
 {
+	// Check async results first.
+	if (std::shared_ptr<D3D12PipelineJob> async_job =
+		GetAsyncJobIfExists<D3D12PipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
+	{
+		return nullptr; // Don't forward incomplete pipelines jobs.
+	}
+
 	auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
 		return it->second.get();
 
-	ComPtr<ID3D12PipelineState> pipeline(CreateTFXPipeline(p, uber, async));
+	D3D12PipelineOrJob pipeline(CreateTFXPipeline(p, uber, async));
+
+	if (IsPipelineJob(pipeline))
+		return nullptr; // Just started compiling
 	
-	if (!pipeline && GSAsyncReturn::IsAsync(async))
-		return nullptr; // Async compilation in progress.
-	
-	it = m_tfx_pipelines.emplace(p, std::move(pipeline)).first;
+	it = m_tfx_pipelines.emplace(p, std::move(GetPipeline(pipeline))).first;
 	return it->second.get();
 }
 
@@ -4762,8 +4774,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 	UpdateHWPipelineSelector(config);
 	if (!m_tfx_pipelines.contains(m_pipeline_selector))
 	{
-		GSAsyncReturn async(true);
-		GetTFXPipeline(m_pipeline_selector, false, &async);
+		GetTFXPipeline(m_pipeline_selector, false, true);
 		compiling_async = true;
 	}
 
@@ -4776,8 +4787,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 		m_pipeline_selector.bs = config.blend;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GSAsyncReturn async(true);
-			GetTFXPipeline(m_pipeline_selector, false, &async);
+			GetTFXPipeline(m_pipeline_selector, false, true);
 			compiling_async = true;
 		}
 	}
@@ -4791,8 +4801,7 @@ bool GSDevice12::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 		m_pipeline_selector.ps.dither = config.blend_multi_pass.dither;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GSAsyncReturn async(true);
-			GetTFXPipeline(m_pipeline_selector, false, &async);
+			GetTFXPipeline(m_pipeline_selector, false, true);
 			compiling_async = true;
 		}
 	}
@@ -5269,8 +5278,8 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 
 		if (uberize_vs_ps)
 		{
-			DX12UberShader::UberizeVSSelector(m_pipeline_selector.vs);
-			DX12UberShader::UberizePSSelector(m_pipeline_selector.ps);
+			D3D12UberShader::UberizeVSSelector(m_pipeline_selector.vs);
+			D3D12UberShader::UberizePSSelector(m_pipeline_selector.ps);
 		}
 	}
 }

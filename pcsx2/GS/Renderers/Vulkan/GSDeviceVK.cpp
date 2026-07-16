@@ -4715,11 +4715,11 @@ namespace VKUberShader
 			// Make sure ROV depth is a valid enum.
 			(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
 
-			// Don't allow depth ROV without some form of depth processing.
-			(!sel.rov_depth || has_depth) &&
+			// Don't allow depth ROV without SW depth.
+			(!sel.rov_depth || sel.uber_sw_depth) &&
 
-			// Don't allow depth ROV write without Z write.
-			(sel.rov_depth != static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_WRITE) || sel.uber_zwrite) &&
+			// Don't allow ROV depth with Z write.
+			(!sel.rov_depth || !sel.uber_zwrite) &&
 
 			(!sel.rov_depth || sel.no_color || sel.rov_color) && // Don't allow depth ROV with non-ROV color output.
 			(!sel.rov_color || !sel.no_color) && // Don't allow color ROV without color output.
@@ -4871,19 +4871,22 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 						if (ps_sel.uber_feedback_depth)
 							selector.feedback_loop_flags |= (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth);
 
-						GSAsyncReturn async(COMPILE_ASYNC);
 						if (stage == 0)
 						{
 							// Start compilation
-							const VkPipeline pipeline = GetTFXPipeline(selector, true, &async);
-							if (!pipeline && !GSAsyncReturn::IsAsync(&async))
+							const VkPipeline pipeline = GetTFXPipeline(selector, true, COMPILE_ASYNC);
+							if (!pipeline && !m_tfx_pipelines_async.contains(selector))
 								return false; // failed
 						}
 						else
 						{
 							// Wait for compilation to finish
-							while (!GetTFXPipeline(selector, true, &async))
+							while (!GetTFXPipeline(selector, true))
+							{
+								if (!m_tfx_pipelines_async.contains(selector))
+									return false; // failed
 								std::this_thread::sleep_for(std::chrono::milliseconds(100));
+							}
 						}
 						num_pipelines++;
 					}
@@ -5043,6 +5046,18 @@ void GSDeviceVK::DestroyResources()
 		vkDestroyShaderModule(m_device, it.second, nullptr);
 	for (auto& it : m_tfx_vertex_shaders)
 		vkDestroyShaderModule(m_device, it.second, nullptr);
+
+	for (auto& it : m_tfx_pipelines_async)
+		vkDestroyPipeline(m_device, it.second->GetPipeline(), nullptr);
+	for (auto& it : m_tfx_fragment_shaders_async)
+		vkDestroyShaderModule(m_device, it.second->GetModule(), nullptr);
+	for (auto& it : m_tfx_vertex_shaders_async)
+		vkDestroyShaderModule(m_device, it.second->GetModule(), nullptr);
+	
+	m_tfx_pipelines_async.clear();
+	m_tfx_fragment_shaders_async.clear();
+	m_tfx_vertex_shaders_async.clear();
+
 	for (VkPipeline it : m_interlace)
 	{
 		if (it != VK_NULL_HANDLE)
@@ -5186,16 +5201,46 @@ static void SetPipelineName(VkDevice device, VkPipeline pipeline, const GSDevice
 		device, pipeline, "TFX Pipeline %08X/%016" PRIX64 "_%016" PRIX64, sel.vs.key, sel.ps.key_hi, sel.ps.key_lo);
 }
 
-GSDeviceVK::VKShaderJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, GSAsyncReturn* async)
+
+template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+std::shared_ptr<ReturnType> GSDeviceVK::GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map)
 {
-	VKShaderJob shader_job{};
+	if (!async_map.empty())
+	{
+		g_vulkan_shader_cache->ProcessAsyncCompileJobs(); // Let shader cache catch up with async compiler.
+
+		const auto it_async = async_map.find(sel);
+		if (it_async != async_map.end())
+		{
+			const std::shared_ptr<ReturnType>& job = it_async->second;
+
+			if (job->IsDone())
+			{
+				// Remove from async map and add to map.
+				map.emplace(sel, VKShaderCompilerAsync::GetOutput(*job));
+				async_map.erase(it_async);
+			}
+			else
+			{
+				return job;
+			}
+		}
+	}
+	return nullptr;
+}
+
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber, bool async)
+{
+	// Check async results first.
+	if (std::shared_ptr<VKShaderJob> async_job =
+		GetAsyncJobIfExists<VKShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
+	{
+		return async_job; // Forward incomplete job for pipeline creation.
+	}
 
 	const auto it = m_tfx_vertex_shaders.find(sel.key);
 	if (it != m_tfx_vertex_shaders.end())
-	{
-		shader_job.module = it->second;
-		return shader_job;
-	}
+		return it->second;
 
 	std::stringstream ss;
 	AddShaderHeader(ss);
@@ -5215,7 +5260,6 @@ GSDeviceVK::VKShaderJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelecto
 			if (!field_desc.dynamic)
 				AddMacro(ss, field_desc.shader_name, sel.GetField(field_desc.index));
 		}
-		
 	}
 	else
 	{
@@ -5233,45 +5277,45 @@ GSDeviceVK::VKShaderJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelecto
 
 	std::string full_source = ss.str();
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(full_source, uber, async);
-
-	if (!mod && GSAsyncReturn::IsAsync(async))
+	// Start async compilation if needed.
+	if (async && !g_vulkan_shader_cache->HasVertexShader(full_source, uber))
 	{
-		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader_job.shader_code = std::move(full_source);
-		shader_job.kind = shaderc_vertex_shader;
-		shader_job.uber = uber;
-		shader_job.hash = sel.key;
-		return shader_job;
+		std::shared_ptr<VKShaderJob> job = std::make_shared<VKShaderJob>(
+			shaderc_vertex_shader, full_source, static_cast<u64>(sel.key), uber);
+		g_vulkan_shader_cache->StartPipelineCompilationAsync(job);
+		m_tfx_vertex_shaders_async.emplace(sel.key, job);
+		return std::move(job);
 	}
+
+	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(full_source, uber);
 
 	if (mod)
 		SetVertexShaderName(m_device, mod, sel.key);
 
 	m_tfx_vertex_shaders.emplace(sel.key, mod);
 
-	shader_job.module = mod;
-
-	return shader_job;
+	return mod;
 }
 
-GSDeviceVK::VKShaderJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber, GSAsyncReturn* async)
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber, bool async)
 {
-	VKShaderJob shader_job{};
+	// Check async results first.
+	if (std::shared_ptr<VKShaderJob> async_job =
+		GetAsyncJobIfExists<VKShaderJob>(sel, m_tfx_fragment_shaders_async, m_tfx_fragment_shaders))
+	{
+		return async_job; // Forward incomplete job for pipeline creation.
+	}
 
 	const auto it = m_tfx_fragment_shaders.find(sel);
 
 	if (it != m_tfx_fragment_shaders.end())
-	{
-		shader_job.module = it->second;
-		return shader_job;
-	}
+		return it->second;
 
 	std::stringstream ss;
 	AddShaderHeader(ss);
 	AddShaderStageMacro(ss, false, false, true);
 
-	const std::string& source = uber ? m_uber_tfx_source : m_tfx_source;
+	const std::string& source = uber ? m_uber_tfx_source : m_tfx_source; // FIXME Unify uber/non-uber sources.
 
 	if (uber)
 	{
@@ -5357,32 +5401,30 @@ GSDeviceVK::VKShaderJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::P
 	
 	ss << source;
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(ss.str(), false);
+	const std::string full_source = ss.str();
 
-	if (!mod && GSAsyncReturn::IsAsync(async))
+	// Start async compilation if needed.
+	if (async && !g_vulkan_shader_cache->HasFragmentShader(full_source, uber))
 	{
-		// Shader does not exist in cache yet. Return info needed to compile it async.
-		shader_job.shader_code = source;
-		shader_job.kind = shaderc_fragment_shader;
-		shader_job.uber = uber;
-		shader_job.hash = GSHWDrawConfig::PSSelectorHash()(sel);
-		return shader_job;
+		std::shared_ptr<VKShaderJob> job = std::make_shared<VKShaderJob>(
+			shaderc_fragment_shader, full_source, GSHWDrawConfig::PSSelectorHash()(sel), uber);
+		g_vulkan_shader_cache->StartPipelineCompilationAsync(job);
+		m_tfx_fragment_shaders_async.emplace(sel, job);
+		return std::move(job);
 	}
+
+	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(full_source, false);
 
 	if (mod)
 		SetFragmentShaderName(m_device, mod, sel);
 
 	m_tfx_fragment_shaders.emplace(sel, mod);
 
-	shader_job.module = mod;
-
-	return shader_job;
+	return mod;
 }
 
-VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, GSAsyncReturn* async)
+GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, bool async)
 {
-	GSAsyncReturn::ClearAsync(async);
-
 	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
 		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
 		VK_PRIMITIVE_TOPOLOGY_LINE_LIST, // Line
@@ -5398,16 +5440,11 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, G
 		pps.no_color1 = true;
 	}
 
-	GSAsyncReturn vs_async(GSAsyncReturn::Enabled(async));
-	GSAsyncReturn fs_async(GSAsyncReturn::Enabled(async));
+	VKShaderModuleOrJob vs = GetTFXVertexShader(p.vs, uber, async);
+	VKShaderModuleOrJob fs = GetTFXFragmentShader(pps, uber, async);
 
-	VKShaderJob vs = GetTFXVertexShader(p.vs, uber, &vs_async);
-	VKShaderJob fs = GetTFXFragmentShader(pps, uber, &fs_async);
-
-	const bool vs_failed = !vs.module && !GSAsyncReturn::IsAsync(&vs_async);
-	const bool fs_failed = !fs.module && !GSAsyncReturn::IsAsync(&fs_async);
-	if (vs_failed || fs_failed)
-		return nullptr; // Failed
+	if (IsNullShaderModule(vs) || IsNullShaderModule(fs))
+		return static_cast<VkPipeline>(VK_NULL_HANDLE); // Failed
 
 	Vulkan::GraphicsPipelineBuilder gpb;
 	SetPipelineProvokingVertex(m_features, gpb);
@@ -5440,10 +5477,10 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, G
 	gpb.AddDynamicState(VK_DYNAMIC_STATE_LINE_WIDTH);
 
 	// Shaders
-	if (vs.module)
-		gpb.SetVertexShader(vs.module);
-	if (fs.module)
-		gpb.SetFragmentShader(fs.module);
+	if (IsShaderModule(vs))
+		gpb.SetVertexShader(GetShaderModule(vs));
+	if (IsShaderModule(fs))
+		gpb.SetFragmentShader(GetShaderModule(fs));
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
@@ -5507,47 +5544,34 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, G
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
 	// Handle async compilation if requested.
-	if (GSAsyncReturn::Enabled(async))
+	if (async)
 	{
-		GSAsyncReturn::SetAsync(async);
-		auto it = std::find_if(
-			m_tfx_pipelines_async_submitted.begin(),
-			m_tfx_pipelines_async_submitted.end(),
-			[&p](const AsyncSubmittedPipeline& submitted)
-			{
-				return p == submitted.sel;
-			}
-		);
-
-		if (it == m_tfx_pipelines_async_submitted.end()) // Don't resubmit the same pipeline twice.
+		const auto it = m_tfx_pipelines_async.find(p);
+		if (it != m_tfx_pipelines_async.end())
+		{
+			return it->second.get();
+		}
+		else
 		{
 			// Submit pipeline async compilation.
-			const bool start_vs = !vs.module && !m_tfx_vertex_shaders_async_submitted.contains(p.vs.key);
-			const bool start_fs = !fs.module && !m_tfx_fragment_shaders_async_submitted.contains(p.ps);
+			std::shared_ptr<VKPipelineJob> job = std::make_shared<VKPipelineJob>(
+				m_device,
+				g_vulkan_shader_cache->GetPipelineCache(true, uber),
+				gpb,
+				PipelineSelectorHash()(p),
+				uber);
 
-			m_tfx_vertex_shaders_async_submitted.insert(p.vs.key);
-			m_tfx_fragment_shaders_async_submitted.insert(p.ps);
-			
-			AsyncSubmittedPipeline submitted_pipeline;
-			submitted_pipeline.sel = p;
-			submitted_pipeline.uid = m_tfx_pipelines_async_uid++;
-			m_tfx_pipelines_async_submitted.push_back(submitted_pipeline);
+			if (IsShaderJob(vs))
+				job->SetVSJob(GetShaderJob(vs));
 
-			VKPipelineJob pipeline_job;
-			pipeline_job.device = m_device;
-			pipeline_job.pipeline_cache = g_vulkan_shader_cache->GetPipelineCache(true, uber);
-			pipeline_job.vs_module = vs.module;
-			pipeline_job.fs_module = fs.module;
-			pipeline_job.gpb = std::move(gpb);
-			pipeline_job.uber = uber;
-			pipeline_job.hash = PipelineSelectorHash()(p);
-			pipeline_job.uid = submitted_pipeline.uid;
+			if (IsShaderJob(fs))
+				job->SetFSJob(GetShaderJob(fs));
 
-			g_vulkan_shader_cache->StartPipelineCompilationAsync(
-				std::move(vs), start_vs, std::move(fs), start_fs, std::move(pipeline_job));
+			m_tfx_pipelines_async.emplace(p, job);
+			g_vulkan_shader_cache->StartPipelineCompilationAsync(job);
+
+			return job.get();
 		}
-
-		return nullptr;
 	}
 
 	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber));
@@ -5557,47 +5581,26 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, G
 	return pipeline;
 }
 
-void GSDeviceVK::GetAsyncFinishedPipelines()
+VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool async)
 {
-	while (std::optional<VKShaderCache::FinishedPipelineJob> finished =
-		g_vulkan_shader_cache->GetAsyncCompiledPipeline())
+	// Check async results first.
+	if (std::shared_ptr<VKPipelineJob> async_job =
+		GetAsyncJobIfExists<VKPipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
 	{
-		// Remove finished pipelines from the submitted queue.
-		auto it = std::find_if(
-			m_tfx_pipelines_async_submitted.begin(),
-			m_tfx_pipelines_async_submitted.end(),
-			[&finished](const AsyncSubmittedPipeline& submitted)
-			{
-				return submitted.uid == finished->uid;
-			}
-		);
-
-		pxAssert(it != m_tfx_pipelines_async_submitted.end() &&
-			finished->pipeline != VK_NULL_HANDLE);
-
-		SetPipelineName(m_device, finished->pipeline, it->sel);
-
-		m_tfx_pipelines.emplace(it->sel, finished->pipeline);
-
-		m_tfx_pipelines_async_submitted.erase(it);
+		return nullptr; // Don't forward incomplete pipelines jobs.
 	}
-}
-
-VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, GSAsyncReturn* async)
-{
-	GetAsyncFinishedPipelines();
 
 	const auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
 		return it->second;
 
-	VkPipeline pipeline = CreateTFXPipeline(p, uber, async);
+	VKPipelineOrJob pipeline = CreateTFXPipeline(p, uber, async);
 
-	if (!pipeline && GSAsyncReturn::IsAsync(async))
-		return nullptr; // Async compilation in progress.
+	if (IsPipelineJob(pipeline))
+		return VK_NULL_HANDLE;  // Just started compiling
 
-	m_tfx_pipelines.emplace(p, pipeline);
-	return pipeline;
+	m_tfx_pipelines.emplace(p, GetPipeline(pipeline));
+	return GetPipeline(pipeline);
 }
 
 bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p, bool uber)
@@ -6452,8 +6455,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config_)
 	UpdateHWPipelineSelector(config, selector);
 	if (!m_tfx_pipelines.contains(selector))
 	{
-		GSAsyncReturn async(true);
-		GetTFXPipeline(selector, false, &async);
+		GetTFXPipeline(selector, false, true);
 		compiling_async = true;
 	}
 
@@ -6466,8 +6468,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config_)
 		m_pipeline_selector.bs = config.blend;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GSAsyncReturn async(true);
-			GetTFXPipeline(m_pipeline_selector, false, &async);
+			GetTFXPipeline(m_pipeline_selector, false, true);
 			compiling_async = true;
 		}
 	}
@@ -6481,8 +6482,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config_)
 		m_pipeline_selector.ps.dither = config.blend_multi_pass.dither;
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GSAsyncReturn async(true);
-			GetTFXPipeline(m_pipeline_selector, false, &async);
+			GetTFXPipeline(m_pipeline_selector, false, true);
 			compiling_async = true;
 		}
 	}

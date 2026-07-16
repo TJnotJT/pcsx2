@@ -24,7 +24,7 @@ class VKShaderCache
 public:
 	using VKShaderJob = VKShaderCompilerAsync::VKShaderJob;
 	using VKPipelineJob = VKShaderCompilerAsync::VKPipelineJob;
-	using VKCompileJob = VKShaderCompilerAsync::VKCompileJob;
+	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
 
 	~VKShaderCache();
 
@@ -37,20 +37,15 @@ public:
 	/// Writes pipeline cache to file, saving all newly compiled pipelines.
 	bool FlushPipelineCache();
 
-	VkShaderModule GetVertexShader(std::string_view shader_code, bool uber, GSAsyncReturn* async = nullptr);
-	VkShaderModule GetFragmentShader(std::string_view shader_code, bool uber, GSAsyncReturn* async = nullptr);
+	bool HasVertexShader(std::string_view shader_code, bool uber);
+	bool HasFragmentShader(std::string_view shader_code, bool uber);
+
+	VkShaderModule GetVertexShader(std::string_view shader_code, bool uber);
+	VkShaderModule GetFragmentShader(std::string_view shader_code, bool uber);
 	VkShaderModule GetComputeShader(std::string_view shader_code);
 
-	void StartPipelineCompilationAsync(VKShaderJob vs_job, bool start_vs,
-		VKShaderJob fs_job, bool start_fs, VKPipelineJob pipeline_job);
-
-	struct FinishedPipelineJob
-	{
-		u64 uid;
-		VkPipeline pipeline;
-	};
-
-	std::optional<FinishedPipelineJob> GetAsyncCompiledPipeline();
+	void StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> job);
+	void ProcessAsyncCompileJobs(); // Process jobs that have finished.
 
 private:
 	// SPIR-V compiled code type
@@ -104,30 +99,17 @@ private:
 	bool ReadExistingPipelineCache(bool uber);
 	void ClosePipelineCache();
 
-	std::optional<SPIRVCodeVector> GetShaderSPV(u32 type, std::string_view shader_code, bool uber, GSAsyncReturn* async = nullptr);
+	bool HasShaderSPV(u32 type, std::string_view shader_code, bool uber);
+	std::optional<SPIRVCodeVector> GetShaderSPV(u32 type, std::string_view shader_code, bool uber);
 	std::optional<SPIRVCodeVector> CompileAndAddShaderSPV(const CacheIndexKey& key, std::string_view shader_code, bool uber);
-	VkShaderModule GetShaderModule(u32 type, std::string_view shader_code, bool uber, GSAsyncReturn* async = nullptr);
+	VkShaderModule GetShaderModule(u32 type, std::string_view shader_code, bool uber);
 	void AddShaderSPV(u32 type, std::string_view shader_code, const SPIRVCodeVector& spv,
 		bool uber, bool only_new);
 
 	static bool InitShadercCompiler();
 
-	void ProcessAsyncCompileJobs();
-
-	struct QueuedPipelineJob
-	{
-		VKShaderJob vs_job; // Vertex shader job needed to start.
-		VKShaderJob fs_job; // Pixel shader job needed to start.
-		VKPipelineJob pipeline_job; // Pipeline jobs that needs to start.
-	};
-
-	// Pipelines waiting for vertex/pixel shaders to finish compiling.
-	std::deque<QueuedPipelineJob> m_queued_pipeline_jobs;
-
-	void StartQueuedPipelineJobs(const VKShaderJob& job);
-
-	// Jobs that are finished and need to be read back by GSDeviceVK.
-	std::deque<FinishedPipelineJob> m_finished_pipeline_jobs;
+	// Start pipeline jobs that are waiting on the given vertex and/or fragment shader.
+	void StartQueuedPipelineJobs(const VKShaderJob* shader_job);
 
 	std::FILE* m_index_file = nullptr;
 	std::FILE* m_blob_file = nullptr;
@@ -157,7 +139,8 @@ private:
 	static bool m_shaderc_failed;
 
 	std::unique_ptr<VKShaderCompilerAsync> m_compiler_async;
-	std::deque<VKCompileJob> m_compile_jobs_async;
+	std::deque<std::shared_ptr<GSCompileJob>> m_compile_jobs_async;
+	std::deque<VKPipelineJob*> m_queued_pipeline_jobs_async;
 };
 
 extern std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;

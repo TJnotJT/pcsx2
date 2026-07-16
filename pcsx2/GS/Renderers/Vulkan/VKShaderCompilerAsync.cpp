@@ -3,14 +3,10 @@
 
 #include "common/Assertions.h"
 
-bool VKShaderCompilerAsync::VKShaderJob::Matches(const VKShaderJob& other) const
+void VKShaderCompilerAsync::VKPipelineJob::Create()
 {
-	const bool matches = (kind == other.kind && shader_code == other.shader_code);
-
-	// Sanity check, make sure debugging fields are same also.
-	pxAssert(!matches || ((hash == other.hash) && (uber == other.uber)));
-
-	return matches;
+	pxAssert(m_gpb.HasVertexShader() && m_gpb.HasFragmentShader());
+	m_pipeline = m_gpb.Create(m_device, m_pipeline_cache, false);
 }
 
 VKShaderCompilerAsync::VKShaderCompilerAsync(u32 num_threads, u32 check_latency_ms)
@@ -28,40 +24,41 @@ void VKShaderCompilerAsync::OnWorkersStarted()
 		compiler = VKDynamicShaderc::CreateCompiler();
 }
 
-void VKShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job_, u32 thread_id)
+void VKShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job, u32 thread_id)
 {
 	if (m_shaderc_compilers.empty())
 		return;
 
-	VKCompileJob* job = static_cast<VKCompileJob*>(job_);
-
-	if (std::holds_alternative<VKShaderJob>(job->job))
+	if (job->IsShaderJob())
 	{
+		VKShaderJob* shader_job = static_cast<VKShaderJob*>(job);
+
 		shaderc_compiler_t compiler = m_shaderc_compilers[thread_id];
 
-		VKShaderJob& shader_job = std::get<VKShaderJob>(job->job);
-		std::optional<SPIRVCodeVector> spv;
-
-		shader_job.module = VK_NULL_HANDLE;
-		spv = VKDynamicShaderc::CompileShaderToSPV(compiler, shader_job.kind,
-			shader_job.shader_code, GSConfig.UseDebugDevice,
-			GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info);
+		std::optional<SPIRVCodeVector> spv =
+			VKDynamicShaderc::CompileShaderToSPV(compiler, shader_job->GetKind(),
+				shader_job->GetShaderCode(), GSConfig.UseDebugDevice,
+				GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info);
 
 		if (spv)
 		{
 			const VkShaderModuleCreateInfo ci{
 				VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, spv->size() * sizeof(SPIRVCodeType), spv->data() };
 
-			vkCreateShaderModule(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &shader_job.module);
+			VkShaderModule mod = VK_NULL_HANDLE;
+			vkCreateShaderModule(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &mod);
 
-			shader_job.spv = std::move(*spv);
+			if (mod != VK_NULL_HANDLE)
+			{
+				shader_job->SetModule(mod);
+				shader_job->SetSPV(std::move(*spv));
+			}
 		}
 	}
-	else if (std::holds_alternative<VKPipelineJob>(job->job))
+	else if (job->IsPipelineJob())
 	{
-		VKPipelineJob& pipeline_job = std::get<VKPipelineJob>(job->job);
-		pxAssert(pipeline_job.gpb.HasVertexShader() && pipeline_job.gpb.HasFragmentShader());
-		pipeline_job.pipeline = pipeline_job.gpb.Create(pipeline_job.device, pipeline_job.pipeline_cache, false);
+		VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job);
+		pipeline_job->Create();
 	}
 	else
 	{

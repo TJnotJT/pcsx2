@@ -466,17 +466,16 @@ private:
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
-	u64 m_tfx_pipelines_async_uid = 0;
-	struct AsyncSubmittedPipeline
-	{
-		u64 uid;
-		PipelineSelector sel;
-	};
-	std::deque<AsyncSubmittedPipeline> m_tfx_pipelines_async_submitted;
-	std::unordered_set<u8> m_tfx_vertex_shaders_async_submitted;
-	std::unordered_set<GSHWDrawConfig::PSSelector, GSHWDrawConfig::PSSelectorHash> m_tfx_fragment_shaders_async_submitted;
+	using VKShaderJob = VKShaderCompilerAsync::VKShaderJob;
+	using VKPipelineJob = VKShaderCompilerAsync::VKPipelineJob;
+	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
 
-	void GetAsyncFinishedPipelines();
+	std::unordered_map<PipelineSelector, std::shared_ptr<VKPipelineJob>, PipelineSelectorHash>
+		m_tfx_pipelines_async;
+	std::unordered_map<u8, std::shared_ptr<VKShaderJob>>
+		m_tfx_vertex_shaders_async;
+	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<VKShaderJob>, GSHWDrawConfig::PSSelectorHash>
+		m_tfx_fragment_shaders_async;
 
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
@@ -516,13 +515,28 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
-	using VKShaderJob = VKShaderCompilerAsync::VKShaderJob;
-	using VKPipelineJob = VKShaderCompilerAsync::VKPipelineJob;
+	using VKShaderModuleOrJob = std::variant<VkShaderModule, std::shared_ptr<VKShaderJob>>;
+	using VKPipelineOrJob = std::variant<VkPipeline, VKPipelineJob*>;
 
-	VKShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
-	VKShaderJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber = false, GSAsyncReturn* async = nullptr);
-	VkPipeline CreateTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
-	VkPipeline GetTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
+	static VkShaderModule& GetShaderModule(VKShaderModuleOrJob& x) { return std::get<VkShaderModule>(x); }
+	static std::shared_ptr<VKShaderJob>& GetShaderJob(VKShaderModuleOrJob& x) { return std::get<std::shared_ptr<VKShaderJob>>(x);
+	}
+	static bool IsShaderModule(VKShaderModuleOrJob& x) { return std::holds_alternative<VkShaderModule>(x); }
+	static bool IsNullShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x) == VK_NULL_HANDLE; }
+	static bool IsShaderJob(VKShaderModuleOrJob& x) { return std::holds_alternative<std::shared_ptr<VKShaderJob>>(x); }
+
+	static VkPipeline& GetPipeline(VKPipelineOrJob& x) { return std::get<VkPipeline>(x); }
+	static VKPipelineJob*& GetPipelineJob(VKPipelineOrJob& x) { return std::get<VKPipelineJob*>(x); }
+	static bool IsPipeline(VKPipelineOrJob& x) { return std::holds_alternative<VkPipeline>(x); }
+	static bool IsPipelineJob(VKPipelineOrJob& x) { return std::holds_alternative<VKPipelineJob*>(x); }
+
+	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+	std::shared_ptr<ReturnType> GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map);
+
+	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber = false, bool async = false);
+	VKPipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
+	VkPipeline GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
 	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
 	VkShaderModule GetUtilityFragmentShader(const std::string& source, const char* replace_main);

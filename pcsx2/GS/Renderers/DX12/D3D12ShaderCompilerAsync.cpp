@@ -1,15 +1,9 @@
 #include "GS/Renderers/DX12/D3D12ShaderCompilerAsync.h"
 
-bool D3D12ShaderCompilerAsync::D3D12ShaderJob::Matches(const D3D12ShaderJob& other) const
+void D3D12ShaderCompilerAsync::D3D12PipelineJob::Create()
 {
-	const bool matches =
-		type == other.type && shader_code == other.shader_code &&
-		macros == other.macros && entry_point == other.entry_point;
-
-	// Sanity check, make sure debugging fields are same also.
-	pxAssert(!matches || ((hash == other.hash) && (uber == other.uber)));
-
-	return matches;
+	pxAssert(m_gpb.HasVertexShader() && m_gpb.HasPixelShader());
+	m_pipeline = m_gpb.Create(m_device, false);
 }
 
 D3D12ShaderCompilerAsync::D3D12ShaderCompilerAsync(
@@ -20,33 +14,31 @@ D3D12ShaderCompilerAsync::D3D12ShaderCompilerAsync(
 {
 }
 
-void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job_, u32 thread_id)
+void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job, u32 thread_id)
 {
-	D3D12CompileJob* job = static_cast<D3D12CompileJob*>(job_);
-
-	if (std::holds_alternative<D3D12ShaderJob>(job->job))
+	if (job->IsShaderJob())
 	{
-		D3D12ShaderJob& shader_job = std::get<D3D12ShaderJob>(job->job);
-		if (shader_job.type == D3D::ShaderCacheEntryType::VertexShader)
+		D3D12ShaderJob* shader_job = static_cast<D3D12ShaderJob*>(job);
+		if (shader_job->GetEntryType() == D3D::ShaderCacheEntryType::VertexShader)
 		{
-			shader_job.blob = D3D::CompileShader(D3D::ShaderType::Vertex, m_shader_model, m_debug,
-				shader_job.shader_code, shader_job.macros.GetPtr(), shader_job.entry_point.c_str());
+			shader_job->SetBlob(D3D::CompileShader(D3D::ShaderType::Vertex, m_shader_model, m_debug,
+				shader_job->GetShaderCode(), shader_job->GetMacros(), shader_job->GetEntryPoint().c_str()));
 		}
-		else if (shader_job.type == D3D::ShaderCacheEntryType::PixelShader)
+		else if (shader_job->GetEntryType() == D3D::ShaderCacheEntryType::PixelShader)
 		{
-			shader_job.blob = D3D::CompileShader(D3D::ShaderType::Pixel, m_shader_model, m_debug,
-				shader_job.shader_code, shader_job.macros.GetPtr(), shader_job.entry_point.c_str());
+			shader_job->SetBlob(D3D::CompileShader(D3D::ShaderType::Pixel, m_shader_model, m_debug,
+				shader_job->GetShaderCode(), shader_job->GetMacros(), shader_job->GetEntryPoint().c_str()));
 		}
 		else
 		{
 			pxFailRel("Unknown shader type");
 		}
 	}
-	else if (std::holds_alternative<D3D12PipelineJob>(job->job))
+	else if (job->IsPipelineJob())
 	{
-		D3D12PipelineJob& pipeline_job = std::get<D3D12PipelineJob>(job->job);
-		pxAssert(pipeline_job.gpb.HasVertexShader() && pipeline_job.gpb.HasPixelShader());
-		pipeline_job.pipeline = pipeline_job.gpb.Create(pipeline_job.device, false);
+		D3D12PipelineJob* pipeline_job = static_cast<D3D12PipelineJob*>(job);
+		pxAssert(pipeline_job->HasVS() && pipeline_job->HasPS());
+		pipeline_job->Create();
 	}
 	else
 	{

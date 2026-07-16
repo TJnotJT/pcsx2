@@ -402,9 +402,17 @@ private:
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
 	
-	std::unordered_set<u32> m_tfx_vertex_shaders_async_submitted;
-	std::unordered_set<GSHWDrawConfig::PSSelector, GSHWDrawConfig::PSSelectorHash> m_tfx_pixel_shaders_async_submitted;
-	std::unordered_set<PipelineSelector, PipelineSelectorHash> m_tfx_pipelines_async_submitted;
+	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
+	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
+	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
+	using ShaderEntryType = D3D12ShaderCache::EntryType;
+
+	std::unordered_map<PipelineSelector, std::shared_ptr<D3D12PipelineJob>, PipelineSelectorHash>
+		m_tfx_pipelines_async;
+	std::unordered_map<u8, std::shared_ptr<D3D12ShaderJob>>
+		m_tfx_vertex_shaders_async;
+	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<D3D12ShaderJob>, GSHWDrawConfig::PSSelectorHash>
+		m_tfx_pixel_shaders_async;
 
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
@@ -445,14 +453,30 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
-	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
-	using ShaderEntryType = D3D12ShaderCache::EntryType;
+	using D3D12ShaderBlobOrJob = std::variant<ID3DBlob*, std::shared_ptr<D3D12ShaderJob>>;
+	using D3D12PipelineOrJob = std::variant<ComPtr<ID3D12PipelineState>, D3D12PipelineJob*>;
 
-	D3D12ShaderJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
-	D3D12ShaderJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, GSAsyncReturn* async = nullptr);
-	ComPtr<ID3D12PipelineState> CreateTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, GSAsyncReturn* async = nullptr);
+	static ID3DBlob*& GetShaderBlob(D3D12ShaderBlobOrJob& x) { return std::get<ID3DBlob*>(x); }
+	static std::shared_ptr<D3D12ShaderJob>& GetShaderJob(D3D12ShaderBlobOrJob& x)
+	{
+		return std::get<std::shared_ptr<D3D12ShaderJob>>(x);
+	}
+	static bool IsShaderBlob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<ID3DBlob*>(x); }
+	static bool IsNullShaderBlob(D3D12ShaderBlobOrJob& x) { return IsShaderBlob(x) && GetShaderBlob(x) == nullptr; }
+	static bool IsShaderJob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<std::shared_ptr<D3D12ShaderJob>>(x); }
+
+	static ComPtr<ID3D12PipelineState>& GetPipeline(D3D12PipelineOrJob& x) { return std::get<ComPtr<ID3D12PipelineState>>(x); }
+	static D3D12PipelineJob*& GetPipelineJob(D3D12PipelineOrJob& x) { return std::get<D3D12PipelineJob*>(x); }
+	static bool IsPipeline(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
+	static bool IsPipelineJob(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
+
+	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
+	std::shared_ptr<ReturnType> GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map);
+
+	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, bool async = false);
+	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);

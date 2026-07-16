@@ -162,6 +162,10 @@ VKShaderCache::~VKShaderCache()
 	CloseShaderCache();
 	FlushPipelineCache();
 	ClosePipelineCache();
+
+	m_compiler_async.reset();
+	m_queued_pipeline_jobs_async.clear();
+	m_compile_jobs_async.clear();
 }
 
 bool VKShaderCache::CacheIndexKey::operator==(const CacheIndexKey& key) const
@@ -519,22 +523,19 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::str
 	return CacheIndexKey{h.hash_low, h.hash_high, static_cast<u32>(shader_code.length()), type};
 }
 
-std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code,
-	bool uber, GSAsyncReturn* async)
+bool VKShaderCache::HasShaderSPV(u32 type, std::string_view shader_code, bool uber)
+{
+	const auto key = GetCacheKey(type, shader_code);
+	auto iter = GetIndex(uber).find(key);
+	return iter != GetIndex(uber).end();
+}
+
+std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code, bool uber)
 {
 	const auto key = GetCacheKey(type, shader_code);
 	auto iter = GetIndex(uber).find(key);
 	if (iter == GetIndex(uber).end())
-	{
-		if (GSAsyncReturn::Enabled(async))
-		{
-			// Don't start async compilation here yet, just flag that the shader is not yet compiled.
-			GSAsyncReturn::SetAsync(async);
-			return std::nullopt;
-		}
-
 		return CompileAndAddShaderSPV(key, shader_code, uber);
-	}
 
 	std::optional<SPIRVCodeVector> spv = SPIRVCodeVector(iter->second.blob_size);
 
@@ -548,9 +549,9 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 ty
 	return spv;
 }
 
-VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code, bool uber, GSAsyncReturn* async)
+VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code, bool uber)
 {
-	std::optional<SPIRVCodeVector> spv = GetShaderSPV(type, shader_code, uber, async);
+	std::optional<SPIRVCodeVector> spv = GetShaderSPV(type, shader_code, uber);
 	if (!spv.has_value())
 		return VK_NULL_HANDLE;
 
@@ -568,21 +569,28 @@ VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_
 	return mod;
 }
 
-VkShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code, bool uber, GSAsyncReturn* async)
+bool VKShaderCache::HasVertexShader(std::string_view shader_code, bool uber)
 {
-	ProcessAsyncCompileJobs();
-	return GetShaderModule(shaderc_glsl_vertex_shader, std::move(shader_code), uber, async);
+	return HasShaderSPV(shaderc_glsl_vertex_shader, shader_code, uber);
 }
 
-VkShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code, bool uber, GSAsyncReturn* async)
+bool VKShaderCache::HasFragmentShader(std::string_view shader_code, bool uber)
 {
-	ProcessAsyncCompileJobs();
-	return GetShaderModule(shaderc_glsl_fragment_shader, std::move(shader_code), uber, async);
+	return HasShaderSPV(shaderc_glsl_fragment_shader, shader_code, uber);
+}
+
+VkShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code, bool uber)
+{
+	return GetShaderModule(shaderc_glsl_vertex_shader, std::move(shader_code), uber);
+}
+
+VkShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code, bool uber)
+{
+	return GetShaderModule(shaderc_glsl_fragment_shader, std::move(shader_code), uber);
 }
 
 VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 {
-	ProcessAsyncCompileJobs();
 	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false);
 }
 
@@ -659,146 +667,128 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 {
 	if (m_compiler_async)
 	{
-		const u32 n_jobs = m_compiler_async->GetCompletedJobs();
+		std::vector<GSCompileJob*> completed;
+		m_compiler_async->GetCompletedJobs(completed);
 
-		if (n_jobs > 0)
-			Console.WriteLn("Async pipeline compile: processing %d jobs", n_jobs);
+		if (!completed.empty())
+			Console.WriteLn("Async pipeline compile: processing %u jobs", static_cast<u32>(completed.size()));
 
-		for (u32 i = 0; i < n_jobs; i++)
+		for (GSCompileJob* job : completed)
 		{
-			VKCompileJob& compile_job = m_compile_jobs_async.front();
-
-			// The async compiler completes jobs in FIFO order so the first n_jobs entries must be done.
-			pxAssert(compile_job.done);
-
-			if (std::holds_alternative<VKShaderJob>(compile_job.job))
+			if (job->IsShaderJob())
 			{
-				VKShaderJob& shader_job = std::get<VKShaderJob>(compile_job.job);
-				AddShaderSPV(shader_job.kind, shader_job.shader_code, shader_job.spv, shader_job.uber, true);
+				// Add shader code to the cache.
+				VKShaderJob* shader_job = static_cast<VKShaderJob*>(job);
+				AddShaderSPV(shader_job->GetKind(), shader_job->GetShaderCode(), shader_job->GetSPV(), shader_job->IsUber(), true);
 
-				pxAssert(shader_job.kind == shaderc_vertex_shader || shader_job.kind == shaderc_fragment_shader);
-				const char* kind_str = (shader_job.kind == shaderc_vertex_shader) ? "vertex" : "fragment";
+				pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
+				const char* kind_str = (shader_job->GetKind() == shaderc_vertex_shader) ? "vertex" : "fragment";
 				Console.WriteLn("Async %s shader compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-					kind_str, shader_job.hash, shader_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
+					kind_str, shader_job->GetHash(), shader_job->IsUber(), shader_job->GetCompileTime(), shader_job->GetThreadID());
 
 				// Notify any pipelines waiting on this shader.
 				StartQueuedPipelineJobs(shader_job);
 			}
-			else if (std::holds_alternative<VKPipelineJob>(compile_job.job))
+			else if (job->IsPipelineJob())
 			{
-				VKPipelineJob& pipeline_job = std::get<VKPipelineJob>(compile_job.job);
+				VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job);
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-					pipeline_job.hash, pipeline_job.uber, compile_job.compile_time_ms, compile_job.thread_id);
-
-				FinishedPipelineJob finished_job;
-				finished_job.uid = pipeline_job.uid;
-				finished_job.pipeline = pipeline_job.pipeline;
-				
-				m_finished_pipeline_jobs.push_back(finished_job);
+					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTime(),
+					pipeline_job->GetThreadID());
 			}
 			else
 			{
 				pxFailRel("Unknown job type");
 			}
 
-			m_compile_jobs_async.pop_front();
+			// Remove reference from the queue.
+			const auto it = std::find_if(
+				m_compile_jobs_async.begin(),
+				m_compile_jobs_async.end(),
+				[job](const std::shared_ptr<GSCompileJob>& other) { return other.get() == job; });
+			pxAssert(it != m_compile_jobs_async.end());
+			m_compile_jobs_async.erase(it);
 		}
 	}
 }
 
-void VKShaderCache::StartPipelineCompilationAsync(VKShaderJob vs_job, bool start_vs,
-	VKShaderJob fs_job, bool start_fs, VKPipelineJob pipeline_job)
+void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> job)
 {
 	if (!m_compiler_async)
 		m_compiler_async = std::make_unique<VKShaderCompilerAsync>(
 			GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS);
 
-	// If the job queue is full we may drop jobs since we don't allow resubmitting the same pipeline
-	// for compilation twice.
-	pxAssert(!m_compiler_async->IsJobQueueFull());
-
-	// VS
-	if (start_vs)
+	if (job->IsShaderJob())
 	{
-		Console.WriteLn("Async vertex shader compile: started hash=0x%016llX uber=%d", vs_job.hash, vs_job.uber);
-		m_compile_jobs_async.emplace_back(vs_job);
-		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
+		VKShaderJob* shader_job = static_cast<VKShaderJob*>(job.get());
+		pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
+		const char* kind_str = (shader_job->GetKind() == shaderc_vertex_shader) ? "vertex" : "fragment";
+		Console.WriteLn("Async %s shader compile: started hash=0x%016llX uber=%d",
+			kind_str, shader_job->GetHash(), shader_job->IsUber());
+		m_compiler_async->StartCompileJobAsync(shader_job);
+		m_compile_jobs_async.emplace_back(std::move(job));
 	}
-
-	// FS
-	if (start_fs)
+	else if (job->IsPipelineJob())
 	{
-		Console.WriteLn("Async fragment shader compile: started hash=0x%016llX uber=%d", fs_job.hash, fs_job.uber);
-		m_compile_jobs_async.emplace_back(fs_job);
-		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
-	}
-
-	// Pipeline
-	if (pipeline_job.vs_module && pipeline_job.fs_module)
-	{
-		Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job.hash, pipeline_job.uber);
-		m_compile_jobs_async.emplace_back(std::move(pipeline_job));
-		m_compiler_async->StartCompileJobAsync(&m_compile_jobs_async.back());
+		VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job.get());
+		if (pipeline_job->HasVS() && pipeline_job->HasFS())
+		{
+			Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job->GetHash(), pipeline_job->IsUber());
+			m_compiler_async->StartCompileJobAsync(pipeline_job);
+			m_compile_jobs_async.emplace_back(std::move(job));
+		}
+		else
+		{
+			// Need to wait for vertex and/or fragment shader.
+			pxAssert((pipeline_job->GetVSJob() || pipeline_job->HasVS()) &&
+				(pipeline_job->GetFSJob() || pipeline_job->HasFS()));
+			Console.WriteLn("Async pipeline compile: queued hash=0x%016llX uber=%d vs_hash=0x%016llX fs_hash=0x%016llX",
+				pipeline_job->GetHash(), pipeline_job->IsUber(),
+				pipeline_job->GetVSJob() ? pipeline_job->GetVSJob()->GetHash() : 0,
+				pipeline_job->GetFSJob() ? pipeline_job->GetFSJob()->GetHash() : 0);
+			m_queued_pipeline_jobs_async.push_back(pipeline_job);
+			m_compile_jobs_async.emplace_back(std::move(job));
+		}
 	}
 	else
 	{
-		// Need to wait for vertex and/or pixel shader.
-		Console.WriteLn("Async pipeline compile: queued hash=0x%016llX uber=%d vs_hash=0x%016llX fs_hash=0x%016llX",
-			pipeline_job.hash, pipeline_job.uber, vs_job.hash, fs_job.hash);
-		QueuedPipelineJob queued_job{ std::move(vs_job), std::move(fs_job), std::move(pipeline_job) };
-		m_queued_pipeline_jobs.push_back(std::move(queued_job));
+		pxFailRel("Unknown job type");
 	}
 }
 
-void VKShaderCache::StartQueuedPipelineJobs(const VKShaderJob& shader_job)
+void VKShaderCache::StartQueuedPipelineJobs(const VKShaderJob* shader_job)
 {
-	for (auto it = m_queued_pipeline_jobs.begin(); it != m_queued_pipeline_jobs.end(); )
+	for (auto it = m_queued_pipeline_jobs_async.begin(); it != m_queued_pipeline_jobs_async.end(); )
 	{
-		QueuedPipelineJob& queued_job = *it;
-		if (shader_job.kind == shaderc_vertex_shader)
+		VKPipelineJob* queued_job = *it;
+		if (shader_job->GetKind() == shaderc_vertex_shader)
 		{
-			if (!queued_job.pipeline_job.vs_module && queued_job.vs_job.Matches(shader_job))
-			{
-				queued_job.pipeline_job.vs_module = shader_job.module;
-				queued_job.pipeline_job.gpb.SetVertexShader(shader_job.module);
-			}
+			if (!queued_job->HasVS() && queued_job->GetVSJob() == shader_job)
+				queued_job->SetVS(shader_job->GetModule());
 		}
-		else if (shader_job.kind == shaderc_fragment_shader)
+		else if (shader_job->GetKind() == shaderc_fragment_shader)
 		{
-			if (!queued_job.pipeline_job.fs_module && queued_job.fs_job.Matches(shader_job))
-			{
-				queued_job.pipeline_job.fs_module = shader_job.module;
-				queued_job.pipeline_job.gpb.SetFragmentShader(shader_job.module);
-			}
+			if (!queued_job->HasFS() && queued_job->GetFSJob() == shader_job)
+				queued_job->SetFS(shader_job->GetModule());
 		}
 		else
 		{
 			pxFailRel("Unknown shader type");
 		}
 
-		if (queued_job.pipeline_job.vs_module && queued_job.pipeline_job.fs_module)
+		if (queued_job->HasVS() && queued_job->HasFS())
 		{
 			// Vertex and pixel shaders compiled so start pipeline creating.
-			Console.WriteLn("Async pipeline compile: got vs=%016X and ps=%016X for pipeline=%016X uber=%d",
-				queued_job.vs_job.hash, queued_job.fs_job.hash, queued_job.pipeline_job.hash, queued_job.pipeline_job.uber);
-			StartPipelineCompilationAsync({}, false, {}, false, std::move(queued_job.pipeline_job));
-			it = m_queued_pipeline_jobs.erase(it);
+			Console.WriteLn("Async pipeline compile: got vs=%016llX and fs=%016llX for pipeline=%016llX uber=%d",
+				queued_job->GetVSJob() ? queued_job->GetVSJob()->GetHash() : 0,
+				queued_job->GetFSJob() ? queued_job->GetFSJob()->GetHash() : 0,
+				queued_job->GetHash(), queued_job->IsUber());
+			m_compiler_async->StartCompileJobAsync(queued_job);
+			it = m_queued_pipeline_jobs_async.erase(it);
 		}
 		else
 		{
 			it++;
 		}
 	}
-}
-
-std::optional<VKShaderCache::FinishedPipelineJob> VKShaderCache::GetAsyncCompiledPipeline()
-{
-	ProcessAsyncCompileJobs();
-	if (!m_finished_pipeline_jobs.empty())
-	{
-		FinishedPipelineJob job = m_finished_pipeline_jobs.front();
-		m_finished_pipeline_jobs.pop_front();
-		return job;
-	}
-	return std::nullopt;
 }

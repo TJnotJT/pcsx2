@@ -22,28 +22,8 @@ D3D12::GraphicsPipelineBuilder::GraphicsPipelineBuilder(const GraphicsPipelineBu
 		m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
 }
 
-// GraphicsPipelineBuilder is not movable, same as copy.
-D3D12::GraphicsPipelineBuilder::GraphicsPipelineBuilder(const GraphicsPipelineBuilder&& other)
-	: m_desc(other.m_desc)
-	, m_input_elements(other.m_input_elements)
-{
-	if (m_desc.InputLayout.NumElements > 0)
-		m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-}
-
 D3D12::GraphicsPipelineBuilder& D3D12::GraphicsPipelineBuilder::operator=(
 	const GraphicsPipelineBuilder& other)
-{
-	m_desc = other.m_desc;
-	m_input_elements = other.m_input_elements;
-	if (m_desc.InputLayout.NumElements > 0)
-		m_desc.InputLayout.pInputElementDescs = m_input_elements.data();
-	return *this;
-}
-
-// GraphicsPipelineBuilder is not movable, same as copy.
-D3D12::GraphicsPipelineBuilder& D3D12::GraphicsPipelineBuilder::operator=(
-	const GraphicsPipelineBuilder&& other)
 {
 	m_desc = other.m_desc;
 	m_input_elements = other.m_input_elements;

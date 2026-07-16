@@ -58,9 +58,7 @@ namespace D3D12
 		GraphicsPipelineBuilder();
 
 		GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other);
-		GraphicsPipelineBuilder(const GraphicsPipelineBuilder&& other);
 		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder& other);
-		GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder&& other);
 
 		~GraphicsPipelineBuilder() = default;
 

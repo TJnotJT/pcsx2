@@ -3,24 +3,56 @@
 #include "common/Pcsx2Defs.h"
 #include "common/Timer.h"
 
+#include <memory>
 #include <thread>
 #include <mutex>
 
 class GSShaderCompilerAsync
 {
 public:
-	struct GSCompileJob
+	enum JobStatus
 	{
-		bool done = false;
-		float compile_time_ms = 0.0f; // Compile time in ms for debugging.
-		u32 thread_id = UINT_MAX; // Thread ID for debugging.
+		NONE,
+		COMPILING,
+		DONE,
+	};
+
+	enum JobType
+	{
+		SHADER,
+		PIPELINE,
+	};
+
+	class GSCompileJob
+	{
+	public:
+		GSCompileJob(JobType type) : m_job_type(type) {}
+
+		bool IsShaderJob() { return m_job_type == SHADER; }
+		bool IsPipelineJob() { return m_job_type == PIPELINE; }
+
+		virtual ~GSCompileJob() {}
+
+		bool IsCompiling() const { return m_status.load(std::memory_order_acquire) == COMPILING; }
+		void SetCompiling() { m_status.store(COMPILING, std::memory_order_release); }
+		bool IsDone() const { return m_status.load(std::memory_order_acquire) == DONE; }
+		void SetDone() { m_status.store(DONE, std::memory_order_release); }
+		float GetCompileTime() const { return m_compile_time_ms; }
+		void SetCompileTime(float ms) { m_compile_time_ms = ms; }
+		u32 GetThreadID() const { return m_thread_id; }
+		void SetThreadID(u32 id) { m_thread_id = id; }
+	private:
+		JobType m_job_type;
+		std::atomic<JobStatus> m_status = NONE;
+		float m_compile_time_ms = 0.0f; // Compile time in ms for debugging.
+		u32 m_thread_id = UINT_MAX; // Thread ID for debugging.
 	};
 
 	GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms);
 	virtual ~GSShaderCompilerAsync();
 
 	bool IsJobQueueFull();
-	u32 GetCompletedJobs();
+	void GetCompletedJobs(std::vector<GSCompileJob*>& jobs);
 	void StartCompileJobAsync(GSCompileJob* job);
 
 protected:
@@ -34,6 +66,7 @@ private:
 
 	static constexpr size_t MAX_JOBS = 1024;
 
+	// GSDevice and the shader cache own the jobs so use raw pointers.
 	std::vector<GSCompileJob*> m_job_queue;
 	std::vector<Common::Timer> m_job_timer_queue;
 
@@ -53,35 +86,4 @@ private:
 	bool m_workers_started = false;
 
 	void WorkerThreadFunc(u32 thread_id);
-};
-
-struct GSAsyncReturn
-{
-private:
-	const bool enabled; // Enable async return.
-	bool async_return; // Call returned after dispatching async processing.
-public:
-	GSAsyncReturn(bool enabled) : enabled(enabled), async_return(false) {}
-
-	static bool Enabled(GSAsyncReturn* async)
-	{
-		return async && async->enabled;
-	}
-
-	static void ClearAsync(GSAsyncReturn* async)
-	{
-		if (async)
-			async->async_return = false;
-	}
-
-	static void SetAsync(GSAsyncReturn* async)
-	{
-		if (async)
-			async->async_return = true;
-	}
-
-	static bool IsAsync(GSAsyncReturn* async)
-	{
-		return async && async->enabled && async->async_return;
-	}
 };
