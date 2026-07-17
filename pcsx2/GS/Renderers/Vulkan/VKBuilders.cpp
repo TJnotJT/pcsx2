@@ -459,7 +459,7 @@ void Vulkan::GraphicsPipelineBuilder::SetLineRasterizationMode(VkLineRasterizati
 
 	m_line_rasterization_state.lineRasterizationMode = mode;
 
-	m_set_provoking_vertex = true;
+	m_set_line_rasterization_state = true;
 }
 
 void Vulkan::GraphicsPipelineBuilder::SetMultisamples(u32 multisamples, bool per_sample_shading)

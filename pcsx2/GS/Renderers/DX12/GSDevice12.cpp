@@ -2539,7 +2539,9 @@ bool GSDevice12::CompileUberTFXPipelines()
 						config.ps = ps_sel;
 						config.vs = vs_sel;
 						config.topology = static_cast<GSHWDrawConfig::Topology>(topology);
-						config.depth = GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
+						config.depth = config.ps.HasDepthROV() ?
+							GSHWDrawConfig::DepthStencilSelector::NoDepth() :
+							GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
 						config.colormask = GSHWDrawConfig::ColorMaskSelector();
 
 						UpdateHWPipelineSelector(config, false);

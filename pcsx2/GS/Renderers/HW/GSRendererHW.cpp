@@ -7954,18 +7954,20 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 				// Mask depth with SW depth feedback.
 				m_conf.ps.zmask = !m_conf.depth.zwe;
 			}
+
 		}
 
-		// Color setup.
+		m_conf.uber_shader = true;
+		m_conf.vs.uber_enable = true;
 		m_conf.ps.uber_enable = true;
-
-		// Remove HW depth.
-		m_conf.depth = GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
 
 		// Remove HW color mask.
 		m_conf.colormask = GSHWDrawConfig::ColorMaskSelector();
-
-		m_conf.uber_shader = true;
+		
+		// Remove HW depth.
+		m_conf.depth = m_conf.ps.HasDepthROV() ?
+			GSHWDrawConfig::DepthStencilSelector::NoDepth() :
+			GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
 	}
 }
 
