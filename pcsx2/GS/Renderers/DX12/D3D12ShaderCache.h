@@ -113,8 +113,7 @@ public:
 
 	using CacheIndex = std::unordered_map<CacheIndexKey, CacheIndexData, CacheIndexEntryHasher>;
 
-public:
-
+private:
 	static std::string GetCacheBaseFileName(const std::string_view type, D3D::ShaderModel shader_model, bool debug, bool uber);
 	static CacheIndexKey GetShaderCacheKey(
 		EntryType type, const std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point);

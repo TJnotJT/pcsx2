@@ -147,6 +147,8 @@ namespace Vulkan
 		bool HasVertexShader() const;
 		bool HasGeometryShader() const;
 		bool HasFragmentShader() const;
+
+		const VkGraphicsPipelineCreateInfo& GetCI() const { return m_ci; }
 	private:
 		void SetPointersAfterCopy();
 

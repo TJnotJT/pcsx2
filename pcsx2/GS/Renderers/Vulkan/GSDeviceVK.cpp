@@ -7,7 +7,6 @@
 #include "GS/GSUtil.h"
 #include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "GS/Renderers/Vulkan/VKBuilders.h"
-#include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKSwapChain.h"
 #include "GS/Renderers/Common/GSDevice.h"
 
@@ -3903,7 +3902,7 @@ VkShaderModule GSDeviceVK::GetUtilityVertexShader(const std::string& source, con
 		ss << "#define " << replace_main << " main\n";
 	ss << source;
 
-	return g_vulkan_shader_cache->GetVertexShader(ss.str(), false);
+	return g_vulkan_shader_cache->GetVertexShader(ss.str(), false).module;
 }
 
 VkShaderModule GSDeviceVK::GetUtilityFragmentShader(const std::string& source, const char* replace_main = nullptr)
@@ -3915,7 +3914,7 @@ VkShaderModule GSDeviceVK::GetUtilityFragmentShader(const std::string& source, c
 		ss << "#define " << replace_main << " main\n";
 	ss << source;
 
-	return g_vulkan_shader_cache->GetFragmentShader(ss.str(), false);
+	return g_vulkan_shader_cache->GetFragmentShader(ss.str(), false).module;
 }
 
 bool GSDeviceVK::CreateNullTexture()
@@ -4826,7 +4825,7 @@ namespace VKUberShader
 		sel.uber_enable = true;
 		sel.uber_date_init = (sel.date == 1 || sel.date == 2);
 		sel.uber_sw_depth = sel.IsFeedbackLoopDepth();
-		sel.uber_zwrite = sel.HasDepthOutput();
+		sel.uber_zwrite = sel.HasDepthOutput() && !sel.HasDepthROV();
 		sel.iip = true;
 
 		// Clear dynamic state bits from the selector.
@@ -5041,11 +5040,11 @@ void GSDeviceVK::DestroyResources()
 		FreePersistentDescriptorSet(m_tfx_ubo_descriptor_set);
 
 	for (auto& it : m_tfx_pipelines)
-		vkDestroyPipeline(m_device, it.second, nullptr);
+		vkDestroyPipeline(m_device, it.second.pipeline, nullptr);
 	for (auto& it : m_tfx_fragment_shaders)
-		vkDestroyShaderModule(m_device, it.second, nullptr);
+		vkDestroyShaderModule(m_device, it.second.module, nullptr);
 	for (auto& it : m_tfx_vertex_shaders)
-		vkDestroyShaderModule(m_device, it.second, nullptr);
+		vkDestroyShaderModule(m_device, it.second.module, nullptr);
 
 	for (auto& it : m_tfx_pipelines_async)
 		vkDestroyPipeline(m_device, it.second->GetPipeline(), nullptr);
@@ -5201,7 +5200,6 @@ static void SetPipelineName(VkDevice device, VkPipeline pipeline, const GSDevice
 		device, pipeline, "TFX Pipeline %08X/%016" PRIX64 "_%016" PRIX64, sel.vs.key, sel.ps.key_hi, sel.ps.key_lo);
 }
 
-
 template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
 std::shared_ptr<ReturnType> GSDeviceVK::GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map)
 {
@@ -5217,7 +5215,7 @@ std::shared_ptr<ReturnType> GSDeviceVK::GetAsyncJobIfExists(const SelType& sel, 
 			if (job->IsDone())
 			{
 				// Remove from async map and add to map.
-				map.emplace(sel, VKShaderCompilerAsync::GetOutput(*job));
+				map.emplace(sel, GetJobOutput(*job.get()));
 				async_map.erase(it_async);
 			}
 			else
@@ -5281,16 +5279,16 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::V
 	if (async && !g_vulkan_shader_cache->HasVertexShader(full_source, uber))
 	{
 		std::shared_ptr<VKShaderJob> job = std::make_shared<VKShaderJob>(
-			shaderc_vertex_shader, full_source, static_cast<u64>(sel.key), uber);
+			m_device, shaderc_vertex_shader, full_source, static_cast<u64>(sel.key), uber);
 		g_vulkan_shader_cache->StartPipelineCompilationAsync(job);
 		m_tfx_vertex_shaders_async.emplace(sel.key, job);
 		return std::move(job);
 	}
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(full_source, uber);
+	VKCachedShaderModule mod = g_vulkan_shader_cache->GetVertexShader(full_source, uber);
 
-	if (mod)
-		SetVertexShaderName(m_device, mod, sel.key);
+	if (mod.module)
+		SetVertexShaderName(m_device, mod.module, sel.key);
 
 	m_tfx_vertex_shaders.emplace(sel.key, mod);
 
@@ -5407,16 +5405,16 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawC
 	if (async && !g_vulkan_shader_cache->HasFragmentShader(full_source, uber))
 	{
 		std::shared_ptr<VKShaderJob> job = std::make_shared<VKShaderJob>(
-			shaderc_fragment_shader, full_source, GSHWDrawConfig::PSSelectorHash()(sel), uber);
+			m_device, shaderc_fragment_shader, full_source, GSHWDrawConfig::PSSelectorHash()(sel), uber);
 		g_vulkan_shader_cache->StartPipelineCompilationAsync(job);
 		m_tfx_fragment_shaders_async.emplace(sel, job);
 		return std::move(job);
 	}
 
-	VkShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(full_source, false);
+	VKCachedShaderModule mod = g_vulkan_shader_cache->GetFragmentShader(full_source, false);
 
-	if (mod)
-		SetFragmentShaderName(m_device, mod, sel);
+	if (mod.module)
+		SetFragmentShaderName(m_device, mod.module, sel);
 
 	m_tfx_fragment_shaders.emplace(sel, mod);
 
@@ -5444,7 +5442,13 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	VKShaderModuleOrJob fs = GetTFXFragmentShader(pps, uber, async);
 
 	if (IsNullShaderModule(vs) || IsNullShaderModule(fs))
-		return static_cast<VkPipeline>(VK_NULL_HANDLE); // Failed
+		return {}; // Failed
+
+	if (!async && !(IsShaderModule(vs) && IsShaderModule(fs)))
+		return {}; // Not allowed to do async.
+
+	VKShaderCache::CacheIndexKey vs_key = IsShaderModule(vs) ? GetShaderModule(vs).key : GetShaderJob(vs)->GetCacheKey();
+	VKShaderCache::CacheIndexKey fs_key = IsShaderModule(fs) ? GetShaderModule(fs).key : GetShaderJob(fs)->GetCacheKey();
 
 	Vulkan::GraphicsPipelineBuilder gpb;
 	SetPipelineProvokingVertex(m_features, gpb);
@@ -5478,9 +5482,9 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 
 	// Shaders
 	if (IsShaderModule(vs))
-		gpb.SetVertexShader(GetShaderModule(vs));
+		gpb.SetVertexShader(GetShaderModule(vs).module);
 	if (IsShaderModule(fs))
-		gpb.SetFragmentShader(GetShaderModule(fs));
+		gpb.SetFragmentShader(GetShaderModule(fs).module);
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
@@ -5559,7 +5563,8 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 				g_vulkan_shader_cache->GetPipelineCache(true, uber),
 				gpb,
 				PipelineSelectorHash()(p),
-				uber);
+				uber,
+				VKShaderCache::GetGraphicsPipelineCacheKey(vs_key, fs_key, gpb.GetCI()));
 
 			if (IsShaderJob(vs))
 				job->SetVSJob(GetShaderJob(vs));
@@ -5574,9 +5579,10 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		}
 	}
 
-	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber));
-	if (pipeline)
-		SetPipelineName(m_device, pipeline, p);
+	//VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber));
+	VKCachedPipeline pipeline = g_vulkan_shader_cache->GetGraphicsPipeline(m_device, vs_key, fs_key, gpb.GetCI(), uber);
+	if (pipeline.pipeline)
+		SetPipelineName(m_device, pipeline.pipeline, p);
 
 	return pipeline;
 }
@@ -5592,15 +5598,15 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool
 
 	const auto it = m_tfx_pipelines.find(p);
 	if (it != m_tfx_pipelines.end())
-		return it->second;
+		return it->second.pipeline;
 
 	VKPipelineOrJob pipeline = CreateTFXPipeline(p, uber, async);
 
 	if (IsPipelineJob(pipeline))
-		return VK_NULL_HANDLE;  // Just started compiling
+		return VK_NULL_HANDLE; // Just started compiling
 
 	m_tfx_pipelines.emplace(p, GetPipeline(pipeline));
-	return GetPipeline(pipeline);
+	return GetPipeline(pipeline).pipeline;
 }
 
 bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p, bool uber)

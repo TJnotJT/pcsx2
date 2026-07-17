@@ -8,6 +8,7 @@
 #include "GS/Renderers/Vulkan/GSTextureVK.h"
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "GS/Renderers/Vulkan/VKStreamBuffer.h"
+#include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
@@ -461,18 +462,22 @@ private:
 		return m_convert[ShaderConvertSelector(shader).Index()];
 	}
 
-	std::unordered_map<u32, VkShaderModule> m_tfx_vertex_shaders;
-	std::unordered_map<GSHWDrawConfig::PSSelector, VkShaderModule, GSHWDrawConfig::PSSelectorHash>
-		m_tfx_fragment_shaders;
-	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
+	using ShaderCompilerAsync = VKShaderCache::ShaderCompilerAsync;
+	using VKCachedShaderModule = VKShaderCache::VKCachedShaderModule;
+	using VKCachedPipeline = VKShaderCache::VKCachedPipeline;
 
-	using VKShaderJob = VKShaderCompilerAsync::VKShaderJob;
-	using VKPipelineJob = VKShaderCompilerAsync::VKPipelineJob;
+	std::unordered_map<u32, VKCachedShaderModule> m_tfx_vertex_shaders;
+	std::unordered_map<GSHWDrawConfig::PSSelector, VKCachedShaderModule, GSHWDrawConfig::PSSelectorHash>
+		m_tfx_fragment_shaders;
+	std::unordered_map<PipelineSelector, VKCachedPipeline, PipelineSelectorHash> m_tfx_pipelines;
+
+	using VKShaderJob = VKShaderCache::VKCachedShaderJob;
+	using VKPipelineJob = VKShaderCache::VKCachedPipelineJob;
 	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
 
 	std::unordered_map<PipelineSelector, std::shared_ptr<VKPipelineJob>, PipelineSelectorHash>
 		m_tfx_pipelines_async;
-	std::unordered_map<u8, std::shared_ptr<VKShaderJob>>
+	std::unordered_map<u32, std::shared_ptr<VKShaderJob>>
 		m_tfx_vertex_shaders_async;
 	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<VKShaderJob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders_async;
@@ -515,20 +520,30 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
-	using VKShaderModuleOrJob = std::variant<VkShaderModule, std::shared_ptr<VKShaderJob>>;
-	using VKPipelineOrJob = std::variant<VkPipeline, VKPipelineJob*>;
+	using VKShaderModuleOrJob = std::variant<VKCachedShaderModule, std::shared_ptr<VKShaderJob>>;
+	using VKPipelineOrJob = std::variant<VKCachedPipeline, VKPipelineJob*>;
 
-	static VkShaderModule& GetShaderModule(VKShaderModuleOrJob& x) { return std::get<VkShaderModule>(x); }
-	static std::shared_ptr<VKShaderJob>& GetShaderJob(VKShaderModuleOrJob& x) { return std::get<std::shared_ptr<VKShaderJob>>(x);
+	static VKCachedShaderModule& GetShaderModule(VKShaderModuleOrJob& x) { return std::get<VKCachedShaderModule>(x); }
+	static std::shared_ptr<VKShaderJob>& GetShaderJob(VKShaderModuleOrJob& x) {
+		return std::get<std::shared_ptr<VKShaderJob>>(x);
 	}
-	static bool IsShaderModule(VKShaderModuleOrJob& x) { return std::holds_alternative<VkShaderModule>(x); }
-	static bool IsNullShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x) == VK_NULL_HANDLE; }
+	static bool IsShaderModule(VKShaderModuleOrJob& x) { return std::holds_alternative<VKCachedShaderModule>(x); }
+	static bool IsNullShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x).module == VK_NULL_HANDLE; }
 	static bool IsShaderJob(VKShaderModuleOrJob& x) { return std::holds_alternative<std::shared_ptr<VKShaderJob>>(x); }
 
-	static VkPipeline& GetPipeline(VKPipelineOrJob& x) { return std::get<VkPipeline>(x); }
+	static VKCachedPipeline& GetPipeline(VKPipelineOrJob& x) { return std::get<VKCachedPipeline>(x); }
 	static VKPipelineJob*& GetPipelineJob(VKPipelineOrJob& x) { return std::get<VKPipelineJob*>(x); }
-	static bool IsPipeline(VKPipelineOrJob& x) { return std::holds_alternative<VkPipeline>(x); }
+	static bool IsPipeline(VKPipelineOrJob& x) { return std::holds_alternative<VKCachedPipeline>(x); }
 	static bool IsPipelineJob(VKPipelineOrJob& x) { return std::holds_alternative<VKPipelineJob*>(x); }
+
+	static VKCachedShaderModule GetJobOutput(const VKShaderJob& job)
+	{
+		return { job.GetModule(), job.GetCacheKey() };
+	}
+	static VKCachedPipeline GetJobOutput(const VKPipelineJob& job)
+	{
+		return { job.GetPipeline(), job.GetCacheKey() };
+	}
 
 	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
 	std::shared_ptr<ReturnType> GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map);

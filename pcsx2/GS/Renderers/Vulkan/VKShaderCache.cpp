@@ -18,6 +18,7 @@
 #include "common/FileSystem.h"
 #include "common/MD5Digest.h"
 #include "common/Path.h"
+#include "common/Timer.h"
 
 #include "fmt/format.h"
 #include "shaderc/shaderc.h"
@@ -198,7 +199,9 @@ void VKShaderCache::Open()
 	{
 		for (u32 uber = 0; uber < 2; uber++)
 		{
-			GetPipelineCacheFilename(uber) = GetPipelineCacheBaseFileName(uber, GSConfig.UseDebugDevice);
+			const std::string pipeline_base_filename = GetPipelineCacheBaseFileName(uber, GSConfig.UseDebugDevice);
+			GetPipelineCacheFilename(uber) = pipeline_base_filename + ".bin";
+			GetPipelineCacheIndexFilename(uber) = pipeline_base_filename + "_index.bin";
 
 			const std::string base_filename = GetShaderCacheBaseFileName(uber, GSConfig.UseDebugDevice);
 			const std::string index_filename = base_filename + ".idx";
@@ -369,26 +372,113 @@ void VKShaderCache::CloseShaderCache()
 
 bool VKShaderCache::CreateNewPipelineCache(bool uber)
 {
-	if (!GetPipelineCacheFilename(uber).empty() && FileSystem::FileExists(GetPipelineCacheFilename(uber).c_str()))
+	// Create new pipeline index.
 	{
-		Console.Warning("Removing existing pipeline cache '%s'", GetPipelineCacheFilename(uber).c_str());
-		FileSystem::DeleteFilePath(GetPipelineCacheFilename(uber).c_str());
+		if (FileSystem::FileExists(GetPipelineCacheIndexFilename(uber).c_str()))
+		{
+			Console.Warning("Removing existing index file '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+			FileSystem::DeleteFilePath(GetPipelineCacheIndexFilename(uber).c_str());
+		}
+
+		FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "wb");
+		if (!index_file)
+		{
+			Console.Error("Failed to open index file '%s' for writing", GetPipelineCacheIndexFilename(uber).c_str());
+			return false;
+		}
+
+		const u32 file_version = SHADER_CACHE_VERSION;
+		VK_PIPELINE_CACHE_HEADER header;
+		FillPipelineCacheHeader(&header);
+
+		if (std::fwrite(&file_version, sizeof(file_version), 1, index_file) != 1 ||
+			std::fwrite(&header, sizeof(header), 1, index_file) != 1)
+		{
+			Console.Error("Failed to write header to index file '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+			std::fclose(index_file);
+			FileSystem::DeleteFilePath(GetPipelineCacheIndexFilename(uber).c_str());
+			return false;
+		}
+
+		std::fclose(index_file);
 	}
 
-	const VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, 0, nullptr};
-	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
-	if (res != VK_SUCCESS)
+	// Create new pipeline cache.
 	{
-		LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
-		return false;
-	}
+		if (!GetPipelineCacheFilename(uber).empty() && FileSystem::FileExists(GetPipelineCacheFilename(uber).c_str()))
+		{
+			Console.Warning("Removing existing pipeline cache '%s'", GetPipelineCacheFilename(uber).c_str());
+			FileSystem::DeleteFilePath(GetPipelineCacheFilename(uber).c_str());
+		}
 
+		const VkPipelineCacheCreateInfo ci{ VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, 0, nullptr };
+		VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
+		if (res != VK_SUCCESS)
+		{
+			LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
+			return false;
+		}
+	}
+	
 	GetPipelineCacheDirty(uber) = true;
 	return true;
 }
 
 bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 {
+	FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "r+b");
+	if (!index_file)
+	{
+		// special case here: when there's a sharing violation (i.e. two instances running),
+		// we don't want to blow away the cache. so just continue without a cache.
+		if (errno == EACCES)
+		{
+			Console.WriteLn("Failed to open pipeline cache index with EACCES, are you running two instances?");
+			return true;
+		}
+
+		return false;
+	}
+
+	u32 file_version = 0;
+	if (std::fread(&file_version, sizeof(file_version), 1, index_file) != 1 || file_version != SHADER_CACHE_VERSION)
+	{
+		Console.Error("Bad file/data version in '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+		std::fclose(index_file);
+		index_file = nullptr;
+		return false;
+	}
+
+	VK_PIPELINE_CACHE_HEADER header;
+	if (std::fread(&header, sizeof(header), 1, index_file) != 1 || !ValidatePipelineCacheHeader(header))
+	{
+		Console.Error("Mismatched pipeline cache header in '%s' (GPU/driver changed?)", GetPipelineCacheIndexFilename(uber).c_str());
+		std::fclose(index_file);
+		return false;
+	}
+
+	// Read existing pipeline index
+	for (;;)
+	{
+		CacheIndexKey key;
+		if (std::fread(&key, sizeof(key), 1, index_file) != 1)
+		{
+			if (std::feof(index_file))
+				break;
+
+			Console.Error("Failed to read key from '%s', corrupt file?", GetPipelineCacheIndexFilename(uber).c_str());
+			GetPipelineIndex(uber).clear();
+			std::fclose(index_file);
+			return false;
+		}
+
+		GetPipelineIndex(uber).insert(key);
+	}
+
+	std::fclose(index_file);
+
+	Console.WriteLn("Read %zu entries from '%s'", GetPipelineIndex(uber).size(), GetPipelineCacheIndexFilename(uber).c_str());
+
 	std::optional<std::vector<u8>> data = FileSystem::ReadBinaryFile(GetPipelineCacheFilename(uber).c_str());
 	if (!data.has_value())
 		return false;
@@ -399,7 +489,6 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 		return false;
 	}
 
-	VK_PIPELINE_CACHE_HEADER header;
 	std::memcpy(&header, data->data(), sizeof(header));
 	if (!ValidatePipelineCacheHeader(header))
 		return false;
@@ -418,12 +507,44 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 
 bool VKShaderCache::FlushPipelineCache()
 {
+	bool flushed = false;
 	for (u32 uber = 0; uber < 2; uber++)
 	{
 		if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE || !GetPipelineCacheDirty(uber) || GetPipelineCacheFilename(uber).empty())
-			return false;
+			continue;
 
 		size_t data_size;
+
+		// Write the pipeline index.
+		data_size = sizeof(CacheIndexKey) * GetPipelineNewIndex(uber).size();
+		Console.WriteLn("Writing %zu bytes to '%s'", data_size, GetPipelineCacheIndexFilename(uber).c_str());
+		
+		FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "a+b");
+		if (!index_file)
+		{
+			// FIXME: Duplication with opening.
+			// special case here: when there's a sharing violation (i.e. two instances running),
+			// we don't want to blow away the cache. so just continue without a cache.
+			if (errno == EACCES)
+			{
+				Console.WriteLn("Failed to open pipeline cache index with EACCES, are you running two instances?");
+				return true;
+			}
+
+			return false;
+		}
+
+		if (std::fwrite(GetPipelineNewIndex(uber).data(), sizeof(CacheIndexKey), GetPipelineNewIndex(uber).size(), index_file) !=
+			GetPipelineNewIndex(uber).size())
+		{
+			Console.Error("Failed to write pipeline index to '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+			return false;
+		}
+
+		std::fclose(index_file);
+		GetPipelineNewIndex(uber).clear();
+
+		// Write the pipeline data.
 		VkResult res =
 			vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), &data_size, nullptr);
 		if (res != VK_SUCCESS)
@@ -460,7 +581,7 @@ bool VKShaderCache::FlushPipelineCache()
 
 		GetPipelineCacheDirty(uber) = false;
 	}
-	return true;
+	return flushed;
 }
 
 void VKShaderCache::ClosePipelineCache()
@@ -498,8 +619,6 @@ std::string VKShaderCache::GetPipelineCacheBaseFileName(bool uber, bool debug)
 	if (debug)
 		base_filename += "_debug";
 
-	base_filename += ".bin";
-
 	return Path::Combine(EmuFolders::Cache, base_filename);
 }
 
@@ -521,6 +640,186 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::str
 	digest.Final(h.hash);
 
 	return CacheIndexKey{h.hash_low, h.hash_high, static_cast<u32>(shader_code.length()), type};
+}
+
+VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
+	const CacheIndexKey& vs_key, const CacheIndexKey& fs_key, const VkGraphicsPipelineCreateInfo& ci)
+{
+	MD5Digest digest;
+	u32 length = 0;
+
+	const auto UpdateDigest = [&digest, &length](const void* data, size_t size) {
+		digest.Update(data, size);
+		length += static_cast<u32>(size);
+	};
+
+	UpdateDigest(&vs_key, sizeof(vs_key));
+	UpdateDigest(&fs_key, sizeof(fs_key));
+
+	UpdateDigest(&ci.sType, sizeof(ci.sType));
+
+	UpdateDigest(&ci.stageCount, sizeof(ci.stageCount));
+	if (ci.pStages)
+	{
+		for (int i = 0; i < ci.stageCount; i++)
+		{
+			const VkPipelineShaderStageCreateInfo& stage = ci.pStages[i];
+			UpdateDigest(&stage.flags, sizeof(ci.pStages[i].flags));
+			UpdateDigest(&stage.stage, sizeof(ci.pStages[i].stage));
+			if (stage.pName)
+				UpdateDigest(stage.pName, strnlen(ci.pStages[i].pName, 128));
+		}
+	}
+
+	if (ci.pVertexInputState)
+	{
+		const VkPipelineVertexInputStateCreateInfo& vsci = *ci.pVertexInputState;
+		UpdateDigest(&vsci.sType, sizeof(vsci.sType));
+		UpdateDigest(&vsci.vertexBindingDescriptionCount, sizeof(vsci.vertexBindingDescriptionCount));
+		UpdateDigest(&vsci.vertexAttributeDescriptionCount, sizeof(vsci.vertexAttributeDescriptionCount));
+		if (vsci.pVertexBindingDescriptions)
+			UpdateDigest(vsci.pVertexBindingDescriptions,
+				sizeof(VkVertexInputBindingDescription) * vsci.vertexBindingDescriptionCount);
+		if (vsci.pVertexAttributeDescriptions)
+			UpdateDigest(vsci.pVertexAttributeDescriptions,
+				sizeof(VkVertexInputAttributeDescription) * vsci.vertexAttributeDescriptionCount);
+	}
+
+	if (ci.pInputAssemblyState)
+	{
+		const VkPipelineInputAssemblyStateCreateInfo& ia = *ci.pInputAssemblyState;
+		UpdateDigest(&ia.sType, sizeof(ia.sType));
+		UpdateDigest(&ia.flags, sizeof(ia.flags));
+		UpdateDigest(&ia.topology, sizeof(ia.topology));
+		UpdateDigest(&ia.primitiveRestartEnable, sizeof(ia.primitiveRestartEnable));
+	}
+
+	if (ci.pRasterizationState)
+	{
+		const VkPipelineRasterizationStateCreateInfo& rast = *ci.pRasterizationState;
+		UpdateDigest(&rast.sType, sizeof(rast.sType));
+		UpdateDigest(&rast.flags, sizeof(rast.flags));
+		UpdateDigest(&rast.depthClampEnable, sizeof(rast.depthClampEnable));
+		UpdateDigest(&rast.rasterizerDiscardEnable, sizeof(rast.rasterizerDiscardEnable));
+		UpdateDigest(&rast.polygonMode, sizeof(rast.polygonMode));
+		UpdateDigest(&rast.cullMode, sizeof(rast.cullMode));
+		UpdateDigest(&rast.frontFace, sizeof(rast.frontFace));
+		UpdateDigest(&rast.depthBiasEnable, sizeof(rast.depthBiasEnable));
+		UpdateDigest(&rast.depthBiasConstantFactor, sizeof(rast.depthBiasConstantFactor));
+		UpdateDigest(&rast.depthBiasClamp, sizeof(rast.depthBiasClamp));
+		UpdateDigest(&rast.depthBiasSlopeFactor, sizeof(rast.depthBiasSlopeFactor));
+		UpdateDigest(&rast.lineWidth, sizeof(rast.lineWidth));
+
+		const VkBaseInStructure* base = reinterpret_cast<const VkBaseInStructure*>(ci.pRasterizationState);
+		while (base->pNext)
+		{
+			base = base->pNext;
+			if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT)
+			{
+				const VkPipelineRasterizationLineStateCreateInfoEXT* line_rast =
+					reinterpret_cast<const VkPipelineRasterizationLineStateCreateInfoEXT*>(base);
+				UpdateDigest(&line_rast->sType, sizeof(line_rast->sType));
+				UpdateDigest(&line_rast->lineRasterizationMode, sizeof(line_rast->lineRasterizationMode));
+				UpdateDigest(&line_rast->stippledLineEnable, sizeof(line_rast->stippledLineEnable));
+				UpdateDigest(&line_rast->lineStippleFactor, sizeof(line_rast->lineStippleFactor));
+				UpdateDigest(&line_rast->lineStipplePattern, sizeof(line_rast->lineStipplePattern));
+			}
+			else if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT)
+			{
+				const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT* provoke =
+					reinterpret_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT*>(base);
+				UpdateDigest(&provoke->sType, sizeof(provoke->sType));
+				UpdateDigest(&provoke->provokingVertexMode, sizeof(provoke->provokingVertexMode));
+			}
+			else
+			{
+				pxAssert(false);
+			}
+		}
+
+		if (ci.pMultisampleState)
+		{
+			const VkPipelineMultisampleStateCreateInfo& ms = *ci.pMultisampleState;
+			UpdateDigest(&ms.sType, sizeof(ms.sType));
+			UpdateDigest(&ms.flags, sizeof(ms.flags));
+			UpdateDigest(&ms.rasterizationSamples, sizeof(ms.rasterizationSamples));
+			UpdateDigest(&ms.sampleShadingEnable, sizeof(ms.sampleShadingEnable));
+			UpdateDigest(&ms.minSampleShading, sizeof(ms.minSampleShading));
+			UpdateDigest(&ms.alphaToCoverageEnable, sizeof(ms.alphaToCoverageEnable));
+			UpdateDigest(&ms.alphaToOneEnable, sizeof(ms.alphaToOneEnable));
+			if (ms.pSampleMask)
+				UpdateDigest(ms.pSampleMask, sizeof(VkSampleMask) * ((ms.rasterizationSamples + 31) / 32));
+		}
+	}
+
+	if (ci.pViewportState)
+	{
+		const VkPipelineViewportStateCreateInfo& view = *ci.pViewportState;
+		UpdateDigest(&view.sType, sizeof(view.sType));
+		UpdateDigest(&view.flags, sizeof(view.flags));
+		UpdateDigest(&view.viewportCount, sizeof(view.viewportCount));
+		UpdateDigest(&view.scissorCount, sizeof(view.scissorCount));
+		if (view.pViewports)
+			UpdateDigest(view.pViewports, sizeof(VkViewport) * view.viewportCount);
+		if (view.pScissors)
+			UpdateDigest(view.pScissors, sizeof(VkRect2D)* view.viewportCount);
+	}
+
+	if (ci.pDynamicState)
+	{
+		const VkPipelineDynamicStateCreateInfo& dynamic = *ci.pDynamicState;
+		UpdateDigest(&dynamic.sType, sizeof(dynamic.sType));
+		UpdateDigest(&dynamic.flags, sizeof(dynamic.flags));
+		UpdateDigest(&dynamic.dynamicStateCount, sizeof(dynamic.dynamicStateCount));
+		if (dynamic.pDynamicStates)
+			UpdateDigest(dynamic.pDynamicStates, sizeof(VkDynamicState) * dynamic.dynamicStateCount);
+	}
+
+	if (ci.pDepthStencilState)
+	{
+		const VkPipelineDepthStencilStateCreateInfo& ds = *ci.pDepthStencilState;
+		UpdateDigest(&ds.sType, sizeof(ds.sType));
+		UpdateDigest(&ds.flags, sizeof(ds.flags));
+		UpdateDigest(&ds.depthTestEnable, sizeof(ds.depthTestEnable));
+		UpdateDigest(&ds.depthWriteEnable, sizeof(ds.depthWriteEnable));
+		UpdateDigest(&ds.depthCompareOp, sizeof(ds.depthCompareOp));
+		UpdateDigest(&ds.depthBoundsTestEnable, sizeof(ds.depthBoundsTestEnable));
+		UpdateDigest(&ds.stencilTestEnable, sizeof(ds.stencilTestEnable));
+		UpdateDigest(&ds.front, sizeof(ds.front));
+		UpdateDigest(&ds.back, sizeof(ds.back));
+		UpdateDigest(&ds.minDepthBounds, sizeof(ds.minDepthBounds));
+		UpdateDigest(&ds.maxDepthBounds, sizeof(ds.maxDepthBounds));
+	}
+
+	if (ci.pColorBlendState)
+	{
+		const VkPipelineColorBlendStateCreateInfo& blend = *ci.pColorBlendState;
+		UpdateDigest(&blend.sType, sizeof(blend.sType));
+		UpdateDigest(&blend.flags, sizeof(blend.flags));
+		UpdateDigest(&blend.logicOpEnable, sizeof(blend.logicOpEnable));
+		UpdateDigest(&blend.logicOp, sizeof(blend.logicOp));
+		UpdateDigest(&blend.attachmentCount, sizeof(blend.attachmentCount));
+		UpdateDigest(&blend.blendConstants, sizeof(blend.blendConstants));
+		if (blend.pAttachments)
+			UpdateDigest(blend.pAttachments, sizeof(VkPipelineColorBlendAttachmentState)* blend.attachmentCount);
+	}
+
+	// Note: render pass and pipeline layout are not handled since they are opaque.
+
+	union HashParts
+	{
+		struct
+		{
+			u64 hash_low;
+			u64 hash_high;
+		};
+		u8 hash[16];
+	};
+	HashParts h;
+
+	digest.Final(h.hash);
+
+	return CacheIndexKey{ h.hash_low, h.hash_high, length, UINT_MAX };
 }
 
 bool VKShaderCache::HasShaderSPV(u32 type, std::string_view shader_code, bool uber)
@@ -549,11 +848,11 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 ty
 	return spv;
 }
 
-VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code, bool uber)
+VKShaderCache::VKCachedShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_code, bool uber)
 {
 	std::optional<SPIRVCodeVector> spv = GetShaderSPV(type, shader_code, uber);
 	if (!spv.has_value())
-		return VK_NULL_HANDLE;
+		return {};
 
 	const VkShaderModuleCreateInfo ci{
 		VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, spv->size() * sizeof(SPIRVCodeType), spv->data()};
@@ -563,10 +862,10 @@ VkShaderModule VKShaderCache::GetShaderModule(u32 type, std::string_view shader_
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreateShaderModule() failed: ");
-		return VK_NULL_HANDLE;
+		return {};
 	}
 
-	return mod;
+	return VKCachedShaderModule{ mod, GetCacheKey(type, shader_code) };
 }
 
 bool VKShaderCache::HasVertexShader(std::string_view shader_code, bool uber)
@@ -579,19 +878,51 @@ bool VKShaderCache::HasFragmentShader(std::string_view shader_code, bool uber)
 	return HasShaderSPV(shaderc_glsl_fragment_shader, shader_code, uber);
 }
 
-VkShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code, bool uber)
+VKShaderCache::VKCachedShaderModule VKShaderCache::GetVertexShader(std::string_view shader_code, bool uber)
 {
 	return GetShaderModule(shaderc_glsl_vertex_shader, std::move(shader_code), uber);
 }
 
-VkShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code, bool uber)
+VKShaderCache::VKCachedShaderModule VKShaderCache::GetFragmentShader(std::string_view shader_code, bool uber)
 {
 	return GetShaderModule(shaderc_glsl_fragment_shader, std::move(shader_code), uber);
 }
 
 VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 {
-	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false);
+	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false).module;
+}
+
+bool VKShaderCache::HasPipelineState(const VKCachedShaderModule& vs, const VKCachedShaderModule& fs,
+	const VkGraphicsPipelineCreateInfo& ci, bool uber)
+{
+	return GetPipelineIndex(uber).contains(GetGraphicsPipelineCacheKey(vs.key, fs.key, ci));
+}
+
+VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice device,
+	const CacheIndexKey& vs_key, const CacheIndexKey& fs_key,
+	const VkGraphicsPipelineCreateInfo& ci, bool uber)
+{
+	const auto key = GetGraphicsPipelineCacheKey(vs_key, fs_key, ci);
+
+	bool is_new = GetPipelineIndex(uber).insert(key).second;
+
+	if (is_new)
+		GetPipelineNewIndex(uber).push_back(key);
+
+	Common::Timer debug_timer;
+
+	VkPipeline pipeline;
+	VkResult res = vkCreateGraphicsPipelines(device, GetPipelineCache(true, uber), 1, &ci, nullptr, &pipeline);
+	if (res != VK_SUCCESS)
+	{
+		LOG_VULKAN_ERROR(res, "vkCreateGraphicsPipelines() failed: ");
+		return {};
+	}
+
+	Console.WriteLn("Sync pipeline compile: uber=%d time=%.2fms", uber, debug_timer.GetTimeMilliseconds());
+
+	return { pipeline, key };
 }
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShaderSPV(
@@ -663,6 +994,11 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	GetIndex(uber).emplace(key, data);
 }
 
+void VKShaderCache::AddPipelineKey(const CacheIndexKey& key, bool uber)
+{
+	GetPipelineIndex(uber).insert(key);
+}
+
 void VKShaderCache::ProcessAsyncCompileJobs()
 {
 	if (m_compiler_async)
@@ -678,7 +1014,7 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			if (job->IsShaderJob())
 			{
 				// Add shader code to the cache.
-				VKShaderJob* shader_job = static_cast<VKShaderJob*>(job);
+				VKCachedShaderJob* shader_job = static_cast<VKCachedShaderJob*>(job);
 				AddShaderSPV(shader_job->GetKind(), shader_job->GetShaderCode(), shader_job->GetSPV(), shader_job->IsUber(), true);
 
 				pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
@@ -691,10 +1027,11 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			}
 			else if (job->IsPipelineJob())
 			{
-				VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job);
+				VKCachedPipelineJob* pipeline_job = static_cast<VKCachedPipelineJob*>(job);
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
 					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTime(),
 					pipeline_job->GetThreadID());
+				AddPipelineKey(pipeline_job->GetCacheKey(), pipeline_job->IsUber());
 			}
 			else
 			{
@@ -715,12 +1052,13 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> job)
 {
 	if (!m_compiler_async)
-		m_compiler_async = std::make_unique<VKShaderCompilerAsync>(
-			GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS);
+		m_compiler_async = std::unique_ptr<ShaderCompilerAsync>(
+			new ShaderCompilerAsync(GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS,
+			GSConfig.UseDebugDevice, GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info));
 
 	if (job->IsShaderJob())
 	{
-		VKShaderJob* shader_job = static_cast<VKShaderJob*>(job.get());
+		VKCachedShaderJob* shader_job = static_cast<VKCachedShaderJob*>(job.get());
 		pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
 		const char* kind_str = (shader_job->GetKind() == shaderc_vertex_shader) ? "vertex" : "fragment";
 		Console.WriteLn("Async %s shader compile: started hash=0x%016llX uber=%d",
@@ -730,7 +1068,7 @@ void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> 
 	}
 	else if (job->IsPipelineJob())
 	{
-		VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job.get());
+		VKCachedPipelineJob* pipeline_job = static_cast<VKCachedPipelineJob*>(job.get());
 		if (pipeline_job->HasVS() && pipeline_job->HasFS())
 		{
 			Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job->GetHash(), pipeline_job->IsUber());
@@ -756,11 +1094,11 @@ void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> 
 	}
 }
 
-void VKShaderCache::StartQueuedPipelineJobs(const VKShaderJob* shader_job)
+void VKShaderCache::StartQueuedPipelineJobs(const VKCachedShaderJob* shader_job)
 {
 	for (auto it = m_queued_pipeline_jobs_async.begin(); it != m_queued_pipeline_jobs_async.end(); )
 	{
-		VKPipelineJob* queued_job = *it;
+		VKCachedPipelineJob* queued_job = *it;
 		if (shader_job->GetKind() == shaderc_vertex_shader)
 		{
 			if (!queued_job->HasVS() && queued_job->GetVSJob() == shader_job)
