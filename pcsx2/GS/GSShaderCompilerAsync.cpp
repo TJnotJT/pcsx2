@@ -5,16 +5,7 @@
 GSShaderCompilerAsync::GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms)
 	: m_check_latency_ms(check_latency_ms)
 {
-	m_job_queue.resize(MAX_JOBS);
-	m_job_timer_queue.resize(MAX_JOBS);
 	m_worker_threads.resize(num_threads);
-}
-
-bool GSShaderCompilerAsync::IsJobQueueFull()
-{
-	std::unique_lock lock(m_mutex);
-
-	return m_queued_jobs == MAX_JOBS;
 }
 
 void GSShaderCompilerAsync::GetCompletedJobs(std::vector<GSCompileJob*>& jobs)
@@ -26,21 +17,13 @@ void GSShaderCompilerAsync::GetCompletedJobs(std::vector<GSCompileJob*>& jobs)
 
 	std::lock_guard lock(m_mutex);
 
-	while (m_acquired_jobs > 0 && m_job_queue[m_job_head]->IsDoneCompiling())
+	while (!m_jobs_done.empty())
 	{
-		GSCompileJob* job = m_job_queue[m_job_head];
-
-		job->SetCompileTime(static_cast<float>(m_job_timer_queue[m_job_head].GetTimeMilliseconds()));
+		GSCompileJob* job = m_jobs_done.front();
 
 		jobs.push_back(job);
 
-		m_job_queue[m_job_head] = nullptr;
-
-		m_job_head = (m_job_head + 1) % MAX_JOBS;
-
-		pxAssert(m_acquired_jobs <= m_queued_jobs);
-		m_queued_jobs--;
-		m_acquired_jobs--;
+		m_jobs_done.pop_front();
 	}
 }
 
@@ -58,38 +41,12 @@ void GSShaderCompilerAsync::StartCompileJobAsync(GSCompileJob* job)
 		m_check_timer.Reset();
 	}
 
-	if (m_queued_jobs == MAX_JOBS)
 	{
-		// Don't lock, overflow queue is exclusively owned by GS thread.
-		m_overflow_job_queue.push_back(job);
-		return;
-	}
+		std::lock_guard lock(m_mutex);
 
-	std::lock_guard lock(m_mutex);
+		m_jobs_waiting.push_back(job);
 
-	// Push the new job and as many as possible from the overflow queue.
-	while (job)
-	{
-		if (m_queued_jobs < MAX_JOBS)
-		{
-			m_job_queue[m_job_tail] = job;
-			m_job_timer_queue[m_job_tail].Reset();
-
-			m_job_tail = (m_job_tail + 1) % MAX_JOBS;
-			m_queued_jobs++;
-
-			m_worker_cv.notify_one();
-		}
-
-		if (!m_overflow_job_queue.empty())
-		{
-			job = m_overflow_job_queue.front();
-			m_overflow_job_queue.pop_front();
-		}
-		else
-		{
-			job = nullptr;
-		}
+		m_worker_cv.notify_one();
 	}
 }
 
@@ -97,30 +54,35 @@ void GSShaderCompilerAsync::WorkerThreadFunc(u32 thread_id)
 {
 	while (true)
 	{
-		// Acquire a queued job.
 		GSCompileJob* job;
+		
+		// Acquire a waiting job.
 		{
 			std::unique_lock lock(m_mutex);
 
 			m_worker_cv.wait(lock, [&]() {
-				return m_workers_stop || m_acquired_jobs < m_queued_jobs;
+				return m_workers_stop || !m_jobs_waiting.empty();
 			});
 
 			if (m_workers_stop)
 				return;
 
-			job = m_job_queue[m_job_acquire];
+			job = m_jobs_waiting.front();
 
-			m_job_acquire = (m_job_acquire + 1) % MAX_JOBS;
-			m_acquired_jobs++;
+			m_jobs_waiting.pop_front();
 		}
 
 		// Compile the job.
 		DoCompileJobSync(job, thread_id);
 
-		// Release the completed job.
 		job->SetThreadID(thread_id); // For debugging
-		job->SetDoneCompiling();
+		
+		// Release the completed job.
+		{
+			std::lock_guard lock(m_mutex);
+
+			m_jobs_done.push_back(job);
+		}
 	}
 }
 
@@ -146,6 +108,4 @@ void GSShaderCompilerAsync::StopWorkerThreads()
 GSShaderCompilerAsync::~GSShaderCompilerAsync()
 {
 	StopWorkerThreads();
-
-	m_job_queue.clear(); // Release jobs references.
 }

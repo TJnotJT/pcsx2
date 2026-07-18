@@ -165,4 +165,5 @@ private:
 	std::unique_ptr<D3D12ShaderCompilerAsync> m_compiler_async;
 	std::deque<std::shared_ptr<GSCompileJob>> m_compile_jobs_async;
 	std::deque<D3D12PipelineJob*> m_queued_pipeline_jobs_async;
+	std::vector<GSCompileJob*> m_finished_compile_jobs_async;
 };

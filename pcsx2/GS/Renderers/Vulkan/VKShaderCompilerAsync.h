@@ -29,8 +29,8 @@ public:
 	VkDevice GetDevice() const { return m_device; }
 	shaderc_shader_kind GetKind() const { return m_kind; }
 	const std::string& GetShaderCode() const { return m_shader_code; }
-	const u64 GetHash() const { return m_hash; }
-	const bool IsUber() const { return m_uber; }
+	u64 GetHash() const { return m_hash; }
+	bool IsUber() const { return m_uber; }
 	void SetModule(VkShaderModule module) { m_module = module; }
 	VkShaderModule GetModule() const { return m_module; }
 	template<typename T>
@@ -70,7 +70,7 @@ public:
 	VkPipelineCache GetPipelineCache() const { return m_pipeline_cache; }
 	const CacheIndexKey& GetVSCacheKey() const { return m_vs_cache_key; }
 	const CacheIndexKey& GetFSCacheKey() const { return m_fs_cache_key; }
-	const CacheIndexKey GetPipelineCacheKey() const
+	CacheIndexKey GetPipelineCacheKey() const
 	{
 		return VKShaderCache::GetGraphicsPipelineCacheKey(m_vs_cache_key, m_fs_cache_key, m_gpb.GetCI());
 	}

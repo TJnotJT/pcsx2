@@ -3441,7 +3441,7 @@ std::shared_ptr<ReturnType> GSDevice12::ProcessAsyncJob(const SelType& sel, Asyn
 		{
 			const std::shared_ptr<ReturnType>& job = it_async->second;
 
-			if (job->IsDoneCaching())
+			if (job->IsDone())
 			{
 				// Remove from async map and add to map.
 				map.emplace(sel, GetJobOutput(*job));

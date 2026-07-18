@@ -177,6 +177,7 @@ private:
 	std::unique_ptr<VKShaderCompilerAsync> m_compiler_async;
 	std::deque<std::shared_ptr<GSCompileJob>> m_compile_jobs_async;
 	std::deque<VKPipelineJob*> m_queued_pipeline_jobs_async;
+	std::vector<GSCompileJob*> m_finished_compile_jobs_async;
 };
 
 extern std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;

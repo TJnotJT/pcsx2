@@ -1026,13 +1026,15 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 {
 	if (m_compiler_async)
 	{
-		std::vector<GSCompileJob*> completed;
-		m_compiler_async->GetCompletedJobs(completed);
+		m_finished_compile_jobs_async.clear();
 
-		if (!completed.empty())
-			Console.WriteLn("Async pipeline compile: processing %u jobs", static_cast<u32>(completed.size()));
+		m_compiler_async->GetCompletedJobs(m_finished_compile_jobs_async);
 
-		for (GSCompileJob* job : completed)
+		if (!m_finished_compile_jobs_async.empty())
+			Console.WriteLn("Async pipeline compile: processing %u jobs",
+				static_cast<u32>(m_finished_compile_jobs_async.size()));
+
+		for (GSCompileJob* job : m_finished_compile_jobs_async)
 		{
 			if (job->IsShaderJob())
 			{
@@ -1043,7 +1045,7 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 				pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
 				const char* kind_str = (shader_job->GetKind() == shaderc_vertex_shader) ? "vertex" : "fragment";
 				Console.WriteLn("Async %s shader compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-					kind_str, shader_job->GetHash(), shader_job->IsUber(), shader_job->GetCompileTime(), shader_job->GetThreadID());
+					kind_str, shader_job->GetHash(), shader_job->IsUber(), shader_job->GetCompileTimeMS(), shader_job->GetThreadID());
 
 				// Notify any pipelines waiting on this shader.
 				StartQueuedPipelineJobs(shader_job);
@@ -1052,7 +1054,7 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			{
 				VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job);
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
-					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTime(),
+					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTimeMS(),
 					pipeline_job->GetThreadID());
 
 				const CacheIndexKey pipeline_key = pipeline_job->GetPipelineCacheKey();
@@ -1064,7 +1066,7 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			}
 
 			// Let GSDevice know we're done.
-			job->SetDoneCaching();
+			job->SetDone();
 
 			// Remove reference from the queue.
 			const auto it = std::find_if(
