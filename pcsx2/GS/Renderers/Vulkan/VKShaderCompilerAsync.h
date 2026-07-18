@@ -3,7 +3,7 @@
 #include "common/Assertions.h"
 
 #include "GS/Renderers/Vulkan/VKBuilders.h"
-#include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
+#include "GS/Renderers/Vulkan/VKShadercWrapper.h"
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Common/GSShaderCompilerAsync.h"
 
@@ -16,8 +16,8 @@
 class VKShaderJob : public GSCompileJob
 {
 public:
-	using SPIRVCodeType = VKDynamicShaderc::SPIRVCodeType;
-	using SPIRVCodeVector = VKDynamicShaderc::SPIRVCodeVector;
+	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
+	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
 	using CacheIndexKey = VKShaderCache::CacheIndexKey;
 
 	VKShaderJob(VkDevice device, shaderc_shader_kind kind, std::string_view shader_code, u64 hash, bool uber)
@@ -54,8 +54,8 @@ private:
 class VKPipelineJob : public GSCompileJob
 {
 public:
-	using SPIRVCodeType = VKDynamicShaderc::SPIRVCodeType;
-	using SPIRVCodeVector = VKDynamicShaderc::SPIRVCodeVector;
+	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
+	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
 	using CacheIndexKey = VKShaderCache::CacheIndexKey;
 
 	VKPipelineJob(VkDevice device, VkPipelineCache pipeline_cache,
@@ -116,8 +116,8 @@ private:
 class VKShaderCompilerAsync : public GSShaderCompilerAsync
 {
 public:
-	using SPIRVCodeType = VKDynamicShaderc::SPIRVCodeType;
-	using SPIRVCodeVector = VKDynamicShaderc::SPIRVCodeVector;
+	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
+	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
 	using CacheIndexKey = VKShaderCache::CacheIndexKey;
 
 	VKShaderCompilerAsync(u32 num_threads, u32 check_latency_ms, bool debug, bool non_semantic)

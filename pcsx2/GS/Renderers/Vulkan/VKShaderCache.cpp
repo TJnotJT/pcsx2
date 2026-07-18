@@ -5,7 +5,7 @@
 #include "GS/GS.h"
 #include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "GS/Renderers/Vulkan/VKBuilders.h"
-#include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
+#include "GS/Renderers/Vulkan/VKShadercWrapper.h"
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
@@ -122,7 +122,7 @@ bool VKShaderCache::m_shaderc_failed = false;
 
 bool VKShaderCache::InitShadercCompiler()
 {
-	if (!VKDynamicShaderc::Open())
+	if (!VKShadercWrapper::Open())
 		return false;
 
 	if (m_shaderc_failed)
@@ -131,7 +131,7 @@ bool VKShaderCache::InitShadercCompiler()
 	if (m_compiler_sync)
 		return true;
 
-	m_compiler_sync = VKDynamicShaderc::CreateCompiler();
+	m_compiler_sync = VKShadercWrapper::CreateCompiler();
 
 	m_shaderc_failed = !m_compiler_sync;
 
@@ -148,7 +148,7 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileShaderToSPV(
 
 	std::string errors;
 
-	ret = VKDynamicShaderc::CompileShaderToSPV(m_compiler_sync, stage, source, debug,
+	ret = VKShadercWrapper::CompileShaderToSPV(m_compiler_sync, stage, source, debug,
 		GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info, &errors);
 
 	if (!ret)

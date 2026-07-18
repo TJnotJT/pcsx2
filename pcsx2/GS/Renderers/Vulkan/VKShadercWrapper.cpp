@@ -1,10 +1,10 @@
-#include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
+#include "GS/Renderers/Vulkan/VKShadercWrapper.h"
 
 #include "common/Assertions.h"
 #include "common/Console.h"
 #include "common/Error.h"
 
-namespace VKDynamicShaderc
+namespace VKShadercWrapper
 {
 	static DynamicLibrary s_library;
 	static std::vector<shaderc_compiler_t> s_compilers;
@@ -14,7 +14,7 @@ namespace VKDynamicShaderc
 #undef DEFINE_FUNC
 };
 
-bool VKDynamicShaderc::Open()
+bool VKShadercWrapper::Open()
 {
 	if (s_library.IsOpen())
 		return true;
@@ -44,12 +44,12 @@ bool VKDynamicShaderc::Open()
 	SHADERC_FUNCTIONS(LOAD_FUNC)
 #undef LOAD_FUNC
 
-	std::atexit(&VKDynamicShaderc::Close);
+	std::atexit(&VKShadercWrapper::Close);
 
 	return true;
 }
 
-void VKDynamicShaderc::Close()
+void VKShadercWrapper::Close()
 {
 	// Release shaderc compilers.
 	for (shaderc_compiler_t compiler : s_compilers)
@@ -64,7 +64,7 @@ void VKDynamicShaderc::Close()
 	s_library.Close();
 }
 
-shaderc_compiler_t VKDynamicShaderc::CreateCompiler()
+shaderc_compiler_t VKShadercWrapper::CreateCompiler()
 {
 	shaderc_compiler_t compiler = shaderc_compiler_initialize();
 	if (!compiler)
@@ -92,7 +92,7 @@ static const char* compilation_status_to_string(shaderc_compilation_status statu
 	return "unknown_error";
 }
 
-std::optional<VKDynamicShaderc::SPIRVCodeVector> VKDynamicShaderc::CompileShaderToSPV(
+std::optional<VKShadercWrapper::SPIRVCodeVector> VKShadercWrapper::CompileShaderToSPV(
 	shaderc_compiler_t compiler, u32 stage, std::string_view source, bool debug, bool enable_non_semantic,
 	std::string* errors_out)
 {

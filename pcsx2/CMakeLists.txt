@@ -637,7 +637,7 @@ if(USE_VULKAN)
 		GS/Renderers/Vulkan/VKLoader.cpp
 		GS/Renderers/Vulkan/VKShaderCache.cpp
 		GS/Renderers/Vulkan/VKShaderCompilerAsync.cpp
-		GS/Renderers/Vulkan/VKDynamicShaderc.cpp
+		GS/Renderers/Vulkan/VKShadercWrapper.cpp
 		GS/Renderers/Vulkan/VKStreamBuffer.cpp
 		GS/Renderers/Vulkan/VKSwapChain.cpp
 	)
@@ -650,7 +650,7 @@ if(USE_VULKAN)
 		GS/Renderers/Vulkan/VKLoader.h
 		GS/Renderers/Vulkan/VKShaderCache.h
 		GS/Renderers/Vulkan/VKShaderCompilerAsync.h
-		GS/Renderers/Vulkan/VKDynamicShaderc.h
+		GS/Renderers/Vulkan/VKShadercWrapper.h
 		GS/Renderers/Vulkan/VKStreamBuffer.h
 		GS/Renderers/Vulkan/VKSwapChain.h
 	)

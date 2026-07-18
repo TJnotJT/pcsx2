@@ -15,7 +15,7 @@ void VKShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job, u32 thread_id)
 		shaderc_compiler_t compiler = m_shaderc_compilers[thread_id];
 
 		std::optional<SPIRVCodeVector> spv =
-			VKDynamicShaderc::CompileShaderToSPV(compiler, shader_job->GetKind(),
+			VKShadercWrapper::CompileShaderToSPV(compiler, shader_job->GetKind(),
 				shader_job->GetShaderCode(), m_debug, m_debug && m_non_semantic);
 
 		if (spv)
@@ -46,10 +46,10 @@ void VKShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job, u32 thread_id)
 
 void VKShaderCompilerAsync::OnWorkersStarted()
 {
-	if (!VKDynamicShaderc::Open())
+	if (!VKShadercWrapper::Open())
 		return;
 
 	m_shaderc_compilers.resize(GetNumThreads());
 	for (shaderc_compiler_t& compiler : m_shaderc_compilers)
-		compiler = VKDynamicShaderc::CreateCompiler();
+		compiler = VKShadercWrapper::CreateCompiler();
 }

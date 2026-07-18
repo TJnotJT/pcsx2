@@ -25,7 +25,7 @@
 	X(shaderc_result_get_error_message) \
 	X(shaderc_result_get_compilation_status)
 
-namespace VKDynamicShaderc
+namespace VKShadercWrapper
 {
 	using SPIRVCodeType = u32;
 	using SPIRVCodeVector = std::vector<SPIRVCodeType>;
@@ -42,4 +42,4 @@ namespace VKDynamicShaderc
 	SHADERC_FUNCTIONS(DECLARE_FUNC)
 #undef DECLARE_FUNC
 
-} // namespace VKDynamicShaderc
+} // namespace VKShadercWrapper

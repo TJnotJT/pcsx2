@@ -6,7 +6,7 @@
 #include "Config.h"
 
 #include "GS/Renderers/Vulkan/VKLoader.h"
-#include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
+#include "GS/Renderers/Vulkan/VKShadercWrapper.h"
 
 #include "common/HashCombine.h"
 
@@ -97,8 +97,8 @@ public:
 	void ProcessAsyncCompileJobs(); // Process jobs that have finished.
 private:
 	// SPIR-V compiled code type
-	using SPIRVCodeType = VKDynamicShaderc::SPIRVCodeType;
-	using SPIRVCodeVector = VKDynamicShaderc::SPIRVCodeVector;
+	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
+	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
 
 	using CacheIndex = std::unordered_map<CacheIndexKey, CacheIndexData, CacheIndexEntryHasher>;
 	using CacheSet = std::unordered_set<CacheIndexKey, CacheIndexEntryHasher>;
