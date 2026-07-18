@@ -1,19 +1,5 @@
 #include "GS/Renderers/DX12/D3D12ShaderCompilerAsync.h"
 
-void D3D12ShaderCompilerAsync::D3D12PipelineJob::Create()
-{
-	pxAssert(m_gpb.HasVertexShader() && m_gpb.HasPixelShader());
-	m_pipeline = m_gpb.Create(m_device, false);
-}
-
-D3D12ShaderCompilerAsync::D3D12ShaderCompilerAsync(
-	u32 num_threads, u32 check_latency_ms, D3D::ShaderModel shader_model, bool debug)
-	: GSShaderCompilerAsync(num_threads, check_latency_ms)
-	, m_shader_model(shader_model)
-	, m_debug(debug)
-{
-}
-
 void D3D12ShaderCompilerAsync::DoCompileJobSync(GSCompileJob* job, u32 thread_id)
 {
 	if (job->IsShaderJob())

@@ -401,10 +401,7 @@ private:
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
-	
-	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
-	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
-	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
+
 	using ShaderEntryType = D3D12ShaderCache::EntryType;
 
 	std::unordered_map<PipelineSelector, std::shared_ptr<D3D12PipelineJob>, PipelineSelectorHash>
@@ -470,8 +467,12 @@ private:
 	static bool IsPipeline(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
 	static bool IsPipelineJob(D3D12PipelineOrJob& x) { return std::holds_alternative<D3D12PipelineJob*>(x); }
 
+	// Overloads for templated functions.
+	static ComPtr<ID3D12PipelineState> GetJobOutput(const D3D12PipelineJob& job) { return job.GetPipeline(); }
+	static ComPtr<ID3DBlob> GetJobOutput(const D3D12ShaderJob& job) { return job.GetBlob(); }
+
 	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
-	std::shared_ptr<ReturnType> GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map);
+	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
 	D3D12ShaderBlobOrJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, bool async = false);

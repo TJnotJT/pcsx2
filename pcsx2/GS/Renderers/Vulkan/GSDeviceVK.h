@@ -462,7 +462,6 @@ private:
 		return m_convert[ShaderConvertSelector(shader).Index()];
 	}
 
-	using ShaderCompilerAsync = VKShaderCache::ShaderCompilerAsync;
 	using VKCachedShaderModule = VKShaderCache::VKCachedShaderModule;
 	using VKCachedPipeline = VKShaderCache::VKCachedPipeline;
 
@@ -470,10 +469,6 @@ private:
 	std::unordered_map<GSHWDrawConfig::PSSelector, VKCachedShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VKCachedPipeline, PipelineSelectorHash> m_tfx_pipelines;
-
-	using VKShaderJob = VKShaderCache::VKCachedShaderJob;
-	using VKPipelineJob = VKShaderCache::VKCachedPipelineJob;
-	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
 
 	std::unordered_map<PipelineSelector, std::shared_ptr<VKPipelineJob>, PipelineSelectorHash>
 		m_tfx_pipelines_async;
@@ -542,11 +537,11 @@ private:
 	}
 	static VKCachedPipeline GetJobOutput(const VKPipelineJob& job)
 	{
-		return { job.GetPipeline(), job.GetCacheKey() };
+		return { job.GetPipeline(), job.GetPipelineCacheKey() };
 	}
 
 	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
-	std::shared_ptr<ReturnType> GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map);
+	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
 	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber = false, bool async = false);

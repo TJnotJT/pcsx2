@@ -5204,7 +5204,7 @@ static void SetPipelineName(VkDevice device, VkPipeline pipeline, const GSDevice
 }
 
 template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
-std::shared_ptr<ReturnType> GSDeviceVK::GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map)
+std::shared_ptr<ReturnType> GSDeviceVK::ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map)
 {
 	if (!async_map.empty())
 	{
@@ -5215,7 +5215,7 @@ std::shared_ptr<ReturnType> GSDeviceVK::GetAsyncJobIfExists(const SelType& sel, 
 		{
 			const std::shared_ptr<ReturnType>& job = it_async->second;
 
-			if (job->IsDone())
+			if (job->IsDoneCaching())
 			{
 				// Remove from async map and add to map.
 				map.emplace(sel, GetJobOutput(*job.get()));
@@ -5234,7 +5234,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::V
 {
 	// Check async results first.
 	if (std::shared_ptr<VKShaderJob> async_job =
-		GetAsyncJobIfExists<VKShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
+		ProcessAsyncJob<VKShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
 	{
 		return async_job; // Forward incomplete job for pipeline creation.
 	}
@@ -5302,7 +5302,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawC
 {
 	// Check async results first.
 	if (std::shared_ptr<VKShaderJob> async_job =
-		GetAsyncJobIfExists<VKShaderJob>(sel, m_tfx_fragment_shaders_async, m_tfx_fragment_shaders))
+		ProcessAsyncJob<VKShaderJob>(sel, m_tfx_fragment_shaders_async, m_tfx_fragment_shaders))
 	{
 		return async_job; // Forward incomplete job for pipeline creation.
 	}
@@ -5550,8 +5550,13 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	if (m_features.framebuffer_fetch && p.IsRTFeedbackLoop())
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
+	const VKShaderCache::CacheIndexKey pipeline_key = (IsShaderModule(vs) && IsShaderModule(fs))
+		? g_vulkan_shader_cache->GetGraphicsPipelineCacheKey(vs_key, fs_key, gpb.GetCI())
+		: VKShaderCache::CacheIndexKey{};
+
 	// Handle async compilation if requested.
-	if (async)
+	if (async && (!IsShaderModule(vs) || !IsShaderModule(fs) ||
+		!g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, uber)))
 	{
 		const auto it = m_tfx_pipelines_async.find(p);
 		if (it != m_tfx_pipelines_async.end())
@@ -5562,12 +5567,8 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		{
 			// Submit pipeline async compilation.
 			std::shared_ptr<VKPipelineJob> job = std::make_shared<VKPipelineJob>(
-				m_device,
-				g_vulkan_shader_cache->GetPipelineCache(true, uber),
-				gpb,
-				PipelineSelectorHash()(p),
-				uber,
-				VKShaderCache::GetGraphicsPipelineCacheKey(vs_key, fs_key, gpb.GetCI()));
+				m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber),
+				gpb, vs_key, fs_key, PipelineSelectorHash()(p), uber);
 
 			if (IsShaderJob(vs))
 				job->SetVSJob(GetShaderJob(vs));
@@ -5582,7 +5583,6 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		}
 	}
 
-	//VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber));
 	VKCachedPipeline pipeline = g_vulkan_shader_cache->GetGraphicsPipeline(m_device, vs_key, fs_key, gpb.GetCI(), uber);
 	if (pipeline.pipeline)
 		SetPipelineName(m_device, pipeline.pipeline, p);
@@ -5594,7 +5594,7 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool
 {
 	// Check async results first.
 	if (std::shared_ptr<VKPipelineJob> async_job =
-		GetAsyncJobIfExists<VKPipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
+		ProcessAsyncJob<VKPipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
 	{
 		return nullptr; // Don't forward incomplete pipelines jobs.
 	}

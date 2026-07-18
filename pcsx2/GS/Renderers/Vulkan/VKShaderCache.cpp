@@ -5,8 +5,9 @@
 #include "GS/GS.h"
 #include "GS/Renderers/Vulkan/GSDeviceVK.h"
 #include "GS/Renderers/Vulkan/VKBuilders.h"
-#include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
+#include "GS/Renderers/Vulkan/VKShaderCache.h"
+#include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
 #include "Config.h"
 #include "ShaderCacheVersion.h"
@@ -659,17 +660,31 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
 	UpdateDigest(&ci.sType, sizeof(ci.sType));
 
 	UpdateDigest(&ci.stageCount, sizeof(ci.stageCount));
+	bool has_vs = false;
+	bool has_fs = false;
 	if (ci.pStages)
 	{
-		for (int i = 0; i < ci.stageCount; i++)
+		// First hash VS then PS.
+		for (u32 vs_or_fs = 0; vs_or_fs < 2; vs_or_fs++)
 		{
-			const VkPipelineShaderStageCreateInfo& stage = ci.pStages[i];
-			UpdateDigest(&stage.flags, sizeof(ci.pStages[i].flags));
-			UpdateDigest(&stage.stage, sizeof(ci.pStages[i].stage));
-			if (stage.pName)
-				UpdateDigest(stage.pName, strnlen(ci.pStages[i].pName, 128));
+			for (u32 i = 0; i < ci.stageCount; i++)
+			{
+				const VkPipelineShaderStageCreateInfo& stage = ci.pStages[i];
+				pxAssert(stage.stage == VK_SHADER_STAGE_VERTEX_BIT || stage.stage == VK_SHADER_STAGE_FRAGMENT_BIT);
+				if ((vs_or_fs == 0 && stage.stage == VK_SHADER_STAGE_VERTEX_BIT) ||
+					(vs_or_fs == 1 && stage.stage == VK_SHADER_STAGE_FRAGMENT_BIT))
+				{
+					UpdateDigest(&stage.flags, sizeof(stage.flags));
+					UpdateDigest(&stage.stage, sizeof(stage.stage));
+					if (stage.pName)
+						UpdateDigest(stage.pName, strnlen(stage.pName, 128));
+					has_vs = has_vs || (vs_or_fs == 0);
+					has_fs = has_fs || (vs_or_fs == 1);
+				}
+			}
 		}
 	}
+	pxAssert(has_vs && has_fs); // Don't hash incomplete descriptions.
 
 	if (ci.pVertexInputState)
 	{
@@ -710,30 +725,40 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
 		UpdateDigest(&rast.depthBiasSlopeFactor, sizeof(rast.depthBiasSlopeFactor));
 		UpdateDigest(&rast.lineWidth, sizeof(rast.lineWidth));
 
-		const VkBaseInStructure* base = reinterpret_cast<const VkBaseInStructure*>(ci.pRasterizationState);
-		while (base->pNext)
+		// First hash line rasterization state then provoking vertex. Fail if anything else is encountered.
+		for (u32 stage = 0; stage < 2; stage++)
 		{
-			base = base->pNext;
-			if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT)
+			const VkBaseInStructure* base = reinterpret_cast<const VkBaseInStructure*>(ci.pRasterizationState);
+			while (base->pNext)
 			{
-				const VkPipelineRasterizationLineStateCreateInfoEXT* line_rast =
-					reinterpret_cast<const VkPipelineRasterizationLineStateCreateInfoEXT*>(base);
-				UpdateDigest(&line_rast->sType, sizeof(line_rast->sType));
-				UpdateDigest(&line_rast->lineRasterizationMode, sizeof(line_rast->lineRasterizationMode));
-				UpdateDigest(&line_rast->stippledLineEnable, sizeof(line_rast->stippledLineEnable));
-				UpdateDigest(&line_rast->lineStippleFactor, sizeof(line_rast->lineStippleFactor));
-				UpdateDigest(&line_rast->lineStipplePattern, sizeof(line_rast->lineStipplePattern));
-			}
-			else if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT)
-			{
-				const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT* provoke =
-					reinterpret_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT*>(base);
-				UpdateDigest(&provoke->sType, sizeof(provoke->sType));
-				UpdateDigest(&provoke->provokingVertexMode, sizeof(provoke->provokingVertexMode));
-			}
-			else
-			{
-				pxAssert(false);
+				base = base->pNext;
+				if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT)
+				{
+					if (stage == 0)
+					{
+						const VkPipelineRasterizationLineStateCreateInfoEXT* line_rast =
+							reinterpret_cast<const VkPipelineRasterizationLineStateCreateInfoEXT*>(base);
+						UpdateDigest(&line_rast->sType, sizeof(line_rast->sType));
+						UpdateDigest(&line_rast->lineRasterizationMode, sizeof(line_rast->lineRasterizationMode));
+						UpdateDigest(&line_rast->stippledLineEnable, sizeof(line_rast->stippledLineEnable));
+						UpdateDigest(&line_rast->lineStippleFactor, sizeof(line_rast->lineStippleFactor));
+						UpdateDigest(&line_rast->lineStipplePattern, sizeof(line_rast->lineStipplePattern));
+					}
+				}
+				else if (base->sType == VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT)
+				{
+					if (stage == 1)
+					{
+						const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT* provoke =
+							reinterpret_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT*>(base);
+						UpdateDigest(&provoke->sType, sizeof(provoke->sType));
+						UpdateDigest(&provoke->provokingVertexMode, sizeof(provoke->provokingVertexMode));
+					}
+				}
+				else
+				{
+					pxAssert(false);
+				}
 			}
 		}
 
@@ -893,10 +918,9 @@ VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false).module;
 }
 
-bool VKShaderCache::HasPipelineState(const VKCachedShaderModule& vs, const VKCachedShaderModule& fs,
-	const VkGraphicsPipelineCreateInfo& ci, bool uber)
+bool VKShaderCache::HasGraphicsPipeline(const CacheIndexKey& key, bool uber)
 {
-	return GetPipelineIndex(uber).contains(GetGraphicsPipelineCacheKey(vs.key, fs.key, ci));
+	return GetPipelineIndex(uber).contains(key);
 }
 
 VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice device,
@@ -905,10 +929,7 @@ VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice devi
 {
 	const auto key = GetGraphicsPipelineCacheKey(vs_key, fs_key, ci);
 
-	bool is_new = GetPipelineIndex(uber).insert(key).second;
-
-	if (is_new)
-		GetPipelineNewIndex(uber).push_back(key);
+	AddPipelineKey(key, uber);
 
 	Common::Timer debug_timer;
 
@@ -996,7 +1017,9 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 
 void VKShaderCache::AddPipelineKey(const CacheIndexKey& key, bool uber)
 {
-	GetPipelineIndex(uber).insert(key);
+	bool is_new = GetPipelineIndex(uber).insert(key).second;
+	if (is_new)
+		GetPipelineNewIndex(uber).push_back(key);
 }
 
 void VKShaderCache::ProcessAsyncCompileJobs()
@@ -1014,7 +1037,7 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			if (job->IsShaderJob())
 			{
 				// Add shader code to the cache.
-				VKCachedShaderJob* shader_job = static_cast<VKCachedShaderJob*>(job);
+				VKShaderJob* shader_job = static_cast<VKShaderJob*>(job);
 				AddShaderSPV(shader_job->GetKind(), shader_job->GetShaderCode(), shader_job->GetSPV(), shader_job->IsUber(), true);
 
 				pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
@@ -1027,16 +1050,21 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 			}
 			else if (job->IsPipelineJob())
 			{
-				VKCachedPipelineJob* pipeline_job = static_cast<VKCachedPipelineJob*>(job);
+				VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job);
 				Console.WriteLn("Async pipeline compile: finished hash=0x%016llX uber=%d time=%.2fms thread_id=%d",
 					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTime(),
 					pipeline_job->GetThreadID());
-				AddPipelineKey(pipeline_job->GetCacheKey(), pipeline_job->IsUber());
+
+				const CacheIndexKey pipeline_key = pipeline_job->GetPipelineCacheKey();
+				AddPipelineKey(pipeline_key, pipeline_job->IsUber());
 			}
 			else
 			{
 				pxFailRel("Unknown job type");
 			}
+
+			// Let GSDevice know we're done.
+			job->SetDoneCaching();
 
 			// Remove reference from the queue.
 			const auto it = std::find_if(
@@ -1052,13 +1080,13 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> job)
 {
 	if (!m_compiler_async)
-		m_compiler_async = std::unique_ptr<ShaderCompilerAsync>(
-			new ShaderCompilerAsync(GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS,
+		m_compiler_async = std::unique_ptr<VKShaderCompilerAsync>(
+			new VKShaderCompilerAsync(GSConfig.HybridShaderCacheThreads, GSConfig.HybridShaderCacheLatencyMS,
 			GSConfig.UseDebugDevice, GSDeviceVK::GetInstance()->GetOptionalExtensions().vk_khr_shader_non_semantic_info));
 
 	if (job->IsShaderJob())
 	{
-		VKCachedShaderJob* shader_job = static_cast<VKCachedShaderJob*>(job.get());
+		VKShaderJob* shader_job = static_cast<VKShaderJob*>(job.get());
 		pxAssert(shader_job->GetKind() == shaderc_vertex_shader || shader_job->GetKind() == shaderc_fragment_shader);
 		const char* kind_str = (shader_job->GetKind() == shaderc_vertex_shader) ? "vertex" : "fragment";
 		Console.WriteLn("Async %s shader compile: started hash=0x%016llX uber=%d",
@@ -1068,7 +1096,7 @@ void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> 
 	}
 	else if (job->IsPipelineJob())
 	{
-		VKCachedPipelineJob* pipeline_job = static_cast<VKCachedPipelineJob*>(job.get());
+		VKPipelineJob* pipeline_job = static_cast<VKPipelineJob*>(job.get());
 		if (pipeline_job->HasVS() && pipeline_job->HasFS())
 		{
 			Console.WriteLn("Async pipeline compile: started hash=0x%016llX uber=%d", pipeline_job->GetHash(), pipeline_job->IsUber());
@@ -1094,11 +1122,11 @@ void VKShaderCache::StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> 
 	}
 }
 
-void VKShaderCache::StartQueuedPipelineJobs(const VKCachedShaderJob* shader_job)
+void VKShaderCache::StartQueuedPipelineJobs(const VKShaderJob* shader_job)
 {
 	for (auto it = m_queued_pipeline_jobs_async.begin(); it != m_queued_pipeline_jobs_async.end(); )
 	{
-		VKCachedPipelineJob* queued_job = *it;
+		VKPipelineJob* queued_job = *it;
 		if (shader_job->GetKind() == shaderc_vertex_shader)
 		{
 			if (!queued_job->HasVS() && queued_job->GetVSJob() == shader_job)

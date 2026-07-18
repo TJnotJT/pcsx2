@@ -7,14 +7,14 @@
 #include <thread>
 #include <mutex>
 
-class GSShaderCompilerAsync
+class GSCompileJob
 {
 public:
 	enum JobStatus
 	{
 		NONE,
-		COMPILING,
-		DONE,
+		DONE_COMPILING,
+		DONE_CACHING,
 	};
 
 	enum JobType
@@ -23,31 +23,31 @@ public:
 		PIPELINE,
 	};
 
-	class GSCompileJob
-	{
-	public:
-		GSCompileJob(JobType type) : m_job_type(type) {}
+	GSCompileJob(JobType type) : m_job_type(type) {}
 
-		bool IsShaderJob() { return m_job_type == SHADER; }
-		bool IsPipelineJob() { return m_job_type == PIPELINE; }
+	bool IsShaderJob() { return m_job_type == SHADER; }
+	bool IsPipelineJob() { return m_job_type == PIPELINE; }
 
-		virtual ~GSCompileJob() {}
+	virtual ~GSCompileJob() {}
 
-		bool IsCompiling() const { return m_status.load(std::memory_order_acquire) == COMPILING; }
-		void SetCompiling() { m_status.store(COMPILING, std::memory_order_release); }
-		bool IsDone() const { return m_status.load(std::memory_order_acquire) == DONE; }
-		void SetDone() { m_status.store(DONE, std::memory_order_release); }
-		float GetCompileTime() const { return m_compile_time_ms; }
-		void SetCompileTime(float ms) { m_compile_time_ms = ms; }
-		u32 GetThreadID() const { return m_thread_id; }
-		void SetThreadID(u32 id) { m_thread_id = id; }
-	private:
-		JobType m_job_type;
-		std::atomic<JobStatus> m_status = NONE;
-		float m_compile_time_ms = 0.0f; // Compile time in ms for debugging.
-		u32 m_thread_id = UINT_MAX; // Thread ID for debugging.
-	};
+	bool IsDoneCompiling() const { return m_status.load(std::memory_order_acquire) == DONE_COMPILING; }
+	void SetDoneCompiling() { m_status.store(DONE_COMPILING, std::memory_order_release); }
+	bool IsDoneCaching() const { return m_status.load(std::memory_order_acquire) == DONE_CACHING; }
+	void SetDoneCaching() { m_status.store(DONE_CACHING, std::memory_order_release); }
+	float GetCompileTime() const { return m_compile_time_ms; }
+	void SetCompileTime(float ms) { m_compile_time_ms = ms; }
+	u32 GetThreadID() const { return m_thread_id; }
+	void SetThreadID(u32 id) { m_thread_id = id; }
+private:
+	JobType m_job_type;
+	std::atomic<JobStatus> m_status = NONE;
+	float m_compile_time_ms = 0.0f; // Compile time in ms for debugging.
+	u32 m_thread_id = UINT_MAX; // Thread ID for debugging.
+};
 
+class GSShaderCompilerAsync
+{
+public:
 	GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms);
 	virtual ~GSShaderCompilerAsync();
 
@@ -69,6 +69,7 @@ private:
 	// GSDevice and the shader cache own the jobs so use raw pointers.
 	std::vector<GSCompileJob*> m_job_queue;
 	std::vector<Common::Timer> m_job_timer_queue;
+	std::deque<GSCompileJob*> m_overflow_job_queue; // Should hardly be used.
 
 	u32 m_job_head = 0; // head <= acquire <= tail
 	u32 m_job_acquire = 0;

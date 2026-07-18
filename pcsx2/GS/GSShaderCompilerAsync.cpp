@@ -26,7 +26,7 @@ void GSShaderCompilerAsync::GetCompletedJobs(std::vector<GSCompileJob*>& jobs)
 
 	std::lock_guard lock(m_mutex);
 
-	while (m_acquired_jobs > 0 && m_job_queue[m_job_head]->IsDone())
+	while (m_acquired_jobs > 0 && m_job_queue[m_job_head]->IsDoneCompiling())
 	{
 		GSCompileJob* job = m_job_queue[m_job_head];
 
@@ -58,23 +58,38 @@ void GSShaderCompilerAsync::StartCompileJobAsync(GSCompileJob* job)
 		m_check_timer.Reset();
 	}
 
-	// If the job queue is full we may drop jobs since we don't allow resubmitting the same pipeline
-	// for compilation twice. FIXME: Allow starting jobs later if the queue is full.
-	pxAssert(!IsJobQueueFull());
+	if (m_queued_jobs == MAX_JOBS)
+	{
+		// Don't lock, overflow queue is exclusively owned by GS thread.
+		m_overflow_job_queue.push_back(job);
+		return;
+	}
 
 	std::lock_guard lock(m_mutex);
 
-	if (m_queued_jobs < MAX_JOBS)
+	// Push the new job and as many as possible from the overflow queue.
+	while (job)
 	{
-		job->SetCompiling(); // Flags that the jobs was successfully pushed onto the queue.
+		if (m_queued_jobs < MAX_JOBS)
+		{
+			m_job_queue[m_job_tail] = job;
+			m_job_timer_queue[m_job_tail].Reset();
 
-		m_job_queue[m_job_tail] = job;
-		m_job_timer_queue[m_job_tail].Reset();
+			m_job_tail = (m_job_tail + 1) % MAX_JOBS;
+			m_queued_jobs++;
 
-		m_job_tail = (m_job_tail + 1) % MAX_JOBS;
-		m_queued_jobs++;
+			m_worker_cv.notify_one();
+		}
 
-		m_worker_cv.notify_one();
+		if (!m_overflow_job_queue.empty())
+		{
+			job = m_overflow_job_queue.front();
+			m_overflow_job_queue.pop_front();
+		}
+		else
+		{
+			job = nullptr;
+		}
 	}
 }
 
@@ -105,7 +120,7 @@ void GSShaderCompilerAsync::WorkerThreadFunc(u32 thread_id)
 
 		// Release the completed job.
 		job->SetThreadID(thread_id); // For debugging
-		job->SetDone();
+		job->SetDoneCompiling();
 	}
 }
 

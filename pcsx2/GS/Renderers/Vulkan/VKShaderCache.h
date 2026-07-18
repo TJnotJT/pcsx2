@@ -7,7 +7,6 @@
 
 #include "GS/Renderers/Vulkan/VKLoader.h"
 #include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
-#include "GS/Renderers/Vulkan/VKShaderCompilerAsync.h"
 
 #include "common/HashCombine.h"
 
@@ -19,6 +18,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+class GSCompileJob;
+class GSShaderCompilerAsync;
+class VKShaderJob;
+class VKPipelineJob;
+class VKShaderCompilerAsync;
 
 class VKShaderCache
 {
@@ -54,11 +59,6 @@ public:
 		u32 blob_size;
 	};
 
-	using ShaderCompilerAsync = VKShaderCompilerAsync<CacheIndexKey>;
-	using VKShaderJob = ShaderCompilerAsync::VKShaderJob;
-	using VKPipelineJob = ShaderCompilerAsync::VKPipelineJob;
-	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
-
 	struct VKCachedShaderModule
 	{
 		VkShaderModule module;
@@ -69,36 +69,6 @@ public:
 	{
 		VkPipeline pipeline;
 		VKShaderCache::CacheIndexKey key;
-	};
-
-	class VKCachedPipelineJob : public VKPipelineJob
-	{
-	public:
-		VKCachedPipelineJob(VkDevice device, VkPipelineCache pipeline_cache,
-			const Vulkan::GraphicsPipelineBuilder& gpb, u64 hash, bool uber,
-			const CacheIndexKey& cache_key)
-			: VKPipelineJob(device, pipeline_cache, gpb, hash, uber)
-			, m_cache_key(cache_key)
-		{
-		}
-
-		virtual const CacheIndexKey& GetCacheKey() const override { return m_cache_key; }
-	private:
-		CacheIndexKey m_cache_key;
-	};
-
-	class VKCachedShaderJob : public VKShaderJob
-	{
-	public:
-		VKCachedShaderJob(VkDevice device, shaderc_shader_kind kind, std::string_view shader_code, u64 hash, bool uber)
-			: VKShaderJob(device, kind, shader_code, hash, uber)
-			, m_cache_key(VKShaderCache::GetCacheKey(kind, shader_code))
-		{
-		}
-
-		virtual const CacheIndexKey& GetCacheKey() const override { return m_cache_key; }
-	private:
-		CacheIndexKey m_cache_key;
 	};
 
 	~VKShaderCache();
@@ -119,8 +89,7 @@ public:
 	VKCachedShaderModule GetFragmentShader(std::string_view shader_code, bool uber);
 	VkShaderModule GetComputeShader(std::string_view shader_code);
 
-	bool HasPipelineState(const VKCachedShaderModule& vs, const VKCachedShaderModule& fs,
-		const VkGraphicsPipelineCreateInfo& ci, bool uber);
+	bool HasGraphicsPipeline(const CacheIndexKey& key, bool uber);
 	VKCachedPipeline GetGraphicsPipeline(VkDevice device, const CacheIndexKey& vs_key, const CacheIndexKey& fs_key,
 		const VkGraphicsPipelineCreateInfo& ci, bool uber);
 
@@ -164,7 +133,7 @@ private:
 	static bool InitShadercCompiler();
 
 	// Start pipeline jobs that are waiting on the given vertex and/or fragment shader.
-	void StartQueuedPipelineJobs(const VKCachedShaderJob* shader_job);
+	void StartQueuedPipelineJobs(const VKShaderJob* shader_job);
 
 	std::FILE* m_index_file = nullptr;
 	std::FILE* m_blob_file = nullptr;
@@ -205,9 +174,9 @@ private:
 	static shaderc_compiler_t m_compiler_sync;
 	static bool m_shaderc_failed;
 
-	std::unique_ptr<ShaderCompilerAsync> m_compiler_async;
+	std::unique_ptr<VKShaderCompilerAsync> m_compiler_async;
 	std::deque<std::shared_ptr<GSCompileJob>> m_compile_jobs_async;
-	std::deque<VKCachedPipelineJob*> m_queued_pipeline_jobs_async;
+	std::deque<VKPipelineJob*> m_queued_pipeline_jobs_async;
 };
 
 extern std::unique_ptr<VKShaderCache> g_vulkan_shader_cache;

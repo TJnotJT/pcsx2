@@ -3430,7 +3430,7 @@ void GSDevice12::DestroyResources()
 }
 
 template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
-std::shared_ptr<ReturnType> GSDevice12::GetAsyncJobIfExists(const SelType& sel, AsyncMapType& async_map, MapType& map)
+std::shared_ptr<ReturnType> GSDevice12::ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map)
 {
 	if (!async_map.empty())
 	{
@@ -3441,10 +3441,10 @@ std::shared_ptr<ReturnType> GSDevice12::GetAsyncJobIfExists(const SelType& sel, 
 		{
 			const std::shared_ptr<ReturnType>& job = it_async->second;
 
-			if (job->IsDone())
+			if (job->IsDoneCaching())
 			{
 				// Remove from async map and add to map.
-				map.emplace(sel, D3D12ShaderCompilerAsync::GetOutput(*job));
+				map.emplace(sel, GetJobOutput(*job));
 				async_map.erase(it_async);
 			}
 			else
@@ -3460,7 +3460,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::
 {
 	// Check async results first.
 	if (std::shared_ptr<D3D12ShaderJob> async_job =
-		GetAsyncJobIfExists<D3D12ShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
+		ProcessAsyncJob<D3D12ShaderJob>(sel.key, m_tfx_vertex_shaders_async, m_tfx_vertex_shaders))
 	{
 		return async_job; // Forward incomplete job for pipeline creation.
 	}
@@ -3519,7 +3519,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXPixelShader(GSHWDrawConfig::P
 {
 	// Check async results first.
 	if (std::shared_ptr<D3D12ShaderJob> async_job =
-		GetAsyncJobIfExists<D3D12ShaderJob>(sel, m_tfx_pixel_shaders_async, m_tfx_pixel_shaders))
+		ProcessAsyncJob<D3D12ShaderJob>(sel, m_tfx_pixel_shaders_async, m_tfx_pixel_shaders))
 	{
 		return async_job; // Forward incomplete job for pipeline creation.
 	}
@@ -3660,6 +3660,9 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 
 	if (IsNullShaderBlob(vs) || IsNullShaderBlob(ps))
 		return nullptr; // Failed
+	
+	if (!async && !(IsShaderBlob(vs) && IsShaderBlob(ps)))
+		return {}; // Not allowed to do async.
 
 	// Common state
 	D3D12::GraphicsPipelineBuilder gpb;
@@ -3759,7 +3762,8 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 	}
 
 	// Handle async compilation if requested.
-	if (async && !m_shader_cache.HasPipelineState(gpb.GetDesc(), uber))
+	if (async && (!gpb.HasVertexShader() || ! gpb.HasPixelShader() ||
+		!m_shader_cache.HasPipelineState(gpb.GetDesc(), uber)))
 	{
 		const auto it = m_tfx_pipelines_async.find(p);
 		if (it != m_tfx_pipelines_async.end())
@@ -3806,7 +3810,7 @@ const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p,
 {
 	// Check async results first.
 	if (std::shared_ptr<D3D12PipelineJob> async_job =
-		GetAsyncJobIfExists<D3D12PipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
+		ProcessAsyncJob<D3D12PipelineJob>(p, m_tfx_pipelines_async, m_tfx_pipelines))
 	{
 		return nullptr; // Don't forward incomplete pipelines jobs.
 	}

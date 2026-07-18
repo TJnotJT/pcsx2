@@ -28,9 +28,6 @@ public:
 	using ComPtr = wil::com_ptr_nothrow<T>;
 
 	using EntryType = D3D::ShaderCacheEntryType;
-	using D3D12ShaderJob = D3D12ShaderCompilerAsync::D3D12ShaderJob;
-	using D3D12PipelineJob = D3D12ShaderCompilerAsync::D3D12PipelineJob;
-	using GSCompileJob = GSShaderCompilerAsync::GSCompileJob;
 
 	D3D12ShaderCache();
 	~D3D12ShaderCache();
@@ -50,7 +47,6 @@ public:
 	{
 		return HasShaderBlob(EntryType::PixelShader, shader_code, macros, entry_point, uber);
 	}
-
 	__fi ComPtr<ID3DBlob> GetVertexShader(
 		std::string_view shader_code, const D3D_SHADER_MACRO* macros = nullptr, const char* entry_point = "main", bool uber = false)
 	{

@@ -348,6 +348,9 @@ D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetShaderCacheKey(
 
 D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetPipelineCacheKey(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& gpdesc)
 {
+	// Don't hash incomplete descriptions.
+	pxAssert(gpdesc.VS.BytecodeLength > 0 && gpdesc.PS.BytecodeLength > 0);
+
 	MD5Digest digest;
 	u32 length = sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC);
 
@@ -815,6 +818,9 @@ void D3D12ShaderCache::ProcessAsyncCompileJobs()
 			{
 				pxFailRel("Unknown job type");
 			}
+
+			// Let GSDevice know we're done.
+			job->SetDoneCaching();
 
 			// Remove reference from the queue.
 			const auto it = std::find_if(
