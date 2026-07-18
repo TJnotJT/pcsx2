@@ -738,8 +738,7 @@ struct HWBlend
 	EXPAND(66, false, u32, uber_zwrite, 1, "UBER_ZWRITE") \
 	EXPAND(67, false, u32, uber_sw_depth, 1, "UBER_SW_DEPTH") \
 	EXPAND(68, false, u32, uber_date_init, 1, "UBER_DATE_INIT") \
-	EXPAND(69, false, u32, uber_feedback_rt, 1, "UBER_FEEDBACK_RT") \
-	EXPAND(70, false, u32, uber_feedback_depth, 1, "UBER_FEEDBACK_DEPTH")
+	EXPAND(69, false, u32, uber_feedback_rt, 1, "UBER_FEEDBACK_RT")
 
 #define VSSEL_FIELDS_EXPAND \
 	EXPAND(0, true, u8, fst, 1, "VS_FST") \
@@ -864,7 +863,7 @@ struct alignas(16) GSHWDrawConfig
 			const bool afail_needs_depth = afail == PS_AFAIL::FB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
 			const bool ztst_needs_depth = ztst == ZTST_GEQUAL || ztst == ZTST_GREATER;
 			const bool aa1_needs_depth = aa1 == PS_AA1::TRIANGLE_SW_Z;
-			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zmask || uber_feedback_depth;
+			return afail_needs_depth || ztst_needs_depth || aa1_needs_depth || zmask;
 		}
 
 		__fi bool HasShaderDiscard() const
@@ -1396,7 +1395,7 @@ struct alignas(16) GSHWDrawConfig
 		#undef EXPAND
 	};
 
-	static constexpr std::array<PipelineSelectorFieldDesc, 71> ps_selector_fields = {
+	static constexpr std::array<PipelineSelectorFieldDesc, 70> ps_selector_fields = {
 		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
 				PipelineSelectorFieldDesc{ INDEX, DYNAMIC, #NAME, WIDTH, SHADER_NAME },
 			PSSEL_FIELDS_EXPAND

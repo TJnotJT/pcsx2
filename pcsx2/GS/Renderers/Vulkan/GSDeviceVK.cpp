@@ -4666,10 +4666,9 @@ namespace VKUberShader
 		u8 uber_date_init; // 1 bit
 		u8 iip; // 1 bit
 		u8 feedback_rt; // 1 bit
-		u8 feedback_depth; // 1 bit
 	};
 
-	static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 2048;
+	static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 1024;
 
 	static constexpr UberPSSelector GetUberPSSelector(u32 n)
 	{
@@ -4683,7 +4682,6 @@ namespace VKUberShader
 		sel.uber_date_init = (n >> 7) & 1;
 		sel.iip = (n >> 8) & 1;
 		sel.feedback_rt = (n >> 9) & 1;
-		sel.feedback_depth = (n >> 10) & 1;
 		return sel;
 	}
 
@@ -4708,10 +4706,7 @@ namespace VKUberShader
 			sel.iip && // Always use interpolated color (flat shading is handled specially).
 
 			// Only allow color feedback with non-ROV color.
-			(!sel.feedback_rt || (!sel.no_color && !sel.rov_color)) &&
-
-			// Only allow depth feedback with non-ROV depth.
-			(!sel.feedback_depth || (!sel.rov_depth && has_depth));
+			(!sel.feedback_rt || (!sel.no_color && !sel.rov_color));
 	}
 
 	static constexpr u32 GetNumValidUberPSSelectors()
@@ -4737,7 +4732,6 @@ namespace VKUberShader
 		sel.uber_date_init = uber_sel.uber_date_init;
 		sel.iip = uber_sel.iip;
 		sel.uber_feedback_rt = uber_sel.feedback_rt;
-		sel.uber_feedback_depth = uber_sel.feedback_depth;
 
 		return sel;
 	}
@@ -4849,7 +4843,7 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 						selector.feedback_loop_flags = 0;
 						if (ps_sel.uber_feedback_rt)
 							selector.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
-						if (ps_sel.uber_feedback_depth)
+						if (ps_sel.uber_sw_depth && !ps_sel.HasDepthROV())
 							selector.feedback_loop_flags |= (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth);
 
 						if (stage == 0)
@@ -7004,7 +6998,6 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 
 			if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth))
 			{
-				m_pipeline_selector.ps.uber_feedback_depth = true;
 				pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
 			}
 		}
