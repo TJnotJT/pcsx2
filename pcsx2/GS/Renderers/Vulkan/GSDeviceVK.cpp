@@ -4688,7 +4688,6 @@ namespace VKUberShader
 	static constexpr bool IsUberPSSelectorValid(u32 n)
 	{
 		const UberPSSelector sel = GetUberPSSelector(n);
-		const bool has_depth = sel.uber_zwrite || sel.uber_sw_depth;
 		return
 			// Make sure ROV depth is a valid enum.
 			(sel.rov_depth <= static_cast<u32>(GSHWDrawConfig::PS_ROV_DEPTH::READ_ONLY)) &&
