@@ -94,6 +94,7 @@
     <None Include="..\bin\resources\shaders\dx11\tfx_uber.fx" />
     <None Include="..\bin\resources\shaders\dx11\imgui.fx" />
     <None Include="..\bin\resources\shaders\dx11\present.fx" />
+    <None Include="..\bin\resources\shaders\vulkan\tfx_uber.glsl" />
     <None Include="GS\Renderers\Vulkan\VKEntryPoints.inl">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </None>
@@ -205,8 +206,8 @@
     <ClCompile Include="DEV9\net.cpp" />
     <ClCompile Include="DEV9\Win32\tap-win32.cpp" />
     <ClCompile Include="GameList.cpp" />
-    <ClCompile Include="GS\GSShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\GSDrawingEnvironment.cpp" />
+    <ClCompile Include="GS\Renderers\Common\GSShaderCompilerAsync.cpp" />
     <ClCompile Include="GS\Renderers\DX11\D3D11ShaderCache.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12Builders.cpp" />
     <ClCompile Include="GS\Renderers\DX12\D3D12ShaderCompilerAsync.cpp" />
@@ -656,9 +657,9 @@
     <ClInclude Include="DEV9\Win32\pcap_io_win32_funcs.h" />
     <ClInclude Include="DEV9\Win32\tap.h" />
     <ClInclude Include="GameList.h" />
-    <ClInclude Include="GS\GSShaderCompilerAsync.h" />
     <ClInclude Include="GS\GSVector4i_arm64.h" />
     <ClInclude Include="GS\GSVector4_arm64.h" />
+    <ClInclude Include="GS\Renderers\Common\GSShaderCompilerAsync.h" />
     <ClInclude Include="GS\Renderers\DX11\D3D11ShaderCache.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12Builders.h" />
     <ClInclude Include="GS\Renderers\DX12\D3D12ShaderCompilerAsync.h" />

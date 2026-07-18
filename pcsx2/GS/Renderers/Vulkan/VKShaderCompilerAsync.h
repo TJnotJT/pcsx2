@@ -5,7 +5,7 @@
 #include "GS/Renderers/Vulkan/VKBuilders.h"
 #include "GS/Renderers/Vulkan/VKDynamicShaderc.h"
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
-#include "GS/GSShaderCompilerAsync.h"
+#include "GS/Renderers/Common/GSShaderCompilerAsync.h"
 
 #include "shaderc/shaderc.h"
 

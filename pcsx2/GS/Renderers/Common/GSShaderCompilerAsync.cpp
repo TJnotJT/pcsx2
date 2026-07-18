@@ -1,6 +1,6 @@
 #include "common/Assertions.h"
 
-#include "GS/GSShaderCompilerAsync.h"
+#include "GS/Renderers/Common/GSShaderCompilerAsync.h"
 
 GSShaderCompilerAsync::GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms)
 	: m_check_latency_ms(check_latency_ms)

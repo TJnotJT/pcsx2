@@ -499,13 +499,13 @@ set(pcsx2GSSources
 	GS/GSUtil.cpp
 	GS/GSVector.cpp
 	GS/MultiISA.cpp
-	GS/GSShaderCompilerAsync.cpp
 	GS/Renderers/Common/GSDevice.cpp
 	GS/Renderers/Common/GSDirtyRect.cpp
 	GS/Renderers/Common/GSFunctionMap.cpp
 	GS/Renderers/Common/GSRenderer.cpp
 	GS/Renderers/Common/GSTexture.cpp
 	GS/Renderers/Common/GSVertexTrace.cpp
+	GS/Renderers/Common/GSShaderCompilerAsync.cpp
 	GS/Renderers/Null/GSRendererNull.cpp
 	GS/Renderers/HW/GSHwHack.cpp
 	GS/Renderers/HW/GSRendererHW.cpp
@@ -540,7 +540,6 @@ set(pcsx2GSHeaders
 	GS/GSVector.h
 	GS/GSXXH.h
 	GS/MultiISA.h
-	GS/GSShaderCompilerAsync.h
 	GS/Renderers/Common/GSDevice.h
 	GS/Renderers/Common/GSDirtyRect.h
 	GS/Renderers/Common/GSFastList.h
@@ -550,6 +549,7 @@ set(pcsx2GSHeaders
 	GS/Renderers/Common/GSTexture.h
 	GS/Renderers/Common/GSVertex.h
 	GS/Renderers/Common/GSVertexTrace.h
+	GS/Renderers/Common/GSShaderCompilerAsync.h
 	GS/Renderers/Null/GSRendererNull.h
 	GS/Renderers/HW/GSHwHack.h
 	GS/Renderers/HW/GSRendererHW.h

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GS/GSShaderCompilerAsync.h"
+#include "GS/Renderers/Common/GSShaderCompilerAsync.h"
 
 #include "GS/Renderers/DX11/D3D.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
