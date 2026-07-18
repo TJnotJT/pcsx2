@@ -5349,7 +5349,7 @@ void GSRendererHW::HandleFlatShadedVertices()
 	if (!fix_vertices)
 		return;
 
-	const int n = GSUtil::GetClassVertexCount(m_vt.m_primclass);
+	const u32 n = static_cast<u32>(GSUtil::GetClassVertexCount(m_vt.m_primclass));
 
 	// If all vertices of each prim have the same color there is nothing to do.
 	bool prims_flat = true;
