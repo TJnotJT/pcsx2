@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/Pcsx2Defs.h"
 #include "common/DynamicLibrary.h"
 
 #include "shaderc/shaderc.h"
