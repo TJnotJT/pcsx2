@@ -798,6 +798,10 @@ struct alignas(16) GSHWDrawConfig
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
 		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+
+		__fi bool operator==(const VSSelector& rhs) const { return key == rhs.key; }
+		__fi bool operator!=(const VSSelector& rhs) const { return key != rhs.key; }
+		__fi bool operator<(const VSSelector& rhs) const { return key < rhs.key; }
 	};
 	static_assert(sizeof(VSSelector) == 1, "VSSelector is a single byte");
 

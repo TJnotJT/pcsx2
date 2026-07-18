@@ -2350,11 +2350,6 @@ bool GSDevice12::CompileImGuiPipeline()
 
 namespace D3D12UberShader
 {
-	struct UberVSSelector
-	{
-		u8 iip; // 1 bit
-	};
-
 	struct UberPSSelector
 	{
 		u8 no_color; // 1 bit
@@ -2368,14 +2363,6 @@ namespace D3D12UberShader
 	};
 
 	static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 512;
-	static constexpr u32 NUM_CANDIDATE_UBER_VS_SELECTORS = 2;
-
-	static constexpr UberVSSelector GetUberVSSelector(u32 n)
-	{
-		UberVSSelector sel;
-		sel.iip = (n & 1);
-		return sel;
-	}
 
 	static constexpr UberPSSelector GetUberPSSelector(u32 n)
 	{
@@ -2389,12 +2376,6 @@ namespace D3D12UberShader
 		sel.uber_date_init = (n >> 7) & 1;
 		sel.iip = (n >> 8) & 1;
 		return sel;
-	}
-
-	static constexpr bool IsUberVSSelectorValid(u32 n)
-	{
-		UberVSSelector sel = GetUberVSSelector(n);
-		return sel.iip != 0; // Always use interpolated color (flat shading is handled specially).
 	}
 
 	static constexpr bool IsUberPSSelectorValid(u32 n)
@@ -2425,14 +2406,6 @@ namespace D3D12UberShader
 		return valid_count;
 	}
 
-	static constexpr u32 GetNumValidUberVSSelectors()
-	{
-		u32 valid_count = 0;
-		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
-			valid_count += static_cast<u32>(IsUberVSSelectorValid(i));
-		return valid_count;
-	}
-
 	static GSHWDrawConfig::PSSelector GetFullUberPSSelector(u32 n)
 	{
 		UberPSSelector uber_sel = GetUberPSSelector(n);
@@ -2451,29 +2424,19 @@ namespace D3D12UberShader
 		return sel;
 	}
 
-	static GSHWDrawConfig::VSSelector GetFullUberVSSelector(u32 n)
-	{
-		UberVSSelector uber_sel = GetUberVSSelector(n);
-
-		GSHWDrawConfig::VSSelector sel{};
-		sel.uber_enable = true;
-		sel.iip = uber_sel.iip;
-
-		return sel;
-	}
-
 	static constexpr u32 NUM_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
-	static constexpr u32 NUM_UBER_VS_SELECTORS = GetNumValidUberVSSelectors();
+	static constexpr u32 NUM_UBER_VS_SELECTORS = 1;
 
 	static std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> GetUberVSSelectors()
 	{
 		std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> selectors;
-		u32 valid_i = 0;
-		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
-		{
-			if (IsUberVSSelectorValid(i))
-				selectors[valid_i++] = GetFullUberVSSelector(i);
-		}
+		
+		GSHWDrawConfig::VSSelector sel0;
+		sel0.uber_enable = true;
+		sel0.iip = true;
+		
+		selectors[0] = sel0;
+
 		return selectors;
 	}
 
@@ -2500,6 +2463,13 @@ namespace D3D12UberShader
 		// Clear dynamic state bits from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
 			sel.ClearField(dynamic_define.index);
+
+#if PCSX2_DEVBUILD
+		if (std::find(uber_vs_selectors.begin(), uber_vs_selectors.end(), sel) == uber_vs_selectors.end())
+		{
+			Console.Warning("Uber VS selector %08X is not in the valid array!", static_cast<u32>(sel.key));
+		}
+#endif
 	}
 
 	static void UberizePSSelector(GSHWDrawConfig::PSSelector& sel)
@@ -2513,6 +2483,13 @@ namespace D3D12UberShader
 		// Clear dynamic state bits from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
 			sel.ClearField(dynamic_define.index);
+
+#if PCSX2_DEVBUILD
+		if (std::find(uber_ps_selectors.begin(), uber_ps_selectors.end(), sel) == uber_ps_selectors.end())
+		{
+			Console.Warning("Uber VS selector %08llX_%08llX is not in the valid array!", sel.key_hi, sel.key_lo);
+		}
+#endif
 	}
 }
 
@@ -3695,7 +3672,7 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 		gpb.SetPixelShader(GetShaderBlob(ps));
 
 	// IA
-	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
+	if (p.vs.expand == GSHWDrawConfig::VSExpand::None && !uber)
 	{
 		gpb.AddVertexAttribute("TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0);
 		gpb.AddVertexAttribute("COLOR", 0, DXGI_FORMAT_R8G8B8A8_UINT, 0, 8);

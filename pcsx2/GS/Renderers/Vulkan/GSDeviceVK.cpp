@@ -4655,11 +4655,6 @@ bool GSDeviceVK::CompileImGuiPipeline()
 
 namespace VKUberShader
 {
-	struct UberVSSelector
-	{
-		u8 iip; // 1 bit
-	};
-
 	struct UberPSSelector
 	{
 		u8 no_color; // 1 bit
@@ -4675,14 +4670,6 @@ namespace VKUberShader
 	};
 
 	static constexpr u32 NUM_CANDIDATE_UBER_PS_SELECTORS = 2048;
-	static constexpr u32 NUM_CANDIDATE_UBER_VS_SELECTORS = 2;
-
-	static constexpr UberVSSelector GetUberVSSelector(u32 n)
-	{
-		UberVSSelector sel;
-		sel.iip = (n & 1);
-		return sel;
-	}
 
 	static constexpr UberPSSelector GetUberPSSelector(u32 n)
 	{
@@ -4698,12 +4685,6 @@ namespace VKUberShader
 		sel.feedback_rt = (n >> 9) & 1;
 		sel.feedback_depth = (n >> 10) & 1;
 		return sel;
-	}
-
-	static constexpr bool IsUberVSSelectorValid(u32 n)
-	{
-		UberVSSelector sel = GetUberVSSelector(n);
-		return sel.iip != 0; // Always use interpolated color (flat shading is handled specially).
 	}
 
 	static constexpr bool IsUberPSSelectorValid(u32 n)
@@ -4741,14 +4722,6 @@ namespace VKUberShader
 		return valid_count;
 	}
 
-	static constexpr u32 GetNumValidUberVSSelectors()
-	{
-		u32 valid_count = 0;
-		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
-			valid_count += static_cast<u32>(IsUberVSSelectorValid(i));
-		return valid_count;
-	}
-
 	static GSHWDrawConfig::PSSelector GetFullUberPSSelector(u32 n)
 	{
 		UberPSSelector uber_sel = GetUberPSSelector(n);
@@ -4769,29 +4742,20 @@ namespace VKUberShader
 		return sel;
 	}
 
-	static GSHWDrawConfig::VSSelector GetFullUberVSSelector(u32 n)
-	{
-		UberVSSelector uber_sel = GetUberVSSelector(n);
-
-		GSHWDrawConfig::VSSelector sel{};
-		sel.uber_enable = true;
-		sel.iip = uber_sel.iip;
-
-		return sel;
-	}
-
 	static constexpr u32 NUM_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
-	static constexpr u32 NUM_UBER_VS_SELECTORS = GetNumValidUberVSSelectors();
+	static constexpr u32 NUM_UBER_VS_SELECTORS = 1;
 
 	static std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> GetUberVSSelectors()
 	{
 		std::array<GSHWDrawConfig::VSSelector, NUM_UBER_VS_SELECTORS> selectors;
-		u32 valid_i = 0;
-		for (u32 i = 0; i < NUM_CANDIDATE_UBER_VS_SELECTORS; i++)
-		{
-			if (IsUberVSSelectorValid(i))
-				selectors[valid_i++] = GetFullUberVSSelector(i);
-		}
+		
+		GSHWDrawConfig::VSSelector sel0{};
+		sel0.uber_enable = true;
+		sel0.iip = true; // Flat shading is handled by expanding vertices on CPU.
+		sel0.point_size = true; // Point size if always exported regardless if needed.
+		
+		selectors[0] = sel0;
+
 		return selectors;
 	}
 
@@ -4814,10 +4778,18 @@ namespace VKUberShader
 	{
 		sel.uber_enable = true;
 		sel.iip = true;
+		sel.point_size = true;
 
 		// Clear dynamic state bits from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderVSSelectorDefines())
 			sel.ClearField(dynamic_define.index);
+
+#if PCSX2_DEVBUILD
+		if (std::find(uber_vs_selectors.begin(), uber_vs_selectors.end(), sel) == uber_vs_selectors.end())
+		{
+			Console.Warning("Uber VS selector %08X is not in the valid array!", static_cast<u32>(sel.key));
+		}
+#endif
 	}
 
 	static void UberizePSSelector(GSHWDrawConfig::PSSelector& sel)
@@ -4831,6 +4803,13 @@ namespace VKUberShader
 		// Clear dynamic state bits from the selector.
 		for (const GSHWDrawConfig::ShaderDefine& dynamic_define : GSHWDrawConfig::GetUberShaderPSSelectorDefines())
 			sel.ClearField(dynamic_define.index);
+
+#if PCSX2_DEVBUILD
+		if (std::find(uber_ps_selectors.begin(), uber_ps_selectors.end(), sel) == uber_ps_selectors.end())
+		{
+			Console.Warning("Uber VS selector %08llX_%08llX is not in the valid array!", sel.key_hi, sel.key_lo);
+		}
+#endif
 	}
 }
 
@@ -5490,7 +5469,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		gpb.SetFragmentShader(GetShaderModule(fs).module);
 
 	// IA
-	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)
+	if (p.vs.expand == GSHWDrawConfig::VSExpand::None && !uber)
 	{
 		gpb.AddVertexBuffer(0, sizeof(GSVertex));
 		gpb.AddVertexAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, 0); // ST
