@@ -2,6 +2,7 @@
 
 #include "common/Pcsx2Defs.h"
 #include "common/Timer.h"
+#include "common/Threading.h"
 
 #include <memory>
 #include <thread>
@@ -65,7 +66,7 @@ private:
 	Common::Timer m_check_timer;
 	u32 m_check_latency_ms = 20;
 
-	std::vector<std::thread> m_worker_threads;
+	std::vector<Threading::Thread> m_worker_threads;
 	std::mutex m_mutex;
 	std::condition_variable m_worker_cv;
 	bool m_workers_stop = false;

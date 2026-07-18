@@ -1,5 +1,7 @@
 #include "common/Assertions.h"
 
+#include "fmt/format.h"
+
 #include "GS/Renderers/Common/GSShaderCompilerAsync.h"
 
 GSShaderCompilerAsync::GSShaderCompilerAsync(u32 num_threads, u32 check_latency_ms)
@@ -33,8 +35,8 @@ void GSShaderCompilerAsync::StartCompileJobAsync(GSCompileJob* job)
 	{
 		m_workers_started = true;
 		u32 thread_id = 0;
-		for (std::thread& t : m_worker_threads)
-			t = std::thread([this, id = thread_id++]() { WorkerThreadFunc(id); });
+		for (Threading::Thread& t : m_worker_threads)
+			t.Start([this, id = thread_id++]() { WorkerThreadFunc(id); });
 
 		OnWorkersStarted();
 
@@ -52,6 +54,9 @@ void GSShaderCompilerAsync::StartCompileJobAsync(GSCompileJob* job)
 
 void GSShaderCompilerAsync::WorkerThreadFunc(u32 thread_id)
 {
+	std::string name = fmt::format("Shader Compiler {}", thread_id);
+	Threading::SetNameOfCurrentThread(name.c_str());
+
 	while (true)
 	{
 		GSCompileJob* job;
@@ -98,10 +103,10 @@ void GSShaderCompilerAsync::StopWorkerThreads()
 	}
 
 	// Join threads.
-	for (std::thread& t : m_worker_threads)
+	for (Threading::Thread& t : m_worker_threads)
 	{
-		if (t.joinable())
-			t.join();
+		if (t.Joinable())
+			t.Join();
 	}
 }
 
