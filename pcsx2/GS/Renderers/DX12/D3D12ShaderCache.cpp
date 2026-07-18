@@ -73,16 +73,18 @@ bool D3D12ShaderCache::Open(D3D::ShaderModel shader_model, bool debug)
 	{
 		for (u32 uber = 0; uber < 2; uber++)
 		{
+			CacheState& state = GetCacheState(uber);
+
 			const std::string base_shader_filename = GetCacheBaseFileName("shaders", m_shader_model, debug, uber);
 			const std::string shader_index_filename = base_shader_filename + ".idx";
 			const std::string shader_blob_filename = base_shader_filename + ".bin";
 
 			if (!ReadExisting(
-				shader_index_filename, shader_blob_filename, GetShaderIndexFile(uber), GetShaderBlobFile(uber),
-				GetShaderIndex(uber)))
+				shader_index_filename, shader_blob_filename, state.shader_index_file, state.shader_blob_file,
+				state.shader_index))
 			{
-				result = CreateNew(shader_index_filename, shader_blob_filename, GetShaderIndexFile(uber),
-					GetShaderBlobFile(uber));
+				result = CreateNew(shader_index_filename, shader_blob_filename, state.shader_index_file,
+					state.shader_blob_file);
 			}
 
 			if (result)
@@ -91,11 +93,11 @@ bool D3D12ShaderCache::Open(D3D::ShaderModel shader_model, bool debug)
 				const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
 				const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
 
-				if (!ReadExisting(pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber),
-					GetPipelineBlobFile(uber), GetPipelineIndex(uber)))
+				if (!ReadExisting(pipelines_index_filename, pipelines_blob_filename, state.pipeline_index_file,
+					state.pipeline_blob_file, state.pipeline_index))
 				{
 					result = CreateNew(
-						pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber), GetPipelineBlobFile(uber));
+						pipelines_index_filename, pipelines_blob_filename, state.pipeline_index_file, state.pipeline_blob_file);
 				}
 			}
 		}
@@ -108,25 +110,27 @@ void D3D12ShaderCache::Close()
 {
 	for (u32 uber = 0; uber < 2; uber++)
 	{
-		if (GetPipelineIndexFile(uber))
+		CacheState& state = GetCacheState(uber);
+
+		if (state.pipeline_index_file)
 		{
-			std::fclose(GetPipelineIndexFile(uber));
-			GetPipelineIndexFile(uber) = nullptr;
+			std::fclose(state.pipeline_index_file);
+			state.pipeline_index_file = nullptr;
 		}
-		if (GetPipelineBlobFile(uber))
+		if (state.pipeline_blob_file)
 		{
-			std::fclose(GetPipelineBlobFile(uber));
-			GetPipelineBlobFile(uber) = nullptr;
+			std::fclose(state.pipeline_blob_file);
+			state.pipeline_blob_file = nullptr;
 		}
-		if (GetShaderIndexFile(uber))
+		if (state.shader_index_file)
 		{
-			std::fclose(GetShaderIndexFile(uber));
-			GetShaderIndexFile(uber) = nullptr;
+			std::fclose(state.shader_index_file);
+			state.shader_index_file = nullptr;
 		}
-		if (GetShaderBlobFile(uber))
+		if (state.shader_blob_file)
 		{
-			std::fclose(GetShaderBlobFile(uber));
-			GetShaderBlobFile(uber) = nullptr;
+			std::fclose(state.shader_blob_file);
+			state.shader_blob_file = nullptr;
 		}
 	}
 }
@@ -135,17 +139,19 @@ void D3D12ShaderCache::InvalidatePipelineCache()
 {
 	for (u32 uber = 0; uber < 2; uber++)
 	{
-		GetPipelineIndex(uber).clear();
-		if (GetPipelineBlobFile(uber))
+		CacheState& state = GetCacheState(uber);
+
+		state.pipeline_index.clear();
+		if (state.pipeline_blob_file)
 		{
-			std::fclose(GetPipelineBlobFile(uber));
-			GetPipelineBlobFile(uber) = nullptr;
+			std::fclose(state.pipeline_blob_file);
+			state.pipeline_blob_file = nullptr;
 		}
 
-		if (GetPipelineIndexFile(uber))
+		if (state.pipeline_index_file)
 		{
-			std::fclose(GetPipelineIndexFile(uber));
-			GetPipelineIndexFile(uber) = nullptr;
+			std::fclose(state.pipeline_index_file);
+			state.pipeline_index_file = nullptr;
 		}
 	}
 
@@ -154,10 +160,11 @@ void D3D12ShaderCache::InvalidatePipelineCache()
 
 	for (u32 uber = 0; uber < 2; uber++)
 	{
+		CacheState& state = GetCacheState(uber);
 		const std::string base_pipelines_filename = GetCacheBaseFileName("pipelines", m_shader_model, m_debug, uber);
 		const std::string pipelines_index_filename = base_pipelines_filename + ".idx";
 		const std::string pipelines_blob_filename = base_pipelines_filename + ".bin";
-		CreateNew(pipelines_index_filename, pipelines_blob_filename, GetPipelineIndexFile(uber), GetPipelineBlobFile(uber));
+		CreateNew(pipelines_index_filename, pipelines_blob_filename, state.pipeline_index_file, state.pipeline_blob_file);
 	}
 }
 
@@ -422,23 +429,26 @@ D3D12ShaderCache::CacheIndexKey D3D12ShaderCache::GetPipelineCacheKey(const D3D1
 bool D3D12ShaderCache::HasShaderBlob(EntryType type, std::string_view shader_code, const D3D_SHADER_MACRO* macros,
 	const char* entry_point, bool uber)
 {
+	CacheState& state = GetCacheState(uber);
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
-	auto iter = GetShaderIndex(uber).find(key);
-	return iter != GetShaderIndex(uber).end();
+	auto iter = state.shader_index.find(key);
+	return iter != state.shader_index.end();
 }
 
 D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType type, std::string_view shader_code,
 	const D3D_SHADER_MACRO* macros /* = nullptr */, const char* entry_point /* = "main" */, bool uber /* = false */)
 {
+	CacheState& state = GetCacheState(uber);
+
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
-	auto iter = GetShaderIndex(uber).find(key);
-	if (iter == GetShaderIndex(uber).end())
+	auto iter = state.shader_index.find(key);
+	if (iter == state.shader_index.end())
 		return CompileAndAddShaderBlob(key, shader_code, macros, entry_point, uber);
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(GetShaderBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetShaderBlobFile(uber)) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(state.shader_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, state.shader_blob_file) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -449,24 +459,27 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::GetShaderBlob(EntryType typ
 
 bool D3D12ShaderCache::HasPipelineState(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, bool uber)
 {
+	CacheState& state = GetCacheState(uber);
 	const auto key = GetPipelineCacheKey(desc);
-	auto iter = GetPipelineIndex(uber).find(key);
-	return iter != GetPipelineIndex(uber).end();
+	auto iter = state.pipeline_index.find(key);
+	return iter != state.pipeline_index.end();
 }
 
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState(
 	ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, bool uber)
 {
+	CacheState& state = GetCacheState(uber);
+
 	const auto key = GetPipelineCacheKey(desc);
 
-	auto iter = GetPipelineIndex(uber).find(key);
-	if (iter == GetPipelineIndex(uber).end())
+	auto iter = state.pipeline_index.find(key);
+	if (iter == state.pipeline_index.end())
 		return CompileAndAddPipeline(device, key, desc, uber);
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(GetPipelineBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetPipelineBlobFile(uber)) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(state.pipeline_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, state.pipeline_blob_file) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -491,16 +504,18 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::GetPipelineState(
 	ID3D12Device* device, const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc)
 {
+	CacheState& state = GetCacheState(false);
+
 	const auto key = GetPipelineCacheKey(desc);
 
-	auto iter = GetPipelineIndex(false).find(key);
-	if (iter == GetPipelineIndex(false).end())
+	auto iter = state.pipeline_index.find(key);
+	if (iter == state.pipeline_index.end())
 		return CompileAndAddPipeline(device, key, desc);
 
 	ComPtr<ID3DBlob> blob;
 	HRESULT hr = D3DCreateBlob(iter->second.blob_size, blob.put());
-	if (FAILED(hr) || std::fseek(GetPipelineBlobFile(false), iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, GetPipelineBlobFile(false)) != iter->second.blob_size)
+	if (FAILED(hr) || std::fseek(state.pipeline_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(blob->GetBufferPointer(), 1, iter->second.blob_size, state.pipeline_blob_file) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed");
 		return {};
@@ -526,6 +541,8 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	const CacheIndexKey& key, std::string_view shader_code, const D3D_SHADER_MACRO* macros, const char* entry_point,
 	bool uber)
 {
+	CacheState& state = GetCacheState(uber);
+
 	ComPtr<ID3DBlob> blob;
 
 	switch (key.type)
@@ -549,11 +566,11 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	if (!blob)
 		return {};
 
-	if (!GetShaderBlobFile(uber) || std::fseek(GetShaderBlobFile(uber), 0, SEEK_END) != 0)
+	if (!state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return blob;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(GetShaderBlobFile(uber)));
+	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(blob->GetBufferSize());
 
 	CacheIndexEntry entry = {};
@@ -568,15 +585,15 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetShaderBlobFile(uber)) != entry.blob_size ||
-		std::fflush(GetShaderBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetShaderIndexFile(uber)) != 1 ||
-		std::fflush(GetShaderIndexFile(uber)) != 0)
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, state.shader_blob_file) != entry.blob_size ||
+		std::fflush(state.shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, state.shader_index_file) != 1 ||
+		std::fflush(state.shader_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 		return blob;
 	}
 
-	GetShaderIndex(uber).emplace(key, data);
+	state.shader_index.emplace(key, data);
 	return blob;
 }
 
@@ -584,16 +601,18 @@ D3D12ShaderCache::ComPtr<ID3DBlob> D3D12ShaderCache::CompileAndAddShaderBlob(
 void D3D12ShaderCache::AddShaderBlob(EntryType type, const std::string& shader_code, const D3D_SHADER_MACRO* macros,
 	const char* entry_point, ComPtr<ID3DBlob> blob, bool uber, bool only_new)
 {
-	if (!blob || !GetShaderBlobFile(uber) || std::fseek(GetShaderBlobFile(uber), 0, SEEK_END) != 0)
+	CacheState& state = GetCacheState(uber);
+
+	if (!blob || !state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return;
 
 	const auto key = GetShaderCacheKey(type, shader_code, macros, entry_point);
 
-	if (only_new && GetShaderIndex(uber).contains(key))
+	if (only_new && state.shader_index.contains(key))
 		return;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(GetShaderBlobFile(uber)));
+	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(blob->GetBufferSize());
 
 	CacheIndexEntry entry = {};
@@ -608,14 +627,14 @@ void D3D12ShaderCache::AddShaderBlob(EntryType type, const std::string& shader_c
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetShaderBlobFile(uber)) != entry.blob_size ||
-		std::fflush(GetShaderBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetShaderIndexFile(uber)) != 1 ||
-		std::fflush(GetShaderIndexFile(uber)) != 0)
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, state.shader_blob_file) != entry.blob_size ||
+		std::fflush(state.shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, state.shader_index_file) != 1 ||
+		std::fflush(state.shader_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 	}
 
-	GetShaderIndex(uber).emplace(key, data);
+	state.shader_index.emplace(key, data);
 }
 
 D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPipeline(
@@ -657,8 +676,10 @@ D3D12ShaderCache::ComPtr<ID3D12PipelineState> D3D12ShaderCache::CompileAndAddPip
 
 bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12PipelineState* pso, bool uber, bool only_new)
 {
-	if (!GetPipelineBlobFile(uber) || std::fseek(GetPipelineBlobFile(uber), 0, SEEK_END) != 0 ||
-		(only_new && GetPipelineIndex(uber).contains(key)))
+	CacheState& state = GetCacheState(uber);
+
+	if (!state.pipeline_blob_file || std::fseek(state.pipeline_blob_file, 0, SEEK_END) != 0 ||
+		(only_new && state.pipeline_index.contains(key)))
 	{
 		return false;
 	}
@@ -672,7 +693,7 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 	}
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(GetPipelineBlobFile(uber)));
+	data.file_offset = static_cast<u32>(std::ftell(state.pipeline_blob_file));
 	data.blob_size = static_cast<u32>(blob->GetBufferSize());
 
 	CacheIndexEntry entry = {};
@@ -683,15 +704,15 @@ bool D3D12ShaderCache::AddPipelineToBlob(const CacheIndexKey& key, ID3D12Pipelin
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, GetPipelineBlobFile(uber)) != entry.blob_size ||
-		std::fflush(GetPipelineBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetPipelineIndexFile(uber)) != 1 ||
-		std::fflush(GetPipelineIndexFile(uber)) != 0)
+	if (std::fwrite(blob->GetBufferPointer(), 1, entry.blob_size, state.pipeline_blob_file) != entry.blob_size ||
+		std::fflush(state.pipeline_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, state.pipeline_index_file) != 1 ||
+		std::fflush(state.pipeline_index_file) != 0)
 	{
 		Console.Error("Failed to write pipeline blob to file");
 		return false;
 	}
 
-	GetPipelineIndex(uber).emplace(key, data);
+	state.pipeline_index.emplace(key, data);
 	return true;
 }
 

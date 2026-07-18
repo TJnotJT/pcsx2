@@ -135,6 +135,24 @@ private:
 	// Start pipeline jobs that are waiting on the given vertex and/or fragment shader.
 	void StartQueuedPipelineJobs(const VKShaderJob* shader_job);
 
+	struct CacheState
+	{
+		std::FILE* shader_index_file = nullptr;
+		std::FILE* shader_blob_file = nullptr;
+
+		std::string pipeline_cache_filename;
+		std::string pipeline_index_filename;
+
+		CacheIndex shader_index;
+		CacheSet pipeline_index;
+		std::vector<CacheIndexKey> new_pipeline_index;
+
+		VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+		bool pipeline_cache_dirty = false;
+	} m_cache_state[2]; // Normal and uber state.
+
+	CacheState& GetCacheState(bool uber) { return m_cache_state[uber ? 1 : 0]; }
+
 	std::FILE* m_index_file = nullptr;
 	std::FILE* m_blob_file = nullptr;
 	std::string m_pipeline_cache_filename;
@@ -146,30 +164,6 @@ private:
 	std::string m_uber_pipeline_cache_filename;
 	std::string m_uber_pipeline_cache_index_filename;
 	std::FILE* m_uber_pipeline_cache_index_file = nullptr;
-
-	CacheIndex m_index;
-	CacheIndex m_uber_index;
-
-	CacheSet m_pipeline_index;
-	CacheSet m_uber_pipeline_index;
-	std::vector<CacheIndexKey> m_new_pipeline_index;
-	std::vector<CacheIndexKey> m_uber_new_pipeline_index;
-
-	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
-	bool m_pipeline_cache_dirty = false;
-
-	VkPipelineCache m_uber_pipeline_cache = VK_NULL_HANDLE;
-	bool m_uber_pipeline_cache_dirty = false;
-
-	std::FILE*& GetIndexFile(bool uber) { return uber ? m_uber_index_file : m_index_file; }
-	std::FILE*& GetBlobFile(bool uber) { return uber ? m_uber_blob_file : m_blob_file; }
-	std::string& GetPipelineCacheIndexFilename(bool uber) { return uber ? m_uber_pipeline_cache_index_filename : m_pipeline_cache_index_filename; }
-	std::string& GetPipelineCacheFilename(bool uber) { return uber ? m_uber_pipeline_cache_filename : m_pipeline_cache_filename; }
-	CacheIndex& GetIndex(bool uber) { return uber ? m_uber_index : m_index; }
-	CacheSet& GetPipelineIndex(bool uber) { return uber ? m_uber_pipeline_index : m_pipeline_index; }
-	std::vector<CacheIndexKey>& GetPipelineNewIndex(bool uber) { return uber ? m_uber_new_pipeline_index : m_new_pipeline_index; }
-	bool& GetPipelineCacheDirty(bool uber) { return uber ? m_uber_pipeline_cache_dirty : m_pipeline_cache_dirty; }
-	VkPipelineCache& GetPipelineCachePrivate(bool uber) { return uber ? m_uber_pipeline_cache : m_pipeline_cache; }
 
 	static shaderc_compiler_t m_compiler_sync;
 	static bool m_shaderc_failed;

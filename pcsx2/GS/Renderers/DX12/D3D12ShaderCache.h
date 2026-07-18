@@ -136,28 +136,18 @@ private:
 	// Start pipeline jobs that are waiting on the given vertex and/or pixel shader.
 	void StartQueuedPipelineJobs(const D3D12ShaderJob* shader_job);
 
-	std::FILE* m_shader_index_file = nullptr;
-	std::FILE* m_shader_blob_file = nullptr;
-	CacheIndex m_shader_index;
+	struct CacheState
+	{
+		std::FILE* shader_index_file = nullptr;
+		std::FILE* shader_blob_file = nullptr;
+		CacheIndex shader_index;
 
-	std::FILE* m_pipeline_index_file = nullptr;
-	std::FILE* m_pipeline_blob_file = nullptr;
-	CacheIndex m_pipeline_index;
+		std::FILE* pipeline_index_file = nullptr;
+		std::FILE* pipeline_blob_file = nullptr;
+		CacheIndex pipeline_index;
+	} m_cache_state[2]; // Normal and uber.
 
-	std::FILE* m_uber_shader_index_file = nullptr;
-	std::FILE* m_uber_shader_blob_file = nullptr;
-	CacheIndex m_uber_shader_index;
-
-	std::FILE* m_uber_pipeline_index_file = nullptr;
-	std::FILE* m_uber_pipeline_blob_file = nullptr;
-	CacheIndex m_uber_pipeline_index;
-
-	std::FILE*& GetShaderIndexFile(bool uber) { return uber ? m_uber_shader_index_file : m_shader_index_file; }
-	std::FILE*& GetShaderBlobFile(bool uber) { return uber ? m_uber_shader_blob_file : m_shader_blob_file; }
-	CacheIndex& GetShaderIndex(bool uber) { return uber ? m_uber_shader_index : m_shader_index; }
-	std::FILE*& GetPipelineIndexFile(bool uber) { return uber ? m_uber_pipeline_index_file : m_pipeline_index_file; }
-	std::FILE*& GetPipelineBlobFile(bool uber) { return uber ? m_uber_pipeline_blob_file : m_pipeline_blob_file; }
-	CacheIndex& GetPipelineIndex(bool uber) { return uber ? m_uber_pipeline_index : m_pipeline_index; }
+	CacheState& GetCacheState(bool uber) { return m_cache_state[uber ? 1 : 0]; }
 
 	D3D::ShaderModel m_shader_model = D3D::ShaderModel::SM51;
 	bool m_debug = false;

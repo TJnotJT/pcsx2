@@ -200,9 +200,11 @@ void VKShaderCache::Open()
 	{
 		for (u32 uber = 0; uber < 2; uber++)
 		{
+			CacheState& state = GetCacheState(uber);
+
 			const std::string pipeline_base_filename = GetPipelineCacheBaseFileName(uber, GSConfig.UseDebugDevice);
-			GetPipelineCacheFilename(uber) = pipeline_base_filename + ".bin";
-			GetPipelineCacheIndexFilename(uber) = pipeline_base_filename + "_index.bin";
+			state.pipeline_cache_filename = pipeline_base_filename + ".bin";
+			state.pipeline_index_filename = pipeline_base_filename + "_index.bin";
 
 			const std::string base_filename = GetShaderCacheBaseFileName(uber, GSConfig.UseDebugDevice);
 			const std::string index_filename = base_filename + ".idx";
@@ -224,11 +226,13 @@ void VKShaderCache::Open()
 
 VkPipelineCache VKShaderCache::GetPipelineCache(bool set_dirty /*= true*/, bool uber /*= false*/)
 {
-	if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE)
-		return GetPipelineCachePrivate(uber);
+	CacheState& state = GetCacheState(uber);
 
-	GetPipelineCacheDirty(uber) |= set_dirty;
-	return GetPipelineCachePrivate(uber);
+	if (state.pipeline_cache == VK_NULL_HANDLE)
+		return state.pipeline_cache;
+
+	state.pipeline_cache_dirty |= set_dirty;
+	return state.pipeline_cache;
 }
 
 bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, const std::string& blob_filename, bool uber)
@@ -244,8 +248,10 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 		FileSystem::DeleteFilePath(blob_filename.c_str());
 	}
 
-	GetIndexFile(uber) = FileSystem::OpenCFile(index_filename.c_str(), "wb");
-	if (!GetIndexFile(uber))
+	CacheState& state = GetCacheState(uber);
+
+	state.shader_index_file = FileSystem::OpenCFile(index_filename.c_str(), "wb");
+	if (!state.shader_index_file)
 	{
 		Console.Error("Failed to open index file '%s' for writing", index_filename.c_str());
 		return false;
@@ -255,22 +261,22 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 	VK_PIPELINE_CACHE_HEADER header;
 	FillPipelineCacheHeader(&header);
 
-	if (std::fwrite(&file_version, sizeof(file_version), 1, GetIndexFile(uber)) != 1 ||
-		std::fwrite(&header, sizeof(header), 1, GetIndexFile(uber)) != 1)
+	if (std::fwrite(&file_version, sizeof(file_version), 1, state.shader_index_file) != 1 ||
+		std::fwrite(&header, sizeof(header), 1, state.shader_index_file) != 1)
 	{
 		Console.Error("Failed to write header to index file '%s'", index_filename.c_str());
-		std::fclose(GetIndexFile(uber));
-		GetIndexFile(uber) = nullptr;
+		std::fclose(state.shader_index_file);
+		state.shader_index_file = nullptr;
 		FileSystem::DeleteFilePath(index_filename.c_str());
 		return false;
 	}
 
-	GetBlobFile(uber) = FileSystem::OpenCFile(blob_filename.c_str(), "w+b");
-	if (!GetBlobFile(uber))
+	state.shader_blob_file = FileSystem::OpenCFile(blob_filename.c_str(), "w+b");
+	if (!state.shader_blob_file)
 	{
 		Console.Error("Failed to open blob file '%s' for writing", blob_filename.c_str());
-		std::fclose(GetIndexFile(uber));
-		GetIndexFile(uber) = nullptr;
+		std::fclose(state.shader_index_file);
+		state.shader_index_file = nullptr;
 		FileSystem::DeleteFilePath(index_filename.c_str());
 		return false;
 	}
@@ -280,8 +286,10 @@ bool VKShaderCache::CreateNewShaderCache(const std::string& index_filename, cons
 
 bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, const std::string& blob_filename, bool uber)
 {
-	GetIndexFile(uber) = FileSystem::OpenCFile(index_filename.c_str(), "r+b");
-	if (!GetIndexFile(uber))
+	CacheState& state = GetCacheState(uber);
+
+	state.shader_index_file = FileSystem::OpenCFile(index_filename.c_str(), "r+b");
+	if (!state.shader_index_file)
 	{
 		// special case here: when there's a sharing violation (i.e. two instances running),
 		// we don't want to blow away the cache. so just continue without a cache.
@@ -295,62 +303,62 @@ bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, c
 	}
 
 	u32 file_version = 0;
-	if (std::fread(&file_version, sizeof(file_version), 1, GetIndexFile(uber)) != 1 || file_version != SHADER_CACHE_VERSION)
+	if (std::fread(&file_version, sizeof(file_version), 1, state.shader_index_file) != 1 || file_version != SHADER_CACHE_VERSION)
 	{
 		Console.Error("Bad file/data version in '%s'", index_filename.c_str());
-		std::fclose(GetIndexFile(uber));
-		GetIndexFile(uber) = nullptr;
+		std::fclose(state.shader_index_file);
+		state.shader_index_file = nullptr;
 		return false;
 	}
 
 	VK_PIPELINE_CACHE_HEADER header;
-	if (std::fread(&header, sizeof(header), 1, GetIndexFile(uber)) != 1 || !ValidatePipelineCacheHeader(header))
+	if (std::fread(&header, sizeof(header), 1, state.shader_index_file) != 1 || !ValidatePipelineCacheHeader(header))
 	{
 		Console.Error("Mismatched pipeline cache header in '%s' (GPU/driver changed?)", index_filename.c_str());
-		std::fclose(GetIndexFile(uber));
-		GetIndexFile(uber) = nullptr;
+		std::fclose(state.shader_index_file);
+		state.shader_index_file = nullptr;
 		return false;
 	}
 
-	GetBlobFile(uber) = FileSystem::OpenCFile(blob_filename.c_str(), "a+b");
-	if (!GetBlobFile(uber))
+	state.shader_blob_file = FileSystem::OpenCFile(blob_filename.c_str(), "a+b");
+	if (!state.shader_blob_file)
 	{
 		Console.Error("Blob file '%s' is missing", blob_filename.c_str());
-		std::fclose(GetIndexFile(uber));
-		GetIndexFile(uber) = nullptr;
+		std::fclose(state.shader_index_file);
+		state.shader_index_file = nullptr;
 		return false;
 	}
 
-	std::fseek(GetBlobFile(uber), 0, SEEK_END);
-	const u32 blob_file_size = static_cast<u32>(std::ftell(GetBlobFile(uber)));
+	std::fseek(state.shader_blob_file, 0, SEEK_END);
+	const u32 blob_file_size = static_cast<u32>(std::ftell(state.shader_blob_file));
 
 	for (;;)
 	{
 		CacheIndexEntry entry;
-		if (std::fread(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
+		if (std::fread(&entry, sizeof(entry), 1, state.shader_index_file) != 1 ||
 			(entry.file_offset + entry.blob_size) > blob_file_size)
 		{
-			if (std::feof(GetIndexFile(uber)))
+			if (std::feof(state.shader_index_file))
 				break;
 
 			Console.Error("Failed to read entry from '%s', corrupt file?", index_filename.c_str());
-			GetIndex(uber).clear();
-			std::fclose(GetBlobFile(uber));
-			GetBlobFile(uber) = nullptr;
-			std::fclose(GetIndexFile(uber));
-			GetIndexFile(uber) = nullptr;
+			state.shader_index.clear();
+			std::fclose(state.shader_blob_file);
+			state.shader_blob_file = nullptr;
+			std::fclose(state.shader_index_file);
+			state.shader_index_file = nullptr;
 			return false;
 		}
 
 		const CacheIndexKey key{entry.source_hash_low, entry.source_hash_high, entry.source_length, entry.shader_type};
 		const CacheIndexData data{entry.file_offset, entry.blob_size};
-		GetIndex(uber).emplace(key, data);
+		state.shader_index.emplace(key, data);
 	}
 
 	// ensure we don't write before seeking
-	std::fseek(GetIndexFile(uber), 0, SEEK_END);
+	std::fseek(state.shader_index_file, 0, SEEK_END);
 
-	Console.WriteLn("Read %zu entries from '%s'", GetIndex(uber).size(), index_filename.c_str());
+	Console.WriteLn("Read %zu entries from '%s'", state.shader_index.size(), index_filename.c_str());
 	return true;
 }
 
@@ -358,33 +366,37 @@ void VKShaderCache::CloseShaderCache()
 {
 	for (u32 uber = 0; uber < 2; uber++)
 	{
-		if (GetIndexFile(uber))
+		CacheState& state = GetCacheState(uber);
+
+		if (state.shader_index_file)
 		{
-			std::fclose(GetIndexFile(uber));
-			GetIndexFile(uber) = nullptr;
+			std::fclose(state.shader_index_file);
+			state.shader_index_file = nullptr;
 		}
-		if (GetBlobFile(uber))
+		if (state.shader_blob_file)
 		{
-			std::fclose(GetBlobFile(uber));
-			GetBlobFile(uber) = nullptr;
+			std::fclose(state.shader_blob_file);
+			state.shader_blob_file = nullptr;
 		}
 	}
 }
 
 bool VKShaderCache::CreateNewPipelineCache(bool uber)
 {
+	CacheState& state = GetCacheState(uber);
+
 	// Create new pipeline index.
 	{
-		if (FileSystem::FileExists(GetPipelineCacheIndexFilename(uber).c_str()))
+		if (FileSystem::FileExists(state.pipeline_index_filename.c_str()))
 		{
-			Console.Warning("Removing existing index file '%s'", GetPipelineCacheIndexFilename(uber).c_str());
-			FileSystem::DeleteFilePath(GetPipelineCacheIndexFilename(uber).c_str());
+			Console.Warning("Removing existing index file '%s'", state.pipeline_index_filename.c_str());
+			FileSystem::DeleteFilePath(state.pipeline_index_filename.c_str());
 		}
 
-		FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "wb");
+		FILE* index_file = FileSystem::OpenCFile(state.pipeline_index_filename.c_str(), "wb");
 		if (!index_file)
 		{
-			Console.Error("Failed to open index file '%s' for writing", GetPipelineCacheIndexFilename(uber).c_str());
+			Console.Error("Failed to open index file '%s' for writing", state.pipeline_index_filename.c_str());
 			return false;
 		}
 
@@ -395,9 +407,9 @@ bool VKShaderCache::CreateNewPipelineCache(bool uber)
 		if (std::fwrite(&file_version, sizeof(file_version), 1, index_file) != 1 ||
 			std::fwrite(&header, sizeof(header), 1, index_file) != 1)
 		{
-			Console.Error("Failed to write header to index file '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+			Console.Error("Failed to write header to index file '%s'", state.pipeline_index_filename.c_str());
 			std::fclose(index_file);
-			FileSystem::DeleteFilePath(GetPipelineCacheIndexFilename(uber).c_str());
+			FileSystem::DeleteFilePath(state.pipeline_index_filename.c_str());
 			return false;
 		}
 
@@ -406,14 +418,14 @@ bool VKShaderCache::CreateNewPipelineCache(bool uber)
 
 	// Create new pipeline cache.
 	{
-		if (!GetPipelineCacheFilename(uber).empty() && FileSystem::FileExists(GetPipelineCacheFilename(uber).c_str()))
+		if (!state.pipeline_cache_filename.empty() && FileSystem::FileExists(state.pipeline_cache_filename.c_str()))
 		{
-			Console.Warning("Removing existing pipeline cache '%s'", GetPipelineCacheFilename(uber).c_str());
-			FileSystem::DeleteFilePath(GetPipelineCacheFilename(uber).c_str());
+			Console.Warning("Removing existing pipeline cache '%s'", state.pipeline_cache_filename.c_str());
+			FileSystem::DeleteFilePath(state.pipeline_cache_filename.c_str());
 		}
 
 		const VkPipelineCacheCreateInfo ci{ VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, 0, nullptr };
-		VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
+		VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &state.pipeline_cache);
 		if (res != VK_SUCCESS)
 		{
 			LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
@@ -421,13 +433,15 @@ bool VKShaderCache::CreateNewPipelineCache(bool uber)
 		}
 	}
 	
-	GetPipelineCacheDirty(uber) = true;
+	state.pipeline_cache_dirty = true;
 	return true;
 }
 
 bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 {
-	FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "r+b");
+	CacheState& state = GetCacheState(uber);
+
+	FILE* index_file = FileSystem::OpenCFile(state.pipeline_index_filename.c_str(), "r+b");
 	if (!index_file)
 	{
 		// special case here: when there's a sharing violation (i.e. two instances running),
@@ -444,7 +458,7 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 	u32 file_version = 0;
 	if (std::fread(&file_version, sizeof(file_version), 1, index_file) != 1 || file_version != SHADER_CACHE_VERSION)
 	{
-		Console.Error("Bad file/data version in '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+		Console.Error("Bad file/data version in '%s'", state.pipeline_index_filename.c_str());
 		std::fclose(index_file);
 		index_file = nullptr;
 		return false;
@@ -453,7 +467,7 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 	VK_PIPELINE_CACHE_HEADER header;
 	if (std::fread(&header, sizeof(header), 1, index_file) != 1 || !ValidatePipelineCacheHeader(header))
 	{
-		Console.Error("Mismatched pipeline cache header in '%s' (GPU/driver changed?)", GetPipelineCacheIndexFilename(uber).c_str());
+		Console.Error("Mismatched pipeline cache header in '%s' (GPU/driver changed?)", state.pipeline_index_filename.c_str());
 		std::fclose(index_file);
 		return false;
 	}
@@ -467,26 +481,26 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 			if (std::feof(index_file))
 				break;
 
-			Console.Error("Failed to read key from '%s', corrupt file?", GetPipelineCacheIndexFilename(uber).c_str());
-			GetPipelineIndex(uber).clear();
+			Console.Error("Failed to read key from '%s', corrupt file?", state.pipeline_index_filename.c_str());
+			state.pipeline_index.clear();
 			std::fclose(index_file);
 			return false;
 		}
 
-		GetPipelineIndex(uber).insert(key);
+		state.pipeline_index.insert(key);
 	}
 
 	std::fclose(index_file);
 
-	Console.WriteLn("Read %zu entries from '%s'", GetPipelineIndex(uber).size(), GetPipelineCacheIndexFilename(uber).c_str());
+	Console.WriteLn("Read %zu entries from '%s'", state.pipeline_index.size(), state.pipeline_index_filename.c_str());
 
-	std::optional<std::vector<u8>> data = FileSystem::ReadBinaryFile(GetPipelineCacheFilename(uber).c_str());
+	std::optional<std::vector<u8>> data = FileSystem::ReadBinaryFile(state.pipeline_cache_filename.c_str());
 	if (!data.has_value())
 		return false;
 
 	if (data->size() < sizeof(VK_PIPELINE_CACHE_HEADER))
 	{
-		Console.Error("Pipeline cache at '%s' is too small", GetPipelineCacheFilename(uber).c_str());
+		Console.Error("Pipeline cache at '%s' is too small", state.pipeline_cache_filename.c_str());
 		return false;
 	}
 
@@ -496,7 +510,7 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 
 	const VkPipelineCacheCreateInfo ci{
 		VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO, nullptr, 0, data->size(), data->data()};
-	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &GetPipelineCachePrivate(uber));
+	VkResult res = vkCreatePipelineCache(GSDeviceVK::GetInstance()->GetDevice(), &ci, nullptr, &state.pipeline_cache);
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreatePipelineCache() failed: ");
@@ -511,16 +525,18 @@ bool VKShaderCache::FlushPipelineCache()
 	bool flushed = false;
 	for (u32 uber = 0; uber < 2; uber++)
 	{
-		if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE || !GetPipelineCacheDirty(uber) || GetPipelineCacheFilename(uber).empty())
+		CacheState& state = GetCacheState(uber);
+
+		if (state.pipeline_cache == VK_NULL_HANDLE || !state.pipeline_cache_dirty || state.pipeline_cache_filename.empty())
 			continue;
 
 		size_t data_size;
 
 		// Write the pipeline index.
-		data_size = sizeof(CacheIndexKey) * GetPipelineNewIndex(uber).size();
-		Console.WriteLn("Writing %zu bytes to '%s'", data_size, GetPipelineCacheIndexFilename(uber).c_str());
+		data_size = sizeof(CacheIndexKey) * state.new_pipeline_index.size();
+		Console.WriteLn("Writing %zu bytes to '%s'", data_size, state.pipeline_index_filename.c_str());
 		
-		FILE* index_file = FileSystem::OpenCFile(GetPipelineCacheIndexFilename(uber).c_str(), "a+b");
+		FILE* index_file = FileSystem::OpenCFile(state.pipeline_index_filename.c_str(), "a+b");
 		if (!index_file)
 		{
 			// FIXME: Duplication with opening.
@@ -535,19 +551,19 @@ bool VKShaderCache::FlushPipelineCache()
 			return false;
 		}
 
-		if (std::fwrite(GetPipelineNewIndex(uber).data(), sizeof(CacheIndexKey), GetPipelineNewIndex(uber).size(), index_file) !=
-			GetPipelineNewIndex(uber).size())
+		if (std::fwrite(state.new_pipeline_index.data(), sizeof(CacheIndexKey), state.new_pipeline_index.size(), index_file) !=
+			state.new_pipeline_index.size())
 		{
-			Console.Error("Failed to write pipeline index to '%s'", GetPipelineCacheIndexFilename(uber).c_str());
+			Console.Error("Failed to write pipeline index to '%s'", state.pipeline_index_filename.c_str());
 			return false;
 		}
 
 		std::fclose(index_file);
-		GetPipelineNewIndex(uber).clear();
+		state.new_pipeline_index.clear();
 
 		// Write the pipeline data.
 		VkResult res =
-			vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), &data_size, nullptr);
+			vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), state.pipeline_cache, &data_size, nullptr);
 		if (res != VK_SUCCESS)
 		{
 			LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() failed: ");
@@ -555,7 +571,7 @@ bool VKShaderCache::FlushPipelineCache()
 		}
 
 		std::vector<u8> data(data_size);
-		res = vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), &data_size, data.data());
+		res = vkGetPipelineCacheData(GSDeviceVK::GetInstance()->GetDevice(), state.pipeline_cache, &data_size, data.data());
 		if (res != VK_SUCCESS)
 		{
 			LOG_VULKAN_ERROR(res, "vkGetPipelineCacheData() (2) failed: ");
@@ -566,21 +582,21 @@ bool VKShaderCache::FlushPipelineCache()
 
 		// Save disk writes if it hasn't changed, think of the poor SSDs.
 		FILESYSTEM_STAT_DATA sd;
-		if (!FileSystem::StatFile(GetPipelineCacheFilename(uber).c_str(), &sd) || sd.Size != static_cast<s64>(data_size))
+		if (!FileSystem::StatFile(state.pipeline_cache_filename.c_str(), &sd) || sd.Size != static_cast<s64>(data_size))
 		{
-			Console.WriteLn("Writing %zu bytes to '%s'", data_size, GetPipelineCacheFilename(uber).c_str());
-			if (!FileSystem::WriteBinaryFile(GetPipelineCacheFilename(uber).c_str(), data.data(), data.size()))
+			Console.WriteLn("Writing %zu bytes to '%s'", data_size, state.pipeline_cache_filename.c_str());
+			if (!FileSystem::WriteBinaryFile(state.pipeline_cache_filename.c_str(), data.data(), data.size()))
 			{
-				Console.Error("Failed to write pipeline cache to '%s'", GetPipelineCacheFilename(uber).c_str());
+				Console.Error("Failed to write pipeline cache to '%s'", state.pipeline_cache_filename.c_str());
 				return false;
 			}
 		}
 		else
 		{
-			Console.WriteLn("Skipping updating pipeline cache '%s' due to no changes.", GetPipelineCacheFilename(uber).c_str());
+			Console.WriteLn("Skipping updating pipeline cache '%s' due to no changes.", state.pipeline_cache_filename.c_str());
 		}
 
-		GetPipelineCacheDirty(uber) = false;
+		state.pipeline_cache_dirty = false;
 	}
 	return flushed;
 }
@@ -589,11 +605,13 @@ void VKShaderCache::ClosePipelineCache()
 {
 	for (u32 uber = 0; uber < 2; uber++)
 	{
-		if (GetPipelineCachePrivate(uber) == VK_NULL_HANDLE)
+		CacheState& state = GetCacheState(uber);
+
+		if (state.pipeline_cache == VK_NULL_HANDLE)
 			return;
 
-		vkDestroyPipelineCache(GSDeviceVK::GetInstance()->GetDevice(), GetPipelineCachePrivate(uber), nullptr);
-		GetPipelineCachePrivate(uber) = VK_NULL_HANDLE;
+		vkDestroyPipelineCache(GSDeviceVK::GetInstance()->GetDevice(), state.pipeline_cache, nullptr);
+		state.pipeline_cache = VK_NULL_HANDLE;
 	}
 }
 
@@ -849,22 +867,24 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
 
 bool VKShaderCache::HasShaderSPV(u32 type, std::string_view shader_code, bool uber)
 {
+	CacheState& state = GetCacheState(uber);
 	const auto key = GetCacheKey(type, shader_code);
-	auto iter = GetIndex(uber).find(key);
-	return iter != GetIndex(uber).end();
+	auto iter = state.shader_index.find(key);
+	return iter != state.shader_index.end();
 }
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code, bool uber)
 {
+	CacheState& state = GetCacheState(uber);
 	const auto key = GetCacheKey(type, shader_code);
-	auto iter = GetIndex(uber).find(key);
-	if (iter == GetIndex(uber).end())
+	auto iter = state.shader_index.find(key);
+	if (iter == state.shader_index.end())
 		return CompileAndAddShaderSPV(key, shader_code, uber);
 
 	std::optional<SPIRVCodeVector> spv = SPIRVCodeVector(iter->second.blob_size);
 
-	if (std::fseek(GetBlobFile(uber), iter->second.file_offset, SEEK_SET) != 0 ||
-		std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, GetBlobFile(uber)) != iter->second.blob_size)
+	if (std::fseek(state.shader_blob_file, iter->second.file_offset, SEEK_SET) != 0 ||
+		std::fread(spv->data(), sizeof(SPIRVCodeType), iter->second.blob_size, state.shader_blob_file) != iter->second.blob_size)
 	{
 		Console.Error("Read blob from file failed, recompiling");
 		spv = CompileShaderToSPV(type, shader_code, GSConfig.UseDebugDevice);
@@ -920,7 +940,7 @@ VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 
 bool VKShaderCache::HasGraphicsPipeline(const CacheIndexKey& key, bool uber)
 {
-	return GetPipelineIndex(uber).contains(key);
+	return GetCacheState(uber).pipeline_index.contains(key);
 }
 
 VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice device,
@@ -953,11 +973,13 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShader
 	if (!spv.has_value())
 		return {};
 
-	if (!GetBlobFile(uber) || std::fseek(GetBlobFile(uber), 0, SEEK_END) != 0)
+	CacheState& state = GetCacheState(uber);
+
+	if (!state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return spv;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(GetBlobFile(uber)));
+	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(spv->size());
 
 	CacheIndexEntry entry = {};
@@ -968,15 +990,15 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShader
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(spv->data(), sizeof(SPIRVCodeType), entry.blob_size, GetBlobFile(uber)) != entry.blob_size ||
-		std::fflush(GetBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
-		std::fflush(GetIndexFile(uber)) != 0)
+	if (std::fwrite(spv->data(), sizeof(SPIRVCodeType), entry.blob_size, state.shader_blob_file) != entry.blob_size ||
+		std::fflush(state.shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, state.shader_index_file) != 1 ||
+		std::fflush(state.shader_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 		return spv;
 	}
 
-	GetIndex(uber).emplace(key, data);
+	state.shader_index.emplace(key, data);
 	return spv;
 }
 
@@ -984,17 +1006,18 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	bool uber, bool only_new)
 {
 	// FIXME: Duplication with CompileAndAddShaderSPV();
+	CacheState& state = GetCacheState(uber);
 
 	const auto key = GetCacheKey(type, shader_code);
 
-	if (only_new && GetIndex(uber).contains(key))
+	if (only_new && state.shader_index.contains(key))
 		return;
 
-	if (!GetBlobFile(uber) || std::fseek(GetBlobFile(uber), 0, SEEK_END) != 0)
+	if (!state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return;
 
 	CacheIndexData data;
-	data.file_offset = static_cast<u32>(std::ftell(GetBlobFile(uber)));
+	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(spv.size());
 
 	CacheIndexEntry entry = {};
@@ -1005,21 +1028,22 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	entry.blob_size = data.blob_size;
 	entry.file_offset = data.file_offset;
 
-	if (std::fwrite(spv.data(), sizeof(SPIRVCodeType), entry.blob_size, GetBlobFile(uber)) != entry.blob_size ||
-		std::fflush(GetBlobFile(uber)) != 0 || std::fwrite(&entry, sizeof(entry), 1, GetIndexFile(uber)) != 1 ||
-		std::fflush(GetIndexFile(uber)) != 0)
+	if (std::fwrite(spv.data(), sizeof(SPIRVCodeType), entry.blob_size, state.shader_blob_file) != entry.blob_size ||
+		std::fflush(state.shader_blob_file) != 0 || std::fwrite(&entry, sizeof(entry), 1, state.shader_index_file) != 1 ||
+		std::fflush(state.shader_index_file) != 0)
 	{
 		Console.Error("Failed to write shader blob to file");
 	}
 
-	GetIndex(uber).emplace(key, data);
+	state.shader_index.emplace(key, data);
 }
 
 void VKShaderCache::AddPipelineKey(const CacheIndexKey& key, bool uber)
 {
-	bool is_new = GetPipelineIndex(uber).insert(key).second;
+	CacheState& state = GetCacheState(uber);
+	bool is_new = state.pipeline_index.insert(key).second;
 	if (is_new)
-		GetPipelineNewIndex(uber).push_back(key);
+		state.new_pipeline_index.push_back(key);
 }
 
 void VKShaderCache::ProcessAsyncCompileJobs()
