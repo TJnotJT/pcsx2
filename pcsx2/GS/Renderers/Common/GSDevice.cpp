@@ -798,7 +798,8 @@ GSTexture* GSDevice::CreateDepthStencil(int w, int h, bool clear, bool prefer_re
 
 GSTexture* GSDevice::CreateDepthStencil(const GSVector2i& size, bool clear, bool prefer_reuse)
 {
-	return FetchSurface(GSTexture::DepthStencil, size.x, size.y, 1, GSTexture::Format::DepthStencil, clear, prefer_reuse);
+	return FetchSurface(m_features.depth_feedback ? GSTexture::FeedbackDepth : GSTexture::DepthStencil,
+		size.x, size.y, 1, GSTexture::Format::DepthStencil, clear, prefer_reuse);
 }
 
 GSTexture* GSDevice::CreateTexture(int w, int h, int mipmap_levels, GSTexture::Format format, bool prefer_reuse)
