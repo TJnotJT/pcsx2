@@ -453,12 +453,6 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
-	using GSDevice::IsUberPSSelectorValid;
-	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps) override
-	{
-		return IsUberPSSelectorValid(ps, GSHWDrawConfig::UberPSSelector::GetValidD3D12());
-	}
-
 	using D3D12ShaderBlobOrJob = std::variant<ID3DBlob*, std::shared_ptr<D3D12ShaderJob>>;
 	using D3D12PipelineOrJob = std::variant<ComPtr<ID3D12PipelineState>, D3D12PipelineJob*>;
 

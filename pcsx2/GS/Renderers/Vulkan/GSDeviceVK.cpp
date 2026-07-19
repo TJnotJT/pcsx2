@@ -2866,6 +2866,7 @@ bool GSDeviceVK::CheckFeatures()
 	                 !m_features.framebuffer_fetch;
 
 	m_features.uber_shader = m_features.vs_expand;
+	m_features.uber_ps_with_feedback_rt_flag = m_features.uber_shader;
 
 	return true;
 }

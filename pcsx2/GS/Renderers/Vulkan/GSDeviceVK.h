@@ -518,18 +518,6 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
-	using GSDevice::IsUberPSSelectorValid;
-	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps) override
-	{
-		return IsUberPSSelectorValid(ps, GSHWDrawConfig::UberPSSelector::GetValidVK());
-	}
-
-	// VK needs explicit fragment shader RT feedback flag.
-	virtual void FinalizeUberPSSelector(const GSHWDrawConfig::PSSelector& ps, GSHWDrawConfig::UberPSSelector& uber_ps) override
-	{
-		uber_ps.feedback_rt = ps.IsFeedbackLoopRT();
-	}
-
 	using VKShaderModuleOrJob = std::variant<VKCachedShaderModule, std::shared_ptr<VKShaderJob>>;
 	using VKPipelineOrJob = std::variant<VKCachedPipeline, VKPipelineJob*>;
 

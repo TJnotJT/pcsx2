@@ -989,7 +989,7 @@ struct alignas(16) GSHWDrawConfig
 			return ps;
 		}
 
-		__fi constexpr bool IsValid(bool with_feedback_rt) const
+		__fi constexpr bool IsValid(bool with_feedback_rt_flag) const
 		{
 			return
 				// Don't allow depth ROV without SW depth.
@@ -1002,12 +1002,11 @@ struct alignas(16) GSHWDrawConfig
 				(!rov_color || !no_color) &&
 				// Must have color or depth output.
 				(!no_color || zwrite || rov_depth) &&
-				(
-					// With feedback RT flag: only allow RT feedbackflag with non-ROV color.
-					(with_feedback_rt && (!feedback_rt || (!no_color && !rov_color))) ||
+				(with_feedback_rt_flag ?
+					// With feedback RT flag: only allow RT feedback flag with non-ROV color.
+					(!feedback_rt || (!no_color && !rov_color)) :
 					// Without feedback RT flag: don't allow RT feedback flag.
-					(!with_feedback_rt && !feedback_rt)
-				) &&
+					!feedback_rt) &&
 				// Don't allow padding.
 				(pad0 == 0 && pad1 == 0);
 		}
@@ -1560,6 +1559,7 @@ public:
 		bool aa1                  : 1; ///< Supports the GS AA1 feature.
 		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
 		bool uber_shader          : 1; ///< Supports uber shader.
+		bool uber_ps_with_feedback_rt_flag : 1; ///< Uber pixel shader needs feedback RT flag (VK only).
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
@@ -1884,24 +1884,7 @@ public:
 	__ri static HWBlend GetBlend(u32 index) { return m_blendMap[index]; }
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
 
-	virtual bool StartPipelineCompilationAsync(const GSHWDrawConfig& conf)
-	{
-		pxFailRel("Not implemented");
-		return false;
-	}
-
-	bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps, std::span<const GSHWDrawConfig::UberPSSelector> valid);
-
-	// Add/remove bits based on implementation requirements.
-	virtual void FinalizeUberPSSelector(const GSHWDrawConfig::PSSelector& ps, GSHWDrawConfig::UberPSSelector& uber_ps)
-	{
-	}
-
-	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps)
-	{
-		pxFailRel("Not implemented");
-		return false;
-	}
+	virtual bool StartPipelineCompilationAsync(const GSHWDrawConfig& conf);
 };
 
 template <>

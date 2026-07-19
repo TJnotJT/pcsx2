@@ -2156,15 +2156,10 @@ std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::
 	return valid_uber_ps_selectors_vk;
 }
 
-bool GSDevice::IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps, std::span<const GSHWDrawConfig::UberPSSelector> valid)
+bool GSDevice::StartPipelineCompilationAsync(const GSHWDrawConfig& conf)
 {
-	if (std::find(valid.begin(), valid.end(), ps) == valid.end())
-	{
-		Console.Warning("Uber PS selector %0X is not in the valid array!",
-			static_cast<u32>(ps.key));
-		return false;
-	}
-	return true;
+	pxFailRel("Not implemented");
+	return false;
 }
 
 // clang-format off

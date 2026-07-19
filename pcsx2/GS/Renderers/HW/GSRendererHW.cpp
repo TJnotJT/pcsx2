@@ -7962,14 +7962,17 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 
 		m_conf.uber_ps.no_color = m_conf.ps.no_color;
 
-		g_gs_device->FinalizeUberPSSelector(m_conf.ps, m_conf.uber_ps); // Backend specific flags.
+		const bool with_feedback_rt_flag = g_gs_device->Features().uber_ps_with_feedback_rt_flag;
+
+		if (with_feedback_rt_flag)
+			m_conf.uber_ps.feedback_rt = m_conf.IsFeedbackLoopRT(m_conf.ps);
+
+		pxAssert(m_conf.uber_ps.IsValid(with_feedback_rt_flag));
 
 		// Get the dynamic bits for VS/PS.
 		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);
 		
 		m_conf.uber_shader = true;
-
-		pxAssert(g_gs_device->IsUberPSSelectorValid(m_conf.uber_ps));
 	}
 }
 
