@@ -1549,6 +1549,8 @@ public:
 		}
 		/// Supports feedback loops through either texture barriers or rt copies.
 		bool feedback_loops() const { return texture_barrier || multidraw_fb_copy; }
+		/// FB fetch can handle depth feedback via color copy.
+		bool FBFetchDepthFeedback() const { return framebuffer_fetch && !depth_feedback; }
 	};
 
 	struct MultiStretchRect

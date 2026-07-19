@@ -7518,6 +7518,12 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 	}
 }
 
+__fi bool GSRendererHW::TexHazardPreventsROVUsage() const
+{
+	// Cannot use ROV if sampling the RT/DS and it's not the same pixel being drawn to.
+	return m_conf.tex_hazard != GSHWDrawConfig::TEX_HAZARD_NONE && !m_conf.ps.tex_is_fb;
+}
+
 // In certain cases using a ROV with depth or color will force the other one
 // because of how color and depth interact via testing.
 __fi void GSRendererHW::GetForcedROVUsage(bool& rov_color, bool& rov_depth)
@@ -7575,15 +7581,9 @@ void GSRendererHW::DetermineROVUsage(GSTextureCache::Target* rt, GSTextureCache:
 		return;
 	}
 
-	if (rt && rt->m_texture == m_conf.tex && !m_conf.ps.tex_is_fb)
+	if (TexHazardPreventsROVUsage())
 	{
-		GL_INS("ROV: Disabled because tex is RT and not sampling from current pixel");
-		return;
-	}
-
-	if (ds && ds->m_texture == m_conf.tex)
-	{
-		GL_INS("ROV: Disabled because tex is depth");
+		GL_INS("ROV: Disabled because of RT/DS sampling hazard");
 		return;
 	}
 
@@ -7935,7 +7935,8 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 
 		// Use either ROV, FB fetch, or full barriers.
 		// Prefer FB fetch over ROV unless depth feedback is not handled by it.
-		if ((!features.framebuffer_fetch || features.depth_feedback) && features.rov && GSConfig.HWROV)
+		if (!features.FBFetchDepthFeedback() && features.rov && GSConfig.HWROV &&
+			!TexHazardPreventsROVUsage())
 		{
 			// If we're using ROV for either color/depth, use it for both.
 			ConfigureROV(rt != nullptr, ds != nullptr);
