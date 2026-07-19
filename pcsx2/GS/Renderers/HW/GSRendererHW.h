@@ -263,7 +263,7 @@ private:
 	void ConvertTextureTypeROVSingle(GSTextureCache::Target* tgt, bool shader_write); // Helper to do the above.
 
 	void HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds,
-		GSTextureCache::Source* tex);
+		GSTextureCache::Source* tex, GSDevice::RecycledTexture& temp_tex);
 
 	void BeginDSAsRT();
 	void EndDSAsRT();

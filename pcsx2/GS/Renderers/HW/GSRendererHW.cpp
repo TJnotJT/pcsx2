@@ -7521,7 +7521,8 @@ void GSRendererHW::EmulateBlending(int rt_alpha_min, int rt_alpha_max, DATEOptio
 __fi bool GSRendererHW::TexHazardPreventsROVUsage() const
 {
 	// Cannot use ROV if sampling the RT/DS and it's not the same pixel being drawn to.
-	return m_conf.tex_hazard != GSHWDrawConfig::TEX_HAZARD_NONE && !m_conf.ps.tex_is_fb;
+	return (m_conf.rt && (m_conf.rt == m_conf.tex) && !m_conf.ps.tex_is_fb) ||
+		(m_conf.ds && (m_conf.ds == m_conf.tex));
 }
 
 // In certain cases using a ROV with depth or color will force the other one
@@ -7920,7 +7921,7 @@ void GSRendererHW::ConvertTextureTypeROV(GSTextureCache::Target* rt, GSTextureCa
 }
 
 void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextureCache::Target* ds,
-	GSTextureCache::Source* tex)
+	GSTextureCache::Source* tex, GSDevice::RecycledTexture& temp_tex)
 {
 	const GSDevice::FeatureSupport& features = g_gs_device->Features();
 
@@ -7959,6 +7960,19 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 				// HW depth write with SW depth masking.
 				m_conf.ps.zmask = !m_conf.depth.zwe; 
 				m_conf.depth.zwe = true;
+			}
+
+			if (m_conf.rt && m_conf.rt == m_conf.tex && !m_conf.ps.tex_is_fb)
+			{
+				GL_INS("HW: RT is source texture; creating copy.");
+				temp_tex.reset(g_gs_device->CreateCompatible(m_conf.rt, false));
+				g_gs_device->StretchRectAuto(m_conf.rt, temp_tex.get(), Nearest);
+			}
+			else if (m_conf.ds && m_conf.ds == m_conf.tex)
+			{
+				GL_INS("HW: DS is source texture; creating copy.");
+				temp_tex.reset(g_gs_device->CreateCompatible(m_conf.ds, false));
+				g_gs_device->StretchRectAuto(m_conf.ds, temp_tex.get(), Nearest);
 			}
 		}
 
@@ -9590,7 +9604,7 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
-	HandleUberOrHybridShader(rt, ds, tex);
+	HandleUberOrHybridShader(rt, ds, tex, tex_copy);
 
 	// Convert textures types after hybrid/uber shader setup in case they use ROV.
 	ConvertTextureTypeROV(rt, ds);
