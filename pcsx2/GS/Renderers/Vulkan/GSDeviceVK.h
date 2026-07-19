@@ -345,6 +345,7 @@ public:
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
+		GSHWDrawConfig::UberPSSelector uber_ps;
 
 		union
 		{
@@ -382,7 +383,7 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key);
 			return hash;
 		}
 	};
@@ -468,6 +469,7 @@ private:
 	std::unordered_map<u32, VKCachedShaderModule> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, VKCachedShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
+	std::unordered_map<u8, VKCachedShaderModule> m_tfx_uber_fragment_shaders;
 	std::unordered_map<PipelineSelector, VKCachedPipeline, PipelineSelectorHash> m_tfx_pipelines;
 
 	std::unordered_map<PipelineSelector, std::shared_ptr<VKPipelineJob>, PipelineSelectorHash>
@@ -476,6 +478,7 @@ private:
 		m_tfx_vertex_shaders_async;
 	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<VKShaderJob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders_async;
+	std::unordered_map<u8, std::shared_ptr<VKShaderJob>> m_tfx_uber_fragment_shaders_async;
 
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
@@ -515,6 +518,18 @@ private:
 	VkSampler GetSampler(GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
 
+	using GSDevice::IsUberPSSelectorValid;
+	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps) override
+	{
+		return IsUberPSSelectorValid(ps, GSHWDrawConfig::UberPSSelector::GetValidVK());
+	}
+
+	// VK needs explicit fragment shader RT feedback flag.
+	virtual void FinalizeUberPSSelector(const GSHWDrawConfig::PSSelector& ps, GSHWDrawConfig::UberPSSelector& uber_ps) override
+	{
+		uber_ps.feedback_rt = ps.IsFeedbackLoopRT();
+	}
+
 	using VKShaderModuleOrJob = std::variant<VKCachedShaderModule, std::shared_ptr<VKShaderJob>>;
 	using VKPipelineOrJob = std::variant<VKCachedPipeline, VKPipelineJob*>;
 
@@ -544,7 +559,8 @@ private:
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
-	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool uber = false, bool async = false);
+	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
+	VKShaderModuleOrJob GetTFXUberFragmentShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
 	VKPipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 	VkPipeline GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
@@ -681,7 +697,7 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 
 	bool BindDrawPipeline(const PipelineSelector& p, bool uber);

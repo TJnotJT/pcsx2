@@ -1902,30 +1902,6 @@ u32 GSHWDrawConfig::VSSelector::GetField(u32 index) const
 	}
 }
 
-void GSHWDrawConfig::VSSelector::ClearField(const std::string& name)
-{
-	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
-			if (name == #NAME) NAME = static_cast<decltype(NAME)>(0);
-		VSSEL_FIELDS_EXPAND
-	#undef EXPAND
-}
-
-void GSHWDrawConfig::VSSelector::ClearField(u32 index)
-{
-	switch (index)
-	{
-		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
-			case INDEX: \
-				NAME = static_cast<decltype(NAME)>(0); \
-				break;
-			VSSEL_FIELDS_EXPAND
-		#undef EXPAND
-			default:
-				pxAssert(false);
-				break;
-	}
-}
-
 u32 GSHWDrawConfig::PSSelector::GetField(const std::string& name) const
 {
 	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
@@ -1946,30 +1922,6 @@ u32 GSHWDrawConfig::PSSelector::GetField(u32 index) const
 			default:
 				pxAssert(false);
 				return 0;
-	}
-}
-
-void GSHWDrawConfig::PSSelector::ClearField(const std::string& name)
-{
-	#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
-			if (name == #NAME) NAME = static_cast<decltype(NAME)>(0);
-		PSSEL_FIELDS_EXPAND
-	#undef EXPAND
-}
-
-void GSHWDrawConfig::PSSelector::ClearField(u32 index)
-{
-	switch (index)
-	{
-		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
-			case INDEX: \
-				NAME = static_cast<decltype(NAME)>(0); \
-				break;
-			PSSEL_FIELDS_EXPAND
-		#undef EXPAND
-			default:
-				pxAssert(false);
-				break;
 	}
 }
 
@@ -2157,6 +2109,62 @@ void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelecto
 	::GetUberShaderSelector<PSSelector, std::size(ps_selector_fields)>(
 		ps, ps_selector_fields_bits, ShaderPushConstants::NUM_UBER_SELECTORS,
 		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
+}
+
+static constexpr u32 GetNumValidUberPSSelectors(bool with_feedback_rt)
+{
+	u32 n_valid = 0;
+	for (u32 i = 0; i < (1 << (8 * sizeof(GSHWDrawConfig::UberPSSelector))); i++)
+	{
+		GSHWDrawConfig::UberPSSelector ps(i);
+		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid(with_feedback_rt))
+			n_valid++;
+	}
+	return n_valid;
+}
+
+static constexpr u32 NUM_VALID_UBER_PS_SELECTORS_D3D12 = GetNumValidUberPSSelectors(false);
+static constexpr u32 NUM_VALID_UBER_PS_SELECTORS_VK = GetNumValidUberPSSelectors(true);
+
+template<u32 N>
+static constexpr std::array<GSHWDrawConfig::UberPSSelector, N>
+	GetValidUberPSSelectors(bool with_feedback_rt)
+{
+	std::array<GSHWDrawConfig::UberPSSelector, N> valid;
+	u32 n_valid = 0;
+	for (u32 i = 0; i < (1 << (8 * sizeof(GSHWDrawConfig::UberPSSelector))); i++)
+	{
+		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid(with_feedback_rt))
+			valid[n_valid++] = GSHWDrawConfig::UberPSSelector::Decode(i);
+	}
+	return valid;
+}
+
+static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS_D3D12>
+	valid_uber_ps_selectors_d3d12 = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS_D3D12>(false);
+
+static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS_VK>
+	valid_uber_ps_selectors_vk = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS_VK>(true);
+
+std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidD3D12()
+{
+	return valid_uber_ps_selectors_d3d12;
+}
+
+std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidVK()
+{
+	return valid_uber_ps_selectors_vk;
+}
+
+bool GSDevice::IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps, std::span<const GSHWDrawConfig::UberPSSelector> valid)
+{
+	if (std::find(valid.begin(), valid.end(), ps) == valid.end())
+	{
+		Console.Warning("Uber PS selector %0X is not in the valid array!",
+			static_cast<u32>(ps.key));
+		return false;
+	}
+	return true;
 }
 
 // clang-format off

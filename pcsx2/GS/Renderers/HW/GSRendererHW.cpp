@@ -5346,12 +5346,9 @@ bool GSRendererHW::VerifyIndices()
 void GSRendererHW::HandleFlatShadedVertices()
 {
 	const bool fix_vertices = !m_conf.vs.iip && // Flat shading
-
-		((!g_gs_device->Features().provoking_vertex_last && // Provoking vertex first and lines/triangle.
-			(m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS)) ||
-
+		(m_vt.m_primclass == GS_LINE_CLASS || m_vt.m_primclass == GS_TRIANGLE_CLASS) && // lines/triangles
+		(!g_gs_device->Features().provoking_vertex_last || // Provoking vertex first.
 			IsCoverageAlphaSupported() || // AA1 (hard to get HW flat shading right in expand shader).
-
 			GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid); // Hybrid/uber shader (can't handle HW flat shading).
 
 	if (!fix_vertices)
@@ -7940,6 +7937,9 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 		{
 			// If we're using ROV for either color/depth, use it for both.
 			ConfigureROV(rt != nullptr, ds != nullptr);
+
+			m_conf.uber_ps.rov_color = (rt != nullptr);
+			m_conf.uber_ps.rov_depth = (ds != nullptr);
 		}
 		else if (!g_gs_device->Features().framebuffer_fetch)
 		{
@@ -7951,31 +7951,25 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			// Depth setup.
 			if (m_conf.ds)
 			{
-				if (!m_conf.ps.HasDepthOutput() && !m_conf.ps.IsFeedbackLoopDepth())
-				{
-					// Force pixel shader Z clamp to let pipeline know we're attaching DS.
-					// (To reduce pipeline combinations, we don't use a separate flag.)
-					m_conf.ps.zclamp = true;
-					m_conf.cb_ps.TA_MaxDepth_Af.z = 1.0f;
-				}
-
-				// Mask depth with SW depth feedback.
+				// Always write depth if it exists and use SW Z mask to reduce combinations.
+				m_conf.uber_ps.zwrite = true;
 				m_conf.ps.zmask = !m_conf.depth.zwe;
-			}
+				m_conf.depth.zwe = true;
 
+				m_conf.uber_ps.sw_depth = m_conf.ps.IsFeedbackLoopDepth();
+			}
 		}
 
-		m_conf.uber_shader = true;
-		m_conf.vs.uber_enable = true;
-		m_conf.ps.uber_enable = true;
+		m_conf.uber_ps.no_color = m_conf.ps.no_color;
 
-		// Remove HW color mask.
-		m_conf.colormask = GSHWDrawConfig::ColorMaskSelector();
+		g_gs_device->FinalizeUberPSSelector(m_conf.ps, m_conf.uber_ps); // Backend specific flags.
+
+		// Get the dynamic bits for VS/PS.
+		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);
 		
-		// Remove HW depth.
-		m_conf.depth = m_conf.ps.HasDepthROV() ?
-			GSHWDrawConfig::DepthStencilSelector::NoDepth() :
-			GSHWDrawConfig::DepthStencilSelector::DepthWriteAlways();
+		m_conf.uber_shader = true;
+
+		pxAssert(g_gs_device->IsUberPSSelectorValid(m_conf.uber_ps));
 	}
 }
 

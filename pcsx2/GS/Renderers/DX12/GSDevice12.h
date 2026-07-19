@@ -264,6 +264,7 @@ public:
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
+		GSHWDrawConfig::UberPSSelector uber_ps;
 
 		union
 		{
@@ -295,7 +296,7 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key);
 			return hash;
 		}
 	};
@@ -400,6 +401,7 @@ private:
 	std::unordered_map<u32, ComPtr<ID3DBlob>> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders;
+	std::unordered_map<u8, ComPtr<ID3DBlob>> m_tfx_uber_pixel_shaders;
 	std::unordered_map<PipelineSelector, ComPtr<ID3D12PipelineState>, PipelineSelectorHash> m_tfx_pipelines;
 
 	using ShaderEntryType = D3D12ShaderCache::EntryType;
@@ -410,6 +412,7 @@ private:
 		m_tfx_vertex_shaders_async;
 	std::unordered_map<GSHWDrawConfig::PSSelector, std::shared_ptr<D3D12ShaderJob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders_async;
+	std::unordered_map<u8, std::shared_ptr<D3D12ShaderJob>> m_tfx_uber_pixel_shaders_async;
 
 	ComPtr<ID3D12RootSignature> m_cas_root_signature;
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
@@ -450,6 +453,12 @@ private:
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
 
+	using GSDevice::IsUberPSSelectorValid;
+	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps) override
+	{
+		return IsUberPSSelectorValid(ps, GSHWDrawConfig::UberPSSelector::GetValidD3D12());
+	}
+
 	using D3D12ShaderBlobOrJob = std::variant<ID3DBlob*, std::shared_ptr<D3D12ShaderJob>>;
 	using D3D12PipelineOrJob = std::variant<ComPtr<ID3D12PipelineState>, D3D12PipelineJob*>;
 
@@ -475,7 +484,8 @@ private:
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
-	D3D12ShaderBlobOrJob GetTFXPixelShader(GSHWDrawConfig::PSSelector sel, bool uber = false, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXUberPixelShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
 	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
 
@@ -590,7 +600,7 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	void SetSelectorPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;

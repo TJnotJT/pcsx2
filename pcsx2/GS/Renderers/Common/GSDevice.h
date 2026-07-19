@@ -733,12 +733,8 @@ struct HWBlend
 	EXPAND(61, true, u32, zmask, 1, "PS_ZMASK") \
 	EXPAND(62, true, u32, cmask, 1, "PS_CMASK") \
 	EXPAND(63, false, u32, rov_color, 1, "PS_ROV_COLOR") \
-	EXPAND(64, false, PS_ROV_DEPTH, rov_depth, 2, "PS_ROV_DEPTH") \
-	EXPAND(65, false, u32, uber_enable, 1, "UBER_SHADER") \
-	EXPAND(66, false, u32, uber_zwrite, 1, "UBER_ZWRITE") \
-	EXPAND(67, false, u32, uber_sw_depth, 1, "UBER_SW_DEPTH") \
-	EXPAND(68, false, u32, uber_date_init, 1, "UBER_DATE_INIT") \
-	EXPAND(69, false, u32, uber_feedback_rt, 1, "UBER_FEEDBACK_RT")
+	EXPAND(64, false, PS_ROV_DEPTH, rov_depth, 2, "PS_ROV_DEPTH")
+
 
 #define VSSEL_FIELDS_EXPAND \
 	EXPAND(0, true, u8, fst, 1, "VS_FST") \
@@ -789,14 +785,22 @@ struct alignas(16) GSHWDrawConfig
 
 		u32 GetField(const std::string& name) const;
 		u32 GetField(u32 index) const;
-		void ClearField(const std::string& name);
-		void ClearField(u32 index);
 
 		/// Returns true if the fixed index buffer should be used.
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
 		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
+
+		__fi static VSSelector GetUberSelector()
+		{
+			// Only one Uber VS selectors.
+			VSSelector vs;
+			vs.iip = true;
+			vs.point_size = true;
+			vs.uber_enable = true;
+			return vs;
+		}
 
 		__fi bool operator==(const VSSelector& rhs) const { return key == rhs.key; }
 		__fi bool operator!=(const VSSelector& rhs) const { return key != rhs.key; }
@@ -832,8 +836,6 @@ struct alignas(16) GSHWDrawConfig
 
 		u32 GetField(const std::string& name) const;
 		u32 GetField(u32 index) const;
-		void ClearField(const std::string& name);
-		void ClearField(u32 index);
 
 		__fi bool IsSWBlending() const
 		{
@@ -855,7 +857,7 @@ struct alignas(16) GSHWDrawConfig
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
 			const bool afail_needs_rt = afail == PS_AFAIL::ZB_ONLY || afail == PS_AFAIL::RGB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
-			return tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || afail_needs_rt || cmask || uber_feedback_rt;
+			return tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || afail_needs_rt || cmask;
 		}
 
 		__fi bool IsFeedbackLoopDepth() const
@@ -948,6 +950,77 @@ struct alignas(16) GSHWDrawConfig
 			return h;
 		}
 	};
+#pragma pack(push, 1)
+	struct UberPSSelector
+	{
+		union
+		{
+			struct
+			{
+				u8 no_color : 1;
+				u8 zwrite : 1;
+				u8 sw_depth : 1;
+				u8 feedback_rt : 1;
+				u8 rov_color : 1;
+				u8 rov_depth : 1;
+				u8 pad0 : 1;
+				u8 pad1 : 1;
+			};
+
+			u8 key;
+		};
+
+		__fi constexpr UberPSSelector() : key(0) {}
+		__fi constexpr UberPSSelector(u8 key) : key(key) {}
+
+		__fi static constexpr UberPSSelector Decode(u8 key)
+		{
+			UberPSSelector ps;
+
+			ps.no_color = (key >> 0) & 1;
+			ps.zwrite = (key >> 1) & 1;
+			ps.sw_depth = (key >> 2) & 1;
+			ps.feedback_rt = (key >> 3) & 1;
+			ps.rov_color = (key >> 4) & 1;
+			ps.rov_depth = (key >> 5) & 1;
+			ps.pad0 = (key >> 6) & 1;
+			ps.pad1 = (key >> 7) & 1;
+
+			return ps;
+		}
+
+		__fi constexpr bool IsValid(bool with_feedback_rt) const
+		{
+			return
+				// Don't allow depth ROV without SW depth.
+				(!rov_depth || sw_depth) &&
+				// Don't allow ROV depth with Z write.
+				(!rov_depth || !zwrite) &&
+				// Don't allow depth ROV with non-ROV color output.
+				(!rov_depth || no_color || rov_color) &&
+				// Don't allow color ROV without color output.
+				(!rov_color || !no_color) &&
+				// Must have color or depth output.
+				(!no_color || zwrite || rov_depth) &&
+				(
+					// With feedback RT flag: only allow RT feedbackflag with non-ROV color.
+					(with_feedback_rt && (!feedback_rt || (!no_color && !rov_color))) ||
+					// Without feedback RT flag: don't allow RT feedback flag.
+					(!with_feedback_rt && !feedback_rt)
+				) &&
+				// Don't allow padding.
+				(pad0 == 0 && pad1 == 0);
+		}
+
+		static std::span<const UberPSSelector> GetValidD3D12();
+		static std::span<const UberPSSelector> GetValidVK();
+
+		__fi bool operator==(const UberPSSelector& rhs) const { return key == rhs.key; }
+		__fi bool operator!=(const UberPSSelector& rhs) const { return key != rhs.key; }
+		__fi bool operator<(const UberPSSelector& rhs) const { return key < rhs.key; }
+	};
+	static_assert(sizeof(UberPSSelector) == 1);
+#pragma pack(pop)
 
 #pragma pack(push, 1)
 	struct SamplerSelector
@@ -1039,6 +1112,10 @@ struct alignas(16) GSHWDrawConfig
 			out.ztst = ZTST_ALWAYS;
 			return out;
 		}
+		static constexpr DepthStencilSelector GetUberSelector()
+		{
+			return DepthWriteAlways();
+		}
 	};
 	struct ColorMaskSelector
 	{
@@ -1061,6 +1138,10 @@ struct alignas(16) GSHWDrawConfig
 		};
 		constexpr ColorMaskSelector(): key(0xF) {}
 		constexpr ColorMaskSelector(u8 c): key(0) { wrgba = c; }
+		static constexpr ColorMaskSelector GetUberSelector()
+		{
+			return ColorMaskSelector();
+		}
 	};
 
 #pragma pack(pop)
@@ -1299,6 +1380,7 @@ struct alignas(16) GSHWDrawConfig
 
 	alignas(8) PSSelector ps;
 	VSSelector vs;
+	UberPSSelector uber_ps;
 	bool uber_shader; ///< Use uber shader in the current draw.
 
 	BlendState blend;
@@ -1395,7 +1477,7 @@ struct alignas(16) GSHWDrawConfig
 		#undef EXPAND
 	};
 
-	static constexpr std::array<PipelineSelectorFieldDesc, 70> ps_selector_fields = {
+	static constexpr std::array<PipelineSelectorFieldDesc, 65> ps_selector_fields = {
 		#define EXPAND(INDEX, DYNAMIC, TYPE, NAME, WIDTH, SHADER_NAME) \
 				PipelineSelectorFieldDesc{ INDEX, DYNAMIC, #NAME, WIDTH, SHADER_NAME },
 			PSSEL_FIELDS_EXPAND
@@ -1803,6 +1885,19 @@ public:
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
 
 	virtual bool StartPipelineCompilationAsync(const GSHWDrawConfig& conf)
+	{
+		pxFailRel("Not implemented");
+		return false;
+	}
+
+	bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps, std::span<const GSHWDrawConfig::UberPSSelector> valid);
+
+	// Add/remove bits based on implementation requirements.
+	virtual void FinalizeUberPSSelector(const GSHWDrawConfig::PSSelector& ps, GSHWDrawConfig::UberPSSelector& uber_ps)
+	{
+	}
+
+	virtual bool IsUberPSSelectorValid(const GSHWDrawConfig::UberPSSelector& ps)
 	{
 		pxFailRel("Not implemented");
 		return false;
