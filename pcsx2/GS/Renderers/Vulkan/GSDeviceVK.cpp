@@ -6940,7 +6940,9 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 	}
 
 #ifdef PCSX2_DEVBUILD
-	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
+	if ((one_barrier || full_barrier) &&
+		!(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps) || config.uber_shader)) 
+		[[unlikely]]
 		Console.Warning("VK: Possible unnecessary barrier detected.");
 #endif
 	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
