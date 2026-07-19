@@ -2111,49 +2111,38 @@ void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelecto
 		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
 }
 
-static constexpr u32 GetNumValidUberPSSelectors(bool with_feedback_rt)
+static constexpr u32 GetNumValidUberPSSelectors()
 {
 	u32 n_valid = 0;
-	for (u32 i = 0; i < (1 << (8 * sizeof(GSHWDrawConfig::UberPSSelector))); i++)
+	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector::MAX_NUM_SELECTORS; i++)
 	{
-		GSHWDrawConfig::UberPSSelector ps(i);
-		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid(with_feedback_rt))
+		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid())
 			n_valid++;
 	}
 	return n_valid;
 }
 
-static constexpr u32 NUM_VALID_UBER_PS_SELECTORS_D3D12 = GetNumValidUberPSSelectors(false);
-static constexpr u32 NUM_VALID_UBER_PS_SELECTORS_VK = GetNumValidUberPSSelectors(true);
+static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
 
 template<u32 N>
-static constexpr std::array<GSHWDrawConfig::UberPSSelector, N>
-	GetValidUberPSSelectors(bool with_feedback_rt)
+static constexpr std::array<GSHWDrawConfig::UberPSSelector, N> GetValidUberPSSelectors()
 {
 	std::array<GSHWDrawConfig::UberPSSelector, N> valid;
 	u32 n_valid = 0;
-	for (u32 i = 0; i < (1 << (8 * sizeof(GSHWDrawConfig::UberPSSelector))); i++)
+	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector::MAX_NUM_SELECTORS; i++)
 	{
-		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid(with_feedback_rt))
+		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid())
 			valid[n_valid++] = GSHWDrawConfig::UberPSSelector::Decode(i);
 	}
 	return valid;
 }
 
-static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS_D3D12>
-	valid_uber_ps_selectors_d3d12 = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS_D3D12>(false);
+static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS>
+	valid_uber_ps_selectors = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS>();
 
-static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS_VK>
-	valid_uber_ps_selectors_vk = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS_VK>(true);
-
-std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidD3D12()
+std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidSelectors()
 {
-	return valid_uber_ps_selectors_d3d12;
-}
-
-std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidVK()
-{
-	return valid_uber_ps_selectors_vk;
+	return valid_uber_ps_selectors;
 }
 
 bool GSDevice::StartPipelineCompilationAsync(const GSHWDrawConfig& conf)

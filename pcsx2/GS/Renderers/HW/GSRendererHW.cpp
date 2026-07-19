@@ -7940,6 +7940,7 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 
 			m_conf.uber_ps.rov_color = (rt != nullptr);
 			m_conf.uber_ps.rov_depth = (ds != nullptr);
+			m_conf.ps.zmask = !m_conf.ps.HasDepthROVWrite(); // SW depth masking.
 		}
 		else if (!g_gs_device->Features().framebuffer_fetch)
 		{
@@ -7948,26 +7949,18 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			m_conf.require_full_barrier = true; // FIXME: Only enable full barriers if they are needed.
 			DetermineBarriers(rt, ds, tex);
 
-			// Depth setup.
-			if (m_conf.ds)
+			if (ds)
 			{
-				// Always write depth if it exists and use SW Z mask to reduce combinations.
-				m_conf.uber_ps.zwrite = true;
-				m_conf.ps.zmask = !m_conf.depth.zwe;
+				// HW depth write with SW depth masking.
+				m_conf.ps.zmask = !m_conf.depth.zwe; 
 				m_conf.depth.zwe = true;
-
-				m_conf.uber_ps.sw_depth = m_conf.ps.IsFeedbackLoopDepth();
 			}
 		}
 
 		m_conf.uber_ps.no_color = m_conf.ps.no_color;
+		m_conf.uber_ps.depth = (ds != nullptr);
 
-		const bool with_feedback_rt_flag = g_gs_device->Features().uber_ps_with_feedback_rt_flag;
-
-		if (with_feedback_rt_flag)
-			m_conf.uber_ps.feedback_rt = m_conf.IsFeedbackLoopRT(m_conf.ps);
-
-		pxAssert(m_conf.uber_ps.IsValid(with_feedback_rt_flag));
+		pxAssert(m_conf.uber_ps.IsValid());
 
 		// Get the dynamic bits for VS/PS.
 		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);

@@ -958,17 +958,15 @@ struct alignas(16) GSHWDrawConfig
 			struct
 			{
 				u8 no_color : 1;
-				u8 zwrite : 1;
-				u8 sw_depth : 1;
-				u8 feedback_rt : 1;
+				u8 depth : 1;
 				u8 rov_color : 1;
 				u8 rov_depth : 1;
-				u8 pad0 : 1;
-				u8 pad1 : 1;
 			};
 
 			u8 key;
 		};
+
+		static constexpr u32 MAX_NUM_SELECTORS = 16;
 
 		__fi constexpr UberPSSelector() : key(0) {}
 		__fi constexpr UberPSSelector(u8 key) : key(key) {}
@@ -978,41 +976,27 @@ struct alignas(16) GSHWDrawConfig
 			UberPSSelector ps;
 
 			ps.no_color = (key >> 0) & 1;
-			ps.zwrite = (key >> 1) & 1;
-			ps.sw_depth = (key >> 2) & 1;
-			ps.feedback_rt = (key >> 3) & 1;
-			ps.rov_color = (key >> 4) & 1;
-			ps.rov_depth = (key >> 5) & 1;
-			ps.pad0 = (key >> 6) & 1;
-			ps.pad1 = (key >> 7) & 1;
+			ps.depth = (key >> 1) & 1;
+			ps.rov_color = (key >> 2) & 1;
+			ps.rov_depth = (key >> 3) & 1;
 
 			return ps;
 		}
 
-		__fi constexpr bool IsValid(bool with_feedback_rt_flag) const
+		__fi constexpr bool IsValid() const
 		{
 			return
 				// Don't allow depth ROV without SW depth.
-				(!rov_depth || sw_depth) &&
-				// Don't allow ROV depth with Z write.
-				(!rov_depth || !zwrite) &&
+				(!rov_depth || depth) &&
 				// Don't allow depth ROV with non-ROV color output.
 				(!rov_depth || no_color || rov_color) &&
 				// Don't allow color ROV without color output.
 				(!rov_color || !no_color) &&
 				// Must have color or depth output.
-				(!no_color || zwrite || rov_depth) &&
-				(with_feedback_rt_flag ?
-					// With feedback RT flag: only allow RT feedback flag with non-ROV color.
-					(!feedback_rt || (!no_color && !rov_color)) :
-					// Without feedback RT flag: don't allow RT feedback flag.
-					!feedback_rt) &&
-				// Don't allow padding.
-				(pad0 == 0 && pad1 == 0);
+				(!no_color || depth);
 		}
 
-		static std::span<const UberPSSelector> GetValidD3D12();
-		static std::span<const UberPSSelector> GetValidVK();
+		static std::span<const UberPSSelector> GetValidSelectors();
 
 		__fi bool operator==(const UberPSSelector& rhs) const { return key == rhs.key; }
 		__fi bool operator!=(const UberPSSelector& rhs) const { return key != rhs.key; }
@@ -1559,7 +1543,6 @@ public:
 		bool aa1                  : 1; ///< Supports the GS AA1 feature.
 		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
 		bool uber_shader          : 1; ///< Supports uber shader.
-		bool uber_ps_with_feedback_rt_flag : 1; ///< Uber pixel shader needs feedback RT flag (VK only).
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));

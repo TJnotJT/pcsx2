@@ -2866,7 +2866,6 @@ bool GSDeviceVK::CheckFeatures()
 	                 !m_features.framebuffer_fetch;
 
 	m_features.uber_shader = m_features.vs_expand;
-	m_features.uber_ps_with_feedback_rt_flag = m_features.uber_shader;
 
 	return true;
 }
@@ -4667,7 +4666,7 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 		{
 			size_t num_pipelines = 0;
 			GSHWDrawConfig config{};
-			for (const GSHWDrawConfig::UberPSSelector& ps_sel : GSHWDrawConfig::UberPSSelector::GetValidVK())
+			for (const GSHWDrawConfig::UberPSSelector& ps_sel : GSHWDrawConfig::UberPSSelector::GetValidSelectors())
 			{
 				for (u32 topology = 0; topology < 3; topology++)
 				{
@@ -5244,9 +5243,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const GSHWD
 	// Do the static macros.
 	AddMacro(ss, "UBER_SHADER", 1);
 	AddMacro(ss, "UBER_NO_COLOR", sel.no_color);
-	AddMacro(ss, "UBER_ZWRITE", sel.zwrite);
-	AddMacro(ss, "UBER_SW_DEPTH", sel.sw_depth);
-	AddMacro(ss, "UBER_FEEDBACK_RT", sel.feedback_rt);
+	AddMacro(ss, "UBER_DEPTH", sel.depth);
 	AddMacro(ss, "UBER_ROV_COLOR", sel.rov_color);
 	AddMacro(ss, "UBER_ROV_DEPTH", sel.rov_depth);
 
@@ -6869,14 +6866,14 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 		pipe.topology = static_cast<u32>(config.topology);
 
 		const bool uber_rt = !config.uber_ps.no_color;
-		const bool uber_ds = config.uber_ps.zwrite || config.uber_ps.sw_depth;
+		const bool uber_ds = config.uber_ps.depth;
 
 		pipe.rt = uber_rt && !config.uber_ps.rov_color;
 		pipe.ds = uber_ds && !config.uber_ps.rov_depth;
 
-		if (config.uber_ps.feedback_rt)
+		if (uber_rt)
 			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
-		if (config.uber_ps.sw_depth && !config.uber_ps.rov_depth)
+		if (uber_ds)
 			pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
 
 		SetShaderPushConstants(config.pc); // Contains uber selector bits.

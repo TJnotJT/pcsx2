@@ -2361,7 +2361,7 @@ bool GSDevice12::CompileUberTFXPipelines()
 		{
 			size_t num_pipelines = 0;
 			GSHWDrawConfig config{};
-			for (const GSHWDrawConfig::UberPSSelector& ps_sel : GSHWDrawConfig::UberPSSelector::GetValidD3D12())
+			for (const GSHWDrawConfig::UberPSSelector& ps_sel : GSHWDrawConfig::UberPSSelector::GetValidSelectors())
 			{
 				for (u32 topology = 0; topology < 3; topology++)
 				{
@@ -3470,8 +3470,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberPixelShader(const GSHWDra
 	// Do the static macros.
 	sm.AddMacro("UBER_SHADER", 1);
 	sm.AddMacro("UBER_NO_COLOR", sel.no_color);
-	sm.AddMacro("UBER_ZWRITE", sel.zwrite);
-	sm.AddMacro("UBER_SW_DEPTH", sel.sw_depth);
+	sm.AddMacro("UBER_DEPTH", sel.depth);
 	sm.AddMacro("UBER_ROV_COLOR", sel.rov_color);
 	sm.AddMacro("UBER_ROV_DEPTH", sel.rov_depth);
 
@@ -5145,8 +5144,8 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 		m_pipeline_selector.topology = static_cast<u32>(config.topology);
 
 		const bool uber_rt = !config.uber_ps.no_color;
-		const bool uber_ds = config.uber_ps.zwrite || config.uber_ps.sw_depth;
-		const bool uber_ds_as_rt = config.uber_ps.sw_depth;
+		const bool uber_ds = config.uber_ps.depth;
+		const bool uber_ds_as_rt = config.uber_ps.depth;
 
 		// Uber pipeline
 		m_pipeline_selector.rt = uber_rt && !config.uber_ps.rov_color;

@@ -81,8 +81,8 @@
 	#else
 		#define PS_ROV_DEPTH 0
 	#endif
-	#define SW_DEPTH UBER_SW_DEPTH
-	#define ZWRITE UBER_ZWRITE
+	#define SW_DEPTH UBER_DEPTH
+	#define ZWRITE UBER_DEPTH
 	#define DATE_INIT 0
 #endif
 
