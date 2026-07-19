@@ -73,7 +73,7 @@
 	#define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
 #else
 	#define PS_IIP 1
-	#define PS_NO_COLOR UBER_NO_COLOR
+	#define PS_NO_COLOR !UBER_COLOR
 	#define PS_NO_COLOR1 1
 	#define PS_ROV_COLOR UBER_ROV_COLOR
 	#if UBER_ROV_DEPTH

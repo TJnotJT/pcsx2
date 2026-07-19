@@ -559,7 +559,7 @@ void main()
 	#define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
 #else
 	#define PS_IIP 1
-	#define PS_NO_COLOR UBER_NO_COLOR
+	#define PS_NO_COLOR !UBER_COLOR
 	#define PS_NO_COLOR1 1
 	#define PS_FEEDBACK_LOOP_IS_NEEDED_RT !UBER_NO_COLOR
 	#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH UBER_DEPTH

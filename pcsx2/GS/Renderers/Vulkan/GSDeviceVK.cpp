@@ -5242,7 +5242,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const GSHWD
 
 	// Do the static macros.
 	AddMacro(ss, "UBER_SHADER", 1);
-	AddMacro(ss, "UBER_NO_COLOR", sel.no_color);
+	AddMacro(ss, "UBER_COLOR", sel.color);
 	AddMacro(ss, "UBER_DEPTH", sel.depth);
 	AddMacro(ss, "UBER_ROV_COLOR", sel.rov_color);
 	AddMacro(ss, "UBER_ROV_DEPTH", sel.rov_depth);
@@ -6865,7 +6865,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 		pipe.cms = GSHWDrawConfig::ColorMaskSelector::GetUberSelector();
 		pipe.topology = static_cast<u32>(config.topology);
 
-		const bool uber_rt = !config.uber_ps.no_color;
+		const bool uber_rt = config.uber_ps.color;
 		const bool uber_ds = config.uber_ps.depth;
 
 		pipe.rt = uber_rt && !config.uber_ps.rov_color;

@@ -957,7 +957,7 @@ struct alignas(16) GSHWDrawConfig
 		{
 			struct
 			{
-				u8 no_color : 1;
+				u8 color : 1;
 				u8 depth : 1;
 				u8 rov_color : 1;
 				u8 rov_depth : 1;
@@ -975,7 +975,7 @@ struct alignas(16) GSHWDrawConfig
 		{
 			UberPSSelector ps;
 
-			ps.no_color = (key >> 0) & 1;
+			ps.color = (key >> 0) & 1;
 			ps.depth = (key >> 1) & 1;
 			ps.rov_color = (key >> 2) & 1;
 			ps.rov_depth = (key >> 3) & 1;
@@ -986,14 +986,14 @@ struct alignas(16) GSHWDrawConfig
 		__fi constexpr bool IsValid() const
 		{
 			return
-				// Don't allow depth ROV without SW depth.
+				// Don't allow depth ROV without depth.
 				(!rov_depth || depth) &&
+				// Don't allow color ROV without color.
+				(!rov_color || color) &&
 				// Don't allow depth ROV with non-ROV color output.
-				(!rov_depth || no_color || rov_color) &&
-				// Don't allow color ROV without color output.
-				(!rov_color || !no_color) &&
+				(!rov_depth || color || rov_color) &&
 				// Must have color or depth output.
-				(!no_color || depth);
+				(color || depth);
 		}
 
 		static std::span<const UberPSSelector> GetValidSelectors();

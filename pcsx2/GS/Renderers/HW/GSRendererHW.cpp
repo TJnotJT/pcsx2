@@ -7957,7 +7957,7 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			}
 		}
 
-		m_conf.uber_ps.no_color = m_conf.ps.no_color;
+		m_conf.uber_ps.color = !m_conf.ps.no_color;
 		m_conf.uber_ps.depth = (ds != nullptr);
 
 		pxAssert(m_conf.uber_ps.IsValid());
