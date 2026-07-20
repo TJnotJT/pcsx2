@@ -212,8 +212,10 @@ struct VS_PROCESSED
 	float4 c;
 	float inv_cov;
 	uint interior;
+#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 	float2 window_pos;
 	uint4 rounduv;
+#endif
 };
 
 struct PS_INPUT
@@ -1790,9 +1792,28 @@ uint4 extract_round_uv_bits(float q)
 	);
 }
 
-float2 native_hpo_window_pos_to_ndc(float2 window_pos)
+float2 raw_coords_to_ndc(uint2 raw_pos)
 {
-	return ((window_pos + 8.0f - 0.05f) * float2(VertexScale.xy) - 1.0f) * float2(1.0f, -1.0f);
+	// pos -= 0.05 (1/320 pixel) helps avoiding rounding problems (integral part of pos is usually 5 digits, 0.05 is about as low as we can go)
+	// example: ceil(afterseveralvertextransformations(y = 133)) => 134 => line 133 stays empty
+	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
+	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
+	float2 ndc_pos = (float2(raw_pos) - 0.05f) * VertexScale - VertexOffset;
+	ndc_pos.y = -ndc_pos.y;
+	return ndc_pos;
+}
+
+float2 window_coords_to_ndc(float2 window_pos)
+{
+	// This function is only used by shader sprite align and always uses a native HPO.
+	float2 ndc_pos = (window_pos + 8.0f - 0.05f) * float2(VertexScale.xy) - 1.0f;
+	ndc_pos.y = -ndc_pos.y;
+	return ndc_pos;
+}
+
+float raw_z_to_ndc(uint z)
+{
+	return float(z) * exp2(-32.0f); // integer->float depth
 }
 
 #if !VS_EXPAND
@@ -1810,20 +1831,11 @@ VS_PROCESSED vs_main(VS_INPUT input)
 		VS_PROCESSED output;
 	#endif
 
-	// pos -= 0.05 (1/320 pixel) helps avoiding rounding problems (integral part of pos is usually 5 digits, 0.05 is about as low as we can go)
-	// example: ceil(afterseveralvertextransformations(y = 133)) => 134 => line 133 stays empty
-	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
-	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
-
-	output.window_pos = float2(input.p.xy) - float2(XYOffset);
-	#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
-		output.p = float4(input.p, input.z, 1.0f) - float4(0.05f, 0.05f, 0, 0);
-		output.p.xy = output.p.xy * float2(VertexScale.x, -VertexScale.y) - float2(VertexOffset.x, -VertexOffset.y);
-	#else
-		output.p = float4(native_hpo_window_pos_to_ndc(output.window_pos), input.z, 1.0f);
+	output.p = float4(raw_coords_to_ndc(input.p.xy), raw_z_to_ndc(input.z), 1.0f);
+	
+	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
+		output.window_pos = float2(input.p.xy) - float2(XYOffset);
 	#endif
-
-	output.p.z *= exp2(-32.0f); // integer->float depth
 
 	if(VS_TME)
 	{
@@ -1895,8 +1907,6 @@ struct VS_RAW_INPUT
 	uint FOG;
 };
 
-// VS_CLAMP_UV == 1: Nearest sampling.
-// VS_CLAMP_UV == 2: Bilinear sampling (don't clamp as aggressively).
 float4 sprite_clamp_uv_range(float4 pos, float4 tex, uint4 round_info)
 {
 	bool rev_x = pos.x > pos.z;
@@ -2219,8 +2229,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			lt.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
-			rb.p.xy = native_hpo_window_pos_to_ndc(pos.zw);
+			lt.p.xy = window_coords_to_ndc(pos.xy);
+			rb.p.xy = window_coords_to_ndc(pos.zw);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -2277,9 +2287,9 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			v0.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
-			v1.p.xy = native_hpo_window_pos_to_ndc(pos.zy);
-			v2.p.xy = native_hpo_window_pos_to_ndc(pos.xw);
+			v0.p.xy = window_coords_to_ndc(pos.xy);
+			v1.p.xy = window_coords_to_ndc(pos.zy);
+			v2.p.xy = window_coords_to_ndc(pos.xw);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;

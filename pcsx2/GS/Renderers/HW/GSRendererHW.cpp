@@ -6148,8 +6148,18 @@ void GSRendererHW::DetermineVSConfig(GSTextureCache::Target* rt, float rtscale, 
 	const float ox = static_cast<float>(static_cast<int>(m_context->XYOFFSET.OFX));
 	const float oy = static_cast<float>(static_cast<int>(m_context->XYOFFSET.OFY));
 
+	if (GSConfig.ShaderSpriteAlign != GSShaderSpriteAlignMode::Off || GSConfig.AccurateUVRounding)
+	{
+		// Use native HPO.
+		 const int unscaled_x = unscaled_size.x;
+		 const int unscaled_y = unscaled_size.y;
+		 sx = 2.0f / (unscaled_x << 4);
+		 sy = 2.0f / (unscaled_y << 4);
+		 ox2 = -1.0f / unscaled_x;
+		 oy2 = -1.0f / unscaled_y;
+	}
 	// Do not apply HPO on texture shuffle draws, as the coordinates are already aligned.
-	if ((GSConfig.UserHacks_HalfPixelOffset < GSHalfPixelOffset::Native || m_texture_shuffle) && rtscale > 1.0f)
+	else if ((GSConfig.UserHacks_HalfPixelOffset < GSHalfPixelOffset::Native || m_texture_shuffle) && rtscale > 1.0f)
 	{
 		sx = 2.0f * rtscale / (rtsize.x << 4);
 		sy = 2.0f * rtscale / (rtsize.y << 4);

@@ -75,9 +75,24 @@ uvec4 extract_round_uv_bits(float q)
 	);
 }
 
-vec2 native_hpo_window_pos_to_ndc(vec2 window_pos)
+vec2 raw_coords_to_ndc(uvec2 raw_pos)
 {
+	// pos -= 0.05 (1/320 pixel) helps avoiding rounding problems (integral part of pos is usually 5 digits, 0.05 is about as low as we can go)
+	// example: ceil(afterseveralvertextransformations(y = 133)) => 134 => line 133 stays empty
+	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
+	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
+	return (vec2(raw_pos) - vec2(0.05f)) * VertexScale - VertexOffset;
+}
+
+vec2 window_coords_to_ndc(vec2 window_pos)
+{
+	// This function is only used by shader sprite align and always uses a native HPO.
 	return (window_pos + vec2(8.0f - 0.05f)) * vec2(VertexScale.xy) - vec2(1.0f);
+}
+
+float raw_z_to_ndc(uint z)
+{
+	return float(z) * exp2(-32.0f); // integer->float depth
 }
 
 #if VS_EXPAND == VS_EXPAND_NONE
@@ -95,19 +110,7 @@ void main()
 	// Clamp to max depth, gs doesn't wrap
 	uint z = min(a_z, MaxDepth);
 
-	// pos -= 0.05 (1/320 pixel) helps avoiding rounding problems (integral part of pos is usually 5 digits, 0.05 is about as low as we can go)
-	// example: ceil(afterseveralvertextransformations(y = 133)) => 134 => line 133 stays empty
-	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
-	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
-
-	#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
-		gl_Position = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-		gl_Position.xy = gl_Position.xy * vec2(VertexScale.x, VertexScale.y) - vec2(VertexOffset.x, VertexOffset.y);
-	#else
-		vec2 window_pos = vec2(a_p) - vec2(XYOffset);
-		gl_Position = vec4(native_hpo_window_pos_to_ndc(window_pos), float(z), 1.0f);
-	#endif
-	gl_Position.z *= exp2(-32.0f);		// integer->float depth
+	gl_Position = vec4(raw_coords_to_ndc(a_p), raw_z_to_ndc(z), 1.0f);
 
 	#if VS_TME
 		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
@@ -318,14 +321,11 @@ ProcessedVertex load_vertex(uint index)
 	ProcessedVertex vtx;
 
 	uint z = min(a_z, MaxDepth);
-	#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
-		vtx.p = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
-		vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, VertexScale.y) - vec2(VertexOffset.x, VertexOffset.y);
-	#else
+	
+	vtx.p = vec4(raw_coords_to_ndc(a_p), raw_z_to_ndc(z), 1.0f);
+	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 		vtx.window_pos = vec2(a_p) - vec2(XYOffset);
-		vtx.p = vec4(native_hpo_window_pos_to_ndc(vtx.window_pos), float(z), 1.0f);
 	#endif
-	vtx.p.z *= exp2(-32.0f); // integer->float depth
 	#if VS_TME
 		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
 			vec2 uv = a_uv - TextureOffset;
@@ -352,7 +352,6 @@ ProcessedVertex load_vertex(uint index)
 	#else
 		vtx.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		vtx.ti = vec4(0.0f);
-		vtx.rounduv = uvec4(0);
 	#endif
 
 	vtx.c = a_c;
@@ -536,8 +535,8 @@ void main()
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			lt.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
-			rb.p.xy = native_hpo_window_pos_to_ndc(pos.zw);
+			lt.p.xy = window_coords_to_ndc(pos.xy);
+			rb.p.xy = window_coords_to_ndc(pos.zw);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -680,9 +679,9 @@ void main()
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			v0.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
-			v1.p.xy = native_hpo_window_pos_to_ndc(pos.zy);
-			v2.p.xy = native_hpo_window_pos_to_ndc(pos.xw);
+			v0.p.xy = window_coords_to_ndc(pos.xy);
+			v1.p.xy = window_coords_to_ndc(pos.zy);
+			v2.p.xy = window_coords_to_ndc(pos.xw);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;

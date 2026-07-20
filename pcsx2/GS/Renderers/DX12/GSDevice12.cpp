@@ -3207,6 +3207,15 @@ void GSDevice12::DestroyResources()
 	m_device.reset();
 }
 
+static void AddRoundAlignClampMacros(GSDevice12::ShaderMacro& sm)
+{
+	sm.AddMacro("ROUND_UV_THRESHOLD", fmt::format("{}", static_cast<float>(ROUND_UV_THRESHOLD)));
+	sm.AddMacro("ROUND_UV_UP", fmt::format("{}", static_cast<int>(ROUND_UV_UP)));
+	sm.AddMacro("ROUND_UV_DOWN", fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)));
+	sm.AddMacro("ROUND_UV_PER_PIXEL", fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)));
+	sm.AddMacro("ROUND_UV_SWAP", fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)));
+}
+
 const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 {
 	auto it = m_tfx_vertex_shaders.find(sel.key);
@@ -3214,12 +3223,10 @@ const ID3DBlob* GSDevice12::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 		return it->second.get();
 
 	ShaderMacro sm;
+
+	AddRoundAlignClampMacros(sm);
+
 	sm.AddMacro("VERTEX_SHADER", 1);
-	sm.AddMacro("ROUND_UV_THRESHOLD", fmt::format("{}", static_cast<float>(ROUND_UV_THRESHOLD)));
-	sm.AddMacro("ROUND_UV_UP", fmt::format("{}", static_cast<int>(ROUND_UV_UP)));
-	sm.AddMacro("ROUND_UV_DOWN", fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)));
-	sm.AddMacro("ROUND_UV_PER_PIXEL", fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)));
-	sm.AddMacro("ROUND_UV_SWAP", fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)));
 	sm.AddMacro("VS_TME", sel.tme);
 	sm.AddMacro("VS_FST", sel.fst);
 	sm.AddMacro("VS_IIP", sel.iip);
@@ -3241,14 +3248,12 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 		return it->second.get();
 
 	ShaderMacro sm;
+
+	AddRoundAlignClampMacros(sm);
+
 	sm.AddMacro("PIXEL_SHADER", 1);
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_DEPTH_FEEDBACK_SUPPORT", 2);
-	sm.AddMacro("ROUND_UV_THRESHOLD", fmt::format("{}", static_cast<float>(ROUND_UV_THRESHOLD)));
-	sm.AddMacro("ROUND_UV_UP", fmt::format("{}", static_cast<int>(ROUND_UV_UP)));
-	sm.AddMacro("ROUND_UV_DOWN", fmt::format("{}", static_cast<int>(ROUND_UV_DOWN)));
-	sm.AddMacro("ROUND_UV_PER_PIXEL", fmt::format("{}", static_cast<int>(ROUND_UV_PER_PIXEL)));
-	sm.AddMacro("ROUND_UV_SWAP", fmt::format("{}", static_cast<int>(ROUND_UV_SWAP)));
 	sm.AddMacro("PS_HAS_CONSERVATIVE_DEPTH", 1);
 	sm.AddMacro("PS_FST", sel.fst);
 	sm.AddMacro("PS_WMS", sel.wms);
