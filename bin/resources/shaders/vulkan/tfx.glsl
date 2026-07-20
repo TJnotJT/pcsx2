@@ -196,8 +196,10 @@ struct ProcessedVertex
 	vec4 c;
 	float inv_cov;
 	uint interior;
+#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 	vec2 window_pos;
 	uvec4 rounduv;
+#endif
 };
 
 vec4 sprite_clamp_uv_range(vec4 pos, vec4 tex, uvec4 round_info)
@@ -316,8 +318,13 @@ ProcessedVertex load_vertex(uint index)
 	ProcessedVertex vtx;
 
 	uint z = min(a_z, MaxDepth);
-	vtx.window_pos = vec2(a_p) - vec2(XYOffset);
-	vtx.p = vec4(native_hpo_window_pos_to_ndc(vtx.window_pos), float(z), 1.0f);
+	#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
+		vtx.p = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
+		vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, VertexScale.y) - vec2(VertexOffset.x, VertexOffset.y);
+	#else
+		vtx.window_pos = vec2(a_p) - vec2(XYOffset);
+		vtx.p = vec4(native_hpo_window_pos_to_ndc(vtx.window_pos), float(z), 1.0f);
+	#endif
 	vtx.p.z *= exp2(-32.0f); // integer->float depth
 	#if VS_TME
 		#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
@@ -340,11 +347,6 @@ ProcessedVertex load_vertex(uint index)
 		// Get UV rounding info saved in Q.
 		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vtx.rounduv = extract_round_uv_bits(a_q);
-		#else
-			vtx.rounduv = uvec4(0);
-		#endif
-
-		#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
 			vsOut.t.w = 1.0f;
 		#endif
 	#else
@@ -474,8 +476,6 @@ void main()
 #if VS_EXPAND == VS_EXPAND_POINT // Point
 
 	vtx = load_vertex(vid >> 2);
-
-	vtx.p.xy = native_hpo_window_pos_to_ndc(vtx.window_pos);
 
 	vtx.p.x += ((vid & 1u) != 0u) ? PointSize.x : 0.0f; 
 	vtx.p.y += ((vid & 2u) != 0u) ? PointSize.y : 0.0f;
