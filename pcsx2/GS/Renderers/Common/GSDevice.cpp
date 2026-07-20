@@ -1273,6 +1273,7 @@ static const char* GetVSExpandName(GSHWDrawConfig::VSExpand vsexpand)
 		case GSHWDrawConfig::VSExpand::Sprite:      return "Sprite";
 		case GSHWDrawConfig::VSExpand::LineAA1:     return "LineAA1";
 		case GSHWDrawConfig::VSExpand::TriangleAA1: return "TriangleAA1";
+		case GSHWDrawConfig::VSExpand::Triangle:    return "Triangle";
 	}
 	return "Unknown";
 }
