@@ -4995,8 +4995,8 @@ bool GSState::SpriteDrawWithoutGaps()
 template<u32 primclass, bool tme, bool fst>
 bool GSState::GetVertexUVRoundingInfoImpl(const bool upscaling, bool* pixel_centers_aligned)
 {
-	if (GSConfig.AccurateUVRounding == GSAccurateUVRoundingMode::Off &&
-		(!GSIsHardwareRenderer() || GSConfig.SpriteAlign == GSSpriteAlignMode::Off))
+	if (!GSConfig.AccurateUVRounding &&
+		(!GSIsHardwareRenderer() || GSConfig.ShaderSpriteAlign == GSShaderSpriteAlignMode::Off))
 	{
 		return false;
 	}

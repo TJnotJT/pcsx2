@@ -2761,15 +2761,6 @@ void GSRendererHW::RoundSpriteOffset()
 
 void GSRendererHW::Draw()
 {
-	GSConfig.UserHacks_AlignSpriteX = false;
-	GSConfig.UserHacks_MergePPSprite = false;
-	GSConfig.UserHacks_ForceEvenSpritePosition = false;
-	GSConfig.UserHacks_HalfPixelOffset = GSHalfPixelOffset::Off;
-	GSConfig.UserHacks_RoundSprite = 0;
-	GSConfig.UserHacks_NativeScaling = GSNativeScaling::Off;
-	GSConfig.UserHacks_TCOffsetX = 0;
-	GSConfig.UserHacks_TCOffsetY = 0;
-	
 	static u32 num_skipped_channel_shuffle_draws = 0;
 	GSVertexBuff& vtx_buff = *m_vertex;
 	GSIndexBuff& idx_buff = *m_index;
@@ -10946,7 +10937,7 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	// Reused between draws, since the draw config is shared, you can't have multiple draws in flight anyway.
 	static GSVertex vertices[6];
 	static constexpr u16 indices[6] = {0, 1, 2, 3, 4, 5};
-	const bool sprite_align = (GSConfig.SpriteAlign != GSSpriteAlignMode::Off);
+	const bool sprite_align = (GSConfig.ShaderSpriteAlign != GSShaderSpriteAlignMode::Off);
 
 	const auto EmitVertex = [&](int i, int x, int y, int u, int v) {
 		vertices[i].XYZ.X = x;
@@ -11107,6 +11098,7 @@ bool GSRendererHW::IsCoverageAlphaSupported()
 	return IsCoverageAlpha() && IsRTWritten() && g_gs_device->Features().aa1;
 }
 
+// Setup shader based sprite round/clamp/align.
 void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSTextureCache::Target* ds, GSTextureCache::Source* tex)
 {
 	const GSTextureCache::Target* target = rt ? rt : ds;
@@ -11117,9 +11109,9 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 	
 	const bool tex_enabled = (m_conf.ps.tfx != TFX_NONE);
 
-	const bool rounding = GSConfig.AccurateUVRounding != GSAccurateUVRoundingMode::Off;
-	const bool aligning = GSConfig.SpriteAlign != GSSpriteAlignMode::Off;
-	const bool clamping = (GSConfig.SpriteAlign == GSSpriteAlignMode::AlignClamp) && (rt && rt->GetScale() != 1.0f);
+	const bool rounding = GSConfig.AccurateUVRounding;
+	const bool aligning = GSConfig.ShaderSpriteAlign != GSShaderSpriteAlignMode::Off;
+	const bool clamping = (GSConfig.ShaderSpriteAlign == GSShaderSpriteAlignMode::AlignClamp) && (rt && rt->GetScale() != 1.0f);
 
 	bool pixel_centers_aligned = true;
 
