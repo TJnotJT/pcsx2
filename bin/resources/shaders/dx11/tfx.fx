@@ -212,7 +212,7 @@ struct VS_PROCESSED
 	float4 c;
 	float inv_cov;
 	uint interior;
-	float2 pos_raw;
+	float2 window_pos;
 	uint4 rounduv;
 };
 
@@ -1790,9 +1790,9 @@ uint4 extract_round_uv_bits(float q)
 	);
 }
 
-float2 transform_raw_pos(float2 raw)
+float2 native_hpo_window_pos_to_ndc(float2 window_pos)
 {
-	return ((raw + 8.0f - 0.05f) * float2(VertexScale.xy) - 1.0f) * float2(1.0f, -1.0f);
+	return ((window_pos + 8.0f - 0.05f) * float2(VertexScale.xy) - 1.0f) * float2(1.0f, -1.0f);
 }
 
 #if !VS_EXPAND
@@ -1815,12 +1815,15 @@ VS_PROCESSED vs_main(VS_INPUT input)
 	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
 	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
 
-	output.p = float4(transform_raw_pos(input.p - float2(XYOffset)), input.z, 1.0f);
-	#if VS_EXPAND
-		output.pos_raw = float2(input.p.xy) - float2(XYOffset);
+	output.window_pos = float2(input.p.xy) - float2(XYOffset);
+	#if !(VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV)
+		output.p = float4(input.p, input.z, 1.0f) - float4(0.05f, 0.05f, 0, 0);
+		output.p.xy = output.p.xy * float2(VertexScale.x, -VertexScale.y) - float2(VertexOffset.x, -VertexOffset.y);
+	#else
+		output.p = float4(native_hpo_window_pos_to_ndc(output.window_pos), input.z, 1.0f);
 	#endif
 
-	output.p.z *= exp2(-32.0f);		// integer->float depth
+	output.p.z *= exp2(-32.0f); // integer->float depth
 
 	if(VS_TME)
 	{
@@ -2201,7 +2204,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_PROCESSED rb = vs_main(load_vertex(vid_rb));
 
 	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
-		float4 pos = float4(lt.pos_raw, rb.pos_raw);
+		float4 pos = float4(lt.window_pos, rb.window_pos);
 		float4 tex = float4(lt.ti.zw, rb.ti.zw);
 
 		#if VS_ROUND_UV
@@ -2216,8 +2219,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			lt.p.xy = transform_raw_pos(pos.xy);
-			rb.p.xy = transform_raw_pos(pos.zw);
+			lt.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
+			rb.p.xy = native_hpo_window_pos_to_ndc(pos.zw);
 
 			lt.ti.zw = tex.xy;
 			lt.ti.xy = lt.ti.zw * TextureScale;
@@ -2259,7 +2262,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 	VS_PROCESSED v2 = vs_main(load_vertex(vid_2));
 
 	#if VS_ROUND_UV || VS_CLAMP_UV || VS_ALIGN_UV
-		float4 pos = float4(v0.pos_raw, v1.pos_raw.x, v2.pos_raw.y);
+		float4 pos = float4(v0.window_pos, v1.window_pos.x, v2.window_pos.y);
 		float4 tex = float4(v0.ti.zw, v1.ti.z, v2.ti.w);
 
 		#if VS_ROUND_UV
@@ -2274,9 +2277,9 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 
 		#if VS_ALIGN_UV
 			sprite_align_and_round(pos, tex);
-			v0.p.xy = transform_raw_pos(pos.xy);
-			v1.p.xy = transform_raw_pos(pos.zy);
-			v2.p.xy = transform_raw_pos(pos.xw);
+			v0.p.xy = native_hpo_window_pos_to_ndc(pos.xy);
+			v1.p.xy = native_hpo_window_pos_to_ndc(pos.zy);
+			v2.p.xy = native_hpo_window_pos_to_ndc(pos.xw);
 
 			v0.ti.zw = tex.xy;
 			v1.ti.zw = tex.zy;
