@@ -670,6 +670,7 @@ struct alignas(16) GSHWDrawConfig
 	};
 	using VSExpand = GSShader::VSExpand;
 	using VS_CLAMP_UV = GSShader::VS_CLAMP_UV;
+	using VS_ALIGN_UV = GSShader::VS_ALIGN_UV;
 	using PS_ATST  = GSShader::PS_ATST;
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
@@ -688,7 +689,7 @@ struct alignas(16) GSHWDrawConfig
 				u32 point_size : 1;		///< Set when points need to be expanded without VS expanding.
 				u32 round_uv : 1;
 				VS_CLAMP_UV clamp_uv : 2;
-				u32 align_uv : 1;
+				VS_ALIGN_UV align_uv : 2;
 				VSExpand expand : 3;
 			};
 			u64 key;

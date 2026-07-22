@@ -23,6 +23,12 @@
 #define VS_CLAMP_UV_LINEAR 2
 #endif
 
+#ifndef VS_ALIGN_UV_NONE
+#define VS_ALIGN_UV_NONE 0
+#define VS_ALIGN_UV_ALIGN 1
+#define VS_ALIGN_UV_PASSTHROUGH 2
+#endif
+
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -533,7 +539,7 @@ void main()
 			clampuv = sprite_clamp_uv_range(pos, tex, lt.rounduv);
 		#endif
 
-		#if VS_ALIGN_UV
+		#if VS_ALIGN_UV == VS_ALIGN_UV_ALIGN
 			sprite_align_and_round(pos, tex);
 			lt.p.xy = window_coords_to_ndc(pos.xy);
 			rb.p.xy = window_coords_to_ndc(pos.zw);
@@ -677,7 +683,7 @@ void main()
 			clampuv = sprite_clamp_uv_range(pos, tex, v0.rounduv);
 		#endif
 
-		#if VS_ALIGN_UV
+		#if VS_ALIGN_UV == VS_ALIGN_UV_ALIGN
 			sprite_align_and_round(pos, tex);
 			v0.p.xy = window_coords_to_ndc(pos.xy);
 			v1.p.xy = window_coords_to_ndc(pos.zy);

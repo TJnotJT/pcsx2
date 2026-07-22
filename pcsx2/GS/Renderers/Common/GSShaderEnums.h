@@ -73,9 +73,16 @@ enum class PS_ROUND_UV : uint32_t
 
 enum class VS_CLAMP_UV : uint32_t
 {
-	NONE = 0, // No special rounding.
+	NONE = 0, // No rounding.
 	NEAREST = 1, // Clamping for nearest sampling.
 	LINEAR = 2, // Clamping for bilinear sampling.
+};
+
+enum class VS_ALIGN_UV : uint32_t
+{
+	NONE = 0, // No alignment.
+	ALIGN = 1, // Align position/texture coords to native pixels.
+	PASSTHROUGH_ = 2, // Does nothing, but needed to enable some shader outputs.
 };
 
 } // namespace GSShader

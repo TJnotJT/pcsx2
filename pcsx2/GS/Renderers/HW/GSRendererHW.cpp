@@ -5416,7 +5416,7 @@ void GSRendererHW::SetupIA(float target_scale, float sx, float sy, bool req_vert
 
 	const bool shader_uv_rounding = m_conf.vs.round_uv ||
 		(m_conf.vs.clamp_uv != GSHWDrawConfig::VS_CLAMP_UV::NONE) ||
-		m_conf.vs.align_uv;
+		(m_conf.vs.align_uv != GSHWDrawConfig::VS_ALIGN_UV::NONE);
 
 	switch (m_vt.m_primclass)
 	{
@@ -11007,8 +11007,9 @@ GSHWDrawConfig& GSRendererHW::BeginHLEHardwareDraw(
 	config.vs.fst = true;
 	if (sprite_align)
 	{
-		config.vs.align_uv = true;
+		config.vs.align_uv = GSHWDrawConfig::VS_ALIGN_UV::ALIGN;
 		config.vs.expand = GSHWDrawConfig::VSExpand::Triangle;
+		config.ps.align_uv = true;
 	}
 	config.ps.key_lo = 0;
 	config.ps.key_hi = 0;
@@ -11177,7 +11178,7 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 			}
 		}
 
-		m_conf.vs.align_uv = aligning;
+		m_conf.vs.align_uv = aligning ? GSHWDrawConfig::VS_ALIGN_UV::ALIGN : GSHWDrawConfig::VS_ALIGN_UV::PASSTHROUGH_;
 
 		// PS align UV flag must be set in all cases because it's responsible for swapping UVs for rotated textures.
 		m_conf.ps.align_uv = true;
