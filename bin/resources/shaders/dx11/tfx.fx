@@ -526,7 +526,7 @@ float4 sample_p(uint u)
 
 float4 sample_p_norm(float u)
 {
-	return sample_p(uint(u * 255.5f));
+	return sample_p(uint(round(u * 255.0f)));
 }
 
 float4 clamp_wrap_uv(float4 uv)
@@ -808,7 +808,7 @@ float4 sample_depth(float2 st, float2 pos)
 	}
 	else if (PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE)
 	{
-		t = trunc(sample_4p(uint4(t.aaaa))[0] * 255.0f + 0.05f);
+		t = round(sample_4p(uint4(t.aaaa))[0] * 255.0f);
 	}
 
 	return t;
@@ -964,9 +964,9 @@ float4 sample_color(float2 st, float uv_w, int2 xy)
 	}
 
 	if (PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION)
-		t.a = t.a * (128.5f / 255.0f);
+		t.a = t.a * (128.0f / 255.0f);
 			
-	return trunc(t * 255.0f + 0.05f);
+	return round(t * 255.0f);
 }
 
 float4 tfx(float4 T, float4 C)
@@ -1029,7 +1029,7 @@ bool atst(float4 C)
 
 float4 fog(float4 c, float f)
 {
-	if(PS_FOG)
+	if (PS_FOG)
 	{
 		c.rgb = trunc(lerp(FogColor, c.rgb, (f * 255.0f) / 256.0f));
 	}
@@ -1098,7 +1098,7 @@ void ps_fbmask(inout float4 C, float2 pos_xy)
 	if (PS_FBMASK)
 	{
 		float multi = PS_COLCLIP_HW ? 65535.0f : 255.0f;
-		float4 RT = trunc(RtLoad(int2(pos_xy)) * multi + 0.1f);
+		float4 RT = round(RtLoad(int2(pos_xy)) * multi);
 		C = (float4)(((uint4)C & ~FbMask) | ((uint4)RT & FbMask));
 	}
 }
@@ -1195,9 +1195,9 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 			}
 		}
 		
-		float Ad = PS_RTA_CORRECTION ? trunc(RT.a * 128.0f + 0.1f) / 128.0f : trunc(RT.a * 255.0f + 0.1f) / 128.0f;
+		float Ad = PS_RTA_CORRECTION ? round(RT.a * 128.0f) / 128.0f : round(RT.a * 255.0f) / 128.0f;
 		float color_multi = PS_COLCLIP_HW ? 65535.0f : 255.0f;
-		float3 Cd = trunc(RT.rgb * color_multi + 0.1f);
+		float3 Cd = round(RT.rgb * color_multi);
 		float3 Cs = Color.rgb;
 
 		float3 A = (PS_BLEND_A == 0) ? Cs : ((PS_BLEND_A == 1) ? Cd : (float3)0.0f);
@@ -1392,7 +1392,7 @@ void ps_main(PS_INPUT input)
 	float4 alpha_blend = (float4)0.0f;
 	if (SW_AD_TO_HW)
 	{
-		float4 RT = PS_RTA_CORRECTION ? trunc(RtLoad(input.p.xy) * 128.0f + 0.1f) : trunc(RtLoad(input.p.xy) * 255.0f + 0.1f);
+		float4 RT = PS_RTA_CORRECTION ? round(RtLoad(input.p.xy) * 128.0f) : round(RtLoad(input.p.xy) * 255.0f);
 		alpha_blend = (float4)(RT.a / 128.0f);
 	}
 	else
