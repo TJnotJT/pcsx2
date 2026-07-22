@@ -30,6 +30,7 @@ layout(std140, binding = 1) uniform cb20
 #define VS_EXPAND_SPRITE 3
 #define VS_EXPAND_LINE_AA1 4
 #define VS_EXPAND_TRIANGLE_AA1 5
+#define VS_EXPAND_TRIANGLE 6
 #endif
 
 #ifndef VS_CLAMP_UV_NONE
