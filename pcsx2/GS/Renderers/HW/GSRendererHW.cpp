@@ -7945,59 +7945,7 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 		(GSConfig.ShaderCacheType == GSShaderCacheType::Hybrid && // Only use uber shader if normal shader is still compiling.
 			g_gs_device->StartPipelineCompilationAsync(m_conf)))
 	{
-		GL_PUSH("HW: Uber/hybrid shader setup");
-
-		// Use either ROV, FB fetch, or full barriers.
-		// Prefer FB fetch over ROV unless depth feedback is not handled by it.
-		if (!features.FBFetchDepthFeedback() && features.rov && GSConfig.HWROV &&
-			!TexHazardPreventsROVUsage())
-		{
-			// If we're using ROV for either color/depth, use it for both.
-			ConfigureROV(rt != nullptr, ds != nullptr);
-
-			m_conf.uber_ps.rov_color = (rt != nullptr);
-			m_conf.uber_ps.rov_depth = (ds != nullptr);
-			m_conf.ps.zmask = !m_conf.ps.HasDepthROVWrite(); // SW depth masking.
-		}
-		else
-		{
-			// Use full shader emulation to cutdown number of pipelines.
-			ConfigureFullSW(rt != nullptr, ds != nullptr);
-			
-			m_conf.require_full_barrier = true;
-			
-			DetermineBarriers(rt, ds, tex);
-
-			if (ds)
-			{
-				// HW depth write with SW depth masking.
-				m_conf.ps.zmask = !m_conf.depth.zwe; 
-				m_conf.depth.zwe = true;
-			}
-
-			// Uber only does SW masking of writes, so to be safe make copies for RT/DS sampling hazards.
-			if (m_conf.rt && m_conf.rt == m_conf.tex && !m_conf.ps.tex_is_fb)
-			{
-				GL_INS("HW: RT is source texture; creating copy.");
-				temp_tex.reset(g_gs_device->CreateCompatible(m_conf.rt, false));
-				g_gs_device->StretchRectAuto(m_conf.rt, temp_tex.get(), Nearest);
-			}
-			else if (m_conf.ds && m_conf.ds == m_conf.tex)
-			{
-				GL_INS("HW: DS is source texture; creating copy.");
-				temp_tex.reset(g_gs_device->CreateCompatible(m_conf.ds, false));
-				g_gs_device->StretchRectAuto(m_conf.ds, temp_tex.get(), Nearest);
-			}
-		}
-
-		m_conf.uber_ps.color = !m_conf.ps.no_color;
-		m_conf.uber_ps.depth = (ds != nullptr);
-
-		pxAssert(m_conf.uber_ps.IsValid());
-
-		// Get the dynamic bits for VS/PS.
-		GSHWDrawConfig::GetUberShaderSelector(m_conf.vs, m_conf.ps, m_conf.pc);
-		
+		GL_INS("HW: Using uber shader");
 		m_conf.uber_shader = true;
 	}
 }

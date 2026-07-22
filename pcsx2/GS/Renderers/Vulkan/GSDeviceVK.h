@@ -50,6 +50,7 @@ public:
 		bool vk_khr_shader_non_semantic_info : 1;
 		bool vk_ext_attachment_feedback_loop_layout : 1;
 		bool vk_ext_fragment_shader_interlock : 1;
+		bool vk_ext_extended_dynamic_state_3 : 1;
 	};
 
 	// Global state accessors
@@ -345,7 +346,6 @@ public:
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
-		GSHWDrawConfig::UberPSSelector uber_ps;
 
 		union
 		{
@@ -356,6 +356,8 @@ public:
 				u32 ds : 1;
 				u32 line_width : 1;
 				u32 feedback_loop_flags : 3;
+				u32 uber_colclip_hw : 1;
+				u32 uber_stencil : 1;
 			};
 
 			u32 key;
@@ -365,7 +367,9 @@ public:
 		GSHWDrawConfig::VSSelector vs;
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
-		u8 pad;
+
+		GSHWDrawConfig::UberPSSelector uber_ps;
+		GSHWDrawConfig::UberVSSelector uber_vs;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
@@ -383,7 +387,8 @@ public:
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key,
+				e.uber_ps.key, static_cast<u32>(e.uber_vs), e.key);
 			return hash;
 		}
 	};
@@ -467,6 +472,7 @@ private:
 	using VKCachedPipeline = VKShaderCache::VKCachedPipeline;
 
 	std::unordered_map<u32, VKCachedShaderModule> m_tfx_vertex_shaders;
+	std::array<VKCachedShaderModule, 2> m_tfx_uber_vertex_shaders{};
 	std::unordered_map<GSHWDrawConfig::PSSelector, VKCachedShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
 	std::unordered_map<u8, VKCachedShaderModule> m_tfx_uber_fragment_shaders;
@@ -546,7 +552,8 @@ private:
 	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
-	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool async = false);
+	VKShaderModuleOrJob GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel);
 	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
 	VKShaderModuleOrJob GetTFXUberFragmentShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
 	VKPipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
@@ -692,8 +699,10 @@ public:
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe, bool uberize_vs_ps = false);
+	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe, bool preserve_feedback_flags = false);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
+	void SetUberDynamicState(const GSHWDrawConfig::DepthStencilSelector& dss, const GSHWDrawConfig::BlendState& bs,
+		const GSHWDrawConfig::ColorMaskSelector& cms, bool date_primid_init);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
 	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
@@ -761,6 +770,11 @@ private:
 		DIRTY_FLAG_PS_CONSTANT_BUFFER = (1 << 16),
 		DIRTY_FLAG_TFX_PUSH_CONSTANTS = (1 << 17),
 
+		DIRTY_FLAG_TFX_UBER_COLOR_BLEND = (1 << 18),
+		DIRTY_FLAG_TFX_UBER_COLOR_MASK = (1 << 19),
+		DIRTY_FLAG_TFX_UBER_DEPTH = (1 << 20),
+		DIRTY_FLAG_TFX_UBER_STENCIL = (1 << 21),
+
 		DIRTY_FLAG_TFX_TEXTURE_TEX = (DIRTY_FLAG_TFX_TEXTURE_0 << 0),
 		DIRTY_FLAG_TFX_TEXTURE_PALETTE = (DIRTY_FLAG_TFX_TEXTURE_0 << 1),
 		DIRTY_FLAG_TFX_TEXTURE_RT = (DIRTY_FLAG_TFX_TEXTURE_0 << 2),
@@ -774,9 +788,12 @@ private:
 		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH | DIRTY_FLAG_TFX_TEXTURE_RT_ROV |
 		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV,
 
+		DIRTY_TFX_UBER_STATE = DIRTY_FLAG_TFX_UBER_COLOR_BLEND | DIRTY_FLAG_TFX_UBER_COLOR_MASK | DIRTY_FLAG_TFX_UBER_DEPTH |
+		                      DIRTY_FLAG_TFX_UBER_STENCIL,
+
 		DIRTY_BASE_STATE = DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PIPELINE | DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR |
 		                   DIRTY_FLAG_BLEND_CONSTANTS | DIRTY_FLAG_LINE_WIDTH,
-		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES,
+		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES | DIRTY_TFX_UBER_STATE,
 		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_UTILITY_TEXTURE,
 		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_TFX_PUSH_CONSTANTS,
 		ALL_DIRTY_STATE = DIRTY_BASE_STATE | DIRTY_TFX_STATE | DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE,
@@ -812,6 +829,16 @@ private:
 	VkViewport m_viewport = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
 	float m_current_line_width = 1.0f;
 	u8 m_blend_constant_color = 0;
+
+	// Dynamic state for uber pipelines.
+	struct UberDynamicState
+	{
+		bool enabled;
+		GSHWDrawConfig::DepthStencilSelector dss;
+		GSHWDrawConfig::BlendState bs;
+		GSHWDrawConfig::ColorMaskSelector cms;
+		bool date_primid_init;
+	} m_uber_dynamic_state{};
 
 	std::array<GSTextureVK*, NUM_TFX_TEXTURES> m_tfx_textures{};
 	VkSampler m_tfx_sampler = VK_NULL_HANDLE;

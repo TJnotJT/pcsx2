@@ -27,6 +27,14 @@ layout(push_constant) uniform cb2
 #define VS_EXPAND_TRIANGLE_AA1 5
 #endif
 
+#if !UBER_SHADER
+	#define VS_EXPAND_ENABLE (VS_EXPAND != VS_EXPAND_NONE)
+#else
+	#define VS_EXPAND_ENABLE UBER_VS_EXPAND_ENABLE
+	#define VS_IIP 1
+	#define VS_POINT_SIZE 1
+#endif
+
 layout(std140, set = 0, binding = 0) uniform cb0
 {
 	vec2 VertexScale;
@@ -250,6 +258,69 @@ void extrapolate_aa1_triangle_edge(inout ProcessedVertex v0, ProcessedVertex v1,
 	v0.t.z += dot(df, weights); // Extrapolate fog
 }
 
+#if !VS_EXPAND_ENABLE
+
+layout(location = 0) in vec2 a_st;
+layout(location = 1) in uvec4 a_c;
+layout(location = 2) in float a_q;
+layout(location = 3) in uvec2 a_p;
+layout(location = 4) in uint a_z;
+layout(location = 5) in uvec2 a_uv;
+layout(location = 6) in vec4 a_f;
+
+void main()
+{
+	// Clamp to max depth, gs doesn't wrap
+	uint z = min(a_z, MaxDepth);
+
+	// pos -= 0.05 (1/320 pixel) helps avoiding rounding problems (integral part of pos is usually 5 digits, 0.05 is about as low as we can go)
+	// example: ceil(afterseveralvertextransformations(y = 133)) => 134 => line 133 stays empty
+	// input granularity is 1/16 pixel, anything smaller than that won't step drawing up/left by one pixel
+	// example: 133.0625 (133 + 1/16) should start from line 134, ceil(133.0625 - 0.05) still above 133
+
+	gl_Position = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
+	gl_Position.xy = gl_Position.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
+	gl_Position.z *= exp2(-32.0f);		// integer->float depth
+	gl_Position.y = -gl_Position.y;
+
+	if (VS_TME != 0)
+	{
+		vec2 uv = a_uv - TextureOffset;
+		vec2 st = a_st - TextureOffset;
+
+		// Integer nomalized
+		vsOut.ti.xy = uv * TextureScale;
+
+		if (VS_FST != 0)
+		{
+			// Integer integral
+			vsOut.ti.zw = uv;
+		}
+		else
+		{
+			// float for post-processing in some games
+			vsOut.ti.zw = st / TextureScale;
+		}
+
+		// Float coords
+		vsOut.t.xy = st;
+		vsOut.t.w = a_q;
+	}
+	else
+	{
+		vsOut.t = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		vsOut.ti = vec4(0.0f);
+	}
+
+	if (VS_POINT_SIZE != 0)
+		gl_PointSize = PointSize.x;
+
+	vsOut.c = vec4(a_c);
+	vsOut.t.z = a_f.r;
+}
+
+#else // VS_EXPAND_ENABLE
+
 void main()
 {
 	ProcessedVertex vtx;
@@ -427,6 +498,8 @@ void main()
 	gl_PointSize = PointSize.x;
 }
 
+#endif // VS_EXPAND_ENABLE
+
 #endif // VERTEX_SHADER
 
 #ifdef FRAGMENT_SHADER
@@ -484,6 +557,20 @@ void main()
 #define PS_ROV_DEPTH_NONE 0
 #define PS_ROV_DEPTH_READ_WRITE 1
 #define PS_ROV_DEPTH_READ_ONLY 2
+#endif
+
+#ifndef UBER_COLOR_NONE
+#define UBER_COLOR_NONE 0
+#define UBER_COLOR_STANDARD 1
+#define UBER_COLOR_FEEDBACK 2
+#define UBER_COLOR_ROV 3
+#endif
+
+#ifndef UBER_DEPTH_NONE
+#define UBER_DEPTH_NONE 0
+#define UBER_DEPTH_STANDARD 1
+#define UBER_DEPTH_FEEDBACK 2
+#define UBER_DEPTH_ROV 3
 #endif
 
 #ifndef PS_FST
@@ -559,19 +646,19 @@ void main()
 	#define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
 #else
 	#define PS_IIP 1
-	#define PS_NO_COLOR !UBER_COLOR
-	#define PS_NO_COLOR1 1
-	#define PS_FEEDBACK_LOOP_IS_NEEDED_RT !UBER_NO_COLOR
-	#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH UBER_DEPTH
-	#define PS_ROV_COLOR UBER_ROV_COLOR
-	#if UBER_ROV_DEPTH
+	#define PS_NO_COLOR (UBER_COLOR == 0)
+	#define PS_NO_COLOR1 (UBER_COLOR1 == 0)
+	#define PS_FEEDBACK_LOOP_IS_NEEDED_RT (UBER_COLOR == UBER_COLOR_FEEDBACK)
+	#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (UBER_DEPTH == UBER_DEPTH_FEEDBACK)
+	#define PS_ROV_COLOR (UBER_COLOR == UBER_COLOR_ROV)
+	#if (UBER_DEPTH == UBER_DEPTH_ROV)
 		#define PS_ROV_DEPTH PS_ROV_DEPTH_READ_WRITE
 	#else
 		#define PS_ROV_DEPTH 0
 	#endif
 	#define ZWRITE UBER_DEPTH
-	#define DATE_INIT 0
-#endif
+	#define DATE_INIT UBER_DATE_INIT
+#endif // UBER_SHADER
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
 #define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
@@ -2084,4 +2171,4 @@ void main()
 #endif // DATE_INIT
 }
 
-#endif
+#endif // FRAGMENT_SHADER

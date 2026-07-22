@@ -2029,7 +2029,7 @@ static std::array<ShaderDefine, N_DYNAMIC> GetUberShaderSelectorDefines(
 					field_desc.name,
 					field_desc.shader_name,
 					fmt::format(
-						"((SELECTOR{} >> {}) & {})\n",
+						"((SELECTOR{} >> {}) & {})",
 						field_desc.selector_num, field_desc.start_bit, field_desc.mask),
 				};
 			}
@@ -2044,7 +2044,7 @@ static std::array<ShaderDefine, N_DYNAMIC> GetUberShaderSelectorDefines(
 						"( "
 						" ((SELECTOR{} >> {}) & {}) | "
 						" (((SELECTOR{} >> {}) & {}) << {}) "
-						")\n",
+						")",
 						field_desc.selector_num, field_desc.start_bit, field_desc.mask,
 						field_desc.selector_num + 1, field_desc.start_bit_2, field_desc.mask_2,
 						field_desc.end_bit - field_desc.start_bit),

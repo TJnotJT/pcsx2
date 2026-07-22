@@ -2350,7 +2350,7 @@ bool GSDevice12::CompileImGuiPipeline()
 
 bool GSDevice12::CompileUberTFXPipelines()
 {
-	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
+	/*if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
 		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
 
@@ -2396,7 +2396,7 @@ bool GSDevice12::CompileUberTFXPipelines()
 				Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
 		}
 
-	}
+	}*/
 
 	return true;
 }
@@ -3451,7 +3451,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXPixelShader(const GSHWDrawCon
 
 GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberPixelShader(const GSHWDrawConfig::UberPSSelector& sel, bool async)
 {
-	// Check async results first.
+	/*// Check async results first.
 	if (std::shared_ptr<D3D12ShaderJob> async_job =
 		ProcessAsyncJob<D3D12ShaderJob>(sel.key, m_tfx_uber_pixel_shaders_async, m_tfx_uber_pixel_shaders))
 	{
@@ -3497,7 +3497,8 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberPixelShader(const GSHWDra
 
 	it = m_tfx_uber_pixel_shaders.emplace(sel.key, std::move(ps)).first;
 
-	return it->second.get();
+	return it->second.get();*/
+	return {};
 }
 
 GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelector& p, bool uber, bool async)
@@ -5139,7 +5140,7 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 	}
 	else
 	{
-		// Everything is determined from uber PS and topology.
+		/*// Everything is determined from uber PS and topology.
 
 		m_pipeline_selector.vs = GSHWDrawConfig::VSSelector::GetUberSelector();
 		m_pipeline_selector.ps = {};
@@ -5150,13 +5151,13 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool ube
 		m_pipeline_selector.topology = static_cast<u32>(config.topology);
 
 		// Uber pipeline
-		const bool uber_rt = config.uber_ps.color;
-		const bool uber_ds = config.uber_ps.depth;
+		const bool uber_rt = config.uber_ps.HasColor();
+		const bool uber_ds = config.uber_ps.HasDepth();
 
 		m_pipeline_selector.rt = (uber_rt && !config.uber_ps.rov_color);
 		m_pipeline_selector.ds_as_rt = m_pipeline_selector.ds = (uber_ds && !config.uber_ps.rov_depth);
 
-		SetShaderPushConstants(config.pc); // Contains uber selector bits.
+		SetShaderPushConstants(config.pc); // Contains uber selector bits.*/
 	}
 }
 

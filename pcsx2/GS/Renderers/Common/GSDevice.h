@@ -741,8 +741,7 @@ struct HWBlend
 	EXPAND(1, true, u8, tme, 1, "VS_TME") \
 	EXPAND(2, false, u8, iip, 1, "VS_IIP") \
 	EXPAND(3, false, u8, point_size, 1, "VS_POINT_SIZE") \
-	EXPAND(4, true, VSExpand, expand, 3, "VS_EXPAND") \
-	EXPAND(5, false, u8, uber_enable, 1, "UBER_SHADER")
+	EXPAND(4, true, VSExpand, expand, 3, "VS_EXPAND")
 
 struct alignas(16) GSHWDrawConfig
 {
@@ -791,16 +790,6 @@ struct alignas(16) GSHWDrawConfig
 		
 		/// Return true if the index buffer should be bound as a vertex shader resource.
 		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
-
-		__fi static VSSelector GetUberSelector()
-		{
-			// Only one Uber VS selectors.
-			VSSelector vs;
-			vs.iip = true;
-			vs.point_size = true;
-			vs.uber_enable = true;
-			return vs;
-		}
 
 		__fi bool operator==(const VSSelector& rhs) const { return key == rhs.key; }
 		__fi bool operator!=(const VSSelector& rhs) const { return key != rhs.key; }
@@ -953,47 +942,111 @@ struct alignas(16) GSHWDrawConfig
 #pragma pack(push, 1)
 	struct UberPSSelector
 	{
+		enum class ColorType : u8
+		{
+			NONE,
+			STANDARD,
+			FEEDBACK,
+			ROV,
+		};
+
+		enum class DepthType : u8
+		{
+			NONE,
+			STANDARD,
+			FEEDBACK,
+			ROV,
+		};
+
 		union
 		{
 			struct
 			{
-				u8 color : 1;
-				u8 depth : 1;
-				u8 rov_color : 1;
-				u8 rov_depth : 1;
+				ColorType color : 2;
+				u8 color1 : 1;
+				DepthType depth : 2;
+				u8 date_init : 1;
 			};
 
 			u8 key;
 		};
 
-		static constexpr u32 MAX_NUM_SELECTORS = 16;
+		static constexpr u32 MAX_NUM_SELECTORS = 64;
 
 		__fi constexpr UberPSSelector() : key(0) {}
-		__fi constexpr UberPSSelector(u8 key) : key(key) {}
 
 		__fi static constexpr UberPSSelector Decode(u8 key)
 		{
 			UberPSSelector ps;
 
-			ps.color = (key >> 0) & 1;
-			ps.depth = (key >> 1) & 1;
-			ps.rov_color = (key >> 2) & 1;
-			ps.rov_depth = (key >> 3) & 1;
+			ps.color = static_cast<ColorType>((key >> 0) & 3);
+			ps.color1 = (key >> 2) & 1;
+			ps.depth = static_cast<DepthType>((key >> 3) & 3);
+			ps.date_init = (key >> 5) & 1;
 
 			return ps;
 		}
 
 		__fi constexpr bool IsValid() const
 		{
-			return
-				// Don't allow depth ROV without depth.
-				(!rov_depth || depth) &&
-				// Don't allow color ROV without color.
-				(!rov_color || color) &&
-				// Don't allow depth ROV with non-ROV color output.
-				(!rov_depth || !color || rov_color) &&
-				// Must have color or depth output.
-				(color || depth);
+			const bool rov = color == ColorType::ROV || depth == DepthType::ROV;
+			const bool feedback = color == ColorType::FEEDBACK || depth == DepthType::FEEDBACK;
+			// These are mutually incompatible.
+			if (rov && (feedback || color1))
+				return false;
+			// Depth ROV must imply color ROV (if color is used).
+			if (depth == DepthType::ROV && !(color == ColorType::NONE || color == ColorType::ROV))
+				return false;
+			// Color1 must imply color.
+			if (color1 && color == ColorType::NONE)
+				return false;
+			// Must have color or depth.
+			if (color == ColorType::NONE && depth == DepthType::NONE)
+				return false;
+			// There's only one uber date init shader.
+			if (date_init && (color != ColorType::STANDARD || depth != DepthType::NONE))
+				return false;
+			return true;
+		}
+
+		__fi bool CompatibleWithColclipHW() const
+		{
+			return color == ColorType::STANDARD || color == ColorType::FEEDBACK;
+		}
+
+		__fi bool CompatibleWithStencil() const
+		{
+			return color == ColorType::STANDARD;
+		}
+
+		__fi bool HasColor() const
+		{
+			return color != ColorType::NONE;
+		}
+
+		__fi bool HasDepth() const
+		{
+			return depth != DepthType::NONE;
+		}
+
+		__fi bool HasColorFeedback() const
+		{
+			return color == ColorType::FEEDBACK;
+		}
+
+		__fi bool HasDepthFeedback() const
+		{
+			return depth == DepthType::FEEDBACK;
+		}
+
+		__fi bool HasColorROV() const
+		{
+			return color == ColorType::ROV;
+		}
+
+		__fi bool HasDepthROV() const
+		{
+			return depth == DepthType::ROV;
 		}
 
 		static std::span<const UberPSSelector> GetValidSelectors();
@@ -1004,6 +1057,12 @@ struct alignas(16) GSHWDrawConfig
 	};
 	static_assert(sizeof(UberPSSelector) == 1);
 #pragma pack(pop)
+
+	enum class UberVSSelector
+	{
+		INPUT_ASSEMBLY,
+		VS_EXPAND,
+	};
 
 #pragma pack(push, 1)
 	struct SamplerSelector
@@ -1363,7 +1422,6 @@ struct alignas(16) GSHWDrawConfig
 
 	alignas(8) PSSelector ps;
 	VSSelector vs;
-	UberPSSelector uber_ps;
 	bool uber_shader; ///< Use uber shader in the current draw.
 
 	BlendState blend;
@@ -1396,6 +1454,30 @@ struct alignas(16) GSHWDrawConfig
 		ColorMaskSelector colormask;
 		DepthStencilSelector depth;
 		float ps_aref;
+
+		void UpdateConfig(GSHWDrawConfig& config) const
+		{
+			pxAssert(enable);
+			config.ps = ps;
+			config.colormask = colormask;
+			config.depth = depth;
+			config.require_full_barrier = require_full_barrier;
+			config.require_one_barrier = require_one_barrier;
+		}
+
+		bool UpdatePSConstantBuffer(PSConstantBuffer& cb_ps) const
+		{
+			pxAssert(enable);
+			if (cb_ps.FogColor_AREF.a != ps_aref)
+			{
+				cb_ps.FogColor_AREF.a = ps_aref;
+				return true;
+			}
+			else
+			{
+				return false;
+			}
+		}
 	};
 	static_assert(sizeof(AlphaPass) == 24, "alpha pass is 24 bytes");
 
@@ -1408,6 +1490,15 @@ struct alignas(16) GSHWDrawConfig
 		u8 no_color1 : 1;
 		u8 blend_hw : 3; // HWBlendType
 		u8 dither : 2;
+
+		void UpdateConfig(GSHWDrawConfig& config) const
+		{
+			pxAssert(enable);
+			config.ps.no_color1 = no_color1;
+			config.ps.blend_hw = blend_hw;
+			config.ps.dither = dither;
+			config.blend = blend;
+		}
 	};
 	static_assert(sizeof(BlendMultiPass) == 8, "blend multi pass is 8 bytes");
 
