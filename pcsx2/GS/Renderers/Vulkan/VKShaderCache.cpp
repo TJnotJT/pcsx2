@@ -20,6 +20,7 @@
 #include "common/MD5Digest.h"
 #include "common/Path.h"
 #include "common/Timer.h"
+#include "common/HashCombine.h"
 
 #include "fmt/format.h"
 #include "shaderc/shaderc.h"
@@ -170,16 +171,28 @@ VKShaderCache::~VKShaderCache()
 	m_compile_jobs_async.clear();
 }
 
-bool VKShaderCache::CacheIndexKey::operator==(const CacheIndexKey& key) const
+bool VKShaderCache::ShaderCacheIndexKey::operator==(const ShaderCacheIndexKey& key) const
 {
 	return (source_hash_low == key.source_hash_low && source_hash_high == key.source_hash_high &&
 			source_length == key.source_length && shader_type == key.shader_type);
 }
 
-bool VKShaderCache::CacheIndexKey::operator!=(const CacheIndexKey& key) const
+bool VKShaderCache::ShaderCacheIndexKey::operator!=(const ShaderCacheIndexKey& key) const
 {
 	return (source_hash_low != key.source_hash_low || source_hash_high != key.source_hash_high ||
 			source_length != key.source_length || shader_type != key.shader_type);
+}
+
+bool VKShaderCache::GraphicsPipelineCacheIndexKey::operator==(const GraphicsPipelineCacheIndexKey& key) const
+{
+	return vs == key.vs && fs == key.fs && renderpass == key.renderpass && ci_hash_high == key.ci_hash_high &&
+		ci_hash_low == key.ci_hash_low && ci_size == key.ci_size;
+}
+
+bool VKShaderCache::GraphicsPipelineCacheIndexKey::operator!=(const GraphicsPipelineCacheIndexKey& key) const
+{
+	return vs != key.vs || fs != key.fs || renderpass != key.renderpass || ci_hash_high != key.ci_hash_high ||
+		ci_hash_low != key.ci_hash_low || ci_size != key.ci_size;
 }
 
 void VKShaderCache::Create()
@@ -350,8 +363,8 @@ bool VKShaderCache::ReadExistingShaderCache(const std::string& index_filename, c
 			return false;
 		}
 
-		const CacheIndexKey key{entry.source_hash_low, entry.source_hash_high, entry.source_length, entry.shader_type};
-		const CacheIndexData data{entry.file_offset, entry.blob_size};
+		const ShaderCacheIndexKey key{entry.source_hash_low, entry.source_hash_high, entry.source_length, entry.shader_type};
+		const ShaderCacheIndexData data{entry.file_offset, entry.blob_size};
 		state.shader_index.emplace(key, data);
 	}
 
@@ -475,7 +488,7 @@ bool VKShaderCache::ReadExistingPipelineCache(bool uber)
 	// Read existing pipeline index
 	for (;;)
 	{
-		CacheIndexKey key;
+		GraphicsPipelineCacheIndexKey key;
 		if (std::fread(&key, sizeof(key), 1, index_file) != 1)
 		{
 			if (std::feof(index_file))
@@ -533,7 +546,7 @@ bool VKShaderCache::FlushPipelineCache()
 		size_t data_size;
 
 		// Write the pipeline index.
-		data_size = sizeof(CacheIndexKey) * state.new_pipeline_index.size();
+		data_size = sizeof(state.new_pipeline_index[0]) * state.new_pipeline_index.size();
 		Console.WriteLn("Writing %zu bytes to '%s'", data_size, state.pipeline_index_filename.c_str());
 		
 		FILE* index_file = FileSystem::OpenCFile(state.pipeline_index_filename.c_str(), "a+b");
@@ -551,7 +564,7 @@ bool VKShaderCache::FlushPipelineCache()
 			return false;
 		}
 
-		if (std::fwrite(state.new_pipeline_index.data(), sizeof(CacheIndexKey), state.new_pipeline_index.size(), index_file) !=
+		if (std::fwrite(state.new_pipeline_index.data(), sizeof(state.new_pipeline_index[0]), state.new_pipeline_index.size(), index_file) !=
 			state.new_pipeline_index.size())
 		{
 			Console.Error("Failed to write pipeline index to '%s'", state.pipeline_index_filename.c_str());
@@ -641,7 +654,7 @@ std::string VKShaderCache::GetPipelineCacheBaseFileName(bool uber, bool debug)
 	return Path::Combine(EmuFolders::Cache, base_filename);
 }
 
-VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::string_view shader_code)
+VKShaderCache::ShaderCacheIndexKey VKShaderCache::GetShaderCacheKey(u32 type, const std::string_view shader_code)
 {
 	union HashParts
 	{
@@ -658,22 +671,19 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetCacheKey(u32 type, const std::str
 	digest.Update(shader_code.data(), static_cast<u32>(shader_code.length()));
 	digest.Final(h.hash);
 
-	return CacheIndexKey{h.hash_low, h.hash_high, static_cast<u32>(shader_code.length()), type};
+	return ShaderCacheIndexKey{h.hash_low, h.hash_high, static_cast<u32>(shader_code.length()), type};
 }
 
-VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
-	const CacheIndexKey& vs_key, const CacheIndexKey& fs_key, const VkGraphicsPipelineCreateInfo& ci)
+VKShaderCache::GraphicsPipelineCacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
+	const ShaderCacheIndexKey& vs_key, const ShaderCacheIndexKey& fs_key, u32 renderpass_key, const VkGraphicsPipelineCreateInfo& ci)
 {
-	MD5Digest digest;
-	u32 length = 0;
+	MD5Digest ci_digest;
+	u32 ci_size = 0;
 
-	const auto UpdateDigest = [&digest, &length](const void* data, size_t size) {
-		digest.Update(data, size);
-		length += static_cast<u32>(size);
+	const auto UpdateDigest = [&ci_digest, &ci_size](const void* data, size_t size) {
+		ci_digest.Update(data, size);
+		ci_size += static_cast<u32>(size);
 	};
-
-	UpdateDigest(&vs_key, sizeof(vs_key));
-	UpdateDigest(&fs_key, sizeof(fs_key));
 
 	UpdateDigest(&ci.sType, sizeof(ci.sType));
 
@@ -858,17 +868,18 @@ VKShaderCache::CacheIndexKey VKShaderCache::GetGraphicsPipelineCacheKey(
 		};
 		u8 hash[16];
 	};
-	HashParts h;
+	HashParts ci_hash;
 
-	digest.Final(h.hash);
+	ci_digest.Final(ci_hash.hash);
 
-	return CacheIndexKey{ h.hash_low, h.hash_high, length, UINT_MAX };
+	return GraphicsPipelineCacheIndexKey{ vs_key, fs_key, renderpass_key, ci_hash.hash_low, ci_hash.hash_high,
+		static_cast<u32>(ci_size) };
 }
 
 bool VKShaderCache::HasShaderSPV(u32 type, std::string_view shader_code, bool uber)
 {
 	CacheState& state = GetCacheState(uber);
-	const auto key = GetCacheKey(type, shader_code);
+	const auto key = GetShaderCacheKey(type, shader_code);
 	auto iter = state.shader_index.find(key);
 	return iter != state.shader_index.end();
 }
@@ -876,7 +887,7 @@ bool VKShaderCache::HasShaderSPV(u32 type, std::string_view shader_code, bool ub
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::GetShaderSPV(u32 type, std::string_view shader_code, bool uber)
 {
 	CacheState& state = GetCacheState(uber);
-	const auto key = GetCacheKey(type, shader_code);
+	const auto key = GetShaderCacheKey(type, shader_code);
 	auto iter = state.shader_index.find(key);
 	if (iter == state.shader_index.end())
 		return CompileAndAddShaderSPV(key, shader_code, uber);
@@ -910,7 +921,7 @@ VKShaderCache::VKCachedShaderModule VKShaderCache::GetShaderModule(u32 type, std
 		return {};
 	}
 
-	return VKCachedShaderModule{ mod, GetCacheKey(type, shader_code) };
+	return VKCachedShaderModule{ mod, GetShaderCacheKey(type, shader_code) };
 }
 
 bool VKShaderCache::HasVertexShader(std::string_view shader_code, bool uber)
@@ -938,18 +949,18 @@ VkShaderModule VKShaderCache::GetComputeShader(std::string_view shader_code)
 	return GetShaderModule(shaderc_glsl_compute_shader, std::move(shader_code), false).module;
 }
 
-bool VKShaderCache::HasGraphicsPipeline(const CacheIndexKey& key, bool uber)
+bool VKShaderCache::HasGraphicsPipeline(const GraphicsPipelineCacheIndexKey& key, bool uber)
 {
 	return GetCacheState(uber).pipeline_index.contains(key);
 }
 
 VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice device,
-	const CacheIndexKey& vs_key, const CacheIndexKey& fs_key,
+	const ShaderCacheIndexKey& vs_key, const ShaderCacheIndexKey& fs_key, u32 renderpass_key,
 	const VkGraphicsPipelineCreateInfo& ci, bool uber)
 {
-	const auto key = GetGraphicsPipelineCacheKey(vs_key, fs_key, ci);
+	const auto key = GetGraphicsPipelineCacheKey(vs_key, fs_key, renderpass_key, ci);
 
-	AddPipelineKey(key, uber);
+	AddGraphicsPipelineKey(key, uber);
 
 	Common::Timer debug_timer;
 
@@ -967,7 +978,7 @@ VKShaderCache::VKCachedPipeline VKShaderCache::GetGraphicsPipeline(VkDevice devi
 }
 
 std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShaderSPV(
-	const CacheIndexKey& key, std::string_view shader_code, bool uber)
+	const ShaderCacheIndexKey& key, std::string_view shader_code, bool uber)
 {
 	std::optional<SPIRVCodeVector> spv = CompileShaderToSPV(key.shader_type, shader_code, GSConfig.UseDebugDevice);
 	if (!spv.has_value())
@@ -978,7 +989,7 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileAndAddShader
 	if (!state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return spv;
 
-	CacheIndexData data;
+	ShaderCacheIndexData data;
 	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(spv->size());
 
@@ -1008,7 +1019,7 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	// FIXME: Duplication with CompileAndAddShaderSPV();
 	CacheState& state = GetCacheState(uber);
 
-	const auto key = GetCacheKey(type, shader_code);
+	const auto key = GetShaderCacheKey(type, shader_code);
 
 	if (only_new && state.shader_index.contains(key))
 		return;
@@ -1016,7 +1027,7 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	if (!state.shader_blob_file || std::fseek(state.shader_blob_file, 0, SEEK_END) != 0)
 		return;
 
-	CacheIndexData data;
+	ShaderCacheIndexData data;
 	data.file_offset = static_cast<u32>(std::ftell(state.shader_blob_file));
 	data.blob_size = static_cast<u32>(spv.size());
 
@@ -1038,7 +1049,7 @@ void VKShaderCache::AddShaderSPV(u32 type, std::string_view shader_code, const S
 	state.shader_index.emplace(key, data);
 }
 
-void VKShaderCache::AddPipelineKey(const CacheIndexKey& key, bool uber)
+void VKShaderCache::AddGraphicsPipelineKey(const GraphicsPipelineCacheIndexKey& key, bool uber)
 {
 	CacheState& state = GetCacheState(uber);
 	bool is_new = state.pipeline_index.insert(key).second;
@@ -1081,8 +1092,8 @@ void VKShaderCache::ProcessAsyncCompileJobs()
 					pipeline_job->GetHash(), pipeline_job->IsUber(), pipeline_job->GetCompileTimeMS(),
 					pipeline_job->GetThreadID());
 
-				const CacheIndexKey pipeline_key = pipeline_job->GetPipelineCacheKey();
-				AddPipelineKey(pipeline_key, pipeline_job->IsUber());
+				const GraphicsPipelineCacheIndexKey pipeline_key = pipeline_job->GetPipelineCacheKey();
+				AddGraphicsPipelineKey(pipeline_key, pipeline_job->IsUber());
 			}
 			else
 			{

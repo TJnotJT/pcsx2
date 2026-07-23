@@ -29,24 +29,20 @@ class VKShaderCompilerAsync;
 class VKShaderCache
 {
 public:
-	struct CacheIndexKey
+	struct ShaderCacheIndexKey
 	{
 		u64 source_hash_low;
 		u64 source_hash_high;
 		u32 source_length;
 		u32 shader_type;
 
-		bool operator==(const CacheIndexKey& key) const;
-		bool operator!=(const CacheIndexKey& key) const;
+		bool operator==(const ShaderCacheIndexKey& key) const;
+		bool operator!=(const ShaderCacheIndexKey& key) const;
 	};
 
-	static CacheIndexKey GetCacheKey(u32 type, const std::string_view shader_code);
-	static CacheIndexKey GetGraphicsPipelineCacheKey(
-		const CacheIndexKey& vs_key, const CacheIndexKey& fs_key, const VkGraphicsPipelineCreateInfo& ci);
-
-	struct CacheIndexEntryHasher
+	struct ShaderCacheIndexKeyHasher
 	{
-		std::size_t operator()(const CacheIndexKey& e) const noexcept
+		std::size_t operator()(const ShaderCacheIndexKey& e) const noexcept
 		{
 			std::size_t h = 0;
 			HashCombine(h, e.source_hash_low, e.source_hash_high, e.source_length, e.shader_type);
@@ -54,7 +50,39 @@ public:
 		}
 	};
 
-	struct CacheIndexData
+	struct GraphicsPipelineCacheIndexKey
+	{
+		ShaderCacheIndexKey vs;
+		ShaderCacheIndexKey fs;
+		u32 renderpass;
+		u64 ci_hash_low;
+		u64 ci_hash_high;
+		u32 ci_size;
+
+		bool operator==(const GraphicsPipelineCacheIndexKey& key) const;
+		bool operator!=(const GraphicsPipelineCacheIndexKey& key) const;
+	};
+
+	struct GraphicsPipelineCacheIndexKeyHasher
+	{
+		std::size_t operator()(const GraphicsPipelineCacheIndexKey& e) const noexcept
+		{
+			std::size_t h = 0;
+			HashCombine(h,
+				e.vs.source_hash_low, e.vs.source_hash_high, e.vs.source_length, e.vs.shader_type,
+				e.fs.source_hash_low, e.fs.source_hash_high, e.fs.source_length, e.fs.shader_type,
+				e.renderpass,
+				e.ci_hash_low, e.ci_hash_high, e.ci_size);
+			return h;
+		}
+	};
+
+	static ShaderCacheIndexKey GetShaderCacheKey(u32 type, const std::string_view shader_code);
+	static GraphicsPipelineCacheIndexKey GetGraphicsPipelineCacheKey(
+		const ShaderCacheIndexKey& vs_key, const ShaderCacheIndexKey& fs_key, u32 renderpass_key,
+		const VkGraphicsPipelineCreateInfo& ci);
+
+	struct ShaderCacheIndexData
 	{
 		u32 file_offset;
 		u32 blob_size;
@@ -63,13 +91,13 @@ public:
 	struct VKCachedShaderModule
 	{
 		VkShaderModule module;
-		VKShaderCache::CacheIndexKey key;
+		ShaderCacheIndexKey key;
 	};
 
 	struct VKCachedPipeline
 	{
 		VkPipeline pipeline;
-		VKShaderCache::CacheIndexKey key;
+		GraphicsPipelineCacheIndexKey key;
 	};
 
 	~VKShaderCache();
@@ -90,9 +118,9 @@ public:
 	VKCachedShaderModule GetFragmentShader(std::string_view shader_code, bool uber);
 	VkShaderModule GetComputeShader(std::string_view shader_code);
 
-	bool HasGraphicsPipeline(const CacheIndexKey& key, bool uber);
-	VKCachedPipeline GetGraphicsPipeline(VkDevice device, const CacheIndexKey& vs_key, const CacheIndexKey& fs_key,
-		const VkGraphicsPipelineCreateInfo& ci, bool uber);
+	bool HasGraphicsPipeline(const GraphicsPipelineCacheIndexKey& key, bool uber);
+	VKCachedPipeline GetGraphicsPipeline(VkDevice device, const ShaderCacheIndexKey& vs_key, const ShaderCacheIndexKey& fs_key,
+		u32 renderpass_key, const VkGraphicsPipelineCreateInfo& ci, bool uber);
 
 	void StartPipelineCompilationAsync(std::shared_ptr<GSCompileJob> job);
 	void ProcessAsyncCompileJobs(); // Process jobs that have finished.
@@ -101,9 +129,8 @@ private:
 	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
 	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
 
-	using CacheIndex = std::unordered_map<CacheIndexKey, CacheIndexData, CacheIndexEntryHasher>;
-	using CacheSet = std::unordered_set<CacheIndexKey, CacheIndexEntryHasher>;
-
+	using ShaderCacheIndex = std::unordered_map<ShaderCacheIndexKey, ShaderCacheIndexData, ShaderCacheIndexKeyHasher>;
+	using GraphicsPipelineCacheSet = std::unordered_set<GraphicsPipelineCacheIndexKey, GraphicsPipelineCacheIndexKeyHasher>;
 
 	VKShaderCache();
 
@@ -124,12 +151,12 @@ private:
 		u32 stage, std::string_view source, bool debug);
 	bool HasShaderSPV(u32 type, std::string_view shader_code, bool uber);
 	std::optional<SPIRVCodeVector> GetShaderSPV(u32 type, std::string_view shader_code, bool uber);
-	std::optional<SPIRVCodeVector> CompileAndAddShaderSPV(const CacheIndexKey& key, std::string_view shader_code, bool uber);
+	std::optional<SPIRVCodeVector> CompileAndAddShaderSPV(const ShaderCacheIndexKey& key, std::string_view shader_code, bool uber);
 	VKCachedShaderModule GetShaderModule(u32 type, std::string_view shader_code, bool uber);
 	void AddShaderSPV(u32 type, std::string_view shader_code, const SPIRVCodeVector& spv,
 		bool uber, bool only_new);
 
-	void AddPipelineKey(const CacheIndexKey& key, bool uber);
+	void AddGraphicsPipelineKey(const GraphicsPipelineCacheIndexKey& key, bool uber);
 
 	static bool InitShadercCompiler();
 
@@ -144,27 +171,15 @@ private:
 		std::string pipeline_cache_filename;
 		std::string pipeline_index_filename;
 
-		CacheIndex shader_index;
-		CacheSet pipeline_index;
-		std::vector<CacheIndexKey> new_pipeline_index;
+		ShaderCacheIndex shader_index;
+		GraphicsPipelineCacheSet pipeline_index;
+		std::vector<GraphicsPipelineCacheIndexKey> new_pipeline_index;
 
 		VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 		bool pipeline_cache_dirty = false;
 	} m_cache_state[2]; // Normal and uber state.
 
 	CacheState& GetCacheState(bool uber) { return m_cache_state[uber ? 1 : 0]; }
-
-	std::FILE* m_index_file = nullptr;
-	std::FILE* m_blob_file = nullptr;
-	std::string m_pipeline_cache_filename;
-	std::string m_pipeline_cache_index_filename;
-	std::FILE* m_pipeline_cache_index_file = nullptr;
-
-	std::FILE* m_uber_index_file = nullptr;
-	std::FILE* m_uber_blob_file = nullptr;
-	std::string m_uber_pipeline_cache_filename;
-	std::string m_uber_pipeline_cache_index_filename;
-	std::FILE* m_uber_pipeline_cache_index_file = nullptr;
 
 	static shaderc_compiler_t m_compiler_sync;
 	static bool m_shaderc_failed;

@@ -656,7 +656,7 @@ void main()
 	#else
 		#define PS_ROV_DEPTH 0
 	#endif
-	#define ZWRITE UBER_DEPTH
+	#define ZWRITE (UBER_DEPTH != UBER_DEPTH_NONE)
 	#define DATE_INIT UBER_DATE_INIT
 #endif // UBER_SHADER
 

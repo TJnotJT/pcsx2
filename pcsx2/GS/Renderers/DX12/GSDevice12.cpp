@@ -5038,7 +5038,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 		// FIXME: Can a copy be avoided?
 		GSHWDrawConfig config2(config);
-		config.blend_multi_pass.UpdateConfig(config2);
+		// config.blend_multi_pass.UpdateConfig(config2); FIXME FIXME
 
 		UpdateHWPipelineSelector(config2);
 
@@ -5049,8 +5049,8 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	// and the alpha pass
 	if (config.alpha_second_pass.enable)
 	{
-		// FIXME: Can the copy be avoided?
-		GSHWDrawConfig config2(config);
+		// FIXME: Can the copy be avoided? FIXME FIXME
+		/*GSHWDrawConfig config2(config);
 
 		if (config2.alpha_second_pass.UpdatePSConstantBuffer(config2.cb_ps))
 			SetPSConstantBuffer(config2.cb_ps);
@@ -5061,7 +5061,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 		SendHWDraw(pipe, config2, draw_rt, draw_ds_as_rt, draw_rt_rov, draw_ds_rov,
 			feedback_rt, feedback_depth, config2.alpha_second_pass.require_one_barrier,
-			config2.alpha_second_pass.require_full_barrier);
+			config2.alpha_second_pass.require_full_barrier);*/
 	}
 
 	if (date_image)

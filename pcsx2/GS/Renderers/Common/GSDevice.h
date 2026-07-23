@@ -1454,30 +1454,6 @@ struct alignas(16) GSHWDrawConfig
 		ColorMaskSelector colormask;
 		DepthStencilSelector depth;
 		float ps_aref;
-
-		void UpdateConfig(GSHWDrawConfig& config) const
-		{
-			pxAssert(enable);
-			config.ps = ps;
-			config.colormask = colormask;
-			config.depth = depth;
-			config.require_full_barrier = require_full_barrier;
-			config.require_one_barrier = require_one_barrier;
-		}
-
-		bool UpdatePSConstantBuffer(PSConstantBuffer& cb_ps) const
-		{
-			pxAssert(enable);
-			if (cb_ps.FogColor_AREF.a != ps_aref)
-			{
-				cb_ps.FogColor_AREF.a = ps_aref;
-				return true;
-			}
-			else
-			{
-				return false;
-			}
-		}
 	};
 	static_assert(sizeof(AlphaPass) == 24, "alpha pass is 24 bytes");
 
@@ -1490,15 +1466,6 @@ struct alignas(16) GSHWDrawConfig
 		u8 no_color1 : 1;
 		u8 blend_hw : 3; // HWBlendType
 		u8 dither : 2;
-
-		void UpdateConfig(GSHWDrawConfig& config) const
-		{
-			pxAssert(enable);
-			config.ps.no_color1 = no_color1;
-			config.ps.blend_hw = blend_hw;
-			config.ps.dither = dither;
-			config.blend = blend;
-		}
 	};
 	static_assert(sizeof(BlendMultiPass) == 8, "blend multi pass is 8 bytes");
 
@@ -1528,6 +1495,113 @@ struct alignas(16) GSHWDrawConfig
 	bool IsBlending()
 	{
 		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending();
+	}
+
+	// Draw pass selectors
+	enum class DrawPass
+	{
+		Main,
+		AlphaSecond,
+		PrimID,
+		Blend,
+	};
+
+	bool GetFullBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return require_full_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_full_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::Blend: return false;
+		}
+	}
+
+	bool GetOneBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return require_one_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::Blend: return false;
+		}
+	}
+
+	const VSSelector& GetVS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return vs;
+			case DrawPass::AlphaSecond: return vs;
+			case DrawPass::Blend: return vs;
+			case DrawPass::PrimID: return vs;
+		}
+	}
+
+	const PSSelector GetPS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return ps;
+			case DrawPass::AlphaSecond: return alpha_second_pass.ps;
+			case DrawPass::Blend:
+			{
+				PSSelector ps_blend = ps;
+				ps_blend.no_color1 = blend_multi_pass.no_color1;
+				ps_blend.blend_hw = blend_multi_pass.blend_hw;
+				ps_blend.dither = blend_multi_pass.dither;
+				return ps_blend;
+			}
+			case DrawPass::PrimID: return ps;
+		}
+	}
+
+	ColorMaskSelector GetColorMask(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return colormask;
+			case DrawPass::AlphaSecond: return alpha_second_pass.colormask;
+			case DrawPass::Blend: return colormask;
+			case DrawPass::PrimID: return GSHWDrawConfig::ColorMaskSelector(1);
+		}
+	}
+
+	DepthStencilSelector GetDepth(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return depth;
+			case DrawPass::AlphaSecond: return alpha_second_pass.depth;
+			case DrawPass::Blend: return depth;
+			case DrawPass::PrimID:
+			{
+				DepthStencilSelector primid_depth = depth;
+				primid_depth.zwe = false;
+				return primid_depth;
+			}
+		}
+	}
+
+	BlendState GetBlend(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::AlphaSecond:
+			case DrawPass::PrimID:
+			case DrawPass::Main:
+				return blend;
+			case DrawPass::Blend:;
+				return blend_multi_pass.blend;
+		}
 	}
 
 	// Dumping

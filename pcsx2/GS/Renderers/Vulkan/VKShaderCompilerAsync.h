@@ -18,11 +18,11 @@ class VKShaderJob : public GSCompileJob
 public:
 	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
 	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
-	using CacheIndexKey = VKShaderCache::CacheIndexKey;
+	using CacheIndexKey = VKShaderCache::ShaderCacheIndexKey;
 
 	VKShaderJob(VkDevice device, shaderc_shader_kind kind, std::string_view shader_code, u64 hash, bool uber)
 		: GSCompileJob(SHADER), m_device(device), m_kind(kind), m_shader_code(shader_code)
-		, m_cache_key(VKShaderCache::GetCacheKey(kind, shader_code)), m_hash(hash), m_uber(uber)
+		, m_cache_key(VKShaderCache::GetShaderCacheKey(kind, shader_code)), m_hash(hash), m_uber(uber)
 	{
 	}
 
@@ -56,23 +56,25 @@ class VKPipelineJob : public GSCompileJob
 public:
 	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
 	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
-	using CacheIndexKey = VKShaderCache::CacheIndexKey;
+	using ShaderCacheIndexKey = VKShaderCache::ShaderCacheIndexKey;
+	using GraphicsPipelineCacheIndexKey = VKShaderCache::GraphicsPipelineCacheIndexKey;
 
 	VKPipelineJob(VkDevice device, VkPipelineCache pipeline_cache,
 		const Vulkan::GraphicsPipelineBuilder& gpb,
-		const CacheIndexKey& vs_cache_key, const CacheIndexKey& fs_cache_key, u64 hash, bool uber)
+		const ShaderCacheIndexKey& vs_cache_key, const ShaderCacheIndexKey& fs_cache_key, u32 renderpass_key, u64 hash, bool uber)
 		: GSCompileJob(PIPELINE), m_device(device), m_pipeline_cache(pipeline_cache)
-		, m_gpb(gpb), m_vs_cache_key(vs_cache_key), m_fs_cache_key(fs_cache_key), m_hash(hash), m_uber(uber)
+		, m_gpb(gpb), m_vs_cache_key(vs_cache_key), m_fs_cache_key(fs_cache_key)
+		, m_renderpass_key(renderpass_key), m_hash(hash), m_uber(uber)
 	{
 	}
 
 	VkDevice GetDevice() const { return m_device; }
 	VkPipelineCache GetPipelineCache() const { return m_pipeline_cache; }
-	const CacheIndexKey& GetVSCacheKey() const { return m_vs_cache_key; }
-	const CacheIndexKey& GetFSCacheKey() const { return m_fs_cache_key; }
-	CacheIndexKey GetPipelineCacheKey() const
+	const ShaderCacheIndexKey& GetVSCacheKey() const { return m_vs_cache_key; }
+	const ShaderCacheIndexKey& GetFSCacheKey() const { return m_fs_cache_key; }
+	GraphicsPipelineCacheIndexKey GetPipelineCacheKey() const
 	{
-		return VKShaderCache::GetGraphicsPipelineCacheKey(m_vs_cache_key, m_fs_cache_key, m_gpb.GetCI());
+		return VKShaderCache::GetGraphicsPipelineCacheKey(m_vs_cache_key, m_fs_cache_key, m_renderpass_key, m_gpb.GetCI());
 	}
 	u64 GetHash() const { return m_hash; }
 	bool IsUber() const { return m_uber; }
@@ -99,8 +101,9 @@ private:
 	VkDevice m_device;
 	VkPipelineCache m_pipeline_cache;
 	Vulkan::GraphicsPipelineBuilder m_gpb;
-	CacheIndexKey m_vs_cache_key;
-	CacheIndexKey m_fs_cache_key;
+	ShaderCacheIndexKey m_vs_cache_key;
+	ShaderCacheIndexKey m_fs_cache_key;
+	u32 m_renderpass_key;
 	u64 m_hash;
 	bool m_uber;
 
@@ -118,7 +121,6 @@ class VKShaderCompilerAsync : public GSShaderCompilerAsync
 public:
 	using SPIRVCodeType = VKShadercWrapper::SPIRVCodeType;
 	using SPIRVCodeVector = VKShadercWrapper::SPIRVCodeVector;
-	using CacheIndexKey = VKShaderCache::CacheIndexKey;
 
 	VKShaderCompilerAsync(u32 num_threads, u32 check_latency_ms, bool debug, bool non_semantic)
 		: GSShaderCompilerAsync(num_threads, check_latency_ms)

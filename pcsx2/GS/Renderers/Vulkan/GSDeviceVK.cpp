@@ -60,6 +60,12 @@ static constexpr std::array<VkBlendOp, 3> VK_BLEND_OPS = { {
 static constexpr std::array<VkCompareOp, 4> VK_COMPARE_OPS = {
 	VK_COMPARE_OP_NEVER, VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_GREATER };
 
+static constexpr VkStencilOpState GetDATEStencilOpState(const bool date_one)
+{
+	return VkStencilOpState { VK_STENCIL_OP_KEEP, date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP,
+	VK_STENCIL_OP_KEEP, VK_COMPARE_OP_EQUAL, 1u, 1u, 1u };
+}
+
 #ifdef ENABLE_OGL_DEBUG
 static u32 s_debug_scope_depth = 0;
 #endif
@@ -1049,7 +1055,7 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 	return true;
 }
 
-VkRenderPass GSDeviceVK::GetRenderPass(VkFormat color_format, VkFormat depth_format, VkAttachmentLoadOp color_load_op,
+GSDeviceVK::VKCachedRenderPass GSDeviceVK::GetRenderPass(VkFormat color_format, VkFormat depth_format, VkAttachmentLoadOp color_load_op,
 	VkAttachmentStoreOp color_store_op, VkAttachmentLoadOp depth_load_op, VkAttachmentStoreOp depth_store_op,
 	VkAttachmentLoadOp stencil_load_op, VkAttachmentStoreOp stencil_store_op, bool color_feedback_loop,
 	bool depth_sampling)
@@ -1066,40 +1072,31 @@ VkRenderPass GSDeviceVK::GetRenderPass(VkFormat color_format, VkFormat depth_for
 	key.color_feedback_loop = color_feedback_loop;
 	key.depth_sampling = depth_sampling;
 
-	auto it = m_render_pass_cache.find(key.key);
+	auto it = m_render_pass_cache.find(key);
 	if (it != m_render_pass_cache.end())
 		return it->second;
 
 	return CreateCachedRenderPass(key);
 }
 
-VkRenderPass GSDeviceVK::GetRenderPassForRestarting(VkRenderPass pass)
+GSDeviceVK::VKCachedRenderPass GSDeviceVK::GetRenderPassForRestarting(VKCachedRenderPass pass)
 {
-	for (const auto& it : m_render_pass_cache)
-	{
-		if (it.second != pass)
-			continue;
+	RenderPassCacheKey modified_key = pass.key;
+	if (modified_key.color_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
+		modified_key.color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+	if (modified_key.depth_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
+		modified_key.depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+	if (modified_key.stencil_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
+		modified_key.stencil_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
 
-		RenderPassCacheKey modified_key;
-		modified_key.key = it.first;
-		if (modified_key.color_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
-			modified_key.color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
-		if (modified_key.depth_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
-			modified_key.depth_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
-		if (modified_key.stencil_load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
-			modified_key.stencil_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+	if (modified_key == pass.key)
+		return pass;
 
-		if (modified_key.key == it.first)
-			return pass;
+	auto fit = m_render_pass_cache.find(modified_key);
+	if (fit != m_render_pass_cache.end())
+		return fit->second;
 
-		auto fit = m_render_pass_cache.find(modified_key.key);
-		if (fit != m_render_pass_cache.end())
-			return fit->second;
-
-		return CreateCachedRenderPass(modified_key);
-	}
-
-	return pass;
+	return CreateCachedRenderPass(modified_key);
 }
 
 VkCommandBuffer GSDeviceVK::GetCurrentInitCommandBuffer()
@@ -1631,7 +1628,7 @@ void GSDeviceVK::DisableDebugUtils()
 	}
 }
 
-VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
+GSDeviceVK::VKCachedRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 {
 	VkAttachmentReference color_reference;
 	VkAttachmentReference* color_reference_ptr = nullptr;
@@ -1745,11 +1742,13 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreateRenderPass failed: ");
-		return VK_NULL_HANDLE;
+		return {};
 	}
 
-	m_render_pass_cache.emplace(key.key, pass);
-	return pass;
+	VKCachedRenderPass cached_pass(pass, key);
+
+	m_render_pass_cache.emplace(key, cached_pass);
+	return cached_pass;
 }
 
 static constexpr std::string_view SPIN_SHADER = R"(
@@ -2938,12 +2937,12 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDeviceVK::Draw(const GSHWDrawConfig& config, int offset, int count)
+void GSDeviceVK::Draw(const PipelineSelector& pipe, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	if (pipe.HasVSExpand())
 	{
-		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
+		const bool vs_indexing = pipe.vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(pipe.vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -2952,9 +2951,9 @@ void GSDeviceVK::Draw(const GSHWDrawConfig& config, int offset, int count)
 	}
 }
 
-void GSDeviceVK::Draw(const GSHWDrawConfig& config)
+void GSDeviceVK::Draw(const PipelineSelector& pipe)
 {
-	Draw(config, 0, m_index.count);
+	Draw(pipe, 0, m_index.count);
 }
 
 VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
@@ -3254,7 +3253,7 @@ void GSDeviceVK::BeginRenderPassForStretchRect(
 	else
 	{
 		// integer formats, etc
-		const VkRenderPass rp = GetRenderPass(dTex->GetVkFormat(), VK_FORMAT_UNDEFINED, load_op,
+		const VKCachedRenderPass rp = GetRenderPass(dTex->GetVkFormat(), VK_FORMAT_UNDEFINED, load_op,
 			VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE);
 		if (load_op == VK_ATTACHMENT_LOAD_OP_CLEAR)
 		{
@@ -4686,6 +4685,38 @@ bool GSDeviceVK::CompileImGuiPipeline()
 	return true;
 }
 
+namespace VKUberShader
+{
+	static constexpr u32 GetNumValidUberPSSelectors()
+	{
+		u32 n_valid = 0;
+		for (u32 i = 0; i < GSDeviceVK::UberPSSelector::MAX_NUM_SELECTORS; i++)
+		{
+			if (GSDeviceVK::UberPSSelector::Decode(i).IsValid())
+				n_valid++;
+		}
+		return n_valid;
+	}
+
+	static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
+
+	template<u32 N>
+	static constexpr std::array<GSDeviceVK::UberPSSelector, N> GetValidUberPSSelectors()
+	{
+		std::array<GSDeviceVK::UberPSSelector, N> valid;
+		u32 n_valid = 0;
+		for (u32 i = 0; i < GSDeviceVK::UberPSSelector::MAX_NUM_SELECTORS; i++)
+		{
+			if (GSDeviceVK::UberPSSelector::Decode(i).IsValid())
+				valid[n_valid++] = GSDeviceVK::UberPSSelector::Decode(i);
+		}
+		return valid;
+	}
+
+	static constexpr std::array<GSDeviceVK::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS>
+		valid_uber_ps_selectors = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS>();
+}
+
 bool GSDeviceVK::CompileUberTFXPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
@@ -4702,26 +4733,27 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 			std::memset(&selector, 0, sizeof(selector));
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
-				for (const GSHWDrawConfig::UberPSSelector& ps_sel : GSHWDrawConfig::UberPSSelector::GetValidSelectors())
+				for (const GSDeviceVK::UberPSSelector& ps_sel : VKUberShader::valid_uber_ps_selectors)
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
-						for (u32 stencil = 0; stencil < 2; stencil++)
+						for (u32 rt_i = 0; rt_i < static_cast<u32>(TFX_RT::Count); rt_i++)
 						{
-							if (stencil && !ps_sel.CompatibleWithStencil())
-								continue;
-							for (u32 colclip_hw = 0; colclip_hw < 2; colclip_hw++)
+							for (u32 ds_i = 0; ds_i < static_cast<u32>(TFX_DS::Count); ds_i++)
 							{
-								if (colclip_hw && !ps_sel.CompatibleWithColclipHW())
+								TFX_RT rt = static_cast<TFX_RT>(rt_i);
+								TFX_DS ds = static_cast<TFX_DS>(ds_i);
+
+								if (!ps_sel.CompatibleWithAttachments(rt, ds))
 									continue;
-								selector.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(vs_sel);
+
+								selector.uber_shader = true;
+								selector.uber_vs = static_cast<UberVSSelector>(vs_sel);
 								selector.uber_ps = ps_sel;
 								selector.topology = topology;
 
-								selector.rt = ps_sel.HasColor() && !ps_sel.HasColorROV();
-								selector.ds = ps_sel.HasDepth() && !ps_sel.HasDepthROV();
-								selector.uber_stencil = stencil;
-								selector.uber_colclip_hw = colclip_hw;
+								selector.rt = rt;
+								selector.ds = ds;
 
 								selector.feedback_loop_flags = FeedbackLoopFlag_None;
 								if (ps_sel.HasColorFeedback())
@@ -4729,13 +4761,10 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 								if (ps_sel.HasDepthFeedback())
 									selector.feedback_loop_flags |= (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth);
 
-								if (selector.uber_ps.key == 10 && (u32)selector.uber_vs == 0 && selector.key == 46)
-									Console.Warning("ps=%08X vs=%08x key=%08x %016llX", selector.uber_ps.key, (u32)selector.uber_vs, selector.key, PipelineSelectorHash()(selector));
-
 								if (stage == 0)
 								{
 									// Start compilation
-									const VkPipeline pipeline = GetTFXPipeline(selector, true, COMPILE_ASYNC);
+									const VkPipeline pipeline = GetTFXPipeline(selector, COMPILE_ASYNC);
 									if (!pipeline && !m_tfx_pipelines_async.contains(selector))
 										return false; // failed
 								}
@@ -5064,7 +5093,7 @@ static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSHWD
 	Vulkan::SetObjectName(device, mod, "TFX Vertex %08X", static_cast<u32>(sel.key));
 }
 
-static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSHWDrawConfig::UberVSSelector& sel)
+static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSDeviceVK::UberVSSelector& sel)
 {
 	Vulkan::SetObjectName(device, mod, "TFX Uber Vertex %08X", static_cast<u32>(sel));
 }
@@ -5074,7 +5103,7 @@ static void SetFragmentShaderName(VkDevice device, VkShaderModule mod, const GSH
 	Vulkan::SetObjectName(device, mod, "TFX Fragment %016" PRIX64 "_%016" PRIX64, sel.key_hi, sel.key_lo);
 }
 
-static void SetFragmentShaderName(VkDevice device, VkShaderModule mod, const GSHWDrawConfig::UberPSSelector& sel)
+static void SetFragmentShaderName(VkDevice device, VkShaderModule mod, const GSDeviceVK::UberPSSelector& sel)
 {
 	Vulkan::SetObjectName(device, mod, "TFX Uber Fragment %08X", static_cast<u32>(sel.key));
 }
@@ -5170,7 +5199,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::V
 	return mod;
 }
 
-GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel)
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(UberVSSelector sel)
 {
 	if (m_tfx_uber_vertex_shaders[static_cast<u32>(sel)].module != VK_NULL_HANDLE)
 		return m_tfx_uber_vertex_shaders[static_cast<u32>(sel)];
@@ -5187,7 +5216,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(GSHWDrawConfi
 
 	// Do the static macros.
 	AddMacro(ss, "UBER_SHADER", 1);
-	AddMacro(ss, "UBER_VS_EXPAND_ENABLE", static_cast<u32>(sel == GSHWDrawConfig::UberVSSelector::VS_EXPAND));
+	AddMacro(ss, "UBER_VS_EXPAND_ENABLE", static_cast<u32>(sel == UberVSSelector::VSExpand));
 
 	ss << source;
 
@@ -5313,7 +5342,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawC
 	return mod;
 }
 
-GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const GSHWDrawConfig::UberPSSelector& sel,bool async)
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const UberPSSelector& sel,bool async)
 {
 	// Check async results first.
 	if (std::shared_ptr<VKShaderJob> async_job =
@@ -5368,7 +5397,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const GSHWD
 	return mod;
 }
 
-GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool uber, bool async)
+GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p, bool async)
 {
 	static constexpr std::array<VkPrimitiveTopology, 3> topology_lookup = {{
 		VK_PRIMITIVE_TOPOLOGY_POINT_LIST, // Point
@@ -5385,8 +5414,8 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		pps.no_color1 = true;
 	}
 
-	VKShaderModuleOrJob vs = uber ? GetTFXUberVertexShader(p.uber_vs) : GetTFXVertexShader(p.vs, async);
-	VKShaderModuleOrJob fs = uber ? GetTFXUberFragmentShader(p.uber_ps, async) : GetTFXFragmentShader(pps, async);
+	VKShaderModuleOrJob vs = p.uber_shader ? GetTFXUberVertexShader(p.uber_vs) : GetTFXVertexShader(p.vs, async);
+	VKShaderModuleOrJob fs = p.uber_shader ? GetTFXUberFragmentShader(p.uber_ps, async) : GetTFXFragmentShader(pps, async);
 
 	if (IsNullShaderModule(vs) || IsNullShaderModule(fs))
 		return {}; // Failed
@@ -5394,48 +5423,31 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	if (!async && !(IsShaderModule(vs) && IsShaderModule(fs)))
 		return {}; // Not allowed to do async.
 
-	VKShaderCache::CacheIndexKey vs_key = IsShaderModule(vs) ? GetShaderModule(vs).key : GetShaderJob(vs)->GetCacheKey();
-	VKShaderCache::CacheIndexKey fs_key = IsShaderModule(fs) ? GetShaderModule(fs).key : GetShaderJob(fs)->GetCacheKey();
+	VKShaderCache::ShaderCacheIndexKey vs_key = IsShaderModule(vs) ? GetShaderModule(vs).key : GetShaderJob(vs)->GetCacheKey();
+	VKShaderCache::ShaderCacheIndexKey fs_key = IsShaderModule(fs) ? GetShaderModule(fs).key : GetShaderJob(fs)->GetCacheKey();
 
 	Vulkan::GraphicsPipelineBuilder gpb;
 	SetPipelineProvokingVertex(m_features, gpb);
 
 	// Common state
 	gpb.SetPipelineLayout(m_tfx_pipeline_layout);
-	if (!uber)
+
+	VKCachedRenderPass rp;
+
+	if (IsDATEModePrimIDInit(p.HasDATEPrimIDInit()))
 	{
-		if (IsDATEModePrimIDInit(p.ps.date))
-		{
-			// DATE image prepass
-			gpb.SetRenderPass(m_primid_image_setup_render_passes[p.ds][0], 0);
-		}
-		else
-		{
-			gpb.SetRenderPass(
-				GetTFXRenderPass(p.rt, p.ds, p.ps.colclip_hw, p.dss.date,
-					p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
-					p.rt ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-					p.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
-				0);
-		}
+		// DATE image prepass
+		rp = m_primid_image_setup_render_passes[p.HasDS()][0];
 	}
 	else
 	{
-		if (p.uber_ps.date_init)
-		{
-			// DATE image prepass
-			gpb.SetRenderPass(m_primid_image_setup_render_passes[p.ds][0], 0);
-		}
-		else
-		{
-			gpb.SetRenderPass(
-				GetTFXRenderPass(p.rt, p.ds, p.uber_colclip_hw, p.uber_stencil,
-					p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
-					p.rt ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-					p.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
-				0);
-		}
+		rp = GetTFXRenderPass(p.HasRT(), p.HasDS(), p.HasColclipHW(), p.HasStencil(),
+			p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
+			p.HasRT() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			p.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 	}
+	gpb.SetRenderPass(rp, 0);
+
 	gpb.SetPrimitiveTopology(topology_lookup[p.topology]);
 	gpb.SetRasterizationState(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	if (m_optional_extensions.vk_ext_line_rasterization &&
@@ -5446,7 +5458,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	gpb.SetDynamicViewportAndScissorState();
 	gpb.AddDynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS);
 	gpb.AddDynamicState(VK_DYNAMIC_STATE_LINE_WIDTH);
-	if (uber)
+	if (p.uber_shader)
 	{
 		gpb.AddDynamicState(VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT);
 		gpb.AddDynamicState(VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT);
@@ -5468,9 +5480,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		gpb.SetFragmentShader(GetShaderModule(fs).module);
 
 	// IA
-	if (uber ?
-		(p.uber_vs == GSHWDrawConfig::UberVSSelector::INPUT_ASSEMBLY) :
-		(p.vs.expand == GSHWDrawConfig::VSExpand::None))
+	if (!p.HasVSExpand())
 	{
 		gpb.AddVertexBuffer(0, sizeof(GSVertex));
 		gpb.AddVertexAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, 0); // ST
@@ -5486,13 +5496,12 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	gpb.SetDepthState((p.dss.ztst != ZTST_ALWAYS || p.dss.zwe), p.dss.zwe, VK_COMPARE_OPS[p.dss.ztst]);
 	if (p.dss.date)
 	{
-		const VkStencilOpState sos{VK_STENCIL_OP_KEEP, p.dss.date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP,
-			VK_STENCIL_OP_KEEP, VK_COMPARE_OP_EQUAL, 1u, 1u, 1u};
+		const VkStencilOpState sos = GetDATEStencilOpState(p.dss.date_one);
 		gpb.SetStencilState(true, sos, sos);
 	}
 
 	// Blending
-	if (IsDATEModePrimIDInit(p.ps.date))
+	if (p.HasDATEPrimIDInit())
 	{
 		// image DATE prepass
 		gpb.SetBlendAttachment(0, true, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE,
@@ -5516,14 +5525,14 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	if (m_features.framebuffer_fetch && p.IsRTFeedbackLoop())
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
-	const VKShaderCache::CacheIndexKey pipeline_key = (IsShaderModule(vs) && IsShaderModule(fs))
-		? g_vulkan_shader_cache->GetGraphicsPipelineCacheKey(vs_key, fs_key, gpb.GetCI())
-		: VKShaderCache::CacheIndexKey{};
+	const VKShaderCache::GraphicsPipelineCacheIndexKey pipeline_key = (IsShaderModule(vs) && IsShaderModule(fs))
+		? g_vulkan_shader_cache->GetGraphicsPipelineCacheKey(vs_key, fs_key, rp.key.key, gpb.GetCI())
+		: VKShaderCache::GraphicsPipelineCacheIndexKey{};
 	const u64 pipeline_hash = PipelineSelectorHash()(p);
 
 	// Handle async compilation if requested.
 	if (async && (!IsShaderModule(vs) || !IsShaderModule(fs) ||
-		!g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, uber)))
+		!g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, p.uber_shader)))
 	{
 		const auto it = m_tfx_pipelines_async.find(p);
 		if (it != m_tfx_pipelines_async.end())
@@ -5534,8 +5543,8 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		{
 			// Submit pipeline async compilation.
 			std::shared_ptr<VKPipelineJob> job = std::make_shared<VKPipelineJob>(
-				m_device, g_vulkan_shader_cache->GetPipelineCache(true, uber),
-				gpb, vs_key, fs_key, pipeline_hash, uber);
+				m_device, g_vulkan_shader_cache->GetPipelineCache(true, p.uber_shader),
+				gpb, vs_key, fs_key, rp.key.key, pipeline_hash, p.uber_shader);
 
 			if (IsShaderJob(vs))
 				job->SetVSJob(GetShaderJob(vs));
@@ -5550,16 +5559,18 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		}
 	}
 
-	if (uber && !g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, uber))
+	if (p.uber_shader && !g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, p.uber_shader))
 	{
+		bool valid = p.uber_ps.IsValid();
 		Console.Warning("Warning: Creating an uber pipeline %016" PRIX64 " synchronously!", pipeline_hash);
 		// Console.Warning("ps=%08X vs=%08x key=%08x", p.uber_ps.key, (u32)p.uber_vs, p.key); // FIXME: DELETE AFTER DEBUGGING
 	}
 
-	VKCachedPipeline pipeline = g_vulkan_shader_cache->GetGraphicsPipeline(m_device, vs_key, fs_key, gpb.GetCI(), uber);
+	VKCachedPipeline pipeline = g_vulkan_shader_cache->GetGraphicsPipeline(m_device, vs_key, fs_key, rp.key.key,
+		gpb.GetCI(), p.uber_shader);
 	if (pipeline.pipeline)
 	{
-		if (uber)
+		if (p.uber_shader)
 			SetUberPipelineName(m_device, pipeline.pipeline, p);
 		else
 			SetPipelineName(m_device, pipeline.pipeline, p);
@@ -5568,7 +5579,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	return pipeline;
 }
 
-VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool async)
+VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool async)
 {
 	// Check async results first.
 	if (std::shared_ptr<VKPipelineJob> async_job =
@@ -5581,7 +5592,7 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool
 	if (it != m_tfx_pipelines.end())
 		return it->second.pipeline;
 
-	VKPipelineOrJob pipeline = CreateTFXPipeline(p, uber, async);
+	VKPipelineOrJob pipeline = CreateTFXPipeline(p, async);
 
 	if (IsPipelineJob(pipeline))
 		return VK_NULL_HANDLE; // Just started compiling
@@ -5590,9 +5601,9 @@ VkPipeline GSDeviceVK::GetTFXPipeline(const PipelineSelector& p, bool uber, bool
 	return GetPipeline(pipeline).pipeline;
 }
 
-bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p, bool uber)
+bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p)
 {
-	VkPipeline pipeline = GetTFXPipeline(p, uber);
+	VkPipeline pipeline = GetTFXPipeline(p);
 
 	if (pipeline == VK_NULL_HANDLE)
 		return false;
@@ -5605,7 +5616,7 @@ bool GSDeviceVK::BindDrawPipeline(const PipelineSelector& p, bool uber)
 void GSDeviceVK::InitializeState()
 {
 	m_current_framebuffer = VK_NULL_HANDLE;
-	m_current_render_pass = VK_NULL_HANDLE;
+	m_current_render_pass = VKCachedRenderPass();
 
 	for (u32 i = 0; i < NUM_TFX_TEXTURES; i++)
 		m_tfx_textures[i] = m_null_texture.get();
@@ -5685,7 +5696,7 @@ void GSDeviceVK::ExecuteCommandBufferAndRestartRenderPass(bool wait_for_completi
 {
 	Console.Warning("VK: Executing command buffer due to '%s'", reason);
 
-	const VkRenderPass render_pass = m_current_render_pass;
+	const VKCachedRenderPass render_pass = m_current_render_pass;
 	const GSVector4i render_pass_area = m_current_render_pass_area;
 	const GSVector4i scissor = m_scissor;
 	GSTexture* const current_rt = m_current_render_target;
@@ -5987,7 +5998,7 @@ bool GSDeviceVK::InRenderPass()
 	return m_current_render_pass != VK_NULL_HANDLE;
 }
 
-void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
+void GSDeviceVK::BeginRenderPass(VKCachedRenderPass rp, const GSVector4i& rect)
 {
 	if (m_current_render_pass != VK_NULL_HANDLE)
 		EndRenderPass();
@@ -6003,9 +6014,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
 	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count)
+void GSDeviceVK::BeginClearRenderPass(VKCachedRenderPass rp, const GSVector4i& rect, const VkClearValue* cv, u32 cv_count)
 {
-	if (m_current_render_pass != VK_NULL_HANDLE)
+	if (!m_current_render_pass.IsNull())
 		EndRenderPass();
 
 	m_current_render_pass = rp;
@@ -6018,14 +6029,14 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
 	vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, u32 clear_color)
+void GSDeviceVK::BeginClearRenderPass(VKCachedRenderPass rp, const GSVector4i& rect, u32 clear_color)
 {
 	alignas(16) VkClearValue cv;
 	GSVector4::store<true>((void*)cv.color.float32, GSVector4::unorm8(clear_color));
 	BeginClearRenderPass(rp, rect, &cv, 1);
 }
 
-void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, float depth, u8 stencil)
+void GSDeviceVK::BeginClearRenderPass(VKCachedRenderPass rp, const GSVector4i& rect, float depth, u8 stencil)
 {
 	VkClearValue cv;
 	cv.depthStencil.depth = depth;
@@ -6035,10 +6046,10 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, f
 
 void GSDeviceVK::EndRenderPass()
 {
-	if (m_current_render_pass == VK_NULL_HANDLE)
+	if (m_current_render_pass.IsNull())
 		return;
 
-	m_current_render_pass = VK_NULL_HANDLE;
+	m_current_render_pass = {};
 	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
 
 	vkCmdEndRenderPass(GetCurrentCommandBuffer());
@@ -6303,9 +6314,8 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 		{
 			if (m_uber_dynamic_state.dss.date)
 			{
-				vkCmdSetStencilOp(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK,
-					VK_STENCIL_OP_KEEP, m_uber_dynamic_state.dss.date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP,
-					VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS);
+				const VkStencilOpState& sos = GetDATEStencilOpState(m_uber_dynamic_state.dss.date_one);
+				vkCmdSetStencilOp(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, sos.failOp, sos.passOp, sos.depthFailOp, sos.compareOp);
 				vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
 				vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
 				vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
@@ -6475,17 +6485,17 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, pipe);
+	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::PrimID, pipe);
 	pipe.dss.zwe = false;
 	pipe.cms.wrgba = 0;
 	pipe.bs = {};
 	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-	pipe.rt = true;
+	pipe.rt = TFX_RT::PrimID;
 	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
 	pipe.ps.no_color = false;
 	pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(pipe, false))
-		Draw(config);
+	if (BindDrawPipeline(pipe))
+		Draw(pipe);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
@@ -6500,7 +6510,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	return image;
 }
 
-bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config_)
+bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 {
 	// Note: this function does not catch certain pipeline combinations, such as those
 	// created by render pass restart optimizations, DATE setup, colclip resolve, etc.
@@ -6508,40 +6518,31 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config_)
 
 	bool compiling_async = false;
 
-	GSHWDrawConfig config = config_;
 	PipelineSelector selector{};
 
-	UpdateHWPipelineSelector(config, selector);
+	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, selector);
 	if (!m_tfx_pipelines.contains(selector))
 	{
-		GetTFXPipeline(selector, false, true);
+		GetTFXPipeline(selector, true);
 		compiling_async = true;
 	}
 
 	if (config.alpha_second_pass.enable)
 	{
-		// FIXME: Code duplication with RenderHW
-		m_pipeline_selector.ps = config.alpha_second_pass.ps;
-		m_pipeline_selector.cms = config.alpha_second_pass.colormask;
-		m_pipeline_selector.dss = config.alpha_second_pass.depth;
-		m_pipeline_selector.bs = config.blend;
+		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::AlphaSecond, selector);
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GetTFXPipeline(m_pipeline_selector, false, true);
+			GetTFXPipeline(m_pipeline_selector, true);
 			compiling_async = true;
 		}
 	}
 
 	if (config.blend_multi_pass.enable)
 	{
-		// FIXME: Code duplication with RenderHW
-		m_pipeline_selector.bs = config.blend_multi_pass.blend;
-		m_pipeline_selector.ps.no_color1 = config.blend_multi_pass.no_color1;
-		m_pipeline_selector.ps.blend_hw = config.blend_multi_pass.blend_hw;
-		m_pipeline_selector.ps.dither = config.blend_multi_pass.dither;
+		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Blend, selector);
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
-			GetTFXPipeline(m_pipeline_selector, false, true);
+			GetTFXPipeline(m_pipeline_selector, true);
 			compiling_async = true;
 		}
 	}
@@ -6601,7 +6602,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// figure out the pipeline
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, pipe);
+	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, pipe);
 
 	// now blit the colclip texture back to the original target
 	if (colclip_rt)
@@ -6625,23 +6626,23 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 				if (draw_ds)
 					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
 
-				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginClearRenderPass(GetTFXRenderPass(true, pipe.HasDS(), false, false, pipe.IsRTFeedbackLoop(),
 										 pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-										 pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+										 pipe.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect(), cvs, cv_count);
 				draw_rt->SetState(GSTexture::State::Dirty);
 			}
 			else
 			{
-				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginRenderPass(GetTFXRenderPass(true, pipe.HasDS(), false, false, pipe.IsRTFeedbackLoop(),
 									pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_LOAD,
-									pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+									pipe.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect());
 			}
 
 			const GSVector4 drawareaf = GSVector4(config.colclip_update_area);
 			const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
-			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+			SetPipeline(m_colclip_finish_pipelines[pipe.HasDS()][pipe.IsRTFeedbackLoop()]);
 			SetUtilityTexture(colclip_rt, m_point_sampler);
 			DrawStretchRect(sRect, drawareaf, rtsize);
 
@@ -6653,8 +6654,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		}
 		else
 		{
-			// FIXME: Will break with uber shader.
-			pipe.ps.colclip_hw = 1;
+			config.ps.colclip_hw = true;
+			UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, pipe);
 			draw_rt = colclip_rt;
 		}
 	}
@@ -6684,7 +6685,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	}
 
 	// Switch to colclip target for colclip hw rendering
-	if (pipe.ps.colclip_hw)
+	if (pipe.HasColclipHW())
 	{
 		if (!colclip_rt)
 		{
@@ -6750,13 +6751,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
-			m_pipeline_selector.rt = true;
+			m_pipeline_selector.rt = TFX_RT::Color;
 		}
 		else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
 			draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 		{
 			draw_ds = m_current_depth_target;
-			m_pipeline_selector.ds = true;
+			m_pipeline_selector.ds = TFX_DS::Depth;
 		}
 
 		// Prefer keeping feedback loop enabled, that way we're not constantly restarting render passes
@@ -6856,14 +6857,14 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		const VkAttachmentLoadOp rt_op = GetLoadOpForTexture(draw_rt);
 		const VkAttachmentLoadOp ds_op = GetLoadOpForTexture(draw_ds);
-		const VkRenderPass rp = GetTFXRenderPass(pipe.rt, pipe.ds, pipe.ps.colclip_hw,
+		const VKCachedRenderPass rp = GetTFXRenderPass(pipe.HasRT(), pipe.HasDS(), pipe.HasColclipHW(),
 			config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil, pipe.IsRTFeedbackLoop(),
 			pipe.IsTestingAndSamplingDepth(), rt_op, ds_op);
 		const bool is_clearing_rt = (rt_op == VK_ATTACHMENT_LOAD_OP_CLEAR || ds_op == VK_ATTACHMENT_LOAD_OP_CLEAR);
 
 		// Only draw to the active area of the colclip hw target. Except when depth is cleared, we need to use the full
 		// buffer size, otherwise it'll only clear the draw part of the depth buffer.
-		const GSVector4i render_area = (pipe.ps.colclip_hw && (config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) && ds_op != VK_ATTACHMENT_LOAD_OP_CLEAR)
+		const GSVector4i render_area = (pipe.HasColclipHW() && (config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) && ds_op != VK_ATTACHMENT_LOAD_OP_CLEAR)
 		                             ? config.drawarea
 		                             : GSVector4i::loadh(rtsize);
 
@@ -6875,7 +6876,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			if (draw_rt)
 			{
 				GSVector4 clear_color = draw_rt->GetClearForFormat();
-				if (pipe.ps.colclip_hw)
+				if (pipe.HasColclipHW())
 				{
 					// Denormalize clear color for hw colclip.
 					clear_color *= GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
@@ -6907,7 +6908,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		OMSetRenderTargets(draw_rt, draw_ds, GSVector4i::loadh(rtsize), static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
 		SetUtilityTexture(static_cast<GSTextureVK*>(config.rt), m_point_sampler);
-		SetPipeline(m_colclip_setup_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+		SetPipeline(m_colclip_setup_pipelines[pipe.HasDS()][pipe.IsRTFeedbackLoop()]);
 
 		const GSVector4 drawareaf = GSVector4((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ? GSVector4i::loadh(rtsize) : config.drawarea);
 		const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
@@ -6922,46 +6923,39 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	// now we can do the actual draw
-	if (BindDrawPipeline(pipe, config.uber_shader))
-		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-			config.require_one_barrier, config.require_full_barrier);
+	if (BindDrawPipeline(pipe))
+		SendHWDraw(config, GSHWDrawConfig::DrawPass::Main,
+			pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
 
 	// blend second pass
 	if (config.blend_multi_pass.enable)
 	{
 		if (config.blend_multi_pass.blend.constant_enable)
 			SetBlendConstants(config.blend_multi_pass.blend.constant);
-
-		// FIXME: Can a copy be avoided?
-		GSHWDrawConfig config2(config);
-		config.blend_multi_pass.UpdateConfig(config2);
-
-		UpdateHWPipelineSelector(config2, pipe, true);
-
-		if (BindDrawPipeline(pipe, config.uber_shader))
+		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Blend, pipe);
+		if (BindDrawPipeline(pipe))
 		{
 			// TODO: This probably should have barriers, in case we want to use it conditionally.
-			Draw(config2);
+			Draw(pipe);
 		}
 	}
 
 	// and the alpha pass
 	if (config.alpha_second_pass.enable)
 	{
-		// FIXME: Can the copy be avoided?
-		GSHWDrawConfig config2(config);
-
-		if (config2.alpha_second_pass.UpdatePSConstantBuffer(config2.cb_ps))
-			SetPSConstantBuffer(config2.cb_ps);
-
-		config.alpha_second_pass.UpdateConfig(config2);
-
-		UpdateHWPipelineSelector(config2, pipe, true);
-		
-		if (BindDrawPipeline(pipe, config.uber_shader))
+		// cbuffer will definitely be dirty if aref changes, no need to check it
+		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
 		{
-			SendHWDraw(config2, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-				config2.require_one_barrier, config2.require_full_barrier);
+			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
+			SetPSConstantBuffer(config.cb_ps);
+		}
+
+		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::AlphaSecond, pipe, true);
+		
+		if (BindDrawPipeline(pipe))
+		{
+			SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond,
+				pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
 		}
 	}
 
@@ -6996,23 +6990,23 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 				if (draw_ds)
 					cvs[cv_count++].depthStencil = {draw_ds->GetClearDepth(), 1};
 
-				BeginClearRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginClearRenderPass(GetTFXRenderPass(true, pipe.HasDS(), false, false, pipe.IsRTFeedbackLoop(),
 										 pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_CLEAR,
-										 pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+										 pipe.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect(), cvs, cv_count);
 				draw_rt->SetState(GSTexture::State::Dirty);
 			}
 			else
 			{
-				BeginRenderPass(GetTFXRenderPass(true, pipe.ds, false, false, pipe.IsRTFeedbackLoop(),
+				BeginRenderPass(GetTFXRenderPass(true, pipe.HasDS(), false, false, pipe.IsRTFeedbackLoop(),
 									pipe.IsTestingAndSamplingDepth(), VK_ATTACHMENT_LOAD_OP_LOAD,
-									pipe.ds ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
+									pipe.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE),
 					draw_rt->GetRect());
 			}
 
 			const GSVector4 drawareaf = GSVector4(config.colclip_update_area);
 			const GSVector4 sRect(drawareaf / GSVector4(rtsize).xyxy());
-			SetPipeline(m_colclip_finish_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
+			SetPipeline(m_colclip_finish_pipelines[pipe.HasDS()][pipe.IsRTFeedbackLoop()]);
 			SetUtilityTexture(colclip_rt, m_point_sampler);
 			DrawStretchRect(sRect, drawareaf, rtsize);
 
@@ -7024,110 +7018,141 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	config.colclip_mode = GSHWDrawConfig::ColClipMode::NoModify;
 }
 
-void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe, bool preserve_feedback_flags)
+void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, PipelineSelector& pipe,
+	bool preserve_feedback_flags)
 {
-	if (!config.uber_shader)
+	const GSHWDrawConfig::VSSelector vs = config.GetVS(pass);
+	const GSHWDrawConfig::PSSelector ps = config.GetPS(pass);
+	const GSHWDrawConfig::ColorMaskSelector cms = config.GetColorMask(pass);
+	const GSHWDrawConfig::DepthStencilSelector dss = config.GetDepth(pass);
+	const GSHWDrawConfig::BlendState bs = config.GetBlend(pass);
+	const bool require_one_barrier = config.GetOneBarrier(pass);
+	const bool require_full_barrier = config.GetFullBarrier(pass);
+
+	// RT setup (common to uber and non-uber)
+	pipe.rt = TFX_RT::None;
+	if (config.rt != nullptr && !ps.HasColorROV())
 	{
-		pipe.vs.key = config.vs.key;
-		pipe.ps.key_hi = config.ps.key_hi;
-		pipe.ps.key_lo = config.ps.key_lo;
-		pipe.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
-		pipe.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : config.blend.key;
-		pipe.bs.constant = 0; // don't dupe states with different alpha values
-		pipe.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
-		pipe.topology = static_cast<u32>(config.topology);
-		pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
-		pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-
-		pipe.line_width = config.line_expand;
-
-		if (!preserve_feedback_flags)
-		{
-			pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-			if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
-			{
-				if (config.IsFeedbackLoopRT(config.ps))
-					pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
-
-				if (config.IsFeedbackLoopDepth(config.ps))
-					pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
-			}
-			if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
-			{
-				pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
-			}
-		}
-
-		// enable point size in the vertex shader if we're rendering points regardless of upscaling.
-		pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
-
-		m_uber_dynamic_state.enabled = false;
+		if (IsDATEModePrimIDInit(ps.date))
+			pipe.rt = TFX_RT::PrimID;
+		else if (ps.colclip_hw)
+			pipe.rt = TFX_RT::ColclipHW;
+		else
+			pipe.rt = TFX_RT::Color;
 	}
-	else
+
+	// RT setup (common to uber and non-uber)
+	pipe.ds = TFX_DS::None;
+	if (config.ds != nullptr && !ps.HasDepthROV())
 	{
-		// Uber shader
-		std::memset(&pipe, 0, sizeof(pipe));
-		pipe.topology = static_cast<u32>(config.topology);
+		if (dss.date)
+			pipe.ds = TFX_DS::DepthStencil;
+		else
+			pipe.ds = TFX_DS::Depth;
+	}
+
+	pipe.vs.key = vs.key;
+	pipe.ps.key_hi = ps.key_hi;
+	pipe.ps.key_lo = ps.key_lo;
+	pipe.dss.key = ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : dss.key;
+	pipe.bs.key = ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : bs.key;
+	pipe.bs.constant = 0; // don't dupe states with different alpha values
+	pipe.cms.key = ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : cms.key;
+	pipe.topology = static_cast<u32>(config.topology);
+
+	pipe.line_width = config.line_expand;
+
+	// enable point size in the vertex shader if we're rendering points regardless of upscaling.
+	pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
+
+	m_uber_dynamic_state.enabled = false;
+
+	if (!preserve_feedback_flags)
+	{
+		pipe.feedback_loop_flags = FeedbackLoopFlag_None;
+		if (m_features.texture_barrier && (require_one_barrier || require_full_barrier))
+		{
+			if (config.IsFeedbackLoopRT(ps))
+				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
+
+			if (config.IsFeedbackLoopDepth(ps))
+				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
+		}
+		if (pipe.HasDS() && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
+		{
+			pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
+		}
+	}
+
+	if (config.uber_shader)
+	{
+		pipe.uber_shader = true;
 
 		if (!m_uber_dynamic_state.enabled)
 		{
+			// Refresh dynamic state if we move from non-uber to uber.
 			m_dirty_flags |= DIRTY_TFX_UBER_STATE;
 			m_uber_dynamic_state.enabled = true;
 		}
-		pipe.uber_vs = (config.vs.expand != GSHWDrawConfig::VSExpand::None) ?
-			GSHWDrawConfig::UberVSSelector::VS_EXPAND :
-			GSHWDrawConfig::UberVSSelector::INPUT_ASSEMBLY;
 
+		// Uber VS
+		pipe.uber_vs = (pipe.vs.expand != GSHWDrawConfig::VSExpand::None) ?
+			UberVSSelector::VSExpand : UberVSSelector::InputAssembly;
+
+		// Uber PS color
 		pipe.uber_ps = {};
-		if (config.ps.HasColorROV())
-			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::ROV;
-		else if (config.IsFeedbackLoopRT(config.ps))
-			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::FEEDBACK;
-		else if (config.rt)
-			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::STANDARD;
+		if (pipe.ps.HasColorROV())
+			pipe.uber_ps.color = UberPSSelector::Color::ROV;
+		else if (pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT)
+			pipe.uber_ps.color = UberPSSelector::Color::Feedback;
+		else if (pipe.HasRT())
+			pipe.uber_ps.color = UberPSSelector::Color::Standard;
 		else
-			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::NONE;
+			pipe.uber_ps.color = UberPSSelector::Color::None;
 
-		if (config.ps.HasDepthROV())
-			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::ROV;
-		else if (config.IsFeedbackLoopDepth(config.ps))
-			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::FEEDBACK;
-		else if (config.ds)
-			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::STANDARD;
+		// Uber PS depth
+		if (pipe.ps.HasDepthROV())
+			pipe.uber_ps.depth = UberPSSelector::Depth::ROV;
+		else if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth))
+			pipe.uber_ps.depth = UberPSSelector::Depth::Feedback;
+		else if (pipe.HasDS())
+			pipe.uber_ps.depth = UberPSSelector::Depth::Standard;
 		else
-			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::NONE;
+			pipe.uber_ps.depth = UberPSSelector::Depth::None;
 
 		pipe.uber_ps.color1 = !config.ps.no_color1;
+		pipe.uber_ps.date_init = IsDATEModePrimIDInit(config.ps.date);
 
 		pxAssert(pipe.uber_ps.IsValid());
 
-		pipe.uber_stencil = pipe.dss.date != 0;
-		pipe.uber_colclip_hw = pipe.ps.colclip_hw != 0;
-
-		pipe.rt = pipe.uber_ps.HasColor() && !pipe.uber_ps.HasColorROV();
-		pipe.ds = pipe.uber_ps.HasDepth() && !pipe.uber_ps.HasDepthROV();
-
 		if (!preserve_feedback_flags)
 		{
-			pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-			if (pipe.uber_ps.HasColorFeedback())
-				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
-			if (pipe.uber_ps.HasDepthFeedback())
+			if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth))
 				pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
 		}
 
 		// Get state that we can set dynamically in VK.
-		GSHWDrawConfig::DepthStencilSelector dss =
-			config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth;
-		GSHWDrawConfig::BlendState bs = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState() : config.blend;
-		GSHWDrawConfig::ColorMaskSelector cms =
-			config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask;
-		SetUberDynamicState(dss, bs, cms, IsDATEModePrimIDInit(pipe.dss.date));
+		SetUberDynamicState(pipe.dss, pipe.bs, pipe.cms, IsDATEModePrimIDInit(pipe.ps.date));
 
 		// Get the state for dynamic branching in the VS/PS.
 		GSHWDrawConfig::ShaderPushConstants pc{}; // FIXME: jank
-		GSHWDrawConfig::GetUberShaderSelector(config.vs, config.ps, pc);
+		GSHWDrawConfig::GetUberShaderSelector(pipe.vs, pipe.ps, pc);
 		SetShaderPushConstants(pc);
+
+		// Clear the state we don't need for uber shader.
+		pipe.vs.key = 0;
+		pipe.ps.key_lo = 0;
+		pipe.ps.key_hi = 0;
+		pipe.cms.key = 0;
+		pipe.bs.key = 0;
+		pipe.dss.key = 0;
+	}
+	else
+	{
+		pipe.uber_shader = false;
+		pipe.uber_vs = static_cast<UberVSSelector>(0);
+		pipe.uber_ps.key = 0;
+		m_uber_dynamic_state.enabled = false;
 	}
 }
 
@@ -7221,14 +7246,16 @@ VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags() const
 	                                 VK_DEPENDENCY_BY_REGION_BIT;
 }
 
-void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
-	bool one_barrier, bool full_barrier)
+void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, GSTextureVK* draw_rt, GSTextureVK* draw_ds)
 {
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		Draw(config);
+		Draw(m_pipeline_selector);
 		return;
 	}
+
+	const bool one_barrier = config.GetOneBarrier(pass);
+	const bool full_barrier = config.GetFullBarrier(pass);
 
 #ifdef PCSX2_DEVBUILD
 	if ((one_barrier || full_barrier) &&
@@ -7284,7 +7311,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 			IssueBarriers();
 
 			const u32 count = config.drawlist->at(n) * indices_per_prim;
-			Draw(config, p, count);
+			Draw(m_pipeline_selector, p, count);
 			p += count;
 		}
 
@@ -7297,7 +7324,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		IssueBarriers();
 	}
 
-	Draw(config);
+	Draw(m_pipeline_selector);
 
 	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
