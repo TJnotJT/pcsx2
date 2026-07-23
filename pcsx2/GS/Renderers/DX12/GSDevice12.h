@@ -264,7 +264,6 @@ public:
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
-		GSHWDrawConfig::UberPSSelector uber_ps;
 
 		union
 		{
@@ -279,24 +278,39 @@ public:
 			u32 key;
 		};
 
+		union
+		{
+			struct
+			{
+				u32 uber_colclip_hw : 1;
+				u32 uber_stencil : 1;
+			};
+
+			u32 uber_key;
+		};
+
 		GSHWDrawConfig::BlendState bs;
 		GSHWDrawConfig::VSSelector vs;
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
+
+		GSHWDrawConfig::UberPSSelector uber_ps;
+		GSHWDrawConfig::UberVSSelector uber_vs;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
 
 		__fi PipelineSelector() { std::memset(this, 0, sizeof(*this)); }
 	};
-	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
+	static_assert(sizeof(PipelineSelector) == 40, "Pipeline selector is 40 bytes");
 
 	struct PipelineSelectorHash
 	{
 		std::size_t operator()(const PipelineSelector& e) const noexcept
 		{
 			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key);
+			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key,
+				e.uber_ps.key, static_cast<u32>(e.uber_vs), e.uber_key);
 			return hash;
 		}
 	};
@@ -399,6 +413,7 @@ private:
 	}
 
 	std::unordered_map<u32, ComPtr<ID3DBlob>> m_tfx_vertex_shaders;
+	std::array<ComPtr<ID3DBlob>, 2> m_tfx_uber_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, ComPtr<ID3DBlob>, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_pixel_shaders;
 	std::unordered_map<u8, ComPtr<ID3DBlob>> m_tfx_uber_pixel_shaders;
@@ -477,7 +492,8 @@ private:
 	template<typename ReturnType, typename SelType, typename AsyncMapType, typename MapType>
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
-	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool uber = false, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel);
 	D3D12ShaderBlobOrJob GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
 	D3D12ShaderBlobOrJob GetTFXUberPixelShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
 	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
@@ -604,7 +620,7 @@ public:
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
 		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
 
-	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, bool uberize_vs_ps = true);
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config);
 	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
 
 public:

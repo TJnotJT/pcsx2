@@ -4759,7 +4759,6 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 			if (stage == (COMPILE_ASYNC ? 1 : 0))
 				Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
 		}
-
 	}
 
 	return true;
@@ -6952,8 +6951,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		// FIXME: Can the copy be avoided?
 		GSHWDrawConfig config2(config);
 
-		if (config.alpha_second_pass.UpdatePSConstantBuffer(config2.cb_ps))
-			SetPSConstantBuffer(config.cb_ps);
+		if (config2.alpha_second_pass.UpdatePSConstantBuffer(config2.cb_ps))
+			SetPSConstantBuffer(config2.cb_ps);
 
 		config.alpha_second_pass.UpdateConfig(config2);
 
@@ -7061,80 +7060,74 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 
 		// enable point size in the vertex shader if we're rendering points regardless of upscaling.
 		pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
+
+		m_uber_dynamic_state.enabled = false;
 	}
 	else
 	{
 		// Uber shader
-		if (config.uber_shader)
+		std::memset(&pipe, 0, sizeof(pipe));
+		pipe.topology = static_cast<u32>(config.topology);
+
+		if (!m_uber_dynamic_state.enabled)
 		{
-			std::memset(&pipe, 0, sizeof(pipe));
-			pipe.topology = static_cast<u32>(config.topology);
-
-			if (!m_uber_dynamic_state.enabled)
-			{
-				m_dirty_flags |= DIRTY_TFX_UBER_STATE;
-				m_uber_dynamic_state.enabled = true;
-			}
-			pipe.uber_vs = (config.vs.expand != GSHWDrawConfig::VSExpand::None) ?
-				GSHWDrawConfig::UberVSSelector::VS_EXPAND :
-				GSHWDrawConfig::UberVSSelector::INPUT_ASSEMBLY;
-
-			pipe.uber_ps = {};
-			if (config.ps.HasColorROV())
-				pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::ROV;
-			else if (config.IsFeedbackLoopRT(config.ps))
-				pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::FEEDBACK;
-			else if (config.rt)
-				pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::STANDARD;
-			else
-				pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::NONE;
-
-			if (config.ps.HasDepthROV())
-				pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::ROV;
-			else if (config.IsFeedbackLoopDepth(config.ps))
-				pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::FEEDBACK;
-			else if (config.ds)
-				pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::STANDARD;
-			else
-				pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::NONE;
-
-			pipe.uber_ps.color1 = !config.ps.no_color1;
-
-			pxAssert(pipe.uber_ps.IsValid());
-
-			pipe.uber_stencil = pipe.dss.date != 0;
-			pipe.uber_colclip_hw = pipe.ps.colclip_hw != 0;
-
-			pipe.rt = pipe.uber_ps.HasColor() && !pipe.uber_ps.HasColorROV();
-			pipe.ds = pipe.uber_ps.HasDepth() && !pipe.uber_ps.HasDepthROV();
-
-
-			if (!preserve_feedback_flags)
-			{
-				pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-				if (pipe.uber_ps.HasColorFeedback())
-					pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
-				if (pipe.uber_ps.HasDepthFeedback())
-					pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
-			}
-
-			// Get state that we can set dynamically in VK.
-			GSHWDrawConfig::DepthStencilSelector dss =
-				config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth;
-			GSHWDrawConfig::BlendState bs = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState() : config.blend;
-			GSHWDrawConfig::ColorMaskSelector cms =
-				config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask;
-			SetUberDynamicState(dss, bs, cms, IsDATEModePrimIDInit(pipe.dss.date));
-
-			// Get the state for dynamic branching in the VS/PS.
-			GSHWDrawConfig::ShaderPushConstants pc{}; // FIXME: jank
-			GSHWDrawConfig::GetUberShaderSelector(config.vs, config.ps, pc);
-			SetShaderPushConstants(pc);
+			m_dirty_flags |= DIRTY_TFX_UBER_STATE;
+			m_uber_dynamic_state.enabled = true;
 		}
+		pipe.uber_vs = (config.vs.expand != GSHWDrawConfig::VSExpand::None) ?
+			GSHWDrawConfig::UberVSSelector::VS_EXPAND :
+			GSHWDrawConfig::UberVSSelector::INPUT_ASSEMBLY;
+
+		pipe.uber_ps = {};
+		if (config.ps.HasColorROV())
+			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::ROV;
+		else if (config.IsFeedbackLoopRT(config.ps))
+			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::FEEDBACK;
+		else if (config.rt)
+			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::STANDARD;
 		else
+			pipe.uber_ps.color = GSHWDrawConfig::UberPSSelector::ColorType::NONE;
+
+		if (config.ps.HasDepthROV())
+			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::ROV;
+		else if (config.IsFeedbackLoopDepth(config.ps))
+			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::FEEDBACK;
+		else if (config.ds)
+			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::STANDARD;
+		else
+			pipe.uber_ps.depth = GSHWDrawConfig::UberPSSelector::DepthType::NONE;
+
+		pipe.uber_ps.color1 = !config.ps.no_color1;
+
+		pxAssert(pipe.uber_ps.IsValid());
+
+		pipe.uber_stencil = pipe.dss.date != 0;
+		pipe.uber_colclip_hw = pipe.ps.colclip_hw != 0;
+
+		pipe.rt = pipe.uber_ps.HasColor() && !pipe.uber_ps.HasColorROV();
+		pipe.ds = pipe.uber_ps.HasDepth() && !pipe.uber_ps.HasDepthROV();
+
+		if (!preserve_feedback_flags)
 		{
-			m_uber_dynamic_state.enabled = false;
+			pipe.feedback_loop_flags = FeedbackLoopFlag_None;
+			if (pipe.uber_ps.HasColorFeedback())
+				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
+			if (pipe.uber_ps.HasDepthFeedback())
+				pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
 		}
+
+		// Get state that we can set dynamically in VK.
+		GSHWDrawConfig::DepthStencilSelector dss =
+			config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth;
+		GSHWDrawConfig::BlendState bs = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState() : config.blend;
+		GSHWDrawConfig::ColorMaskSelector cms =
+			config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask;
+		SetUberDynamicState(dss, bs, cms, IsDATEModePrimIDInit(pipe.dss.date));
+
+		// Get the state for dynamic branching in the VS/PS.
+		GSHWDrawConfig::ShaderPushConstants pc{}; // FIXME: jank
+		GSHWDrawConfig::GetUberShaderSelector(config.vs, config.ps, pc);
+		SetShaderPushConstants(pc);
 	}
 }
 

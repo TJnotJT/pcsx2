@@ -356,6 +356,7 @@ public:
 				u32 ds : 1;
 				u32 line_width : 1;
 				u32 feedback_loop_flags : 3;
+				// FIXME: Put these in a separate selector.
 				u32 uber_colclip_hw : 1;
 				u32 uber_stencil : 1;
 			};

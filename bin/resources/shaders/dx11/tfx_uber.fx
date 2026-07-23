@@ -59,6 +59,20 @@
 #define VS_EXPAND_TRIANGLE_AA1 5
 #endif
 
+#ifndef UBER_COLOR_NONE
+#define UBER_COLOR_NONE 0
+#define UBER_COLOR_STANDARD 1
+#define UBER_COLOR_FEEDBACK 2
+#define UBER_COLOR_ROV 3
+#endif
+
+#ifndef UBER_DEPTH_NONE
+#define UBER_DEPTH_NONE 0
+#define UBER_DEPTH_STANDARD 1
+#define UBER_DEPTH_FEEDBACK 2
+#define UBER_DEPTH_ROV 3
+#endif
+
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
@@ -73,17 +87,17 @@
 	#define DATE_INIT (PS_DATE == 1 || PS_DATE == 2)
 #else
 	#define PS_IIP 1
-	#define PS_NO_COLOR !UBER_COLOR
-	#define PS_NO_COLOR1 1
-	#define PS_ROV_COLOR UBER_ROV_COLOR
-	#if UBER_ROV_DEPTH
+	#define PS_NO_COLOR (UBER_COLOR == 0)
+	#define PS_NO_COLOR1 (UBER_COLOR1 == 0)
+	#define PS_ROV_COLOR (UBER_COLOR == UBER_COLOR_ROV)
+	#if (UBER_DEPTH == UBER_DEPTH_ROV)
 		#define PS_ROV_DEPTH PS_ROV_DEPTH_READ_WRITE
 	#else
 		#define PS_ROV_DEPTH 0
 	#endif
-	#define SW_DEPTH UBER_DEPTH
-	#define ZWRITE UBER_DEPTH
-	#define DATE_INIT 0
+	#define SW_DEPTH (UBER_DEPTH >= UBER_DEPTH_FEEDBACK)
+	#define ZWRITE (UBER_DEPTH != UBER_DEPTH_NONE)
+	#define DATE_INIT UBER_DATE_INIT
 #endif
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
@@ -1626,6 +1640,11 @@ void ps_main(PS_INPUT input)
 //////////////////////////////////////////////////////////////////////
 
 #ifdef VERTEX_SHADER
+
+#if UBER_SHADER
+	#define VS_IIP 1
+	#define VS_POINT_SIZE 1
+#endif
 
 #ifdef DX12
 cbuffer cb0 : register(b0)

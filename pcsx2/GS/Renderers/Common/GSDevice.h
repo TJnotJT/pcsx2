@@ -1004,7 +1004,7 @@ struct alignas(16) GSHWDrawConfig
 			if (color == ColorType::NONE && depth == DepthType::NONE)
 				return false;
 			// There's only one uber date init shader.
-			if (date_init && (color != ColorType::STANDARD || depth != DepthType::NONE))
+			if (date_init && (color != ColorType::STANDARD || color1 || depth != DepthType::NONE))
 				return false;
 			return true;
 		}
