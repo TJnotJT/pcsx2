@@ -544,7 +544,7 @@ public:
 
 		__fi bool HasRT() const { return rt != TFX_RT::None; }
 		__fi bool HasDS() const { return ds != TFX_DS::None; }
-		__fi bool HasStencil() const { return ds == TFX_DS::DepthStencil; }
+		__fi bool HasDATEStencil() const { return ds == TFX_DS::DepthStencil; }
 		__fi bool HasDATEPrimIDInit() const { return rt == TFX_RT::PrimID; }
 		__fi bool HasColclipHW() const { return rt == TFX_RT::ColclipHW; }
 		__fi bool HasVSExpand() const
@@ -875,7 +875,7 @@ public:
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, PipelineSelector& pipe,
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass, PipelineSelector& pipe,
 		bool preserve_feedback_flags = false);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	void SetUberDynamicState(const GSHWDrawConfig::DepthStencilSelector& dss, const GSHWDrawConfig::BlendState& bs,
@@ -883,7 +883,7 @@ public:
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
 	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
-	void SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, GSTextureVK* draw_rt, GSTextureVK* draw_ds);
+	void SendHWDraw(const GSHWDrawConfig& config, DrawPass pass, GSTextureVK* draw_rt, GSTextureVK* draw_ds);
 
 	//////////////////////////////////////////////////////////////////////////
 	// Vulkan State

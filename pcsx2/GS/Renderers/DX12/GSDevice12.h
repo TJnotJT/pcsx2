@@ -260,6 +260,106 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
+	enum class UberVSSelector
+	{
+		InputAssembly,
+		VSExpand,
+	};
+
+	struct UberPSSelector
+	{
+		enum class Color : u8
+		{
+			None,
+			Standard,
+			ROV,
+			Count,
+		};
+
+		enum class Depth : u8
+		{
+			None,
+			Standard,
+			ROV,
+			Count,
+		};
+
+		union
+		{
+			struct
+			{
+				Color color : 2;
+				Depth depth : 2;
+			};
+
+			u8 key;
+		};
+
+		static constexpr u32 MAX_NUM_SELECTORS = 16;
+
+		__fi constexpr UberPSSelector() : key(0) {}
+
+		__fi static constexpr UberPSSelector Decode(u8 key)
+		{
+			UberPSSelector ps;
+
+			ps.color = static_cast<Color>((key >> 0) & 3);
+			ps.depth = static_cast<Depth>((key >> 2) & 3);
+
+			return ps;
+		}
+
+		__fi constexpr bool IsValid() const
+		{
+			// Make sure enums are valid.
+			if (color >= Color::Count || depth >= Depth::Count)
+				return false;
+			// Depth ROV must imply color ROV (if color is used).
+			if (depth == Depth::ROV && !(color == Color::None || color == Color::ROV))
+				return false;
+			// Must have either color or depth.
+			if (color == Color::None && depth == Depth::None)
+				return false;
+			return true;
+		}
+
+		__fi bool HasColor() const
+		{
+			return color != Color::None;
+		}
+
+		__fi bool HasDepth() const
+		{
+			return depth != Depth::None;
+		}
+
+		__fi bool HasColorROV() const
+		{
+			return color == Color::ROV;
+		}
+
+		__fi bool HasDepthROV() const
+		{
+			return depth == Depth::ROV;
+		}
+	};
+
+	enum class TFX_RT : u32
+	{
+		None,
+		Color,
+		ColclipHW,
+		PrimID,
+		Count,
+	};
+
+	enum class TFX_DS : u32
+	{
+		None,
+		Depth,
+		DepthStencil,
+		Count,
+	};
 
 	struct alignas(8) PipelineSelector
 	{
@@ -270,23 +370,13 @@ public:
 			struct
 			{
 				u32 topology : 2;
-				u32 rt : 1;
+				TFX_RT rt : 2;
 				u32 ds_as_rt : 1;
-				u32 ds : 1;
+				TFX_DS ds : 2;
+				u32 uber_shader : 1;
 			};
 
 			u32 key;
-		};
-
-		union
-		{
-			struct
-			{
-				u32 uber_colclip_hw : 1;
-				u32 uber_stencil : 1;
-			};
-
-			u32 uber_key;
 		};
 
 		GSHWDrawConfig::BlendState bs;
@@ -294,15 +384,25 @@ public:
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
 
-		GSHWDrawConfig::UberPSSelector uber_ps;
-		GSHWDrawConfig::UberVSSelector uber_vs;
+		UberPSSelector uber_ps;
+		UberVSSelector uber_vs;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
 
 		__fi PipelineSelector() { std::memset(this, 0, sizeof(*this)); }
+
+		__fi bool HasRT() const { return rt != TFX_RT::None; }
+		__fi bool HasDS() const { return ds != TFX_DS::None; }
+		__fi bool HasDATEStencil() const { return ds == TFX_DS::DepthStencil; }
+		__fi bool HasDATEPrimIDInit() const { return rt == TFX_RT::PrimID; }
+		__fi bool HasColclipHW() const { return rt == TFX_RT::ColclipHW; }
+		__fi bool HasVSExpand() const
+		{
+			return uber_shader ? uber_vs == UberVSSelector::VSExpand : vs.expand != GSHWDrawConfig::VSExpand::None;
+		}
 	};
-	static_assert(sizeof(PipelineSelector) == 40, "Pipeline selector is 40 bytes");
+	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
 
 	struct PipelineSelectorHash
 	{
@@ -310,7 +410,7 @@ public:
 		{
 			std::size_t hash = 0;
 			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.uber_ps.key, e.dss.key, e.cms.key, e.bs.key, e.key,
-				e.uber_ps.key, static_cast<u32>(e.uber_vs), e.uber_key);
+				e.uber_ps.key, static_cast<u32>(e.uber_vs));
 			return hash;
 		}
 	};
@@ -493,11 +593,11 @@ private:
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool async = false);
-	D3D12ShaderBlobOrJob GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel);
+	D3D12ShaderBlobOrJob GetTFXUberVertexShader(UberVSSelector sel);
 	D3D12ShaderBlobOrJob GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
-	D3D12ShaderBlobOrJob GetTFXUberPixelShader(const GSHWDrawConfig::UberPSSelector& uber_sel, bool async = false);
-	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
-	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool uber = false, bool async = false);
+	D3D12ShaderBlobOrJob GetTFXUberPixelShader(const UberPSSelector& uber_sel, bool async = false);
+	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool async = false);
+	const ID3D12PipelineState* GetTFXPipeline(const PipelineSelector& p, bool async = false);
 
 	ComPtr<ID3DBlob> GetUtilityVertexShader(const std::string& source, const char* entry_point);
 	ComPtr<ID3DBlob> GetUtilityPixelShader(const std::string& source, const char* entry_point);
@@ -568,8 +668,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const GSHWDrawConfig& config);
-	void Draw(const GSHWDrawConfig& config, int offset, int count);
+	void Draw(const PipelineSelector& config);
+	void Draw(const PipelineSelector& config, int offset, int count);
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
@@ -616,11 +716,11 @@ public:
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
+	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, DrawPass pass, GSTexture12* draw_rt,
 		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
-		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
+		const bool feedback_rt, const bool feedback_dept);
 
-	void UpdateHWPipelineSelector(const GSHWDrawConfig& config);
+	void UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass);
 	void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config);
 
 public:

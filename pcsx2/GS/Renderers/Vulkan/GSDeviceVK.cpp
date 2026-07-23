@@ -60,7 +60,7 @@ static constexpr std::array<VkBlendOp, 3> VK_BLEND_OPS = { {
 static constexpr std::array<VkCompareOp, 4> VK_COMPARE_OPS = {
 	VK_COMPARE_OP_NEVER, VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_GREATER };
 
-static constexpr VkStencilOpState GetDATEStencilOpState(const bool date_one)
+static VkStencilOpState GetDATEStencilOpState(const bool date_one)
 {
 	return VkStencilOpState { VK_STENCIL_OP_KEEP, date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP,
 	VK_STENCIL_OP_KEEP, VK_COMPARE_OP_EQUAL, 1u, 1u, 1u };
@@ -5441,7 +5441,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	}
 	else
 	{
-		rp = GetTFXRenderPass(p.HasRT(), p.HasDS(), p.HasColclipHW(), p.HasStencil(),
+		rp = GetTFXRenderPass(p.HasRT(), p.HasDS(), p.HasColclipHW(), p.HasDATEStencil(),
 			p.IsRTFeedbackLoop(), p.IsTestingAndSamplingDepth(),
 			p.HasRT() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			p.HasDS() ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE);
@@ -6485,7 +6485,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::PrimID, pipe);
+	UpdateHWPipelineSelector(config, DrawPass::PrimID, pipe);
 	pipe.dss.zwe = false;
 	pipe.cms.wrgba = 0;
 	pipe.bs = {};
@@ -6520,7 +6520,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 
 	PipelineSelector selector{};
 
-	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, selector);
+	UpdateHWPipelineSelector(config, DrawPass::Main, selector);
 	if (!m_tfx_pipelines.contains(selector))
 	{
 		GetTFXPipeline(selector, true);
@@ -6529,7 +6529,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 
 	if (config.alpha_second_pass.enable)
 	{
-		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::AlphaSecond, selector);
+		UpdateHWPipelineSelector(config, DrawPass::AlphaSecond, selector);
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
 			GetTFXPipeline(m_pipeline_selector, true);
@@ -6539,7 +6539,7 @@ bool GSDeviceVK::StartPipelineCompilationAsync(const GSHWDrawConfig& config)
 
 	if (config.blend_multi_pass.enable)
 	{
-		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Blend, selector);
+		UpdateHWPipelineSelector(config, DrawPass::Blend, selector);
 		if (!m_tfx_pipelines.contains(m_pipeline_selector))
 		{
 			GetTFXPipeline(m_pipeline_selector, true);
@@ -6602,7 +6602,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// figure out the pipeline
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, pipe);
+	UpdateHWPipelineSelector(config, DrawPass::Main, pipe);
 
 	// now blit the colclip texture back to the original target
 	if (colclip_rt)
@@ -6655,7 +6655,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		else
 		{
 			config.ps.colclip_hw = true;
-			UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Main, pipe);
+			UpdateHWPipelineSelector(config, DrawPass::Main, pipe);
 			draw_rt = colclip_rt;
 		}
 	}
@@ -6924,7 +6924,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// now we can do the actual draw
 	if (BindDrawPipeline(pipe))
-		SendHWDraw(config, GSHWDrawConfig::DrawPass::Main,
+		SendHWDraw(config, DrawPass::Main,
 			pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
 
 	// blend second pass
@@ -6932,7 +6932,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	{
 		if (config.blend_multi_pass.blend.constant_enable)
 			SetBlendConstants(config.blend_multi_pass.blend.constant);
-		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::Blend, pipe);
+		UpdateHWPipelineSelector(config, DrawPass::Blend, pipe);
 		if (BindDrawPipeline(pipe))
 		{
 			// TODO: This probably should have barriers, in case we want to use it conditionally.
@@ -6950,11 +6950,11 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		UpdateHWPipelineSelector(config, GSHWDrawConfig::DrawPass::AlphaSecond, pipe, true);
+		UpdateHWPipelineSelector(config, DrawPass::AlphaSecond, pipe, true);
 		
 		if (BindDrawPipeline(pipe))
 		{
-			SendHWDraw(config, GSHWDrawConfig::DrawPass::AlphaSecond,
+			SendHWDraw(config, DrawPass::AlphaSecond,
 				pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr);
 		}
 	}
@@ -7018,7 +7018,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	config.colclip_mode = GSHWDrawConfig::ColClipMode::NoModify;
 }
 
-void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, PipelineSelector& pipe,
+void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass, PipelineSelector& pipe,
 	bool preserve_feedback_flags)
 {
 	const GSHWDrawConfig::VSSelector vs = config.GetVS(pass);
@@ -7029,7 +7029,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 	const bool require_one_barrier = config.GetOneBarrier(pass);
 	const bool require_full_barrier = config.GetFullBarrier(pass);
 
-	// RT setup (common to uber and non-uber)
+	// RT setup
 	pipe.rt = TFX_RT::None;
 	if (config.rt != nullptr && !ps.HasColorROV())
 	{
@@ -7041,7 +7041,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 			pipe.rt = TFX_RT::Color;
 	}
 
-	// RT setup (common to uber and non-uber)
+	// DT setup
 	pipe.ds = TFX_DS::None;
 	if (config.ds != nullptr && !ps.HasDepthROV())
 	{
@@ -7246,7 +7246,7 @@ VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags() const
 	                                 VK_DEPENDENCY_BY_REGION_BIT;
 }
 
-void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSHWDrawConfig::DrawPass pass, GSTextureVK* draw_rt, GSTextureVK* draw_ds)
+void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, DrawPass pass, GSTextureVK* draw_rt, GSTextureVK* draw_ds)
 {
 	if (!m_features.texture_barrier) [[unlikely]]
 	{

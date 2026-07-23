@@ -756,7 +756,7 @@ struct alignas(16) GSHWDrawConfig
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
-
+	
 	struct PipelineSelectorFieldDesc
 	{
 		u32 index;
@@ -1670,6 +1670,8 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 class GSDevice : public GSAlignedClass<32>
 {
 public:
+	using DrawPass = GSHWDrawConfig::DrawPass;
+
 	enum class PresentResult
 	{
 		OK,
