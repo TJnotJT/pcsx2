@@ -417,17 +417,28 @@
           </widget>
         </item>
         <item row="2" column="1">
-          <widget class="QSpinBox" name="hybridShaderCacheLatencyMS">
-            <property name="suffix">
-            <string> ms</string>
-            </property>
-            <property name="minimum">
-            <number>0</number>
-            </property>
-            <property name="maximum">
-            <number>99999999</number>
+        <widget class="QSpinBox" name="hybridShaderCacheLatencyMS">
+          <property name="suffix">
+          <string> ms</string>
+          </property>
+          <property name="minimum">
+          <number>0</number>
+          </property>
+          <property name="maximum">
+          <number>99999999</number>
+          </property>
+        </widget>
+        </item>
+        <item row="3" column="0" colspan="2">
+        <layout class="QGridLayout" name="shaderCacheCheckBoxesLayout">
+          <item row="0" column="1">
+          <widget class="QCheckBox" name="reducedUberShaders">
+            <property name="text">
+            <string>Reduced Uber Shaders</string>
             </property>
           </widget>
+          </item>
+        </layout>
         </item>
        </layout>
       </item>
