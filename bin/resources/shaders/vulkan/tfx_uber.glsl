@@ -2141,7 +2141,7 @@ void main()
 			DISCARD_DEPTH; // No depth update for triangle edges.
 	}
 
-	#if !PS_NO_COLOR
+	#if !PS_NO_COLOR && !DATE_INIT
 		if (PS_CMASK != 0)
 			o_col0 = mix(o_col0, sample_from_rt(), equal(FbMask, uvec4(0xFFu))); // channel masking
 	#endif

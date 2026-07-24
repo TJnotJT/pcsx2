@@ -2942,7 +2942,7 @@ void GSDeviceVK::Draw(const PipelineSelector& pipe, int offset, int count)
 	if (pipe.HasVSExpand())
 	{
 		const bool vs_indexing = pipe.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(pipe.vs.expand);
+		const u32 vs_indexing_expansion = GetExpansionFactor(pipe.vs.expand); // FIXME: Change this back to config?
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -4685,38 +4685,6 @@ bool GSDeviceVK::CompileImGuiPipeline()
 	return true;
 }
 
-namespace VKUberShader
-{
-	static constexpr u32 GetNumValidUberPSSelectors()
-	{
-		u32 n_valid = 0;
-		for (u32 i = 0; i < GSDeviceVK::UberPSSelector::MAX_NUM_SELECTORS; i++)
-		{
-			if (GSDeviceVK::UberPSSelector::Decode(i).IsValid())
-				n_valid++;
-		}
-		return n_valid;
-	}
-
-	static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
-
-	template<u32 N>
-	static constexpr std::array<GSDeviceVK::UberPSSelector, N> GetValidUberPSSelectors()
-	{
-		std::array<GSDeviceVK::UberPSSelector, N> valid;
-		u32 n_valid = 0;
-		for (u32 i = 0; i < GSDeviceVK::UberPSSelector::MAX_NUM_SELECTORS; i++)
-		{
-			if (GSDeviceVK::UberPSSelector::Decode(i).IsValid())
-				valid[n_valid++] = GSDeviceVK::UberPSSelector::Decode(i);
-		}
-		return valid;
-	}
-
-	static constexpr std::array<GSDeviceVK::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS>
-		valid_uber_ps_selectors = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS>();
-}
-
 bool GSDeviceVK::CompileUberTFXPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
@@ -4733,7 +4701,7 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 			std::memset(&selector, 0, sizeof(selector));
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
-				for (const GSDeviceVK::UberPSSelector& ps_sel : VKUberShader::valid_uber_ps_selectors)
+				for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
@@ -4748,7 +4716,7 @@ bool GSDeviceVK::CompileUberTFXPipelines()
 									continue;
 
 								selector.uber_shader = true;
-								selector.uber_vs = static_cast<UberVSSelector>(vs_sel);
+								selector.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(vs_sel);
 								selector.uber_ps = ps_sel;
 								selector.topology = topology;
 
@@ -5093,7 +5061,7 @@ static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSHWD
 	Vulkan::SetObjectName(device, mod, "TFX Vertex %08X", static_cast<u32>(sel.key));
 }
 
-static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSDeviceVK::UberVSSelector& sel)
+static void SetVertexShaderName(VkDevice device, VkShaderModule mod, const GSHWDrawConfig::UberVSSelector& sel)
 {
 	Vulkan::SetObjectName(device, mod, "TFX Uber Vertex %08X", static_cast<u32>(sel));
 }
@@ -5199,7 +5167,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::V
 	return mod;
 }
 
-GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(UberVSSelector sel)
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel)
 {
 	if (m_tfx_uber_vertex_shaders[static_cast<u32>(sel)].module != VK_NULL_HANDLE)
 		return m_tfx_uber_vertex_shaders[static_cast<u32>(sel)];
@@ -5216,7 +5184,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberVertexShader(UberVSSelecto
 
 	// Do the static macros.
 	AddMacro(ss, "UBER_SHADER", 1);
-	AddMacro(ss, "UBER_VS_EXPAND_ENABLE", static_cast<u32>(sel == UberVSSelector::VSExpand));
+	AddMacro(ss, "UBER_VS_EXPAND_ENABLE", static_cast<u32>(sel == GSHWDrawConfig::UberVSSelector::VSExpand));
 
 	ss << source;
 
@@ -5342,7 +5310,7 @@ GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXFragmentShader(const GSHWDrawC
 	return mod;
 }
 
-GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const UberPSSelector& sel,bool async)
+GSDeviceVK::VKShaderModuleOrJob GSDeviceVK::GetTFXUberFragmentShader(const UberPSSelector& sel, bool async)
 {
 	// Check async results first.
 	if (std::shared_ptr<VKShaderJob> async_job =
@@ -7097,7 +7065,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 
 		// Uber VS
 		pipe.uber_vs = (pipe.vs.expand != GSHWDrawConfig::VSExpand::None) ?
-			UberVSSelector::VSExpand : UberVSSelector::InputAssembly;
+			GSHWDrawConfig::UberVSSelector::VSExpand : GSHWDrawConfig::UberVSSelector::InputAssembly;
 
 		// Uber PS color
 		pipe.uber_ps = {};
@@ -7150,7 +7118,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 	else
 	{
 		pipe.uber_shader = false;
-		pipe.uber_vs = static_cast<UberVSSelector>(0);
+		pipe.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(0);
 		pipe.uber_ps.key = 0;
 		m_uber_dynamic_state.enabled = false;
 	}
