@@ -2259,7 +2259,7 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
 		!CompileMergePipelines() || !CompilePostProcessingPipelines() || !InitSpinResources() ||
-		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileUberTFXPipelines()))
+		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileTFXUberPipelines()))
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
@@ -4686,7 +4686,7 @@ bool GSDeviceVK::CompileImGuiPipeline()
 	return true;
 }
 
-bool GSDeviceVK::CompileUberTFXPipelines()
+bool GSDeviceVK::CompileTFXUberPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{

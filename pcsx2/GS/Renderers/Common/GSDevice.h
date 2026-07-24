@@ -1180,10 +1180,7 @@ struct alignas(16) GSHWDrawConfig
 			out.ztst = ZTST_ALWAYS;
 			return out;
 		}
-		static constexpr DepthStencilSelector GetUberSelector()
-		{
-			return DepthWriteAlways();
-		}
+		static constexpr DepthStencilSelector ReducedUberDefault() { return DepthWriteAlways(); }
 	};
 	struct ColorMaskSelector
 	{
@@ -1206,10 +1203,7 @@ struct alignas(16) GSHWDrawConfig
 		};
 		constexpr ColorMaskSelector(): key(0xF) {}
 		constexpr ColorMaskSelector(u8 c): key(0) { wrgba = c; }
-		static constexpr ColorMaskSelector GetUberSelector()
-		{
-			return ColorMaskSelector();
-		}
+		static constexpr ColorMaskSelector ReducedUberDefault() { return ColorMaskSelector(); }
 	};
 
 #pragma pack(pop)
@@ -1476,7 +1470,7 @@ struct alignas(16) GSHWDrawConfig
 			dst_factor_alpha = dst_alpha_factor_;
 			constant = constant_;
 		}
-
+		static constexpr BlendState ReducedUberDefault() { return BlendState(); }
 		// Blending has no effect if RGB is masked.
 		bool IsEffective(ColorMaskSelector colormask) const;
 	};

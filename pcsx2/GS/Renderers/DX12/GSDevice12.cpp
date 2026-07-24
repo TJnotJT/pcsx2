@@ -997,7 +997,7 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
 		!CompileMergePipelines() || !CompilePostProcessingPipelines() ||
-		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileUberTFXPipelines()))
+		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileTFXUberPipelines()))
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
@@ -2371,11 +2371,11 @@ bool GSDevice12::CompileImGuiPipeline()
 	return true;
 }
 
-bool GSDevice12::CompileUberTFXPipelines()
+bool GSDevice12::CompileTFXUberPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
-		constexpr bool COMPILE_ASYNC = false; // Change to enable/disable async compile.
+		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
 
 		Common::Timer timer;
 		// Compile uber pipelines async (stage 0 to start compilation, stage 1 to wait for finish).
@@ -2384,6 +2384,7 @@ bool GSDevice12::CompileUberTFXPipelines()
 			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
+			selector.SetReducedUberDefaults();
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
 				for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
@@ -5215,6 +5216,8 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 		pipe.vs.key = 0;
 		pipe.ps.key_lo = 0;
 		pipe.ps.key_hi = 0;
+		if (GSConfig.ReducedUberShaders)
+			pipe.SetReducedUberDefaults();
 
 		// Get the state for dynamic branching in the VS/PS.
 		SetUberDynamicSelector(GSHWDrawConfig::GetUberDynamicSelector(vs, ps));

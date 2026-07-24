@@ -611,7 +611,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
-	bool CompileUberTFXPipelines();
+	bool CompileTFXUberPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();

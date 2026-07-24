@@ -776,6 +776,7 @@ struct Pcsx2Config
 					UseBlitSwapChain : 1,
 					DisableFramebufferFetch : 1,
 					DisableVertexShaderExpand : 1,
+					ReducedUberShaders : 1,
 					SkipDuplicateFrames : 1,
 					OsdShowSpeed : 1,
 					OsdShowFPS : 1,

@@ -721,6 +721,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	UseBlitSwapChain = false;
 	DisableFramebufferFetch = false;
 	DisableVertexShaderExpand = false;
+	ReducedUberShaders = false;
 	SkipDuplicateFrames = true;
 	OsdMessagesPos = OsdOverlayPos::TopLeft;
 	OsdPerformancePos = OsdOverlayPos::TopRight;
@@ -968,6 +969,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(UseBlitSwapChain);
 	SettingsWrapBitBool(DisableFramebufferFetch);
 	SettingsWrapBitBool(DisableVertexShaderExpand);
+	SettingsWrapBitBool(ReducedUberShaders);
 	SettingsWrapBitBool(SkipDuplicateFrames);
 	SettingsWrapBitBool(OsdShowSpeed);
 	SettingsWrapBitBool(OsdShowFPS);

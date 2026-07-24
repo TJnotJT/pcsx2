@@ -304,6 +304,13 @@ public:
 			return uber_shader ? uber_vs == GSHWDrawConfig::UberVSSelector::VSExpand :
 				vs.expand != GSHWDrawConfig::VSExpand::None;
 		}
+
+		__fi void SetReducedUberDefaults()
+		{
+			bs = GSHWDrawConfig::BlendState::ReducedUberDefault();
+			dss = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();
+			cms = GSHWDrawConfig::ColorMaskSelector::ReducedUberDefault();
+		}
 	};
 	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
 
@@ -518,7 +525,7 @@ private:
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
 	bool CompileCASPipelines();
-	bool CompileUberTFXPipelines();
+	bool CompileTFXUberPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();

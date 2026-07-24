@@ -7945,8 +7945,52 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 		(GSConfig.ShaderCacheType == GSShaderCacheType::Hybrid && // Only use uber shader if normal shader is still compiling.
 			g_gs_device->StartPipelineCompilationAsync(m_conf)))
 	{
-		GL_INS("HW: Using uber shader");
+		GL_INS("HW: Using uber shader (%s)", GSConfig.ReducedUberShaders ? "reduced" : "full");
+		
 		m_conf.uber_shader = true;
+
+		if (GSConfig.ReducedUberShaders)
+		{
+			// Do as much in SW as possible to reduce uber shader combinations used.
+			if (!features.FBFetchDepthFeedback() && features.rov && GSConfig.HWROV &&
+				!TexHazardPreventsROVUsage())
+			{
+				// If we're using ROV for either color/depth, use it for both.
+				ConfigureROV(rt != nullptr, ds != nullptr);
+				m_conf.ps.zmask = ds && !m_conf.ps.HasDepthROVWrite(); // SW depth masking.
+			}
+			else
+			{
+				// Use full shader emulation to cutdown number of pipelines.
+				ConfigureFullSW(rt != nullptr, ds != nullptr);
+
+				m_conf.require_full_barrier = true;
+
+				DetermineBarriers(rt, ds, tex);
+
+				// HW depth write with SW depth masking.
+				m_conf.ps.zmask = ds && !m_conf.depth.zwe;
+
+				// Uber only does SW masking of writes, so to be safe make copies for RT/DS sampling hazards.
+				if (m_conf.rt && m_conf.rt == m_conf.tex && !m_conf.ps.tex_is_fb)
+				{
+					GL_INS("HW: RT is source texture; creating copy.");
+					temp_tex.reset(g_gs_device->CreateCompatible(m_conf.rt, false));
+					g_gs_device->StretchRectAuto(m_conf.rt, temp_tex.get(), Nearest);
+				}
+				else if (m_conf.ds && m_conf.ds == m_conf.tex)
+				{
+					GL_INS("HW: DS is source texture; creating copy.");
+					temp_tex.reset(g_gs_device->CreateCompatible(m_conf.ds, false));
+					g_gs_device->StretchRectAuto(m_conf.ds, temp_tex.get(), Nearest);
+				}
+			}
+
+			// Set these to defaults to reduce combinations.
+			m_conf.blend = GSHWDrawConfig::BlendState::ReducedUberDefault();
+			m_conf.depth = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();
+			m_conf.colormask = GSHWDrawConfig::ColorMaskSelector::ReducedUberDefault();
+		}
 	}
 }
 
