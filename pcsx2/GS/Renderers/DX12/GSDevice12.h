@@ -260,106 +260,8 @@ private:
 	D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
 
 public:
-	enum class UberVSSelector
-	{
-		InputAssembly,
-		VSExpand,
-	};
 
-	struct UberPSSelector
-	{
-		enum class Color : u8
-		{
-			None,
-			Standard,
-			ROV,
-			Count,
-		};
-
-		enum class Depth : u8
-		{
-			None,
-			Standard,
-			ROV,
-			Count,
-		};
-
-		union
-		{
-			struct
-			{
-				Color color : 2;
-				Depth depth : 2;
-			};
-
-			u8 key;
-		};
-
-		static constexpr u32 MAX_NUM_SELECTORS = 16;
-
-		__fi constexpr UberPSSelector() : key(0) {}
-
-		__fi static constexpr UberPSSelector Decode(u8 key)
-		{
-			UberPSSelector ps;
-
-			ps.color = static_cast<Color>((key >> 0) & 3);
-			ps.depth = static_cast<Depth>((key >> 2) & 3);
-
-			return ps;
-		}
-
-		__fi constexpr bool IsValid() const
-		{
-			// Make sure enums are valid.
-			if (color >= Color::Count || depth >= Depth::Count)
-				return false;
-			// Depth ROV must imply color ROV (if color is used).
-			if (depth == Depth::ROV && !(color == Color::None || color == Color::ROV))
-				return false;
-			// Must have either color or depth.
-			if (color == Color::None && depth == Depth::None)
-				return false;
-			return true;
-		}
-
-		__fi bool HasColor() const
-		{
-			return color != Color::None;
-		}
-
-		__fi bool HasDepth() const
-		{
-			return depth != Depth::None;
-		}
-
-		__fi bool HasColorROV() const
-		{
-			return color == Color::ROV;
-		}
-
-		__fi bool HasDepthROV() const
-		{
-			return depth == Depth::ROV;
-		}
-	};
-
-	enum class TFX_RT : u32
-	{
-		None,
-		Color,
-		ColclipHW,
-		PrimID,
-		Count,
-	};
-
-	enum class TFX_DS : u32
-	{
-		None,
-		Depth,
-		DepthStencil,
-		Count,
-	};
+	using UberPSSelector = GSHWDrawConfig::UberPSSelector<false>;
 
 	struct alignas(8) PipelineSelector
 	{
@@ -385,7 +287,7 @@ public:
 		GSHWDrawConfig::ColorMaskSelector cms;
 
 		UberPSSelector uber_ps;
-		UberVSSelector uber_vs;
+		GSHWDrawConfig::UberVSSelector uber_vs;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
@@ -399,7 +301,8 @@ public:
 		__fi bool HasColclipHW() const { return rt == TFX_RT::ColclipHW; }
 		__fi bool HasVSExpand() const
 		{
-			return uber_shader ? uber_vs == UberVSSelector::VSExpand : vs.expand != GSHWDrawConfig::VSExpand::None;
+			return uber_shader ? uber_vs == GSHWDrawConfig::UberVSSelector::VSExpand :
+				vs.expand != GSHWDrawConfig::VSExpand::None;
 		}
 	};
 	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
@@ -593,7 +496,7 @@ private:
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	D3D12ShaderBlobOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool async = false);
-	D3D12ShaderBlobOrJob GetTFXUberVertexShader(UberVSSelector sel);
+	D3D12ShaderBlobOrJob GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel);
 	D3D12ShaderBlobOrJob GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
 	D3D12ShaderBlobOrJob GetTFXUberPixelShader(const UberPSSelector& uber_sel, bool async = false);
 	D3D12PipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool async = false);
@@ -712,7 +615,7 @@ public:
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	void SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
-	bool BindDrawPipeline(const PipelineSelector& p, bool uber);
+	bool BindDrawPipeline(const PipelineSelector& p);
 	bool StartPipelineCompilationAsync(const GSHWDrawConfig& config) override;
 
 	void RenderHW(GSHWDrawConfig& config) override;

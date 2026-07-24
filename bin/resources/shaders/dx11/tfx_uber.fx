@@ -86,16 +86,16 @@
 #else
 	#define PS_IIP 1
 	#define PS_NO_COLOR (UBER_COLOR == 0)
-	#define PS_NO_COLOR1 0
+	#define PS_NO_COLOR1 (UBER_COLOR1 == 0)
 	#define PS_ROV_COLOR (UBER_COLOR == UBER_COLOR_ROV)
 	#if (UBER_DEPTH == UBER_DEPTH_ROV)
 		#define PS_ROV_DEPTH PS_ROV_DEPTH_READ_WRITE
 	#else
 		#define PS_ROV_DEPTH 0
 	#endif
-	#define SW_DEPTH (UBER_DEPTH >= UBER_DEPTH_STANDARD)
+	#define SW_DEPTH (UBER_DEPTH > UBER_DEPTH_STANDARD)
 	#define ZWRITE (UBER_DEPTH != UBER_DEPTH_NONE)
-	#define DATE_INIT 0T
+	#define DATE_INIT UBER_DATE_INIT
 #endif
 
 #define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
@@ -1588,7 +1588,7 @@ void ps_main(PS_INPUT input)
 	}
 
 	// SW channel masking
-#if !PS_NO_COLOR
+#if !PS_NO_COLOR && !DATE_INIT
 	if (PS_CMASK)
 		o_col0 = (FbMask == 0xFFu) ? RtLoad(input.p.xy) : o_col0; // channel masking
 #endif

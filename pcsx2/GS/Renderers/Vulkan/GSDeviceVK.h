@@ -367,148 +367,7 @@ public:
 		}
 	}
 
-	enum class TFX_RT : u32
-	{
-		None,
-		Color,
-		ColclipHW,
-		PrimID,
-		Count,
-	};
-
-	enum class TFX_DS : u32
-	{
-		None,
-		Depth,
-		DepthStencil,
-		Count,
-	};
-
-	enum class UberVSSelector
-	{
-		InputAssembly,
-		VSExpand,
-	};
-
-	struct UberPSSelector
-	{
-		enum class Color : u8
-		{
-			None,
-			Standard,
-			Feedback,
-			ROV,
-			Count,
-		};
-
-		enum class Depth : u8
-		{
-			None,
-			Standard,
-			Feedback,
-			ROV,
-			Count,
-		};
-
-		union
-		{
-			struct
-			{
-				Color color : 2;
-				u8 color1 : 1;
-				Depth depth : 2;
-				u8 date_init : 1; // DATE primid init.
-			};
-
-			u8 key;
-		};
-
-		static constexpr u32 MAX_NUM_SELECTORS = 64;
-
-		__fi constexpr UberPSSelector() : key(0) {}
-
-		__fi static constexpr UberPSSelector Decode(u8 key)
-		{
-			UberPSSelector ps;
-
-			ps.color = static_cast<Color>((key >> 0) & 3);
-			ps.color1 = (key >> 2) & 1;
-			ps.depth = static_cast<Depth>((key >> 3) & 3);
-			ps.date_init = (key >> 5) & 1;
-
-			return ps;
-		}
-
-		__fi constexpr bool IsValid() const
-		{
-			// Make sure enums are valid.
-			if (color >= Color::Count || depth >= Depth::Count)
-				return false;
-			const bool rov = color == Color::ROV || depth == Depth::ROV;
-			const bool feedback = color == Color::Feedback || depth == Depth::Feedback;
-			// These are mutually incompatible.
-			if (rov && (feedback || color1))
-				return false;
-			// Depth ROV must imply color ROV (if color is used).
-			if (depth == Depth::ROV && !(color == Color::None || color == Color::ROV))
-				return false;
-			// Color1 must imply color.
-			if (color1 && color == Color::None)
-				return false;
-			// Must have either color or depth.
-			if (color == Color::None && depth == Depth::None)
-				return false;
-			// There's only one uber date init shader and disallows DSB or special depth.
-			if (date_init && (color != Color::Standard || color1 || depth > Depth::Standard))
-				return false;
-			return true;
-		}
-
-		__fi constexpr bool CompatibleWithAttachments(TFX_RT rt, TFX_DS ds) const
-		{
-			if ((rt == TFX_RT::None) != (color == Color::None))
-				return false;
-			if ((ds == TFX_DS::None) != (depth == Depth::None))
-				return false;
-			if (static_cast<bool>(date_init) != (rt == TFX_RT::PrimID))
-				return false;
-			if (date_init && (ds == TFX_DS::DepthStencil))
-				return false;
-			if (color1 && (rt == TFX_RT::PrimID))
-				return false;
-			return true;
-		}
-
-		__fi bool HasColor() const
-		{
-			return color != Color::None;
-		}
-
-		__fi bool HasDepth() const
-		{
-			return depth != Depth::None;
-		}
-
-		__fi bool HasColorFeedback() const
-		{
-			return color == Color::Feedback;
-		}
-
-		__fi bool HasDepthFeedback() const
-		{
-			return depth == Depth::Feedback;
-		}
-
-		__fi bool HasColorROV() const
-		{
-			return color == Color::ROV;
-		}
-
-		__fi bool HasDepthROV() const
-		{
-			return depth == Depth::ROV;
-		}
-	};
+	using UberPSSelector = GSHWDrawConfig::UberPSSelector<true>;
 
 	struct alignas(8) PipelineSelector
 	{
@@ -535,7 +394,7 @@ public:
 		GSHWDrawConfig::ColorMaskSelector cms;
 
 		UberPSSelector uber_ps;
-		UberVSSelector uber_vs;
+		GSHWDrawConfig::UberVSSelector uber_vs;
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
@@ -549,7 +408,8 @@ public:
 		__fi bool HasColclipHW() const { return rt == TFX_RT::ColclipHW; }
 		__fi bool HasVSExpand() const
 		{
-			return uber_shader ? uber_vs == UberVSSelector::VSExpand : vs.expand != GSHWDrawConfig::VSExpand::None;
+			return uber_shader ? uber_vs == GSHWDrawConfig::UberVSSelector::VSExpand :
+				vs.expand != GSHWDrawConfig::VSExpand::None;
 		}
 
 		__fi bool IsRTFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT) != 0); }
@@ -729,7 +589,7 @@ private:
 	std::shared_ptr<ReturnType> ProcessAsyncJob(const SelType& sel, AsyncMapType& async_map, MapType& map);
 
 	VKShaderModuleOrJob GetTFXVertexShader(GSHWDrawConfig::VSSelector sel, bool async = false);
-	VKShaderModuleOrJob GetTFXUberVertexShader(UberVSSelector sel);
+	VKShaderModuleOrJob GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel);
 	VKShaderModuleOrJob GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel, bool async = false);
 	VKShaderModuleOrJob GetTFXUberFragmentShader(const UberPSSelector& uber_sel, bool async = false);
 	VKPipelineOrJob CreateTFXPipeline(const PipelineSelector& p, bool async = false);

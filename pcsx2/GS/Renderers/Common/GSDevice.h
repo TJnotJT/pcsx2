@@ -939,33 +939,59 @@ struct alignas(16) GSHWDrawConfig
 			return h;
 		}
 	};
+
+	enum class TFX_RT : u32
+	{
+		None,
+		Color,
+		ColclipHW,
+		PrimID,
+		Count,
+	};
+
+	enum class TFX_DS : u32
+	{
+		None,
+		Depth,
+		DepthStencil,
+		Count,
+	};
+
+	enum class UberVSSelector
+	{
+		InputAssembly,
+		VSExpand,
+	};
 #pragma pack(push, 1)
+	template<bool allow_color_feedback>
 	struct UberPSSelector
 	{
-		enum class ColorType : u8
+		enum class Color : u8
 		{
-			NONE,
-			STANDARD,
-			FEEDBACK,
+			None,
+			Standard,
+			Feedback,
 			ROV,
+			Count,
 		};
 
-		enum class DepthType : u8
+		enum class Depth : u8
 		{
-			NONE,
-			STANDARD,
-			FEEDBACK,
+			None,
+			Standard,
+			Feedback,
 			ROV,
+			Count,
 		};
 
 		union
 		{
 			struct
 			{
-				ColorType color : 2;
+				Color color : 2;
 				u8 color1 : 1;
-				DepthType depth : 2;
-				u8 date_init : 1;
+				Depth depth : 2;
+				u8 date_init : 1; // DATE primid init.
 			};
 
 			u8 key;
@@ -979,9 +1005,9 @@ struct alignas(16) GSHWDrawConfig
 		{
 			UberPSSelector ps;
 
-			ps.color = static_cast<ColorType>((key >> 0) & 3);
+			ps.color = static_cast<Color>((key >> 0) & 3);
 			ps.color1 = (key >> 2) & 1;
-			ps.depth = static_cast<DepthType>((key >> 3) & 3);
+			ps.depth = static_cast<Depth>((key >> 3) & 3);
 			ps.date_init = (key >> 5) & 1;
 
 			return ps;
@@ -989,80 +1015,80 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi constexpr bool IsValid() const
 		{
-			const bool rov = color == ColorType::ROV || depth == DepthType::ROV;
-			const bool feedback = color == ColorType::FEEDBACK || depth == DepthType::FEEDBACK;
+			// Make sure enums are valid.
+			if (color >= Color::Count || depth >= Depth::Count)
+				return false;
+			const bool rov = color == Color::ROV || depth == Depth::ROV;
+			const bool feedback = color == Color::Feedback || depth == Depth::Feedback;
 			// These are mutually incompatible.
 			if (rov && (feedback || color1))
 				return false;
+			// Only VK fragment shaders needs explicit color feedback.
+			if (!allow_color_feedback && color == Color::Feedback)
+				return false;
 			// Depth ROV must imply color ROV (if color is used).
-			if (depth == DepthType::ROV && !(color == ColorType::NONE || color == ColorType::ROV))
+			if (depth == Depth::ROV && !(color == Color::None || color == Color::ROV))
 				return false;
 			// Color1 must imply color.
-			if (color1 && color == ColorType::NONE)
+			if (color1 && color == Color::None)
 				return false;
-			// Must have color or depth.
-			if (color == ColorType::NONE && depth == DepthType::NONE)
+			// Must have either color or depth.
+			if (color == Color::None && depth == Depth::None)
 				return false;
-			// There's only one uber date init shader.
-			if (date_init && (color != ColorType::STANDARD || color1 || depth != DepthType::NONE))
+			// There's only one uber date init shader and disallows DSB or special depth.
+			if (date_init && (color != Color::Standard || color1 || depth > Depth::Standard))
 				return false;
 			return true;
 		}
 
-		__fi bool CompatibleWithColclipHW() const
+		__fi constexpr bool CompatibleWithAttachments(TFX_RT rt, TFX_DS ds) const
 		{
-			return color == ColorType::STANDARD || color == ColorType::FEEDBACK;
-		}
-
-		__fi bool CompatibleWithStencil() const
-		{
-			return color == ColorType::STANDARD;
+			if ((rt == TFX_RT::None) != (color == Color::None || color == Color::ROV))
+				return false;
+			if ((ds == TFX_DS::None) != (depth == Depth::None || depth == Depth::ROV))
+				return false;
+			if (static_cast<bool>(date_init) != (rt == TFX_RT::PrimID))
+				return false;
+			if (date_init && (ds == TFX_DS::DepthStencil))
+				return false;
+			if (color1 && (rt == TFX_RT::PrimID))
+				return false;
+			return true;
 		}
 
 		__fi bool HasColor() const
 		{
-			return color != ColorType::NONE;
+			return color != Color::None;
 		}
 
 		__fi bool HasDepth() const
 		{
-			return depth != DepthType::NONE;
+			return depth != Depth::None;
 		}
 
 		__fi bool HasColorFeedback() const
 		{
-			return color == ColorType::FEEDBACK;
+			return color == Color::Feedback;
 		}
 
 		__fi bool HasDepthFeedback() const
 		{
-			return depth == DepthType::FEEDBACK;
+			return depth == Depth::Feedback;
 		}
 
 		__fi bool HasColorROV() const
 		{
-			return color == ColorType::ROV;
+			return color == Color::ROV;
 		}
 
 		__fi bool HasDepthROV() const
 		{
-			return depth == DepthType::ROV;
+			return depth == Depth::ROV;
 		}
 
 		static std::span<const UberPSSelector> GetValidSelectors();
-
-		__fi bool operator==(const UberPSSelector& rhs) const { return key == rhs.key; }
-		__fi bool operator!=(const UberPSSelector& rhs) const { return key != rhs.key; }
-		__fi bool operator<(const UberPSSelector& rhs) const { return key < rhs.key; }
 	};
-	static_assert(sizeof(UberPSSelector) == 1);
 #pragma pack(pop)
-
-	enum class UberVSSelector
-	{
-		INPUT_ASSEMBLY,
-		VS_EXPAND,
-	};
 
 #pragma pack(push, 1)
 	struct SamplerSelector
@@ -1671,6 +1697,8 @@ class GSDevice : public GSAlignedClass<32>
 {
 public:
 	using DrawPass = GSHWDrawConfig::DrawPass;
+	using TFX_RT = GSHWDrawConfig::TFX_RT;
+	using TFX_DS = GSHWDrawConfig::TFX_DS;
 
 	enum class PresentResult
 	{

@@ -2112,38 +2112,52 @@ void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelecto
 		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
 }
 
+template<bool allow_color_feedback>
 static constexpr u32 GetNumValidUberPSSelectors()
 {
 	u32 n_valid = 0;
-	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector::MAX_NUM_SELECTORS; i++)
+	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector<allow_color_feedback>::MAX_NUM_SELECTORS; i++)
 	{
-		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid())
+		if (GSHWDrawConfig::UberPSSelector<allow_color_feedback>::Decode(i).IsValid())
 			n_valid++;
 	}
 	return n_valid;
 }
 
-static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
+static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors<false>();
+static constexpr u32 NUM_VALID_UBER_PS_SELECTORS_ALLOW_COLOR_FEEDBACK = GetNumValidUberPSSelectors<true>();
 
-template<u32 N>
-static constexpr std::array<GSHWDrawConfig::UberPSSelector, N> GetValidUberPSSelectors()
+template<u32 N, bool allow_color_feedback>
+static constexpr std::array<GSHWDrawConfig::UberPSSelector<allow_color_feedback>, N> GetValidUberPSSelectors()
 {
-	std::array<GSHWDrawConfig::UberPSSelector, N> valid;
+	std::array<GSHWDrawConfig::UberPSSelector<allow_color_feedback>, N> valid;
 	u32 n_valid = 0;
-	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector::MAX_NUM_SELECTORS; i++)
+	for (u32 i = 0; i < GSHWDrawConfig::UberPSSelector<allow_color_feedback>::MAX_NUM_SELECTORS; i++)
 	{
-		if (GSHWDrawConfig::UberPSSelector::Decode(i).IsValid())
-			valid[n_valid++] = GSHWDrawConfig::UberPSSelector::Decode(i);
+		if (GSHWDrawConfig::UberPSSelector<allow_color_feedback>::Decode(i).IsValid())
+			valid[n_valid++] = GSHWDrawConfig::UberPSSelector<allow_color_feedback>::Decode(i);
 	}
 	return valid;
 }
 
-static constexpr std::array<GSHWDrawConfig::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS>
-	valid_uber_ps_selectors = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS>();
+static constexpr std::array<GSHWDrawConfig::UberPSSelector<false>, NUM_VALID_UBER_PS_SELECTORS>
+	valid_uber_ps_selectors =
+	GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS, false>();
 
-std::span<const GSHWDrawConfig::UberPSSelector> GSHWDrawConfig::UberPSSelector::GetValidSelectors()
+static constexpr std::array<GSHWDrawConfig::UberPSSelector<true>, NUM_VALID_UBER_PS_SELECTORS_ALLOW_COLOR_FEEDBACK>
+	valid_uber_ps_selectors_allow_color_feedback =
+	GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS_ALLOW_COLOR_FEEDBACK, true>();
+
+std::span<const GSHWDrawConfig::UberPSSelector<false>>
+GSHWDrawConfig::UberPSSelector<false>::GetValidSelectors()
 {
-	return valid_uber_ps_selectors;
+	return std::span(valid_uber_ps_selectors);
+}
+
+std::span<const GSHWDrawConfig::UberPSSelector<true>>
+GSHWDrawConfig::UberPSSelector<true>::GetValidSelectors()
+{
+	return std::span(valid_uber_ps_selectors_allow_color_feedback);
 }
 
 bool GSDevice::StartPipelineCompilationAsync(const GSHWDrawConfig& conf)

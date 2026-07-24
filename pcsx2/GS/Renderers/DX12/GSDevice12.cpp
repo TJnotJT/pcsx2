@@ -2370,43 +2370,11 @@ bool GSDevice12::CompileImGuiPipeline()
 	return true;
 }
 
-namespace D3D12UberShader
-{
-	static constexpr u32 GetNumValidUberPSSelectors()
-	{
-		u32 n_valid = 0;
-		for (u32 i = 0; i < GSDevice12::UberPSSelector::MAX_NUM_SELECTORS; i++)
-		{
-			if (GSDevice12::UberPSSelector::Decode(i).IsValid())
-				n_valid++;
-		}
-		return n_valid;
-	}
-
-	static constexpr u32 NUM_VALID_UBER_PS_SELECTORS = GetNumValidUberPSSelectors();
-
-	template<u32 N>
-	static constexpr std::array<GSDevice12::UberPSSelector, N> GetValidUberPSSelectors()
-	{
-		std::array<GSDevice12::UberPSSelector, N> valid;
-		u32 n_valid = 0;
-		for (u32 i = 0; i < GSDevice12::UberPSSelector::MAX_NUM_SELECTORS; i++)
-		{
-			if (GSDevice12::UberPSSelector::Decode(i).IsValid())
-				valid[n_valid++] = GSDevice12::UberPSSelector::Decode(i);
-		}
-		return valid;
-	}
-
-	static constexpr std::array<GSDevice12::UberPSSelector, NUM_VALID_UBER_PS_SELECTORS>
-		valid_uber_ps_selectors = GetValidUberPSSelectors<NUM_VALID_UBER_PS_SELECTORS>();
-}
-
 bool GSDevice12::CompileUberTFXPipelines()
 {
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
-		constexpr bool COMPILE_ASYNC = false; // Change to enable/disable async compile.
+		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
 
 		Common::Timer timer;
 		// Compile uber pipelines async (stage 0 to start compilation, stage 1 to wait for finish).
@@ -2415,43 +2383,51 @@ bool GSDevice12::CompileUberTFXPipelines()
 			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
-
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
-				for (const UberPSSelector& ps_sel : D3D12UberShader::valid_uber_ps_selectors)
+				for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
 				{
 					for (u32 topology = 0; topology < 3; topology++)
 					{
-						selector.uber_shader = true;
-						selector.uber_vs = static_cast<UberVSSelector>(vs_sel);
-						selector.uber_ps = ps_sel;
-						selector.topology = topology;
-
-						selector.rt = (ps_sel.HasColor() && !ps_sel.HasColorROV()) ? TFX_RT::Color : TFX_RT::None;
-						selector.ds = (ps_sel.HasDepth() && !ps_sel.HasDepthROV()) ? TFX_DS::Depth : TFX_DS::None;
-						selector.ds_as_rt = ps_sel.HasDepth() && !ps_sel.HasDepthROV();
-
-						Console.Warning("ps=%08X vs=%08x key=%08x cms=%X bs=%X dss=%X top=%d", selector.uber_ps.key, (u32)selector.uber_vs, selector.key,
-							selector.cms.key, selector.bs.key, selector.dss.key, selector.topology);
-
-						if (stage == 0)
+						for (u32 rt_i = 0; rt_i < static_cast<u32>(TFX_RT::Count); rt_i++)
 						{
-							// Start compilation
-							const ID3D12PipelineState* pipeline = GetTFXPipeline(selector, COMPILE_ASYNC);
-							if (!pipeline && !m_tfx_pipelines_async.contains(selector))
-								return false; // failed
-						}
-						else
-						{
-							// Wait for compilation to finish
-							while (!GetTFXPipeline(selector, true))
+							for (u32 ds_i = 0; ds_i < static_cast<u32>(TFX_DS::Count); ds_i++)
 							{
-								if (!m_tfx_pipelines_async.contains(selector))
-									return false; // failed
-								std::this_thread::sleep_for(std::chrono::milliseconds(100));
+								TFX_RT rt = static_cast<TFX_RT>(rt_i);
+								TFX_DS ds = static_cast<TFX_DS>(ds_i);
+
+								if (!ps_sel.CompatibleWithAttachments(rt, ds))
+									continue;
+
+								selector.uber_shader = true;
+								selector.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(vs_sel);
+								selector.uber_ps = ps_sel;
+								selector.topology = topology;
+
+								selector.rt = rt;
+								selector.ds = ds;
+								selector.ds_as_rt = ps_sel.HasDepthFeedback();
+
+								if (stage == 0)
+								{
+									// Start compilation
+									const ID3D12PipelineState* pipeline = GetTFXPipeline(selector, COMPILE_ASYNC);
+									if (!pipeline && !m_tfx_pipelines_async.contains(selector))
+										return false; // failed
+								}
+								else
+								{
+									// Wait for compilation to finish
+									while (!GetTFXPipeline(selector, true))
+									{
+										if (!m_tfx_pipelines_async.contains(selector))
+											return false; // failed
+										std::this_thread::sleep_for(std::chrono::milliseconds(100));
+									}
+								}
+								num_pipelines++;
 							}
 						}
-						num_pipelines++;
 					}
 				}
 			}
@@ -3390,7 +3366,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXVertexShader(GSHWDrawConfig::
 	return it->second.get();
 }
 
-GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberVertexShader(UberVSSelector sel)
+GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberVertexShader(GSHWDrawConfig::UberVSSelector sel)
 {
 	if (m_tfx_uber_vertex_shaders[static_cast<u32>(sel)])
 		return m_tfx_uber_vertex_shaders[static_cast<u32>(sel)].get();
@@ -3405,7 +3381,7 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberVertexShader(UberVSSelect
 	// Do the static macros.
 	sm.AddMacro("UBER_SHADER", 1);
 
-	const char* entry_point = (sel == UberVSSelector::VSExpand) ? "vs_main_expand" : "vs_main";
+	const char* entry_point = (sel == GSHWDrawConfig::UberVSSelector::VSExpand) ? "vs_main_expand" : "vs_main";
 
 	const std::string& source =  m_tfx_uber_source; // FIXME: Unify uber/non-uber sources
 
@@ -3547,7 +3523,9 @@ GSDevice12::D3D12ShaderBlobOrJob GSDevice12::GetTFXUberPixelShader(const UberPSS
 	// Do the static macros.
 	sm.AddMacro("UBER_SHADER", 1);
 	sm.AddMacro("UBER_COLOR", static_cast<u32>(sel.color));
+	sm.AddMacro("UBER_COLOR1", static_cast<u32>(sel.color1));
 	sm.AddMacro("UBER_DEPTH", static_cast<u32>(sel.depth));
+	sm.AddMacro("UBER_DATE_INIT", static_cast<u32>(sel.date_init));
 
 	// FIXME: Make the Uber/Normal sources the same.
 	const std::string& source = m_tfx_uber_source;
@@ -3759,9 +3737,9 @@ const ID3D12PipelineState* GSDevice12::GetTFXPipeline(const PipelineSelector& p,
 	return it->second.get();
 }
 
-bool GSDevice12::BindDrawPipeline(const PipelineSelector& p, bool uber)
+bool GSDevice12::BindDrawPipeline(const PipelineSelector& p)
 {
-	const ID3D12PipelineState* pipeline = GetTFXPipeline(p, uber);
+	const ID3D12PipelineState* pipeline = GetTFXPipeline(p);
 
 	if (!pipeline)
 		return false;
@@ -4658,7 +4636,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(init_pipe, false))
+	if (BindDrawPipeline(init_pipe))
 		Draw(init_pipe);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
@@ -5041,7 +5019,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 
 		UpdateHWPipelineSelector(config, DrawPass::Blend);
 
-		if (BindDrawPipeline(pipe, false))
+		if (BindDrawPipeline(pipe))
 			Draw(pipe);
 	}
 
@@ -5114,7 +5092,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		if (BindDrawPipeline(pipe, config.uber_shader))
+		if (BindDrawPipeline(pipe))
 			Draw(pipe);
 		return;
 	}
@@ -5152,7 +5130,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				if (feedback_depth)
 					FeedbackBarrier(draw_ds);
 
-				if (BindDrawPipeline(pipe, config.uber_shader))
+				if (BindDrawPipeline(pipe))
 					Draw(pipe, p, count);
 				p += count;
 			}
@@ -5171,7 +5149,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		}
 	}
 
-	if (BindDrawPipeline(pipe, config.uber_shader))
+	if (BindDrawPipeline(pipe))
 		Draw(pipe);
 
 	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
@@ -5210,57 +5188,67 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 			m_pipeline_selector.ds = TFX_DS::Depth;
 	}
 
+	// DS as RT setup
 	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !ps.HasDepthROV();
+
+	m_pipeline_selector.vs.key = config.vs.key;
+	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
+	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
+	m_pipeline_selector.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : dss.key;
+	m_pipeline_selector.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : bs.key;
+	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
+	m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : cms.key;
+	m_pipeline_selector.topology = static_cast<u32>(config.topology);
+
 	m_pipeline_selector.uber_shader = config.uber_shader;
 
-	if (!config.uber_shader)
+	if (config.uber_shader)
 	{
-		m_pipeline_selector.vs.key = config.vs.key;
-		m_pipeline_selector.ps.key_hi = config.ps.key_hi;
-		m_pipeline_selector.ps.key_lo = config.ps.key_lo;
-		m_pipeline_selector.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : dss.key;
-		m_pipeline_selector.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : bs.key;
-		m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
-		m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : cms.key;
-		m_pipeline_selector.topology = static_cast<u32>(config.topology);
-	}
-	else
-	{
-		// Uber shader draw shouldn't require blend/alpha/primid pass.
-		pxAssert(pass == GSHWDrawConfig::DrawPass::Main);
+		m_pipeline_selector.uber_shader = true;
 
-		m_pipeline_selector.uber_vs = (config.vs.expand != GSHWDrawConfig::VSExpand::None) ?
-			UberVSSelector::VSExpand : UberVSSelector::InputAssembly;
+		// Uber VS
+		m_pipeline_selector.uber_vs = (m_pipeline_selector.vs.expand != GSHWDrawConfig::VSExpand::None) ?
+			GSHWDrawConfig::UberVSSelector::VSExpand : GSHWDrawConfig::UberVSSelector::InputAssembly;
 
+		// Uber PS color
 		m_pipeline_selector.uber_ps = {};
-		if (config.ps.HasColorROV())
+		if (m_pipeline_selector.ps.HasColorROV())
 			m_pipeline_selector.uber_ps.color = UberPSSelector::Color::ROV;
-		else if (config.rt)
+		else if (m_pipeline_selector.HasRT())
 			m_pipeline_selector.uber_ps.color = UberPSSelector::Color::Standard;
 		else
 			m_pipeline_selector.uber_ps.color = UberPSSelector::Color::None;
 
-		if (config.ps.HasDepthROV())
+		// Uber PS depth
+		if (m_pipeline_selector.ps.HasDepthROV())
 			m_pipeline_selector.uber_ps.depth = UberPSSelector::Depth::ROV;
-		else if (config.ds)
+		else if (config.IsFeedbackLoopDepth(ps))
+			m_pipeline_selector.uber_ps.depth = UberPSSelector::Depth::Feedback;
+		else if (m_pipeline_selector.HasDS())
 			m_pipeline_selector.uber_ps.depth = UberPSSelector::Depth::Standard;
 		else
 			m_pipeline_selector.uber_ps.depth = UberPSSelector::Depth::None;
+
+		m_pipeline_selector.uber_ps.color1 = !config.ps.no_color1;
+		m_pipeline_selector.uber_ps.date_init = IsDATEModePrimIDInit(config.ps.date);
 
 		pxAssert(m_pipeline_selector.uber_ps.IsValid());
 
 		// Get the state for dynamic branching in the VS/PS.
 		GSHWDrawConfig::ShaderPushConstants pc{}; // FIXME: jank
-		GSHWDrawConfig::GetUberShaderSelector(config.vs, config.ps, pc);
+		GSHWDrawConfig::GetUberShaderSelector(m_pipeline_selector.vs, m_pipeline_selector.ps, pc);
 		SetShaderPushConstants(pc);
 
 		// Clear the state we don't need for uber shader.
 		m_pipeline_selector.vs.key = 0;
 		m_pipeline_selector.ps.key_lo = 0;
 		m_pipeline_selector.ps.key_hi = 0;
-		m_pipeline_selector.cms.key = 0;
-		m_pipeline_selector.bs.key = 0;
-		m_pipeline_selector.dss.key = 0;
+	}
+	else
+	{
+		m_pipeline_selector.uber_shader = false;
+		m_pipeline_selector.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(0);
+		m_pipeline_selector.uber_ps.key = 0;
 	}
 }
 
