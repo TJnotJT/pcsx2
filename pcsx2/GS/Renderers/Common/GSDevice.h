@@ -1254,39 +1254,33 @@ struct alignas(16) GSHWDrawConfig
 		}
 	};
 
-	struct alignas(16) ShaderPushConstants
+	struct VSPushConstants
 	{
-		static constexpr u32 VS_UBER_SELECTOR = 0; // First 32 bits
-		static constexpr u32 PS_UBER_SELECTOR = 1; // Remaining 32 x 4 bits
-		static constexpr u32 NUM_UBER_SELECTORS = 5;
-
 		u32 base_vertex;
 		u32 base_index;
-		u32 uber_selectors[NUM_UBER_SELECTORS];
-		u32 _pad_0;
 
-		__fi ShaderPushConstants()
+		__fi VSPushConstants()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
 		}
-		__fi ShaderPushConstants(const ShaderPushConstants& other)
+		__fi VSPushConstants(const VSPushConstants& other)
 		{
 			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
 		}
-		__fi ShaderPushConstants& operator=(const ShaderPushConstants& other)
+		__fi VSPushConstants& operator=(const VSPushConstants& other)
 		{
-			new (this) ShaderPushConstants(other);
+			new (this) VSPushConstants(other);
 			return *this;
 		}
-		__fi bool operator==(const ShaderPushConstants& other) const
+		__fi bool operator==(const VSPushConstants& other) const
 		{
 			return BitEqual(*this, other);
 		}
-		__fi bool operator!=(const ShaderPushConstants& other) const
+		__fi bool operator!=(const VSPushConstants& other) const
 		{
 			return !(*this == other);
 		}
-		__fi bool Update(const ShaderPushConstants& other)
+		__fi bool Update(const VSPushConstants& other)
 		{
 			if (*this == other)
 				return false;
@@ -1295,7 +1289,102 @@ struct alignas(16) GSHWDrawConfig
 			return true;
 		}
 	};
-	static_assert(sizeof(ShaderPushConstants) == 32, "ShaderPushConstants wrong size");
+
+	static_assert(sizeof(VSPushConstants) == 2 * sizeof(u32));
+
+	struct UberDynamicSelector
+	{
+		union
+		{
+			struct
+			{
+				u32 vs_selector;
+				u32 ps_selector[4];
+			};
+			u32 selector[5];
+		};
+
+		static constexpr u32 VS_OFFSET = 0;
+		static constexpr u32 PS_OFFSET = 1;
+		static constexpr u32 NUM_SELECTORS = 5;
+
+		__fi UberDynamicSelector()
+		{
+			memset(static_cast<void*>(this), 0, sizeof(*this));
+		}
+		__fi UberDynamicSelector(const UberDynamicSelector& other)
+		{
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		}
+		__fi UberDynamicSelector& operator=(const UberDynamicSelector& other)
+		{
+			new (this) UberDynamicSelector(other);
+			return *this;
+		}
+		__fi bool operator==(const UberDynamicSelector& other) const
+		{
+			return BitEqual(*this, other);
+		}
+		__fi bool operator!=(const UberDynamicSelector& other) const
+		{
+			return !(*this == other);
+		}
+		__fi bool Update(const UberDynamicSelector& other)
+		{
+			if (*this == other)
+				return false;
+
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+			return true;
+		}
+	};
+
+	static_assert(sizeof(UberDynamicSelector) == UberDynamicSelector::NUM_SELECTORS * sizeof(u32));
+	static_assert(offsetof(UberDynamicSelector, vs_selector) == UberDynamicSelector::VS_OFFSET * sizeof(u32));
+	static_assert(offsetof(UberDynamicSelector, ps_selector) == UberDynamicSelector::PS_OFFSET * sizeof(u32));
+
+	struct alignas(16) TFXPushConstants
+	{
+		VSPushConstants vs_pc;
+		UberDynamicSelector uber_selector;
+		u32 _pad_0;
+
+		static constexpr u32 VS_PC_OFFSET = 0;
+		static constexpr u32 VS_PC_NUM_CONSTANTS = sizeof(vs_pc) / sizeof(u32);
+
+		__fi TFXPushConstants()
+		{
+			memset(static_cast<void*>(this), 0, sizeof(*this));
+		}
+		__fi TFXPushConstants(const TFXPushConstants& other)
+		{
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		}
+		__fi TFXPushConstants& operator=(const TFXPushConstants& other)
+		{
+			new (this) TFXPushConstants(other);
+			return *this;
+		}
+		__fi bool operator==(const TFXPushConstants& other) const
+		{
+			return BitEqual(*this, other);
+		}
+		__fi bool operator!=(const TFXPushConstants& other) const
+		{
+			return !(*this == other);
+		}
+		__fi bool Update(const TFXPushConstants& other)
+		{
+			if (*this == other)
+				return false;
+
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+			return true;
+		}
+	};
+
+	static_assert(sizeof(TFXPushConstants) == 32, "TFXPushConstants wrong size");
+	static_assert(offsetof(TFXPushConstants, vs_pc) == TFXPushConstants::VS_PC_OFFSET * sizeof(u32));
 
 	struct alignas(16) PSConstantBuffer
 	{
@@ -1498,7 +1587,7 @@ struct alignas(16) GSHWDrawConfig
 	BlendMultiPass blend_multi_pass;
 	
 	// Place push constants before constant buffer so that they're zeroed out ever draw.
-	ShaderPushConstants pc;
+	TFXPushConstants pc;
 
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
@@ -1661,7 +1750,7 @@ struct alignas(16) GSHWDrawConfig
 	static std::span<const ShaderDefine> GetUberShaderVSSelectorDefines();
 	static std::span<const ShaderDefine> GetUberShaderPSSelectorDefines();
 
-	static void GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out);
+	static UberDynamicSelector GetUberDynamicSelector(const VSSelector& vs, const PSSelector& ps);
 };
 
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)

@@ -540,7 +540,7 @@ private:
 
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
-	GSHWDrawConfig::ShaderPushConstants m_tfx_pc_cache;
+	GSHWDrawConfig::TFXPushConstants m_tfx_pc_cache;
 
 	std::string m_tfx_source;
 	std::string m_uber_tfx_source;
@@ -728,7 +728,7 @@ public:
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
-	void SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc);
+	void SetUberDynamicSelector(const GSHWDrawConfig::UberDynamicSelector& sel);
 	void WriteTFXPushConstants(u32 offset, u32 num_constants);
 
 	bool BindDrawPipeline(const PipelineSelector& p);

@@ -2322,14 +2322,14 @@ void GSDeviceOGL::PSSetUniformBuffer(GSHWDrawConfig::PSConstantBuffer& cb)
 
 void GSDeviceOGL::VSSetPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::ShaderPushConstants vs_pc;
+	GSHWDrawConfig::VSPushConstants vs_pc;
 	vs_pc.base_vertex = base_vertex;
 	vs_pc.base_index = base_index;
 
-	if (m_tfx_pc_cache.Update(vs_pc) || force_update)
+	if (m_tfx_pc_cache.vs_pc.Update(vs_pc) || force_update)
 	{
 		WriteToStreamBuffer(m_vertex_push_constants_stream_buffer.get(), g_vs_pc_index,
-			m_uniform_buffer_alignment, &vs_pc, sizeof(vs_pc));
+			m_uniform_buffer_alignment, &m_tfx_pc_cache, sizeof(m_tfx_pc_cache));
 	}
 }
 

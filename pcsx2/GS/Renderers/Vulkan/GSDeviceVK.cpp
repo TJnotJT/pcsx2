@@ -4055,7 +4055,7 @@ bool GSDeviceVK::CreatePipelineLayouts()
 	{
 		dslb.AddBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
 		plb.AddPushConstants(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-			0, sizeof(GSHWDrawConfig::ShaderPushConstants));
+			0, sizeof(GSHWDrawConfig::TFXPushConstants));
 	}
 	if (m_features.aa1 || GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 		dslb.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
@@ -6338,18 +6338,21 @@ void GSDeviceVK::SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb)
 
 void GSDeviceVK::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_update)
 {
-	GSHWDrawConfig::ShaderPushConstants pc;
-	pc.base_vertex = base_vertex;
-	pc.base_index = base_index;
-	static constexpr u32 start = offsetof(GSHWDrawConfig::ShaderPushConstants, base_vertex) / sizeof(u32);
-	static constexpr u32 end = offsetof(GSHWDrawConfig::ShaderPushConstants, base_index) / sizeof(u32);
-	if (m_tfx_pc_cache.Update(pc) || force_update)
-		WriteTFXPushConstants(start, end - start + 1); // Need constants per draw call so write immediately.
+	GSHWDrawConfig::VSPushConstants vs_pc;
+	vs_pc.base_vertex = base_vertex;
+	vs_pc.base_index = base_index;
+	if (m_tfx_pc_cache.vs_pc.Update(vs_pc) || force_update)
+	{
+		// Need constants per draw call so write immediately.
+		WriteTFXPushConstants(
+			GSHWDrawConfig::TFXPushConstants::VS_PC_OFFSET,
+			GSHWDrawConfig::TFXPushConstants::VS_PC_NUM_CONSTANTS);
+	}
 }
 
-void GSDeviceVK::SetShaderPushConstants(const GSHWDrawConfig::ShaderPushConstants& pc)
+void GSDeviceVK::SetUberDynamicSelector(const GSHWDrawConfig::UberDynamicSelector& sel)
 {
-	if (m_tfx_pc_cache.Update(pc))
+	if (m_tfx_pc_cache.uber_selector.Update(sel))
 		m_dirty_flags |= DIRTY_FLAG_TFX_PUSH_CONSTANTS; // Needs constants per pipeline so just set dirty bit.
 }
 
@@ -6719,13 +6722,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			draw_ds && m_current_render_target->GetSize() == draw_ds->GetSize())
 		{
 			draw_rt = m_current_render_target;
-			m_pipeline_selector.rt = TFX_RT::Color;
+			pipe.rt = TFX_RT::Color;
 		}
 		else if (!(draw_ds || draw_ds_rov) && m_current_depth_target && config.tex != m_current_depth_target &&
 			draw_rt && m_current_depth_target->GetSize() == draw_rt->GetSize())
 		{
 			draw_ds = m_current_depth_target;
-			m_pipeline_selector.ds = TFX_DS::Depth;
+			pipe.ds = TFX_DS::Depth;
 		}
 
 		// Prefer keeping feedback loop enabled, that way we're not constantly restarting render passes
@@ -7056,6 +7059,17 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 	{
 		pipe.uber_shader = true;
 
+		// Clear the state that will be set with VK dynamic state.
+		pipe.vs.key = 0;
+		pipe.ps.key_lo = 0;
+		pipe.ps.key_hi = 0;
+		pipe.cms.key = 0;
+		pipe.bs.key = 0;
+		pipe.dss.key = 0;
+
+		// Update pipeline's dynamic state.
+		SetUberDynamicState(dss, bs, cms, IsDATEModePrimIDInit(ps.date));
+
 		if (!m_uber_dynamic_state.enabled)
 		{
 			// Refresh dynamic state if we move from non-uber to uber.
@@ -7063,13 +7077,16 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 			m_uber_dynamic_state.enabled = true;
 		}
 
+		// Get the state for dynamic branching in the VS/PS.
+		SetUberDynamicSelector(GSHWDrawConfig::GetUberDynamicSelector(vs, ps));
+
 		// Uber VS
-		pipe.uber_vs = (pipe.vs.expand != GSHWDrawConfig::VSExpand::None) ?
+		pipe.uber_vs = (vs.expand != GSHWDrawConfig::VSExpand::None) ?
 			GSHWDrawConfig::UberVSSelector::VSExpand : GSHWDrawConfig::UberVSSelector::InputAssembly;
 
 		// Uber PS color
 		pipe.uber_ps = {};
-		if (pipe.ps.HasColorROV())
+		if (ps.HasColorROV())
 			pipe.uber_ps.color = UberPSSelector::Color::ROV;
 		else if (pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT)
 			pipe.uber_ps.color = UberPSSelector::Color::Feedback;
@@ -7079,7 +7096,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 			pipe.uber_ps.color = UberPSSelector::Color::None;
 
 		// Uber PS depth
-		if (pipe.ps.HasDepthROV())
+		if (ps.HasDepthROV())
 			pipe.uber_ps.depth = UberPSSelector::Depth::ROV;
 		else if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth))
 			pipe.uber_ps.depth = UberPSSelector::Depth::Feedback;
@@ -7089,31 +7106,16 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 			pipe.uber_ps.depth = UberPSSelector::Depth::None;
 
 		pipe.uber_ps.color1 = !config.ps.no_color1;
-		pipe.uber_ps.date_init = IsDATEModePrimIDInit(config.ps.date);
+		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date);
 
 		pxAssert(pipe.uber_ps.IsValid());
 
+		// Feedback loop flags
 		if (!preserve_feedback_flags)
 		{
 			if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth))
 				pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
 		}
-
-		// Get state that we can set dynamically in VK.
-		SetUberDynamicState(pipe.dss, pipe.bs, pipe.cms, IsDATEModePrimIDInit(pipe.ps.date));
-
-		// Get the state for dynamic branching in the VS/PS.
-		GSHWDrawConfig::ShaderPushConstants pc{}; // FIXME: jank
-		GSHWDrawConfig::GetUberShaderSelector(pipe.vs, pipe.ps, pc);
-		SetShaderPushConstants(pc);
-
-		// Clear the state we don't need for uber shader.
-		pipe.vs.key = 0;
-		pipe.ps.key_lo = 0;
-		pipe.ps.key_hi = 0;
-		pipe.cms.key = 0;
-		pipe.bs.key = 0;
-		pipe.dss.key = 0;
 	}
 	else
 	{

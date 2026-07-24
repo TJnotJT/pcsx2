@@ -2003,14 +2003,14 @@ static constexpr size_t NUM_DYNAMIC_PS_FIELDS = GetNumDynamicSelectorFields(GSHW
 
 static constexpr std::array<PipelineSelectorFieldBitsDesc, NUM_VS_FIELDS> vs_selector_fields_bits =
 	GetSelectorFieldBits<NUM_VS_FIELDS>(GSHWDrawConfig::vs_selector_fields,
-		GSHWDrawConfig::ShaderPushConstants::VS_UBER_SELECTOR);
+		GSHWDrawConfig::UberDynamicSelector::VS_OFFSET);
 
 static constexpr std::array<PipelineSelectorFieldBitsDesc, NUM_PS_FIELDS> ps_selector_fields_bits =
 	GetSelectorFieldBits<NUM_PS_FIELDS>(GSHWDrawConfig::ps_selector_fields,
-		GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR);
+		GSHWDrawConfig::UberDynamicSelector::PS_OFFSET);
 
 template<size_t N_ALL, size_t N_DYNAMIC>
-static std::array<ShaderDefine, N_DYNAMIC> GetUberShaderSelectorDefines(
+static std::array<ShaderDefine, N_DYNAMIC> GetUberDynamicSelectorDefines(
 	const std::array<PipelineSelectorFieldBitsDesc, N_ALL>& selector_fields,
 	u32 base_selector)
 {
@@ -2057,15 +2057,15 @@ static std::array<ShaderDefine, N_DYNAMIC> GetUberShaderSelectorDefines(
 }
 
 static const std::array<ShaderDefine, NUM_DYNAMIC_VS_FIELDS> vs_uber_defines =
-	GetUberShaderSelectorDefines<NUM_VS_FIELDS, NUM_DYNAMIC_VS_FIELDS>(
-		vs_selector_fields_bits, GSHWDrawConfig::ShaderPushConstants::VS_UBER_SELECTOR);
+	GetUberDynamicSelectorDefines<NUM_VS_FIELDS, NUM_DYNAMIC_VS_FIELDS>(
+		vs_selector_fields_bits, GSHWDrawConfig::UberDynamicSelector::VS_OFFSET);
 
 static const std::array<ShaderDefine, NUM_DYNAMIC_PS_FIELDS> ps_uber_defines =
-	GetUberShaderSelectorDefines<NUM_PS_FIELDS, NUM_DYNAMIC_PS_FIELDS>(
-		ps_selector_fields_bits, GSHWDrawConfig::ShaderPushConstants::PS_UBER_SELECTOR);
+	GetUberDynamicSelectorDefines<NUM_PS_FIELDS, NUM_DYNAMIC_PS_FIELDS>(
+		ps_selector_fields_bits, GSHWDrawConfig::UberDynamicSelector::PS_OFFSET);
 
 template<typename SelectorType, size_t N>
-static void GetUberShaderSelector(
+static void GetUberDynamicSelector(
 	const SelectorType& selector,
 	const std::array<PipelineSelectorFieldBitsDesc, N>& selector_fields,
 	u32 max_selectors,
@@ -2101,15 +2101,19 @@ std::span<const ShaderDefine> GSHWDrawConfig::GetUberShaderPSSelectorDefines()
 	return ps_uber_defines;
 }
 
-void GSHWDrawConfig::GetUberShaderSelector(const VSSelector& vs, const PSSelector& ps, ShaderPushConstants& pc_out)
+GSHWDrawConfig::UberDynamicSelector GSHWDrawConfig::GetUberDynamicSelector(const VSSelector& vs, const PSSelector& ps)
 {
-	::GetUberShaderSelector<VSSelector, NUM_VS_FIELDS>(
-		vs, vs_selector_fields_bits, ShaderPushConstants::NUM_UBER_SELECTORS,
-		ShaderPushConstants::VS_UBER_SELECTOR, pc_out.uber_selectors);
+	UberDynamicSelector selector{};
 
-	::GetUberShaderSelector<PSSelector, std::size(ps_selector_fields)>(
-		ps, ps_selector_fields_bits, ShaderPushConstants::NUM_UBER_SELECTORS,
-		ShaderPushConstants::PS_UBER_SELECTOR, pc_out.uber_selectors);
+	::GetUberDynamicSelector<VSSelector, NUM_VS_FIELDS>(
+		vs, vs_selector_fields_bits, UberDynamicSelector::NUM_SELECTORS,
+		UberDynamicSelector::VS_OFFSET, selector.selector);
+
+	::GetUberDynamicSelector<PSSelector, std::size(ps_selector_fields)>(
+		ps, ps_selector_fields_bits, UberDynamicSelector::NUM_SELECTORS,
+		UberDynamicSelector::PS_OFFSET, selector.selector);
+
+	return selector;
 }
 
 template<bool allow_color_feedback>
