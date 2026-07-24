@@ -571,8 +571,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const PipelineSelector& config);
-	void Draw(const PipelineSelector& config, int offset, int count);
+	void Draw(const GSHWDrawConfig& config, DrawPass pass);
+	void Draw(const GSHWDrawConfig& config, DrawPass pass, int offset, int count);
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 

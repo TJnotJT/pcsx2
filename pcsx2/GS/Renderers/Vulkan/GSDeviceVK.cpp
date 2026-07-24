@@ -2937,12 +2937,13 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDeviceVK::Draw(const PipelineSelector& pipe, int offset, int count)
+void GSDeviceVK::Draw(const GSHWDrawConfig& config, DrawPass pass, int offset, int count)
 {
-	if (pipe.HasVSExpand())
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = pipe.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(pipe.vs.expand); // FIXME: Change this back to config?
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -2951,9 +2952,9 @@ void GSDeviceVK::Draw(const PipelineSelector& pipe, int offset, int count)
 	}
 }
 
-void GSDeviceVK::Draw(const PipelineSelector& pipe)
+void GSDeviceVK::Draw(const GSHWDrawConfig& config, DrawPass pass)
 {
-	Draw(pipe, 0, m_index.count);
+	Draw(config, pass, 0, m_index.count);
 }
 
 VkFormat GSDeviceVK::LookupNativeFormat(GSTexture::Format format) const
@@ -6466,7 +6467,7 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	pipe.ps.no_color = false;
 	pipe.ps.no_color1 = true;
 	if (BindDrawPipeline(pipe))
-		Draw(pipe);
+		Draw(config, DrawPass::PrimID);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
@@ -6907,7 +6908,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (BindDrawPipeline(pipe))
 		{
 			// TODO: This probably should have barriers, in case we want to use it conditionally.
-			Draw(pipe);
+			Draw(config, DrawPass::Blend);
 		}
 	}
 
@@ -7220,7 +7221,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, DrawPass pass, GSTextu
 {
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		Draw(m_pipeline_selector);
+		Draw(config, pass);
 		return;
 	}
 
@@ -7281,7 +7282,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, DrawPass pass, GSTextu
 			IssueBarriers();
 
 			const u32 count = config.drawlist->at(n) * indices_per_prim;
-			Draw(m_pipeline_selector, p, count);
+			Draw(config, pass, p, count);
 			p += count;
 		}
 
@@ -7294,7 +7295,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, DrawPass pass, GSTextu
 		IssueBarriers();
 	}
 
-	Draw(m_pipeline_selector);
+	Draw(config, pass);
 
 	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);

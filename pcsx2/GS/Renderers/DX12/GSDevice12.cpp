@@ -1607,12 +1607,13 @@ void GSDevice12::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDevice12::Draw(const PipelineSelector& pipe, int offset, int count)
+void GSDevice12::Draw(const GSHWDrawConfig& config, DrawPass pass, int offset, int count)
 {
-	if (pipe.HasVSExpand())
+	const GSHWDrawConfig::VSSelector& vs = config.GetVS(pass);
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = pipe.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(pipe.vs.expand); // FIXME: Change this back to config?
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -1621,9 +1622,9 @@ void GSDevice12::Draw(const PipelineSelector& pipe, int offset, int count)
 	}
 }
 
-void GSDevice12::Draw(const PipelineSelector& pipe)
+void GSDevice12::Draw(const GSHWDrawConfig& config, DrawPass pass)
 {
-	Draw(pipe, 0, m_index.count);
+	Draw(config, pass, 0, m_index.count);
 }
 
 void GSDevice12::LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
@@ -4639,7 +4640,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	init_pipe.ps.no_color = false;
 	init_pipe.ps.no_color1 = true;
 	if (BindDrawPipeline(init_pipe))
-		Draw(init_pipe);
+		Draw(config, DrawPass::PrimID);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
@@ -5024,7 +5025,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		UpdateHWPipelineSelector(config, DrawPass::Blend);
 
 		if (BindDrawPipeline(pipe))
-			Draw(pipe);
+			Draw(config, DrawPass::Blend);
 	}
 
 	// and the alpha pass
@@ -5097,7 +5098,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
 		if (BindDrawPipeline(pipe))
-			Draw(pipe);
+			Draw(config, pass);
 		return;
 	}
 
@@ -5135,7 +5136,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 					FeedbackBarrier(draw_ds);
 
 				if (BindDrawPipeline(pipe))
-					Draw(pipe, p, count);
+					Draw(config, pass, p, count);
 				p += count;
 			}
 
@@ -5154,7 +5155,7 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 	}
 
 	if (BindDrawPipeline(pipe))
-		Draw(pipe);
+		Draw(config, pass);
 
 	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
