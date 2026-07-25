@@ -74,7 +74,7 @@ struct PipelineSelectorMTL
 	GSHWDrawConfig::PSSelector ps;
 	PipelineSelectorExtrasMTL extras;
 	GSHWDrawConfig::VSSelector vs;
-	u8 pad[7];
+	u8 pad[4];
 	PipelineSelectorMTL()
 	{
 		memset(this, 0, sizeof(*this));
@@ -101,7 +101,7 @@ struct PipelineSelectorMTL
 	}
 };
 
-static_assert(sizeof(PipelineSelectorMTL) == 28);
+static_assert(sizeof(PipelineSelectorMTL) == 32);
 
 template <>
 struct std::hash<PipelineSelectorMTL>
@@ -205,12 +205,14 @@ public:
 				bool fst        : 1;
 				bool point_size : 1;
 				bool round_uv   : 1;
+				GSShader::VS_CLAMP_UV clamp_uv : 2;
+				GSShader::VS_ALIGN_UV align_uv : 2;
 				GSShader::VSExpand expand : 3;
 			};
-			u8 key;
+			u64 key;
 		};
 		VSSelector(): key(0) {}
-		VSSelector(u8 key): key(key) {}
+		VSSelector(u64 key): key(key) {}
 	};
 
 	using PSSelector = GSHWDrawConfig::PSSelector;
@@ -275,7 +277,7 @@ public:
 		return m_convert_pipeline[ShaderConvertSelector(shader).Index()];
 	}
 
-	MRCOwned<id<MTLFunction>> m_hw_vs[6 << 4];
+	MRCOwned<id<MTLFunction>> m_hw_vs[6 << 8];
 	std::unordered_map<PSSelector, MRCOwned<id<MTLFunction>>> m_hw_ps;
 	std::unordered_map<PipelineSelectorMTL, MRCOwned<id<MTLRenderPipelineState>>> m_hw_pipeline;
 
