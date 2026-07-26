@@ -202,7 +202,7 @@ bool GSRendererHWHybrid::IsCoverageAlphaSupported()
 
 void GSRendererHWHybrid::Draw()
 {
-	GL_PUSH("Draw %" PRIX64, s_n);
+	GL_PUSH("Draw %" PRId64, s_n);
 
 	const GIFRegFRAME& frame = m_context->FRAME;
 	const GIFRegTEX0& tex0 = m_context->TEX0;
@@ -227,5 +227,5 @@ void GSRendererHWHybrid::Draw()
 
 	g_gs_device->DrawHybrid(config);
 
-	m_texture_cache->WritebackAllTextures();
+	//m_texture_cache->WritebackAllTextures();
 }
