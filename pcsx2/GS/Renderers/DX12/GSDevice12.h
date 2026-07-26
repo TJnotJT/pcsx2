@@ -489,6 +489,7 @@ private:
 	}
 	static bool IsShaderBlob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<ID3DBlob*>(x); }
 	static bool IsNullShaderBlob(D3D12ShaderBlobOrJob& x) { return IsShaderBlob(x) && GetShaderBlob(x) == nullptr; }
+	static bool IsValidShaderBlob(D3D12ShaderBlobOrJob& x) { return IsShaderBlob(x) && GetShaderBlob(x) != nullptr; }
 	static bool IsShaderJob(D3D12ShaderBlobOrJob& x) { return std::holds_alternative<std::shared_ptr<D3D12ShaderJob>>(x); }
 
 	static ComPtr<ID3D12PipelineState>& GetPipeline(D3D12PipelineOrJob& x) { return std::get<ComPtr<ID3D12PipelineState>>(x); }

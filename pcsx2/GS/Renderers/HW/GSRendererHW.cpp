@@ -7957,7 +7957,6 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			{
 				// If we're using ROV for either color/depth, use it for both.
 				ConfigureROV(rt != nullptr, ds != nullptr);
-				m_conf.ps.zmask = ds && !m_conf.ps.HasDepthROVWrite(); // SW depth masking.
 			}
 			else
 			{
@@ -7990,6 +7989,13 @@ void GSRendererHW::HandleUberOrHybridShader(GSTextureCache::Target* rt, GSTextur
 			m_conf.blend = GSHWDrawConfig::BlendState::ReducedUberDefault();
 			m_conf.depth = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();
 			m_conf.colormask = GSHWDrawConfig::ColorMaskSelector::ReducedUberDefault();
+		}
+
+		// Do SW color masking with uber ROV.
+		if (m_conf.ps.HasColorROV() && !m_conf.ps.HasColorOutput())
+		{
+			m_conf.ps.no_color = false;
+			m_conf.cb_ps.FbMask = GSVector4i(0xFF);
 		}
 
 		// Do SW depth masking with uber ROV.

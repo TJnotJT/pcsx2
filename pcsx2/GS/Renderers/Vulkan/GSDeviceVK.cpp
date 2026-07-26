@@ -4697,6 +4697,7 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
 		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
+		constexpr int SLEEP_MS = 100;
 
 		Common::Timer timer;
 
@@ -4750,7 +4751,7 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 									{
 										if (!m_tfx_pipelines_async.contains(selector))
 											return false; // failed
-										std::this_thread::sleep_for(std::chrono::milliseconds(100));
+										std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_MS));
 									}
 								}
 								num_pipelines++;

@@ -569,6 +569,7 @@ private:
 	}
 	static bool IsShaderModule(VKShaderModuleOrJob& x) { return std::holds_alternative<VKCachedShaderModule>(x); }
 	static bool IsNullShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x).module == VK_NULL_HANDLE; }
+	static bool IsValisShaderModule(VKShaderModuleOrJob& x) { return IsShaderModule(x) && GetShaderModule(x).module != VK_NULL_HANDLE; }
 	static bool IsShaderJob(VKShaderModuleOrJob& x) { return std::holds_alternative<std::shared_ptr<VKShaderJob>>(x); }
 
 	static VKCachedPipeline& GetPipeline(VKPipelineOrJob& x) { return std::get<VKCachedPipeline>(x); }

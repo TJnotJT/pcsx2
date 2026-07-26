@@ -2381,12 +2381,56 @@ bool GSDevice12::CompileTFXUberPipelines()
 	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
 	{
 		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
+		constexpr int SLEEP_MS = 100;
 
 		Common::Timer timer;
 
 		// Compile uber pipelines async (stage 0 to start compilation, stage 1 to wait for finish).
 		for (u32 stage = 0; stage < (COMPILE_ASYNC ? 2 : 1); stage++)
 		{
+			// Vertex shaders
+			size_t num_vs = 0;
+			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
+			{
+				if (stage == 0)
+				{
+					// Uber VS is only compiled synchronously.
+					D3D12ShaderBlobOrJob vs = GetTFXUberVertexShader(static_cast<GSHWDrawConfig::UberVSSelector>(vs_sel));
+					if (!IsValidShaderBlob(vs))
+						return false; // failed
+				}
+				num_vs++;
+			}
+
+			// Pixel shaders
+			size_t num_ps = 0;
+			for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
+			{
+				if (stage == 0)
+				{
+					// Start compilation
+					D3D12ShaderBlobOrJob ps = GetTFXUberPixelShader(ps_sel, COMPILE_ASYNC);
+					if (!IsValidShaderBlob(ps) && !m_tfx_uber_pixel_shaders_async.contains(ps_sel.key))
+						return false; // failed
+				}
+				else
+				{
+					// Wait for compilation to finish
+					while (true)
+					{
+						D3D12ShaderBlobOrJob ps = GetTFXUberPixelShader(ps_sel, true);
+						if (IsValidShaderBlob(ps))
+							break;
+						if (!m_tfx_uber_pixel_shaders_async.contains(ps_sel.key))
+							return false; // failed
+						std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_MS));
+					}
+				}
+				num_ps++;
+			}
+
+			// Compile a subset of the needed uber pipelines.
+			// Most combinations cannot be compiled since they require blend/depth/stencil/color mask state.
 			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
@@ -2405,6 +2449,12 @@ bool GSDevice12::CompileTFXUberPipelines()
 								TFX_DS ds = static_cast<TFX_DS>(ds_i);
 
 								if (!ps_sel.CompatibleWithAttachments(rt, ds))
+									continue;
+
+								if (ps_sel.HasColor() && !ps_sel.HasColorROV())
+									continue;
+
+								if (ps_sel.color1 || ps_sel.date_init)
 									continue;
 
 								selector.uber_shader = true;
@@ -2441,7 +2491,8 @@ bool GSDevice12::CompileTFXUberPipelines()
 			}
 
 			if (stage == (COMPILE_ASYNC ? 1 : 0))
-				Console.WriteLn("Compiled %u uber pipelines in %.2f seconds", num_pipelines, timer.GetTimeSecondsAndReset());
+				Console.WriteLn("Compiled %u uber pipelines (%u vertex shaders, %u pixel shaders) in %.2f seconds",
+					num_pipelines, num_vs, num_ps, timer.GetTimeSecondsAndReset());
 		}
 	}
 
@@ -5262,6 +5313,14 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 
 		// DATE primid init
 		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date);
+
+		if (!pipe.HasDS())
+			pipe.dss = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();
+		if (!pipe.HasRT())
+		{
+			pipe.bs = GSHWDrawConfig::BlendState::ReducedUberDefault();
+			pipe.cms = GSHWDrawConfig::ColorMaskSelector::ReducedUberDefault();
+		}
 
 		pxAssert(pipe.uber_ps.IsValid());
 	}
