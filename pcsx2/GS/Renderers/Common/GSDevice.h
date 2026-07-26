@@ -1608,7 +1608,7 @@ struct alignas(16) GSHWDrawConfig
 	
 	bool IsBlending()
 	{
-		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending();
+		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending() || !ps.no_color1;
 	}
 
 	// Draw pass selectors

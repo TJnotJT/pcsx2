@@ -7757,7 +7757,7 @@ void GSRendererHW::ConfigureFullSW(bool color, bool depth)
 			if (m_conf.ps.blend_c == ALPHA_C_FIX)
 				m_conf.cb_ps.TA_MaxDepth_Af.a = m_optimized_blend.FIX / 128.0f;
 
-			// Disable HW or mixed blend or multipass blend
+			// Disable HW or mixed blend or multipass blend.
 			m_conf.blend = {};
 			m_conf.ps.blend_hw = false;
 			m_conf.ps.blend_mix = false;
