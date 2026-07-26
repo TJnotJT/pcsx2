@@ -4707,6 +4707,7 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
+			selector.SetReducedUberDefaults();
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
 				for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
@@ -7072,9 +7073,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 		pipe.vs.key = 0;
 		pipe.ps.key_lo = 0;
 		pipe.ps.key_hi = 0;
-		pipe.cms.key = 0;
-		pipe.bs.key = 0;
-		pipe.dss.key = 0;
+		pipe.SetReducedUberDefaults();
 
 		// Update pipeline's dynamic state.
 		SetUberDynamicState(dss, bs, cms, IsDATEModePrimIDInit(ps.date));

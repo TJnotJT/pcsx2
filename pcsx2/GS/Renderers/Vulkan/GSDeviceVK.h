@@ -415,6 +415,13 @@ public:
 		__fi bool IsRTFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT) != 0); }
 		__fi bool IsDepthFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) != 0); }
 		__fi bool IsTestingAndSamplingDepth() const { return ((feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0); }
+
+		__fi void SetReducedUberDefaults()
+		{
+			bs = GSHWDrawConfig::BlendState::ReducedUberDefault();
+			dss = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();
+			cms = GSHWDrawConfig::ColorMaskSelector::ReducedUberDefault();
+		}
 	};
 	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
 
