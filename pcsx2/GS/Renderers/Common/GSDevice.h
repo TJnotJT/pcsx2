@@ -686,16 +686,16 @@ struct alignas(16) GSHWDrawConfig
 				u32 fst : 1;
 				u32 tme : 1;
 				u32 iip : 1;
-				u32 point_size : 1;		///< Set when points need to be expanded without VS expanding.
+				u32 point_size : 1; ///< Set when points need to be expanded without VS expanding.
 				u32 round_uv : 1;
 				VS_CLAMP_UV clamp_uv : 2;
 				VS_ALIGN_UV align_uv : 2;
 				VSExpand expand : 3;
 			};
-			u64 key;
+			u32 key;
 		};
 		VSSelector(): key(0) {}
-		VSSelector(u64 k): key(k) {}
+		VSSelector(u32 k): key(k) {}
 
 		/// Returns true if the fixed index buffer should be used.
 		__fi bool UseFixedExpandIndexBuffer() const { return (expand == VSExpand::Point || expand == VSExpand::Sprite); }
@@ -703,7 +703,7 @@ struct alignas(16) GSHWDrawConfig
 		/// Return true if the index buffer should be bound as a vertex shader resource.
 		__fi bool UseVSExpandIndexBuffer() const { return (expand == VSExpand::TriangleAA1); }
 	};
-	static_assert(sizeof(VSSelector) == 8, "VSSelector is 8 bytes");
+	static_assert(sizeof(VSSelector) == 4, "VSSelector is 2 bytes");
 #pragma pack(pop)
 
 #pragma pack(push, 1)

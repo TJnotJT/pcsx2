@@ -9,7 +9,7 @@
 
 namespace GSShader {
 
-enum class VSExpand : uint8_t
+enum class VSExpand : uint32_t
 {
 	None        = 0,
 	Point       = 1,

@@ -359,7 +359,7 @@ public:
 		GSHWDrawConfig::VSSelector vs;
 		GSHWDrawConfig::DepthStencilSelector dss;
 		GSHWDrawConfig::ColorMaskSelector cms;
-		u8 pad;
+		u8 pad[2];
 
 		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
@@ -370,7 +370,8 @@ public:
 		__fi bool IsDepthFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) != 0); }
 		__fi bool IsTestingAndSamplingDepth() const { return ((feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0); }
 	};
-	static_assert(sizeof(PipelineSelector) == 40, "Pipeline selector is 40 bytes");
+	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
+	static_assert(offsetof(PipelineSelector, pad) + sizeof(PipelineSelector::pad) == sizeof(PipelineSelector));
 
 	struct PipelineSelectorHash
 	{
@@ -457,7 +458,7 @@ private:
 		return m_convert[ShaderConvertSelector(shader).Index()];
 	}
 
-	std::unordered_map<u64, VkShaderModule> m_tfx_vertex_shaders;
+	std::unordered_map<u32, VkShaderModule> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, VkShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
 	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
