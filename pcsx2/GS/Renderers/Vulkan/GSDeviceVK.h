@@ -50,7 +50,6 @@ public:
 		bool vk_ext_attachment_feedback_loop_layout : 1;
 		bool vk_ext_fragment_shader_interlock : 1;
 		bool vk_dynamic_rendering : 1;
-		bool vk_synchronization2 : 1;
 		bool vk_khr_dynamic_rendering_local_read : 1;
 	};
 
@@ -78,11 +77,6 @@ public:
 	__fi bool UseDynamicRendering() const
 	{
 		return m_optional_extensions.vk_dynamic_rendering;
-	}
-
-	__fi bool UseSynchronization2() const
-	{
-		return m_optional_extensions.vk_synchronization2;
 	}
 
 	void SetPipelineRenderPass(const RenderPass& rp, Vulkan::GraphicsPipelineBuilder& gpb);
@@ -678,9 +672,6 @@ public:
 	void SetUtilityTexture(GSTexture* tex, VkSampler sampler);
 	void SetUtilityPushConstants(const void* data, u32 size);
 	void UnbindTexture(GSTextureVK* tex);
-
-	static VkRenderingAttachmentInfo GetRenderingAttachmentInfo(VkImageView view, VkImageLayout layout,
-		VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op, VkClearValue cv);
 
 	// Ends a render pass if we're currently in one.
 	// When Bind() is next called, the pass will be restarted.

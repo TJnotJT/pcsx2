@@ -232,6 +232,13 @@ VULKAN_DEVICE_ENTRY_POINT(vkCmdPipelineBarrier2, true)
 VULKAN_DEVICE_ENTRY_POINT(vkCreateRenderPass2, true)
 VULKAN_DEVICE_ENTRY_POINT(vkCmdBeginRenderPass2, true)
 VULKAN_DEVICE_ENTRY_POINT(vkCmdEndRenderPass2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkQueueSubmit2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdWriteTimestamp2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdBlitImage2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdCopyBuffer2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdCopyBufferToImage2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdCopyImage2, true)
+VULKAN_DEVICE_ENTRY_POINT(vkCmdCopyImageToBuffer2, true)
 
 #ifdef _WIN32
 VULKAN_DEVICE_ENTRY_POINT(vkAcquireFullScreenExclusiveModeEXT, false)

@@ -26,14 +26,6 @@ namespace Vulkan
 	const char* VkResultToString(VkResult res);
 	void LogVulkanResult(const char* func_name, VkResult res, const char* msg, ...);
 
-	VkImageSubresourceRange CreateSubresourceRange(VkImageAspectFlags aspect, u32 base_mip_level = 0, u32 num_mip_levels = 1);
-
-	VkImageMemoryBarrier2 CreateImageMemoryBarrier(
-		VkPipelineStageFlags src_stage, VkAccessFlags2 src_access,
-		VkPipelineStageFlags dst_stage, VkAccessFlags2 dst_access,
-		VkImageLayout old_layout, VkImageLayout new_layout, VkImage image,
-		VkImageAspectFlags aspect, u32 base_mip_level = 0, u32 num_mip_levels = 1);
-
 	class RenderPass
 	{
 	private:
@@ -132,13 +124,18 @@ namespace Vulkan
 		static constexpr u32 MAX_COLOR_ATTACHMENTS = RenderPass::MAX_COLOR_ATTACHMENTS;
 
 		void AddColorAttachment(VkImageLayout layout, VkFormat format,
-			VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op, bool feedback_loop);
+			VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op,
+			bool feedback_loop, bool input_reference, bool subpass_self_dependency);
+
 		void AddDepthStencilAttachment(VkImageLayout layout, VkFormat depth_format,
 			VkAttachmentLoadOp depth_load_op, VkAttachmentStoreOp depth_store_op,
-			VkAttachmentLoadOp stencil_load_op, VkAttachmentStoreOp stencil_store_op, bool depth_feedback_loop);
+			VkAttachmentLoadOp stencil_load_op, VkAttachmentStoreOp stencil_store_op,
+			bool feedback_loop, bool input_reference, bool subpass_self_dependency);
 		
-		void SetColorFeedbackBarrier(const VkImageMemoryBarrier2& barrier, VkDependencyFlags dependency);
-		void SetDepthFeedbackBarrier(const VkImageMemoryBarrier2& barrier, VkDependencyFlags dependency);
+		void SetColorFeedbackBarrier(const VkMemoryBarrier2& barrier, VkDependencyFlags dependency);
+		void SetDepthFeedbackBarrier(const VkMemoryBarrier2& barrier, VkDependencyFlags dependency);
+
+		void SetSubpassFlags(VkSubpassDescriptionFlags subpass_flags);
 
 		void Clear();
 
@@ -156,19 +153,17 @@ namespace Vulkan
 		u32 m_color_feedback_loop = false;
 
 		std::array<VkSubpassDependency2, MAX_COLOR_ATTACHMENTS + 1> m_subpass_dependency{};
-		std::array<VkImageMemoryBarrier2, MAX_COLOR_ATTACHMENTS + 1> m_subpass_barriers{};
 		u32 m_num_subpass_dependencies = 0;
 
 		std::array<VkAttachmentDescription2, MAX_COLOR_ATTACHMENTS + 1> m_attachments{};
 		u32 m_num_attachments = 0;
 
-		bool m_use_feedback_loop_layout = false;
-		bool m_use_framebuffer_fetch = false;
+		VkSubpassDescriptionFlags m_subpass_flags = 0;
 
 		struct
 		{
-			VkImageMemoryBarrier2 color;
-			VkImageMemoryBarrier2 depth;
+			VkMemoryBarrier2 color;
+			VkMemoryBarrier2 depth;
 			VkDependencyFlags dependency;
 		} m_feedback_barriers{};
 	};
