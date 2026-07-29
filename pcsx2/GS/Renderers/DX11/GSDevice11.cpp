@@ -2027,7 +2027,7 @@ void GSDevice11::SetupPS(const PSSelector& sel, const GSHWDrawConfig::PSConstant
 		sm.AddMacro("PS_AEM", sel.aem);
 		sm.AddMacro("PS_TFX", sel.tfx);
 		sm.AddMacro("PS_TCC", sel.tcc);
-		sm.AddMacro("PS_DATE", sel.date);
+		sm.AddMacro("PS_DATE", static_cast<u32>(sel.date));
 		sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
 		sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
 		sm.AddMacro("PS_FOG", sel.fog);
@@ -3195,8 +3195,9 @@ void GSDevice11::RenderHW(GSHWDrawConfig& config)
 		SetRenderHWShaderResources(config, nullptr);
 		Draw(config);
 
-		config.ps.date = 3;
-		config.alpha_second_pass.ps.date = 3;
+		config.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
+		if (config.alpha_second_pass.enable)
+			config.alpha_second_pass.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
 		SetupPS(config.ps, nullptr, config.sampler);
 	}
 

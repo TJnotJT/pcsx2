@@ -34,11 +34,6 @@
 static u32 s_debug_scope_depth = 0;
 #endif
 
-static bool IsDATEModePrimIDInit(u32 flag)
-{
-	return flag == 1 || flag == 2;
-}
-
 static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY, 3> s_primitive_topology_mapping = {
 	{D3D_PRIMITIVE_TOPOLOGY_POINTLIST, D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST}};
 
@@ -2610,6 +2605,15 @@ void GSDevice12::OMSetRenderTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTextur
 	SetScissor(scissor);
 }
 
+void GSDevice12::OMSetRenderTargets(const DrawTargets12& targets, const GSHWDrawConfig& config)
+{
+	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv.
+	const bool read_only_depth = config.tex && (config.tex == targets.ds || config.IsFeedbackLoopDepth(config.ps)) &&
+		!config.depth.zwe && !config.ps.HasDepthROV();
+
+	OMSetRenderTargets(targets.rt, targets.ds_as_rt, targets.ds, config.scissor, read_only_depth, targets.rtsize);
+}
+
 bool GSDevice12::GetSampler(D3D12DescriptorHandle* cpu_handle, GSHWDrawConfig::SamplerSelector ss)
 {
 	const auto it = m_samplers.find(ss.key);
@@ -3244,7 +3248,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_AEM", sel.aem);
 	sm.AddMacro("PS_TFX", sel.tfx);
 	sm.AddMacro("PS_TCC", sel.tcc);
-	sm.AddMacro("PS_DATE", sel.date);
+	sm.AddMacro("PS_DATE", static_cast<u32>(sel.date));
 	sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
 	sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
 	sm.AddMacro("PS_FOG", sel.fog);
@@ -3335,7 +3339,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	u32 num_rts = 0;
 	if (p.rt)
 	{
-		const GSTexture::Format format = IsDATEModePrimIDInit(p.ps.date) ?
+		const GSTexture::Format format = GSHWDrawConfig::IsDATEPrimIDInit(p.ps.date) ?
 			GSTexture::Format::PrimID :
 			(p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
 
@@ -3385,7 +3389,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	}
 
 	// Blending
-	if (IsDATEModePrimIDInit(p.ps.date))
+	if (GSHWDrawConfig::IsDATEPrimIDInit(p.ps.date))
 	{
 		// image DATE prepass
 		gpb.SetBlendState(0, true, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_MIN, D3D12_BLEND_ONE,
@@ -3644,30 +3648,25 @@ void GSDevice12::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 	m_dirty_flags |= DIRTY_FLAG_TFX_SAMPLERS;
 }
 
-void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds)
+void GSDevice12::SetROVTextures(const DrawTargets12& targets, const GSHWDrawConfig& config)
 {
-	GSTexture12* d12Rt = static_cast<GSTexture12*>(rt);
-	GSTexture12* d12Ds = static_cast<GSTexture12*>(ds);
-
-	pxAssert(!(d12Rt || d12Ds) || m_features.rov);
-
-	if (d12Rt)
+	if (targets.rt_rov)
 	{
-		PSSetShaderResource(TEXTURE_RT_UAV, d12Rt, true, ResourceType::UAV);
+		PSSetShaderResource(TEXTURE_RT_UAV, targets.rt_rov, true, ResourceType::UAV);
 
 		// Unbind conflicting RT texture
 		PSSetShaderResource(TEXTURE_RT, nullptr, false);
 
 		// Unbind conflicting source texture
-		if (m_tfx_textures[TEXTURE_TEXTURE] == d12Rt->GetSRVDescriptor() ||
-			m_tfx_textures[TEXTURE_TEXTURE] == d12Rt->GetFBLDescriptor())
+		if (m_tfx_textures[TEXTURE_TEXTURE] == targets.rt_rov->GetSRVDescriptor() ||
+			m_tfx_textures[TEXTURE_TEXTURE] == targets.rt_rov->GetFBLDescriptor())
 		{
 			PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
 		}
 
-		if (write_rt)
+		if (config.ps.HasColorOutput())
 		{
-			d12Rt->SetState(GSTexture::State::Dirty);
+			targets.rt_rov->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -3676,22 +3675,22 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 		PSSetShaderResource(TEXTURE_RT_UAV, nullptr, false, ResourceType::UAV);
 	}
 
-	if (d12Ds)
+	if (targets.ds_rov)
 	{
-		PSSetShaderResource(TEXTURE_DEPTH_UAV, d12Ds, true, ResourceType::UAV);
+		PSSetShaderResource(TEXTURE_DEPTH_UAV, targets.ds_rov, true, ResourceType::UAV);
 
 		// Unbind conflicting depth texture
 		PSSetShaderResource(TEXTURE_DEPTH, nullptr, false);
 
 		// Unbind conflicting source texture
-		if (m_tfx_textures[TEXTURE_TEXTURE] == d12Ds->GetSRVDescriptor())
+		if (m_tfx_textures[TEXTURE_TEXTURE] == targets.ds_rov->GetSRVDescriptor())
 		{
 			PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
 		}
 
-		if (write_ds)
+		if (config.ps.HasDepthROVWrite())
 		{
-			d12Ds->SetState(GSTexture::State::Dirty);
+			targets.ds_rov->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -3699,6 +3698,12 @@ void GSDevice12::PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool wri
 		// Unbind to avoid conflicts with OM targets.
 		PSSetShaderResource(TEXTURE_DEPTH_UAV, nullptr, false, ResourceType::UAV);
 	}
+}
+
+void GSDevice12::PSUnbindSourceTextureConflict(GSTexture12* tex)
+{
+	if (tex && tex->GetSRVDescriptor() == m_tfx_textures[TEXTURE_TEXTURE])
+		PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
 }
 
 void GSDevice12::SetUtilityRootSignature()
@@ -4232,117 +4237,6 @@ void GSDevice12::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
 	}
 }
 
-void GSDevice12::SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox)
-{
-	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
-
-	GL_PUSH("SetupDATE {%d,%d} %dx%d", bbox.left, bbox.top, bbox.width(), bbox.height());
-
-	const GSVector2i size(ds->GetSize());
-	const GSVector4 src = GSVector4(bbox) / GSVector4(size).xyxy();
-	const GSVector4 dst = src * 2.0f - 1.0f;
-	const GSVertexPT1 vertices[] = {
-		{GSVector4(dst.x, -dst.y, 0.5f, 1.0f), GSVector2(src.x, src.y)},
-		{GSVector4(dst.z, -dst.y, 0.5f, 1.0f), GSVector2(src.z, src.y)},
-		{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
-		{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
-	};
-
-	// sfex3 (after the capcom logo), vf4 (first menu fading in), ffxii shadows, rumble roses shadows, persona4 shadows
-	EndRenderPass();
-	SetUtilityTexture(rt, m_point_sampler_cpu);
-	OMSetRenderTargets(nullptr, nullptr, ds, bbox);
-	IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
-	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(GetConvertPipeline(SetDATMShader(datm)));
-	// Reference stencil value set on Create()
-	BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-		GSVector4::zero(), 0.0f, 0);
-	if (ApplyUtilityState())
-		DrawPrimitive();
-
-	EndRenderPass();
-}
-
-GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, PipelineSelector& pipe)
-{
-	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
-
-	// How this is done:
-	// - can't put a barrier for the image in the middle of the normal render pass, so that's out
-	// - so, instead of just filling the int texture with INT_MAX, we sample the RT and use -1 for failing values
-	// - then, instead of sampling the RT with DATE=1/2, we just do a min() without it, the -1 gets preserved
-	// - then, the DATE=3 draw is done as normal
-	GL_INS("Setup DATE Primitive ID Image for {%d,%d}-{%d,%d}", config.drawarea.left, config.drawarea.top,
-		config.drawarea.right, config.drawarea.bottom);
-
-	const GSVector2i rtsize(config.rt->GetSize());
-	GSTexture12* image =
-		static_cast<GSTexture12*>(CreateRenderTarget(rtsize.x, rtsize.y, GSTexture::Format::PrimID, false));
-	if (!image)
-		return nullptr;
-
-	EndRenderPass();
-
-	// setup the fill quad to prefill with existing alpha values
-	SetUtilityTexture(config.rt, m_point_sampler_cpu);
-	OMSetRenderTargets(image, nullptr, config.ds, config.drawarea);
-
-	// if the depth target has been cleared, we need to preserve that clear
-	BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-		config.ds ? GetLoadOpForTexture(static_cast<GSTexture12*>(config.ds)) :
-					D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-		config.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-		D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-		GSVector4::zero(), config.ds ? config.ds->GetClearDepth() : 0.0f);
-
-	// draw the quad to prefill the image
-	const GSVector4 src = GSVector4(config.drawarea) / GSVector4(rtsize).xyxy();
-	const GSVector4 dst = src * 2.0f - 1.0f;
-	const GSVertexPT1 vertices[] = {
-		{GSVector4(dst.x, -dst.y, 0.5f, 1.0f), GSVector2(src.x, src.y)},
-		{GSVector4(dst.z, -dst.y, 0.5f, 1.0f), GSVector2(src.z, src.y)},
-		{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
-		{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
-	};
-	SetUtilityRootSignature();
-	SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	SetPipeline(m_primid_image_setup_pipelines[pipe.ds][static_cast<u8>(config.datm)].get());
-	IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
-	if (ApplyUtilityState())
-		DrawPrimitive();
-
-	// image is now filled with either -1 or INT_MAX, so now we can do the prepass
-	SetPrimitiveTopology(s_primitive_topology_mapping[static_cast<u8>(config.topology)]);
-	UploadHWDrawVerticesAndIndices(config);
-
-	// cut down the configuration for the prepass, we don't need blending or any feedback loop
-	PipelineSelector init_pipe(m_pipeline_selector);
-	init_pipe.dss.zwe = false;
-	init_pipe.cms.wrgba = 0;
-	init_pipe.bs = {};
-	init_pipe.rt = true;
-	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
-	init_pipe.ps.no_color = false;
-	init_pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(init_pipe))
-		Draw(config);
-
-	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
-	EndRenderPass();
-
-	// .. by setting it to DATE=3
-	pipe.ps.date = 3;
-	config.alpha_second_pass.ps.date = 3;
-
-	// and bind the image to the primitive sampler
-	image->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
-	PSSetShaderResource(TEXTURE_PRIMID, image, false);
-	return image;
-}
-
 void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 {
 	if (m_enhanced_barriers)
@@ -4369,92 +4263,471 @@ void GSDevice12::FeedbackBarrier(const GSTexture12* texture)
 	}
 }
 
-void GSDevice12::RenderHW(GSHWDrawConfig& config)
+void GSDevice12::ColorClipEarlyResolveOrActivate(DrawTargets12& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
 {
-	GSTexture12* colclip_rt = static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture());
-	GSTexture12* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
-	GSTexture12* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds);
-	GSTexture12* draw_rt_rov = config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr;
-	GSTexture12* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr;
-	GSTexture12* draw_rt_clone = nullptr;
-
-	const bool feedback = draw_rt && (config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier) || (config.tex && config.tex == config.rt));
-
-	// Align the render area to 128x128, hopefully avoiding render pass restarts for small render area changes (e.g. Ratchet and Clank).
-	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
-
-	PipelineSelector& pipe = m_pipeline_selector;
-
-	// figure out the pipeline
-	UpdateHWPipelineSelector(config);
-
-	// now blit the colclip texture back to the original target
-	if (colclip_rt)
+	if (targets.colclip_rt)
 	{
 		if (config.colclip_mode == GSHWDrawConfig::ColClipMode::EarlyResolve)
 		{
 			GL_PUSH("Blit ColorClip back to RT");
 
 			EndRenderPass();
-			colclip_rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
+			targets.colclip_rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
 
-			draw_rt = static_cast<GSTexture12*>(config.rt);
-			OMSetRenderTargets(draw_rt, nullptr, draw_ds, config.colclip_update_area);
+			OMSetRenderTargets(targets.rt, nullptr, targets.ds, config.colclip_update_area);
 
 			// if this target was cleared and never drawn to, perform the clear as part of the resolve here.
-			BeginRenderPass(GetLoadOpForTexture(draw_rt), D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-				GetLoadOpForTexture(draw_ds),
-				draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			BeginRenderPass(GetLoadOpForTexture(targets.rt), D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+				GetLoadOpForTexture(targets.ds),
+				targets.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
 				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				draw_rt->GetClearForFormat(), 0.0f, 0);
+				targets.rt->GetClearForFormat(), 0.0f, 0);
 
-			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(rtsize.x, rtsize.y).xyxy());
+			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(targets.rtsize).xyxy());
 			SetPipeline(m_colclip_finish_pipelines[pipe.ds].get());
-			SetUtilityTexture(colclip_rt, m_point_sampler_cpu);
-			DrawStretchRect(sRect, GSVector4(config.colclip_update_area), rtsize);
+			SetUtilityTexture(targets.colclip_rt, m_point_sampler_cpu);
+			DrawStretchRect(sRect, GSVector4(config.colclip_update_area), targets.rtsize);
 
-			Recycle(colclip_rt);
+			Recycle(targets.colclip_rt);
+			targets.colclip_rt = nullptr;
 			g_gs_device->SetColorClipTexture(nullptr);
 
-			colclip_rt = nullptr;
-			draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt);
+			targets.rt = pipe.rt ? static_cast<GSTexture12*>(config.rt) : nullptr;
 		}
 		else
 		{
-			draw_rt = colclip_rt;
-			pipe.ps.colclip_hw = 1;
+			targets.rt = targets.colclip_rt;
+			config.ps.colclip_hw = true;
+			pipe = GetHWPipelineSelector(config, DrawPass::Main);
 		}
 	}
+}
 
-	// Destination Alpha Setup
-	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
-	switch (config.destination_alpha)
+bool GSDevice12::ColorClipCreate(DrawTargets12& targets, GSHWDrawConfig& config)
+{
+	if (!config.ps.colclip_hw)
+		return true;
+
+	if (!targets.colclip_rt)
 	{
-		case GSHWDrawConfig::DestinationAlphaMode::Off: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::Full: // No setup
-		case GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking: // Setup is done below
-			break;
-		case GSHWDrawConfig::DestinationAlphaMode::StencilOne: // setup is done below
+		config.colclip_update_area = config.drawarea;
+
+		EndRenderPass();
+
+		targets.colclip_rt = static_cast<GSTexture12*>(CreateFeedbackTarget(targets.rtsize, GSTexture::Format::ColorClip, false));
+		if (!targets.colclip_rt)
 		{
-			// we only need to do the setup here if we don't have barriers, in which case do full DATE.
-			if (!need_barrier)
+			Console.Warning("D3D12: Failed to allocate ColorClip render target, aborting draw.");
+			return false;
+		}
+
+		g_gs_device->SetColorClipTexture(targets.colclip_rt);
+
+		// Propagate clear value through if the colclip render is the first.
+		if (targets.rt->GetState() == GSTexture::State::Cleared)
+		{
+			targets.colclip_rt->SetState(GSTexture::State::Cleared);
+			targets.colclip_rt->SetClearColor(targets.rt->GetClearColor());
+
+			// If depth is cleared, we need to commit it, because we're only going to draw to the active part of the FB.
+			if (targets.ds && targets.ds->GetState() == GSTexture::State::Cleared && !config.drawarea.eq(GSVector4i::loadh(targets.rtsize)))
+				targets.ds->CommitClear();
+		}
+		else if (targets.rt->GetState() == GSTexture::State::Dirty)
+		{
+			targets.rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
+		}
+
+		// We're not drawing to the RT, so we can use it as a source.
+		if (config.require_one_barrier && !m_features.texture_barrier)
+			PSSetShaderResource(TEXTURE_RT, targets.rt, true);
+	}
+
+	targets.rt = targets.colclip_rt;
+
+	return true;
+}
+
+void GSDevice12::ColorClipConvert(const DrawTargets12& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
+{
+	if (targets.colclip_rt && config.HasColorClipConvert() && config.rt->GetState() == GSTexture::State::Dirty)
+	{
+		GL_PUSH("ColorClip Render Target Setup");
+		pxAssert(targets.colclip_rt == targets.rt);
+
+		OMSetRenderTargets(targets.colclip_rt, nullptr, targets.ds, GSVector4i::loadh(targets.rtsize));
+		SetUtilityTexture(config.rt, m_point_sampler_cpu);
+		SetPipeline(m_colclip_setup_pipelines[pipe.ds].get());
+
+		const GSVector4 drawareaf((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ?
+			GSVector4i::loadh(targets.rtsize) : config.drawarea);
+		const GSVector4 sRect(drawareaf / GSVector4(targets.rtsize).xyxy());
+		DrawStretchRect(sRect, GSVector4(drawareaf), targets.rtsize);
+
+		// Change the scissor region back.
+		OMSetRenderTargets(targets.colclip_rt, nullptr, targets.ds, config.scissor);
+	}
+}
+
+bool GSDevice12::DATEPrimIDSetup(DrawTargets12& targets, GSHWDrawConfig& config, const PipelineSelector& pipe)
+{
+	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+	// DATE PrimID steps:
+	// 1. Clear pass: Sample the RT and draw -1 for failing values and INT_MAX for passing values.
+	// 2. Init pass: Draw main geometry and record first primitive ID that fails using MIN blending.
+	// 3. Main draw: Discard primitives whose primitive ID is larger than the primid texture value.
+	{
+		GL_PUSH("DATE PrimID clear pass {%d,%d}-{%d,%d}", config.drawarea.left, config.drawarea.top,
+			config.drawarea.right, config.drawarea.bottom);
+
+		targets.primid.reset(static_cast<GSTexture12*>(CreateRenderTarget(targets.rtsize, GSTexture::Format::PrimID, false)));
+		if (!targets.primid)
+		{
+			Console.Warning("Could not create PrimID texture; aborting draw.");
+			return false;
+		}
+
+		EndRenderPass();
+
+		// Sample from RT alpha.
+		SetUtilityTexture(targets.colclip_rt ? targets.colclip_rt : targets.rt, m_point_sampler_cpu);
+		OMSetRenderTargets(targets.primid.get(), nullptr, targets.ds, config.drawarea);
+
+		// Clear depth if needed.
+		BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+			targets.ds ? GetLoadOpForTexture(static_cast<GSTexture12*>(targets.ds)) :
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+			targets.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			GSVector4::zero(), targets.ds ? targets.ds->GetClearDepth() : 0.0f);
+
+		// Draw the quad to prefill the image.
+		const GSVector4 src = GSVector4(config.drawarea) / GSVector4(targets.rtsize).xyxy();
+		const GSVector4 dst = src * 2.0f - 1.0f;
+		const GSVertexPT1 vertices[] = {
+			{GSVector4(dst.x, -dst.y, 0.5f, 1.0f), GSVector2(src.x, src.y)},
+			{GSVector4(dst.z, -dst.y, 0.5f, 1.0f), GSVector2(src.z, src.y)},
+			{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
+			{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
+		};
+		SetUtilityRootSignature();
+		SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		SetPipeline(m_primid_image_setup_pipelines[pipe.ds][static_cast<u8>(config.datm)].get());
+		IASetVertexBuffer(vertices, sizeof(vertices[0]), std::size(vertices));
+		if (ApplyUtilityState())
+			DrawPrimitive();
+	}
+
+	{
+		GL_PUSH("DATE PrimID init pass");
+
+		// Image is now filled with either -1 or INT_MAX, so now we can do the init pass.
+		SetPrimitiveTopology(s_primitive_topology_mapping[static_cast<u8>(config.topology)]);
+		UploadHWDrawVerticesAndIndices(config);
+
+		// Remove unnecessary config for the init pass.
+		PipelineSelector init_pipe = pipe;
+		init_pipe.dss.zwe = false;
+		init_pipe.cms.wrgba = 0;
+		init_pipe.bs = {};
+		init_pipe.rt = true;
+		init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
+		init_pipe.ps.no_color = false;
+		init_pipe.ps.no_color1 = true;
+		if (BindDrawPipeline(init_pipe))
+			Draw(config);
+
+		EndRenderPass();
+
+		// Setup config and primid texture for the main draw.
+		config.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
+		if (config.alpha_second_pass.enable)
+			config.alpha_second_pass.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
+
+		targets.primid->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
+		PSSetShaderResource(TEXTURE_PRIMID, targets.primid.get(), false);
+	}
+
+	return true;
+}
+
+void GSDevice12::DATEStencilSetup(const DrawTargets12& targets, GSHWDrawConfig& config)
+{
+	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
+
+	if ((config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne && !need_barrier) ||
+		config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil)
+	{
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+
+		GL_PUSH("SetupDATE {%d,%d} %dx%d", config.drawarea.left, config.drawarea.top, config.drawarea.width(), config.drawarea.height());
+
+		const GSVector2i size(targets.ds->GetSize());
+		const GSVector4 src = GSVector4(config.drawarea) / GSVector4(size).xyxy();
+		const GSVector4 dst = src * 2.0f - 1.0f;
+		const GSVertexPT1 vertices[] = {
+			{GSVector4(dst.x, -dst.y, 0.5f, 1.0f), GSVector2(src.x, src.y)},
+			{GSVector4(dst.z, -dst.y, 0.5f, 1.0f), GSVector2(src.z, src.y)},
+			{GSVector4(dst.x, -dst.w, 0.5f, 1.0f), GSVector2(src.x, src.w)},
+			{GSVector4(dst.z, -dst.w, 0.5f, 1.0f), GSVector2(src.z, src.w)},
+		};
+
+		// sfex3 (after the capcom logo), vf4 (first menu fading in), ffxii shadows, rumble roses shadows, persona4 shadows
+		EndRenderPass();
+		SetUtilityTexture(targets.rt, m_point_sampler_cpu);
+		OMSetRenderTargets(nullptr, nullptr, targets.ds, config.drawarea);
+		IASetVertexBuffer(vertices, sizeof(vertices[0]), 4);
+		SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		SetPipeline(GetConvertPipeline(SetDATMShader(config.datm)));
+		// Reference stencil value set on Create()
+		BeginRenderPass(D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+			GSVector4::zero(), 0.0f, 0);
+		if (ApplyUtilityState())
+			DrawPrimitive();
+
+		EndRenderPass();
+	}
+}
+
+void GSDevice12::DATEStencilOneClear(const DrawTargets12& targets, const GSHWDrawConfig& config)
+{
+	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
+	{
+		EndRenderPass();
+
+		// Make sure the DSV is in writeable state
+		targets.ds->TransitionToState(GSTexture12::ResourceState::DepthWriteStencil);
+
+		const D3D12_RECT rect = { config.drawarea.left, config.drawarea.top,
+			config.drawarea.left + config.drawarea.width(), config.drawarea.top + config.drawarea.height() };
+
+		// DX12 equivalent of vkCmdClearAttachments for StencilOne
+		GetCommandList().list4->ClearDepthStencilView(targets.ds->GetWriteDescriptor(), D3D12_CLEAR_FLAG_STENCIL, 0.0f, 1, 1, &rect);
+	}
+}
+
+void GSDevice12::OptimizeRenderPassRestart(DrawTargets12& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
+{
+	// Avoid restarting the render pass just to switch from rt+depth to rt and vice versa.
+	// Keep depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
+	if (InRenderPass() && !(targets.rt || targets.rt_rov) && targets.ds && m_current_render_target &&
+		config.tex != m_current_render_target &&
+		m_current_render_target->GetSize() == targets.ds->GetSize())
+	{
+		targets.rt = m_current_render_target;
+		pipe.rt = true;
+	}
+	else if (InRenderPass() && !(targets.ds || targets.ds_rov) && targets.rt && m_current_depth_target &&
+		config.tex != m_current_depth_target &&
+		m_current_depth_target->GetSize() == targets.rt->GetSize())
+	{
+		targets.ds = m_current_depth_target;
+		pipe.ds = true;
+	}
+}
+
+bool GSDevice12::CreateRTCopyForFeedback(DrawTargets12& targets, const GSHWDrawConfig& config)
+{
+	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
+
+	const bool feedback_rt = targets.rt && (need_barrier && config.IsFeedbackLoopRTAnyPass());
+
+	if (feedback_rt && !m_features.texture_barrier)
+	{
+		// Requires a copy of the RT.
+		targets.rt_copy.reset(static_cast<GSTexture12*>(CreateTexture(targets.rtsize, 1, targets.rt->GetFormat(), true)));
+		if (!targets.rt_copy)
+		{
+			Console.Warning("D3D12: Failed to allocate temp texture for RT copy.");
+			return false;
+		}
+
+		GL_PUSH("D3D12: Copy RT to temp texture {%d,%d %dx%d}",
+			config.drawarea.left, config.drawarea.top,
+			config.drawarea.width(), config.drawarea.height());
+		
+		EndRenderPass();
+		
+		if (config.tex_hazard)
+		{
+			const GSVector4i union_rect = config.drawarea.runion(config.samplearea);
+			const u32 size_union = union_rect.width() * union_rect.height();
+			const u32 size_indiv = config.drawarea.width() * config.drawarea.height() +
+				config.samplearea.width() * config.samplearea.height();
+
+			// Do an individual copy if the union is larger than the sum of individual areas.
+			if (size_union > size_indiv)
 			{
-				SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-				config.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Stencil;
+				const GSVector4i snapped_drawarea = ProcessCopyArea(GSVector4i::loadh(targets.rtsize), config.drawarea);
+				const GSVector4i snapped_samplearea = ProcessCopyArea(GSVector4i::loadh(targets.rtsize), config.samplearea);
+				CopyRect(targets.rt, targets.rt_copy.get(), snapped_drawarea, snapped_drawarea.left, snapped_drawarea.top);
+				CopyRect(targets.rt, targets.rt_copy.get(), snapped_samplearea, snapped_samplearea.left, snapped_samplearea.top);
+			}
+			else
+			{
+				CopyRect(targets.rt, targets.rt_copy.get(), union_rect, union_rect.left, union_rect.top);
 			}
 		}
-		break;
+		else
+		{
+			CopyRect(targets.rt, targets.rt_copy.get(), config.drawarea, config.drawarea.left, config.drawarea.top);
+		}
 
-		case GSHWDrawConfig::DestinationAlphaMode::Stencil:
-			SetupDATE(draw_rt, config.ds, config.datm, config.drawarea);
-			break;
+		if (config.require_one_barrier)
+			PSSetShaderResource(TEXTURE_RT, targets.rt_copy.get(), true);
+		if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_RT)
+			PSSetShaderResource(TEXTURE_TEXTURE, targets.rt_copy.get(), true);
 	}
 
-	// stream buffer in first, in case we need to exec
+	return true;
+}
+
+void GSDevice12::BeginTFXRenderPass(const DrawTargets12& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
+{
+	if (!InRenderPass())
+	{
+		GSVector4 clear_color = targets.rt ? targets.rt->GetClearForFormat() : GSVector4::zero();
+
+		const bool stencil_DATE = config.HasDATEStencil();
+
+		const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
+
+		BeginRenderPass(GetLoadOpForTexture(targets.rt),
+			targets.rt ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			GetLoadOpForTexture(targets.ds),
+			targets.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			targets.ds ? (stencil_DATE ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE :
+				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD) :
+			D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
+			targets.ds ? ((stencil_DATE && need_barrier) ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE :
+				D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD) :
+			D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+			clear_color, targets.ds ? targets.ds->GetClearDepth() : 0.0f, 1);
+	}
+}
+
+void GSDevice12::SetFeedbackLoopTextures(const DrawTargets12& targets, const GSHWDrawConfig& config, DrawPass pass)
+{
+	const bool one_barrier = config.GetOneBarrier(pass);
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool feedback_rt = config.IsFeedbackLoopRT(pass);
+	const bool feedback_depth = config.IsFeedbackLoopDepth(pass);
+
+	if ((one_barrier || full_barrier) && feedback_rt)
+		PSSetShaderResource(TEXTURE_RT, targets.rt, false, ResourceType::FBL);
+	if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_RT)
+		PSSetShaderResource(TEXTURE_TEXTURE, targets.rt, false, ResourceType::FBL);
+	if ((one_barrier || full_barrier) && feedback_depth)
+		PSSetShaderResource(TEXTURE_DEPTH, targets.ds, false, ResourceType::FBL);
+}
+
+void GSDevice12::DoBlendMultiPass(const GSHWDrawConfig& config)
+{
+	if (config.blend_multi_pass.enable)
+	{
+		GL_PUSH("Blend multi pass");
+
+		if (config.blend_multi_pass.blend.constant_enable)
+			SetBlendConstants(config.blend_multi_pass.blend.constant);
+
+		const PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::BlendMulti);
+
+		if (BindDrawPipeline(pipe))
+			Draw(config);
+	}
+}
+
+void GSDevice12::DoAlphaSecondPass(const DrawTargets12& targets, GSHWDrawConfig& config)
+{
+	if (config.alpha_second_pass.enable)
+	{
+		// Update constant buffer is AREF changes.
+		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
+		{
+			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
+			SetPSConstantBuffer(config.cb_ps);
+		}
+
+		PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::AlphaSecond);
+
+		if (BindDrawPipeline(pipe))
+		{
+			SetFeedbackLoopTextures(targets, config, DrawPass::AlphaSecond);
+			SendHWDraw(targets, config, DrawPass::AlphaSecond, pipe);
+		}
+	}
+}
+
+void GSDevice12::ColorClipResolve(DrawTargets12& targets, GSHWDrawConfig& config)
+{
+	// Blit colorclip texture back to the main RT or just update draw area.
+	if (targets.colclip_rt)
+	{
+		config.colclip_update_area = config.colclip_update_area.runion(config.drawarea);
+
+		if (config.HasColorClipResolve())
+		{
+			GL_PUSH("Blit ColorClip back to RT");
+			pxAssert(targets.colclip_rt == targets.rt);
+
+			EndRenderPass();
+
+			targets.colclip_rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
+
+			targets.rt = static_cast<GSTexture12*>(config.rt);
+
+			config.ps.colclip_hw = false;
+			const PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::Main);
+
+			OMSetRenderTargets(targets.rt, nullptr, targets.ds, config.colclip_update_area);
+
+			BeginRenderPass(GetLoadOpForTexture(targets.rt), D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+				GetLoadOpForTexture(targets.ds),
+				targets.ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
+				targets.rt->GetClearForFormat(), 0.0f, 0);
+
+			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(targets.rtsize).xyxy());
+			SetPipeline(m_colclip_finish_pipelines[pipe.ds].get());
+			SetUtilityTexture(targets.colclip_rt, m_point_sampler_cpu);
+			DrawStretchRect(sRect, GSVector4(config.colclip_update_area), targets.rtsize);
+
+			Recycle(targets.colclip_rt);
+			targets.colclip_rt = nullptr;
+			g_gs_device->SetColorClipTexture(nullptr);
+		}
+	}
+}
+
+void GSDevice12::RenderHW(GSHWDrawConfig& config)
+{
+	DrawTargets12 targets = {
+		config.ps.HasColorROV() ? nullptr : static_cast<GSTexture12*>(config.rt),
+		config.ps.HasDepthROV() ? nullptr : static_cast<GSTexture12*>(config.ds),
+		config.ps.HasColorROV() ? static_cast<GSTexture12*>(config.rt) : nullptr,
+		config.ps.HasDepthROV() ? static_cast<GSTexture12*>(config.ds) : nullptr,
+		static_cast<GSTexture12*>(g_gs_device->GetColorClipTexture()),
+		static_cast<GSTexture12*>(m_ds_as_rt),
+		nullptr,
+		nullptr,
+		nullptr,
+		config.rt ? config.rt->GetSize() : config.ds->GetSize(),
+	};
+
+	PipelineSelector main_pipe = GetHWPipelineSelector(config, DrawPass::Main);
+
+	ColorClipEarlyResolveOrActivate(targets, config, main_pipe);
+
+	DATEStencilSetup(targets, config);
+
+	// Stream constants buffers first, in case they trigger command lists execution.
 	SetVSConstantBuffer(config.cb_vs);
 	SetPSConstantBuffer(config.cb_ps);
 
-	// bind textures before checking the render pass, in case we need to transition them
+	// Bind textures before starting the render pass, in case we need to transition them.
 	if (config.tex)
 	{
 		PSSetShaderResource(TEXTURE_TEXTURE, config.tex, config.tex != config.rt && config.tex != config.ds);
@@ -4466,305 +4739,72 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 	if (config.blend.constant_enable)
 		SetBlendConstants(config.blend.constant);
 
-	// Primitive ID tracking DATE setup.
-	GSTexture12* date_image = nullptr;
-	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
-	{
-		GSTexture* backup_rt = config.rt;
-		config.rt = draw_rt;
-		date_image = SetupPrimitiveTrackingDATE(config, pipe);
-		config.rt = backup_rt;
-		if (!date_image)
-		{
-			Console.Warning("D3D12: Failed to allocate DATE image, aborting draw.");
-			return;
-		}
-	}
+	if (!DATEPrimIDSetup(targets, config, main_pipe))
+		return;
 
-	// Switch to colclip target for colclip hw rendering
-	if (pipe.ps.colclip_hw)
-	{
-		if (!colclip_rt)
-		{
-			config.colclip_update_area = config.drawarea;
-
-			EndRenderPass();
-
-			colclip_rt = static_cast<GSTexture12*>(CreateFeedbackTarget(rtsize.x, rtsize.y, GSTexture::Format::ColorClip, false));
-			if (!colclip_rt)
-			{
-				Console.Warning("D3D12: Failed to allocate ColorClip render target, aborting draw.");
-
-				if (date_image)
-					Recycle(date_image);
-
-				return;
-			}
-
-			g_gs_device->SetColorClipTexture(static_cast<GSTexture*>(colclip_rt));
-
-			// propagate clear value through if the colclip render is the first
-			if (draw_rt->GetState() == GSTexture::State::Cleared)
-			{
-				colclip_rt->SetState(GSTexture::State::Cleared);
-				colclip_rt->SetClearColor(draw_rt->GetClearColor());
-			}
-			else if (draw_rt->GetState() == GSTexture::State::Dirty)
-			{
-				GL_PUSH_("ColorClip Render Target Setup");
-				draw_rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
-			}
-
-			// we're not drawing to the RT, so we can use it as a source
-			if (config.require_one_barrier && !m_features.texture_barrier)
-				PSSetShaderResource(TEXTURE_RT, draw_rt, true);
-		}
-
-		draw_rt = colclip_rt;
-	}
+	if (!ColorClipCreate(targets, config))
+		return;
 
 	// Clear texture binding when it's bound to RT or DS.
-	if (!config.tex && ((draw_rt && static_cast<GSTexture12*>(draw_rt)->GetSRVDescriptor() == m_tfx_textures[0]) ||
-		(draw_ds && static_cast<GSTexture12*>(draw_ds)->GetSRVDescriptor() == m_tfx_textures[0])))
-		PSSetShaderResource(TEXTURE_TEXTURE, nullptr, false);
-
-	// Avoid restarting the render pass just to switch from rt+depth to rt and vice versa.
-	// Keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
-	if (InRenderPass() && !(draw_rt || draw_rt_rov) && draw_ds && m_current_render_target && config.tex != m_current_render_target && 
-		m_current_render_target->GetSize() == draw_ds->GetSize())
+	if (!config.tex)
 	{
-		draw_rt = m_current_render_target;
-		m_pipeline_selector.rt = true;
-	}
-	else if (InRenderPass() && !(draw_ds || draw_ds_rov) && draw_rt && m_current_depth_target && config.tex != m_current_depth_target &&
-		m_current_depth_target->GetSize() == draw_rt->GetSize())
-	{
-		draw_ds = m_current_depth_target;
-		m_pipeline_selector.ds = true;
+		PSUnbindSourceTextureConflict(targets.rt);
+		PSUnbindSourceTextureConflict(targets.ds);
 	}
 
-	GSTexture12* draw_ds_as_rt = static_cast<GSTexture12*>(m_ds_as_rt);
+	OptimizeRenderPassRestart(targets, config, main_pipe);
 
-	const bool feedback_rt = draw_rt && (((config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier)) && (config.IsFeedbackLoopRT(config.ps) ||
-		config.IsFeedbackLoopRT(config.alpha_second_pass.ps))));
-	const bool feedback_depth = draw_ds_as_rt != nullptr;
+	CreateRTCopyForFeedback(targets, config);
 
-	if (feedback_rt && !m_features.texture_barrier)
-	{
-		// Requires a copy of the RT.
-		draw_rt_clone = static_cast<GSTexture12*>(CreateTexture(rtsize.x, rtsize.y, 1, draw_rt->GetFormat(), true));
-		if (draw_rt_clone)
-		{
-			GL_PUSH("D3D12: Copy RT to temp texture {%d,%d %dx%d}",
-				config.drawarea.left, config.drawarea.top,
-				config.drawarea.width(), config.drawarea.height());
-			EndRenderPass();
-			if (config.tex_hazard)
-			{
-				const GSVector4i union_rect = config.drawarea.runion(config.samplearea);
-				const u32 size_union = union_rect.width() * union_rect.height();
-				const u32 size_indiv = config.drawarea.width() * config.drawarea.height() +
-				                       config.samplearea.width() * config.samplearea.height();
+	SetROVTextures(targets, config);
 
-				// Do an individual copy if the union is larger than the sum of individual areas.
-				if (size_union > size_indiv)
-				{
-					const GSVector4i snapped_drawarea = ProcessCopyArea(GSVector4i(0, 0, rtsize.x, rtsize.y), config.drawarea);
-					const GSVector4i snapped_samplearea = ProcessCopyArea(GSVector4i(0, 0, rtsize.x, rtsize.y), config.samplearea);
-					CopyRect(draw_rt, draw_rt_clone, snapped_drawarea, snapped_drawarea.left, snapped_drawarea.top);
-					CopyRect(draw_rt, draw_rt_clone, snapped_samplearea, snapped_samplearea.left, snapped_samplearea.top);
-				}
-				else
-				{
-					CopyRect(draw_rt, draw_rt_clone, union_rect, union_rect.left, union_rect.top);
-				}
-			}
-			else
-			{
-				CopyRect(draw_rt, draw_rt_clone, config.drawarea, config.drawarea.left, config.drawarea.top);
-			}
+	OMSetRenderTargets(targets, config);
 
-			if (config.require_one_barrier)
-				PSSetShaderResource(TEXTURE_RT, draw_rt_clone, true);
-			if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_RT)
-				PSSetShaderResource(TEXTURE_TEXTURE, draw_rt_clone, true);
-		}
-		else
-			Console.Warning("D3D12: Failed to allocate temp texture for RT copy.");
-	}
+	DATEStencilOneClear(targets, config);
 
-	PSSetROVs(draw_rt_rov, draw_ds_rov, config.ps.HasColorOutput(), config.ps.HasDepthROVWrite());
+	BeginTFXRenderPass(targets, config, main_pipe);
 
-	// For depth testing and sampling, use a read only dsv, otherwise use a write dsv
-	OMSetRenderTargets(draw_rt, draw_ds_as_rt, draw_ds, config.scissor,
-		config.tex && (config.tex == draw_ds || config.ps.IsFeedbackLoopDepth()) && !config.depth.zwe && !config.ps.HasDepthROV(),
-		config.rt ? config.rt->GetSize() : config.ds->GetSize());
+	ColorClipConvert(targets, config, main_pipe);
 
-	// DX12 equivalent of vkCmdClearAttachments for StencilOne
-	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
-	{
-		EndRenderPass();
-		// Make sure the DSV is in writeable state
-		draw_ds->TransitionToState(GSTexture12::ResourceState::DepthWriteStencil);
-
-		const D3D12_RECT rect = {config.drawarea.left, config.drawarea.top, config.drawarea.left + config.drawarea.width(), config.drawarea.top + config.drawarea.height()};
-		GetCommandList().list4->ClearDepthStencilView(draw_ds->GetWriteDescriptor(), D3D12_CLEAR_FLAG_STENCIL, 0.0f, 1, 1, &rect);
-	}
-
-	// Begin render pass if new target or out of the area.
-	if (!InRenderPass())
-	{
-		GSVector4 clear_color = draw_rt ? draw_rt->GetClearForFormat() : GSVector4::zero();
-		if (pipe.ps.colclip_hw)
-		{
-			// Denormalize clear color for hw colclip.
-			clear_color *= GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
-		}
-
-		const bool stencil_DATE = config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil ||
-		                          config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne;
-
-		BeginRenderPass(GetLoadOpForTexture(draw_rt),
-			draw_rt ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			GetLoadOpForTexture(draw_ds),
-			draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			draw_ds ? (stencil_DATE ? D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE :
-									  D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD) :
-					  D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-			draw_ds ? ((stencil_DATE && need_barrier) ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE :
-														D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD) :
-					  D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-			clear_color, draw_ds ? draw_ds->GetClearDepth() : 0.0f, 1);
-	}
-
-	// rt -> colclip hw blit if enabled
-	if (colclip_rt && (config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly || config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) && config.rt->GetState() == GSTexture::State::Dirty)
-	{
-		OMSetRenderTargets(draw_rt, nullptr, draw_ds, GSVector4i::loadh(rtsize));
-		SetUtilityTexture(static_cast<GSTexture12*>(config.rt), m_point_sampler_cpu);
-		SetPipeline(m_colclip_setup_pipelines[pipe.ds].get());
-
-		const GSVector4 drawareaf = GSVector4((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ? GSVector4i::loadh(rtsize) : config.drawarea);
-		const GSVector4 sRect(drawareaf / GSVector4(rtsize.x, rtsize.y).xyxy());
-		DrawStretchRect(sRect, GSVector4(drawareaf), rtsize);
-
-		GL_POP();
-
-		// Restore original scissor, not sure if needed since the render pass has already been started. But to be safe.
-		OMSetRenderTargets(draw_rt, nullptr, draw_ds, config.scissor);
-	}
-
-	// VB/IB upload, if we did DATE setup and it's not colclip hw this has already been done
 	SetPrimitiveTopology(s_primitive_topology_mapping[static_cast<u8>(config.topology)]);
-	if (!date_image || colclip_rt)
+
+	// VB/IB upload, if we did DATE setup and it's not colclip hw this has already been done.
+	if (!targets.primid || targets.colclip_rt)
 		UploadHWDrawVerticesAndIndices(config);
 
-	// now we can do the actual draw
-	SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_rt_rov, draw_ds_rov,
-		feedback_rt, feedback_depth, config.require_one_barrier, config.require_full_barrier);
-
-	// blend second pass
-	if (config.blend_multi_pass.enable)
+	if (BindDrawPipeline(main_pipe))
 	{
-		if (config.blend_multi_pass.blend.constant_enable)
-			SetBlendConstants(config.blend_multi_pass.blend.constant);
-
-		pipe.bs = config.blend_multi_pass.blend;
-		pipe.ps.no_color1 = config.blend_multi_pass.no_color1;
-		pipe.ps.blend_hw = config.blend_multi_pass.blend_hw;
-		pipe.ps.dither = config.blend_multi_pass.dither;
-		if (BindDrawPipeline(pipe))
-			Draw(config);
+		SetFeedbackLoopTextures(targets, config, DrawPass::Main);
+		SendHWDraw(targets, config, DrawPass::Main, main_pipe);
 	}
 
-	// and the alpha pass
-	if (config.alpha_second_pass.enable)
-	{
-		// cbuffer will definitely be dirty if aref changes, no need to check it
-		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
-		{
-			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
-			SetPSConstantBuffer(config.cb_ps);
-		}
+	DoBlendMultiPass(config);
 
-		pipe.ps = config.alpha_second_pass.ps;
-		pipe.cms = config.alpha_second_pass.colormask;
-		pipe.dss = config.alpha_second_pass.depth;
-		pipe.bs = config.blend;
-		SendHWDraw(pipe, config, draw_rt, draw_ds_as_rt, draw_rt_rov, draw_ds_rov,
-			feedback_rt, feedback_depth, config.alpha_second_pass.require_one_barrier,
-			config.alpha_second_pass.require_full_barrier);
-	}
+	DoAlphaSecondPass(targets, config);
 
-	if (date_image)
-		Recycle(date_image);
-
-	if (draw_rt_clone)
-		Recycle(draw_rt_clone);
-
-	// now blit the colclip texture back to the original target
-	if (colclip_rt)
-	{
-		config.colclip_update_area = config.colclip_update_area.runion(config.drawarea);
-
-		if ((config.colclip_mode == GSHWDrawConfig::ColClipMode::ResolveOnly || config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve))
-		{
-			GL_PUSH("Blit ColorClip back to RT");
-
-			EndRenderPass();
-			colclip_rt->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
-
-			draw_rt = static_cast<GSTexture12*>(config.rt);
-			OMSetRenderTargets(draw_rt, nullptr, draw_ds, config.colclip_update_area);
-
-			// if this target was cleared and never drawn to, perform the clear as part of the resolve here.
-			BeginRenderPass(GetLoadOpForTexture(draw_rt), D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
-				GetLoadOpForTexture(draw_ds),
-				draw_ds ? D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE : D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-				draw_rt->GetClearForFormat(), 0.0f, 0);
-
-			const GSVector4 sRect(GSVector4(config.colclip_update_area) / GSVector4(rtsize.x, rtsize.y).xyxy());
-			SetPipeline(m_colclip_finish_pipelines[pipe.ds].get());
-			SetUtilityTexture(colclip_rt, m_point_sampler_cpu);
-			DrawStretchRect(sRect, GSVector4(config.colclip_update_area), rtsize);
-
-			Recycle(colclip_rt);
-			g_gs_device->SetColorClipTexture(nullptr);
-		}
-	}
+	ColorClipResolve(targets, config);
 }
 
-void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-	GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
-	const bool feedback_rt, const bool feedback_depth,
-	const bool one_barrier, const bool full_barrier)
+void GSDevice12::SendHWDraw(const DrawTargets12& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe)
 {
-	// Should not be mixing ROVs with barriers.
-	pxAssert(!(draw_rt_rov || draw_ds_rov) || !(one_barrier || full_barrier));
-	
+	const bool one_barrier = config.GetOneBarrier(pass);
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool feedback_rt = config.IsFeedbackLoopRT(pipe.ps);
+	const bool feedback_depth = config.IsFeedbackLoopDepth(pipe.ps);
 	const int n_barriers = static_cast<int>(feedback_rt) + static_cast<int>(feedback_depth);
 
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
-		if (BindDrawPipeline(pipe))
-			Draw(config);
+		Draw(config);
 		return;
 	}
 
 	if (feedback_rt || feedback_depth)
 	{
 #ifdef PCSX2_DEVBUILD
-		if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(config.ps) || config.IsFeedbackLoopDepth(config.ps))) [[unlikely]]
+		if ((one_barrier || full_barrier) && !(feedback_rt || feedback_depth)) [[unlikely]]
 			Console.Warning("D3D12: Possible unnecessary barrier detected.");
 #endif
-		if ((one_barrier || full_barrier) && feedback_rt)
-			PSSetShaderResource(TEXTURE_RT, draw_rt, false, ResourceType::FBL);
-		if (config.tex_hazard == GSHWDrawConfig::TEX_HAZARD_RT)
-			PSSetShaderResource(TEXTURE_TEXTURE, draw_rt, false, ResourceType::FBL);
-		if ((one_barrier || full_barrier) && feedback_depth)
-			PSSetShaderResource(TEXTURE_DEPTH, draw_ds, false, ResourceType::FBL);
-		
 		if (full_barrier)
 		{
 			pxAssert(config.drawlist && !config.drawlist->empty());
@@ -4779,9 +4819,9 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 				const u32 count = config.drawlist->at(n) * indices_per_prim;
 
 				if (feedback_rt)
-					FeedbackBarrier(draw_rt);
+					FeedbackBarrier(targets.rt);
 				if (feedback_depth)
-					FeedbackBarrier(draw_ds);
+					FeedbackBarrier(targets.ds);
 
 				if (BindDrawPipeline(pipe))
 					Draw(config, p, count);
@@ -4796,9 +4836,9 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 			g_perfmon.Put(GSPerfMon::Barriers, n_barriers);
 
 			if (feedback_rt)
-				FeedbackBarrier(draw_rt);
+				FeedbackBarrier(targets.rt);
 			if (feedback_depth)
-				FeedbackBarrier(draw_ds);
+				FeedbackBarrier(targets.ds);
 		}
 	}
 
@@ -4809,19 +4849,29 @@ void GSDevice12::SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& 
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
 
-void GSDevice12::UpdateHWPipelineSelector(GSHWDrawConfig& config)
+GSDevice12::PipelineSelector GSDevice12::GetHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass)
 {
-	m_pipeline_selector.vs.key = config.vs.key;
-	m_pipeline_selector.ps.key_hi = config.ps.key_hi;
-	m_pipeline_selector.ps.key_lo = config.ps.key_lo;
-	m_pipeline_selector.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
-	m_pipeline_selector.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : config.blend.key;
-	m_pipeline_selector.bs.constant = 0; // don't dupe states with different alpha values
-	m_pipeline_selector.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
-	m_pipeline_selector.topology = static_cast<u32>(config.topology);
-	m_pipeline_selector.rt = config.rt != nullptr && !config.ps.HasColorROV();
-	m_pipeline_selector.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	m_pipeline_selector.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
+	const GSHWDrawConfig::VSSelector vs = config.GetVS(pass);
+	const GSHWDrawConfig::PSSelector ps = config.GetPS(pass);
+	const GSHWDrawConfig::BlendState bs = config.GetBlend(pass);
+	const GSHWDrawConfig::ColorMaskSelector cms = config.GetColorMask(pass);
+	const GSHWDrawConfig::DepthStencilSelector dss = config.GetDepth(pass);
+	const bool full_barrier = config.GetFullBarrier(pass);
+	const bool one_barrier = config.GetOneBarrier(pass);
+
+	PipelineSelector pipe;
+	pipe.vs = vs;
+	pipe.ps = ps;
+	pipe.dss = ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth() : dss;
+	pipe.bs = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState() : bs;
+	pipe.bs.constant = 0; // don't dupe states with different alpha values
+	pipe.cms = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector() : cms;
+	pipe.topology = static_cast<u32>(config.topology);
+	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
+	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
+	pipe.ds_as_rt = m_ds_as_rt != nullptr && !config.ps.HasDepthROV();
+
+	return pipe;
 }
 
 void GSDevice12::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)

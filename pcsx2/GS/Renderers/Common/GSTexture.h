@@ -233,7 +233,11 @@ public:
 
 	__fi u32 GetClearColor() const { return m_clear_value.color; }
 	__fi float GetClearDepth() const { return m_clear_value.depth; }
-	__fi GSVector4 GetUNormClearColor() const { return GSVector4::unorm8(m_clear_value.color); }
+	__fi GSVector4 GetUNormClearColor() const
+	{
+		return m_format == Format::ColorClip ?
+			GSVector4::unorm16(m_clear_value.color) : GSVector4::unorm8(m_clear_value.color);
+	}
 	__fi GSVector4 GetClearForFormat() const
 	{
 		return IsDepthLike() ? GSVector4(m_clear_value.depth, 0.0f, 0.0f, 0.0f) : GetUNormClearColor();
