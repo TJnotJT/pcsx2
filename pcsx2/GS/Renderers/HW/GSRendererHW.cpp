@@ -6117,7 +6117,7 @@ void GSRendererHW::EmulateDATEGetConfig(DATEOptions& date_options, bool scale_rt
 
 	if (date_options.barrier)
 	{
-		m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM;
+		m_conf.ps.date = GSHWDrawConfig::GetDATEBarrier(m_cached_ctx.TEST.DATM);
 	}
 	else if (date_options.stencil_one)
 	{
@@ -6125,14 +6125,14 @@ void GSRendererHW::EmulateDATEGetConfig(DATEOptions& date_options, bool scale_rt
 		if (features.texture_barrier || multidraw_fb_copy)
 		{
 			m_conf.require_one_barrier = true;
-			m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM;
+			m_conf.ps.date = GSHWDrawConfig::GetDATEBarrier(m_cached_ctx.TEST.DATM);
 		}
 		m_conf.depth.date = 1;
 		m_conf.depth.date_one = 1;
 	}
 	else if (date_options.primid)
 	{
-		m_conf.ps.date = 1 + m_cached_ctx.TEST.DATM;
+		m_conf.ps.date = GSHWDrawConfig::GetDATEPrimIDInit(m_cached_ctx.TEST.DATM);
 	}
 	else if (date_options.enabled)
 	{
@@ -7759,7 +7759,7 @@ void GSRendererHW::ConfigureROV(bool color_rov, bool depth_rov)
 				m_conf.destination_alpha = GSHWDrawConfig::DestinationAlphaMode::Full;
 				m_conf.depth.date = false; // Don't use stencil with ROV
 				m_conf.depth.date_one = false; // Don't use stencil with ROV
-				m_conf.ps.date = 5 + m_cached_ctx.TEST.DATM; // Shader discard DATM.
+				m_conf.ps.date = GSHWDrawConfig::GetDATEBarrier(m_cached_ctx.TEST.DATM); // Shader discard DATM.
 				m_conf.datm = static_cast<SetDATM>(0); // Not needed
 			}
 		}

@@ -34,11 +34,6 @@
 static u32 s_debug_scope_depth = 0;
 #endif
 
-static bool IsDATEModePrimIDInit(u32 flag)
-{
-	return flag == 1 || flag == 2;
-}
-
 static constexpr std::array<D3D12_PRIMITIVE_TOPOLOGY, 3> s_primitive_topology_mapping = {
 	{D3D_PRIMITIVE_TOPOLOGY_POINTLIST, D3D_PRIMITIVE_TOPOLOGY_LINELIST, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST}};
 
@@ -3244,7 +3239,7 @@ const ID3DBlob* GSDevice12::GetTFXPixelShader(const GSHWDrawConfig::PSSelector& 
 	sm.AddMacro("PS_AEM", sel.aem);
 	sm.AddMacro("PS_TFX", sel.tfx);
 	sm.AddMacro("PS_TCC", sel.tcc);
-	sm.AddMacro("PS_DATE", sel.date);
+	sm.AddMacro("PS_DATE", static_cast<u32>(sel.date));
 	sm.AddMacro("PS_ATST", static_cast<u32>(sel.atst));
 	sm.AddMacro("PS_AFAIL", static_cast<u32>(sel.afail));
 	sm.AddMacro("PS_FOG", sel.fog);
@@ -3335,7 +3330,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	u32 num_rts = 0;
 	if (p.rt)
 	{
-		const GSTexture::Format format = IsDATEModePrimIDInit(p.ps.date) ?
+		const GSTexture::Format format = GSHWDrawConfig::IsDATEPrimIDInit(p.ps.date) ?
 			GSTexture::Format::PrimID :
 			(p.ps.colclip_hw ? GSTexture::Format::ColorClip : GSTexture::Format::Color);
 
@@ -3385,7 +3380,7 @@ GSDevice12::ComPtr<ID3D12PipelineState> GSDevice12::CreateTFXPipeline(const Pipe
 	}
 
 	// Blending
-	if (IsDATEModePrimIDInit(p.ps.date))
+	if (GSHWDrawConfig::IsDATEPrimIDInit(p.ps.date))
 	{
 		// image DATE prepass
 		gpb.SetBlendState(0, true, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_MIN, D3D12_BLEND_ONE,
@@ -4334,8 +4329,9 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 	EndRenderPass();
 
 	// .. by setting it to DATE=3
-	pipe.ps.date = 3;
-	config.alpha_second_pass.ps.date = 3;
+	pipe.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
+	if (config.alpha_second_pass.enable)
+		config.alpha_second_pass.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
 
 	// and bind the image to the primitive sampler
 	image->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);

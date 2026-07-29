@@ -1677,7 +1677,7 @@ std::string GSDeviceOGL::GetPSSource(const PSSelector& sel)
 		+ fmt::format("#define PS_AUTOMATIC_LOD {}\n", sel.automatic_lod)
 		+ fmt::format("#define PS_MANUAL_LOD {}\n", sel.manual_lod)
 		+ fmt::format("#define PS_COLCLIP {}\n", sel.colclip)
-		+ fmt::format("#define PS_DATE {}\n", sel.date)
+		+ fmt::format("#define PS_DATE {}\n", static_cast<u32>(sel.date))
 		+ fmt::format("#define PS_TCOFFSETHACK {}\n", sel.tcoffsethack)
 		+ fmt::format("#define PS_REGION_RECT {}\n", sel.region_rect)
 		+ fmt::format("#define PS_BLEND_A {}\n", sel.blend_a)
@@ -3042,8 +3042,9 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		// Compute primitiveID max that pass the date test (Draw without barrier)
 		Draw(config);
 
-		psel.ps.date = 3;
-		config.alpha_second_pass.ps.date = 3;
+		psel.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
+		if (config.alpha_second_pass.enable)
+			config.alpha_second_pass.ps.date = GSHWDrawConfig::PS_DATE::PrimIDMain;
 		SetupPipeline(psel);
 		PSSetShaderResource(TEXTURE_PRIMID, primid_texture);
 	}

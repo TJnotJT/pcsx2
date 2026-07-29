@@ -1282,16 +1282,16 @@ static const char* GetVSExpandName(GSHWDrawConfig::VSExpand vsexpand)
 	return "Unknown";
 }
 
-static const char* GetPSDateName(u32 date)
+static const char* GetPSDateName(GSHWDrawConfig::PS_DATE date)
 {
 	switch (date)
 	{
-		case 0: return "Off";
-		case 1: return "PrimID Init DATM=0";
-		case 2: return "PrimID Init DATM=1";
-		case 3: return "PrimID Main";
-		case 5: return "Barrier DATM=0";
-		case 6: return "Barrier DATM=1";
+		case GSHWDrawConfig::PS_DATE::None: return "None";
+		case GSHWDrawConfig::PS_DATE::PrimIDInitDATM0: return "PrimID Init DATM=0";
+		case GSHWDrawConfig::PS_DATE::PrimIDInitDATM1: return "PrimID Init DATM=1";
+		case GSHWDrawConfig::PS_DATE::PrimIDMain: return "PrimID Main";
+		case GSHWDrawConfig::PS_DATE::BarrierDATM0: return "Barrier DATM=0";
+		case GSHWDrawConfig::PS_DATE::BarrierDATM1: return "Barrier DATM=1";
 	}
 	return "Unknown";
 }
@@ -1563,7 +1563,7 @@ static void DumpPSSelector(DrawConfigWriter& out, const GSHWDrawConfig::PSSelect
 	out.WriteLn("fba: {}", ps.fba);
 	out.WriteLn("fog: {}", ps.fog);
 	out.WriteLn("iip: {}", ps.iip);
-	out.WriteLn("date: {} ({})", GetPSDateName(ps.date), ps.date);
+	out.WriteLn("date: {} ({})", GetPSDateName(ps.date), static_cast<u32>(ps.date));
 	out.WriteLn("atst: {} ({})", GetPSAlphaTestName(ps.atst), static_cast<u32>(ps.atst));
 	out.WriteLn("afail: {} ({})", GetPSAFAILName(ps.afail), static_cast<u32>(ps.afail));
 	out.WriteLn("fst: {}", ps.fst);

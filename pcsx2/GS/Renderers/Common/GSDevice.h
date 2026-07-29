@@ -673,6 +673,25 @@ struct alignas(16) GSHWDrawConfig
 	using PS_AFAIL = GSShader::PS_AFAIL;
 	using PS_AA1   = GSShader::PS_AA1;
 	using PS_ROV_DEPTH = GSShader::PS_ROV_DEPTH;
+	using PS_DATE = GSShader::PS_DATE;
+
+	static PS_DATE GetDATEPrimIDInit(u32 DATM)
+	{
+		pxAssert(DATM <= 1);
+		return DATM ? PS_DATE::PrimIDInitDATM1 : PS_DATE::PrimIDInitDATM0;
+	}
+
+	static PS_DATE GetDATEBarrier(u32 DATM)
+	{
+		pxAssert(DATM <= 1);
+		return DATM ? PS_DATE::BarrierDATM1 : PS_DATE::BarrierDATM0;
+	}
+
+	static bool IsDATEPrimIDInit(PS_DATE date)
+	{
+		return date == PS_DATE::PrimIDInitDATM0 || date == PS_DATE::PrimIDInitDATM1;
+	}
+
 #pragma pack(push, 1)
 	struct VSSelector
 	{
@@ -722,7 +741,7 @@ struct alignas(16) GSHWDrawConfig
 				// Flat/goround shading
 				u32 iip : 1;
 				// Pixel test
-				u32 date : 3;
+				PS_DATE date : 3;
 				PS_ATST atst : 3;
 				PS_AFAIL afail : 3;
 				u32 ztst : 2;
@@ -831,7 +850,7 @@ struct alignas(16) GSHWDrawConfig
 			const u32 sw_blend_bits = blend_a | blend_b | blend_d;
 			const bool sw_blend_needs_rt = (sw_blend_bits != 0 && ((sw_blend_bits | blend_c) & 1u)) || ((a_masked & blend_c) != 0);
 			const bool afail_needs_rt = afail == PS_AFAIL::ZB_ONLY || afail == PS_AFAIL::RGB_ONLY || afail == PS_AFAIL::RGB_ONLY_SW_Z;
-			return tex_is_fb || fbmask || (date >= 5) || sw_blend_needs_rt || afail_needs_rt;
+			return tex_is_fb || fbmask || (date == PS_DATE::BarrierDATM0 || date == PS_DATE::BarrierDATM1) || sw_blend_needs_rt || afail_needs_rt;
 		}
 
 		__fi bool IsFeedbackLoopDepth() const
@@ -844,7 +863,7 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi bool HasShaderDiscard() const
 		{
-			return (IsAlphaTesting() && afail == PS_AFAIL::KEEP) || scanmsk || date || IsZTesting();
+			return (IsAlphaTesting() && afail == PS_AFAIL::KEEP) || scanmsk || date != PS_DATE::None || IsZTesting();
 		}
 
 		/// Disables color output from the pixel shader, this is done when all channels are masked.
@@ -1320,10 +1339,132 @@ struct alignas(16) GSHWDrawConfig
 	{
 		return ps.IsFeedbackLoopDepth() || (tex_hazard == TEX_HAZARD_DEPTH);
 	}
+
+	__fi bool IsFeedbackLoopRTAnyPass() const
+	{
+		return IsFeedbackLoopRT(ps) || (alpha_second_pass.enable && IsFeedbackLoopRT(alpha_second_pass.ps));
+	}
+
+	__fi bool IsFeedbackLoopDepthAnyPass() const
+	{
+		return IsFeedbackLoopDepth(ps) || (alpha_second_pass.enable && IsFeedbackLoopDepth(alpha_second_pass.ps));
+	}
 	
 	bool IsBlending()
 	{
 		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending();
+	}
+
+	bool IsColorClipConvertAndResolve()
+	{
+		return colclip_mode == ColClipMode::ConvertAndResolve;
+	}
+
+	// Draw pass selectors
+	enum class DrawPass
+	{
+		Main,
+		AlphaSecond,
+		PrimID,
+		BlendMulti,
+	};
+
+	bool GetFullBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return require_full_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_full_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::BlendMulti: return false;
+		}
+	}
+
+	bool GetOneBarrier(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return require_one_barrier;
+			case DrawPass::AlphaSecond: return alpha_second_pass.require_one_barrier;
+			case DrawPass::PrimID: return false;
+			case DrawPass::BlendMulti: return false;
+		}
+	}
+
+	const VSSelector& GetVS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return vs;
+			case DrawPass::AlphaSecond: return vs;
+			case DrawPass::BlendMulti: return vs;
+			case DrawPass::PrimID: return vs;
+		}
+	}
+
+	const PSSelector GetPS(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return ps;
+			case DrawPass::AlphaSecond: return alpha_second_pass.ps;
+			case DrawPass::BlendMulti:
+			{
+				PSSelector ps_blend = ps;
+				ps_blend.no_color1 = blend_multi_pass.no_color1;
+				ps_blend.blend_hw = blend_multi_pass.blend_hw;
+				ps_blend.dither = blend_multi_pass.dither;
+				return ps_blend;
+			}
+			case DrawPass::PrimID: return ps;
+		}
+	}
+
+	ColorMaskSelector GetColorMask(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return colormask;
+			case DrawPass::AlphaSecond: return alpha_second_pass.colormask;
+			case DrawPass::BlendMulti: return colormask;
+			case DrawPass::PrimID: return GSHWDrawConfig::ColorMaskSelector(1);
+		}
+	}
+
+	DepthStencilSelector GetDepth(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main: return depth;
+			case DrawPass::AlphaSecond: return alpha_second_pass.depth;
+			case DrawPass::BlendMulti: return depth;
+			case DrawPass::PrimID:
+			{
+				DepthStencilSelector primid_depth = depth;
+				primid_depth.zwe = false;
+				return primid_depth;
+			}
+		}
+	}
+
+	BlendState GetBlend(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::AlphaSecond:
+			case DrawPass::PrimID:
+			case DrawPass::Main:
+				return blend;
+			case DrawPass::BlendMulti:;
+				return blend_multi_pass.blend;
+		}
 	}
 
 	// Dumping
@@ -1364,6 +1505,8 @@ static inline u32 GetVertexAlignment(GSHWDrawConfig::VSExpand expand)
 class GSDevice : public GSAlignedClass<32>
 {
 public:
+	using DrawPass = GSHWDrawConfig::DrawPass;
+
 	enum class PresentResult
 	{
 		OK,
@@ -1422,7 +1565,9 @@ public:
 	{
 		void operator()(GSTexture* const tex);
 	};
-	using RecycledTexture = std::unique_ptr<GSTexture, TextureRecycleDeleter>;
+	template<typename T>
+	using RecycledTextureT = std::unique_ptr<T, TextureRecycleDeleter>;
+	using RecycledTexture = RecycledTextureT<GSTexture>;
 
 	enum BlendFactor : u8
 	{

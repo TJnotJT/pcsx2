@@ -591,8 +591,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const GSHWDrawConfig& config);
-	void Draw(const GSHWDrawConfig& config, int offset, int count);
+	void Draw(const GSHWDrawConfig& config, DrawPass pass);
+	void Draw(const GSHWDrawConfig& config, DrawPass pass, int offset, int count);
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
@@ -619,33 +619,69 @@ public:
 		GSTexture* dTex, u32 DBW, u32 DPSM) override;
 	void FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect) override;
 
-	void SetupDATE(GSTexture* rt, GSTexture* ds, SetDATM datm, const GSVector4i& bbox);
-	GSTextureVK* SetupPrimitiveTrackingDATE(GSHWDrawConfig& config);
+	struct alignas(16) ClearValueList
+	{
+		VkClearValue cv[2];
+		u32 count;
+	};
+
+	struct DrawTargets
+	{
+		GSTextureVK* rt;
+		GSTextureVK* ds;
+		GSTextureVK* rt_rov;
+		GSTextureVK* ds_rov;
+		GSTextureVK* colclip_rt;
+		GSDevice::RecycledTextureT<GSTextureVK> primid;
+		GSDevice::RecycledTextureT<GSTextureVK> rt_copy;
+		GSVector2i rtsize;
+
+		ClearValueList GetClearValues(u32 stencil = 0) const;
+	};
 
 	void IASetVertexBuffer(const void* vertex, size_t stride, size_t count, size_t align_multiplier = 1);
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
-	void PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
+	void PSUnbindSourceTextureConflict(GSTexture* tex);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None, const GSVector2i& viewport_size = {});
+	void OMSetRenderTargets(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	bool BindDrawPipeline(const PipelineSelector& p);
 
+	// Helper functions for RenderHW.
+	void SetConstantBuffers(const GSHWDrawConfig& config);
+	void DATEStencilSetup(const DrawTargets& targets, GSHWDrawConfig& config);
+	void DATEStencilOneClear(const DrawTargets& targets, const GSHWDrawConfig& config);
+	bool DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config);
+	void ColorClipEarlyResolveOrActivate(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config);
+	void ColorClipConvert(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void ColorClipResolve(DrawTargets& targets, GSHWDrawConfig& config);
+	void OptimizeRenderPassRestart(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool CreateRTCopyForFeedback(DrawTargets& targets, const GSHWDrawConfig& config);
+	void SetFeedbackLoopTextures(DrawTargets& targets, const PipelineSelector& pipe);
+	void SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& config);
+	void BeginTFXRenderPass(const DrawTargets& targets, const GSHWDrawConfig& config,
+		const PipelineSelector& pipe, const GSVector4i& drawarea);
+	void DoBlendMultiPass(GSHWDrawConfig& config);
+	void DoAlphaSecondPass(const DrawTargets& targets, GSHWDrawConfig& config);
+
 	void RenderHW(GSHWDrawConfig& config) override;
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe);
+	PipelineSelector GetHWPipelineSelector(GSHWDrawConfig& config, DrawPass pass);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
 	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
-	void SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
-		bool one_barrier, bool full_barrier);
+	void FeedbackBarrier(const DrawTargets& targets, const PipelineSelector& pipe);
+	void SendHWDraw(const DrawTargets& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe);
 
 	//////////////////////////////////////////////////////////////////////////
 	// Vulkan State
@@ -777,7 +813,4 @@ private:
 
 	std::unique_ptr<GSTextureVK> m_null_texture;
 	VkFramebuffer m_null_framebuffer;
-
-	// current pipeline selector - we save this in the struct to avoid re-zeroing it every draw
-	PipelineSelector m_pipeline_selector = {};
 };

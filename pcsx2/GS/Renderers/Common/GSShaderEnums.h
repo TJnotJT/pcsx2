@@ -63,4 +63,14 @@ enum class PS_ROV_DEPTH : uint32_t
 	READ_ONLY = 2,
 };
 
+enum class PS_DATE : uint32_t
+{
+	None            = 0,
+	PrimIDInitDATM0 = 1,
+	PrimIDInitDATM1 = 2,
+	PrimIDMain      = 3,
+	BarrierDATM0    = 5,
+	BarrierDATM1    = 6,
+};
+
 } // namespace GSShader
