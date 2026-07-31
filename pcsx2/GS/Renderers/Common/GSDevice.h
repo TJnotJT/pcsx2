@@ -1330,37 +1330,6 @@ struct alignas(16) GSHWDrawConfig
 	GIFRegFRAME colclip_frame;
 	GSVector4i colclip_update_area; ///< Area in the framebuffer which colclip will modify;
 
-	__fi bool IsFeedbackLoopRT(const PSSelector& ps) const
-	{
-		return ps.IsFeedbackLoopRT() || (tex_hazard == TEX_HAZARD_RT);
-	}
-
-	__fi bool IsFeedbackLoopDepth(const PSSelector& ps) const
-	{
-		return ps.IsFeedbackLoopDepth() || (tex_hazard == TEX_HAZARD_DEPTH);
-	}
-
-	__fi bool IsFeedbackLoopRTAnyPass() const
-	{
-		return IsFeedbackLoopRT(ps) || (alpha_second_pass.enable && IsFeedbackLoopRT(alpha_second_pass.ps));
-	}
-
-	__fi bool IsFeedbackLoopDepthAnyPass() const
-	{
-		return IsFeedbackLoopDepth(ps) || (alpha_second_pass.enable && IsFeedbackLoopDepth(alpha_second_pass.ps));
-	}
-	
-	bool IsBlending()
-	{
-		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending();
-	}
-
-	bool IsColorClipConvertAndResolve()
-	{
-		return colclip_mode == ColClipMode::ConvertAndResolve;
-	}
-
-	// Draw pass selectors
 	enum class DrawPass
 	{
 		Main,
@@ -1369,6 +1338,87 @@ struct alignas(16) GSHWDrawConfig
 		BlendMulti,
 	};
 
+	__fi bool IsFeedbackLoopRT(const PSSelector& ps) const
+	{
+		return ps.IsFeedbackLoopRT() || (tex_hazard == TEX_HAZARD_RT);
+	}
+
+	__fi bool IsFeedbackLoopRT(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main:
+				return IsFeedbackLoopRT(ps);
+			case DrawPass::AlphaSecond:
+				return alpha_second_pass.enable && IsFeedbackLoopRT(alpha_second_pass.ps);
+			case DrawPass::PrimID:
+				return false;
+			case DrawPass::BlendMulti:
+				return false;
+		}
+	}
+
+	__fi bool IsFeedbackLoopDepth(const PSSelector& ps) const
+	{
+		return ps.IsFeedbackLoopDepth() || (tex_hazard == TEX_HAZARD_DEPTH);
+	}
+
+	__fi bool IsFeedbackLoopDepth(DrawPass pass) const
+	{
+		switch (pass)
+		{
+			default:
+			case DrawPass::Main:
+				return IsFeedbackLoopDepth(ps);
+			case DrawPass::AlphaSecond:
+				return alpha_second_pass.enable && IsFeedbackLoopDepth(alpha_second_pass.ps);
+			case DrawPass::PrimID:
+				return false;
+			case DrawPass::BlendMulti:
+				return false;
+		}
+	}
+
+	__fi bool IsFeedbackLoopRTAnyPass() const
+	{
+		return IsFeedbackLoopRT(DrawPass::Main) || IsFeedbackLoopRT(DrawPass::AlphaSecond);
+	}
+
+	__fi bool IsFeedbackLoopDepthAnyPass() const
+	{
+		return IsFeedbackLoopDepth(DrawPass::Main) || IsFeedbackLoopDepth(DrawPass::AlphaSecond);
+	}
+	
+	bool IsBlending()
+	{
+		return blend.enable || blend_multi_pass.enable || ps.IsSWBlending();
+	}
+
+	bool IsColorClipConvertAndResolve() const
+	{
+		return colclip_mode == ColClipMode::ConvertAndResolve;
+	}
+
+	bool HasColorClipConvert() const
+	{
+		return colclip_mode == ColClipMode::ConvertOnly ||
+			colclip_mode == ColClipMode::ConvertAndResolve;
+	}
+
+	bool HasColorClipResolve() const
+	{
+		return colclip_mode == ColClipMode::ResolveOnly ||
+			colclip_mode == ColClipMode::ConvertAndResolve;
+	}
+
+	bool HasDATEStencil() const
+	{
+		return destination_alpha == DestinationAlphaMode::Stencil ||
+			destination_alpha == DestinationAlphaMode::StencilOne;
+	}
+
+	// Draw pass selectors
 	bool GetFullBarrier(DrawPass pass) const
 	{
 		switch (pass)
@@ -1568,6 +1618,21 @@ public:
 	template<typename T>
 	using RecycledTextureT = std::unique_ptr<T, TextureRecycleDeleter>;
 	using RecycledTexture = RecycledTextureT<GSTexture>;
+
+	template <typename T>
+	struct DrawTargets
+	{
+		T* rt;
+		T* ds;
+		T* rt_rov;
+		T* ds_rov;
+		T* colclip_rt;
+		T* ds_as_rt;
+		RecycledTextureT<T> primid;
+		RecycledTextureT<T> rt_copy;
+		RecycledTextureT<T> ds_copy;
+		GSVector2i rtsize;
+	};
 
 	enum BlendFactor : u8
 	{

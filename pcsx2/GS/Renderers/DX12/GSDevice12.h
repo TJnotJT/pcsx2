@@ -575,21 +575,42 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 	void PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
+	void PSUnbindSourceTextureConflict(GSTexture12* tex);
+
+	struct DrawTargets12 : DrawTargets<GSTexture12>
+	{
+	};
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, GSTexture* ds_as_rt, const GSVector4i& scissor,
 		bool depth_read = false, const GSVector2i& viewport_size = {});
+	void OMSetRenderTargets(const DrawTargets12& targets, const GSHWDrawConfig& config);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	bool BindDrawPipeline(const PipelineSelector& p);
 
-	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
-		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
+	// Helper functions for RenderHW.
+	void SetConstantBuffers(const GSHWDrawConfig& config);
+	void DATEStencilSetup(const DrawTargets12& targets, GSHWDrawConfig& config);
+	void DATEStencilOneClear(const DrawTargets12& targets, const GSHWDrawConfig& config);
+	bool DATEPrimIDSetup(DrawTargets12& targets, GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void ColorClipEarlyResolveOrActivate(DrawTargets12& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool ColorClipCreate(DrawTargets12& targets, GSHWDrawConfig& config);
+	void ColorClipConvert(const DrawTargets12& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void ColorClipResolve(DrawTargets12& targets, GSHWDrawConfig& config);
+	void OptimizeRenderPassRestart(DrawTargets12& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool CreateRTCopyForFeedback(DrawTargets12& targets, const GSHWDrawConfig& config);
+	void SetFeedbackLoopTextures(const DrawTargets12& targets, const GSHWDrawConfig& config, DrawPass pass);
+	void SetROVTextures(const DrawTargets12& targets, const GSHWDrawConfig& config);
+	void BeginTFXRenderPass(const DrawTargets12& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void DoBlendMultiPass(const GSHWDrawConfig& config);
+	void DoAlphaSecondPass(const DrawTargets12& targets, GSHWDrawConfig& config);
 
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
+	void RenderHW(GSHWDrawConfig& config) override;
+	void SendHWDraw(const DrawTargets12& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe);
+
+	PipelineSelector GetHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 
 public:
@@ -732,7 +753,4 @@ private:
 	const ID3D12PipelineState* m_current_pipeline = nullptr;
 
 	std::unique_ptr<GSTexture12> m_null_texture;
-
-	// current pipeline selector - we save this in the struct to avoid re-zeroing it every draw
-	PipelineSelector m_pipeline_selector = {};
 };

@@ -625,17 +625,8 @@ public:
 		u32 count;
 	};
 
-	struct DrawTargets
+	struct DrawTargetsVK : DrawTargets<GSTextureVK>
 	{
-		GSTextureVK* rt;
-		GSTextureVK* ds;
-		GSTextureVK* rt_rov;
-		GSTextureVK* ds_rov;
-		GSTextureVK* colclip_rt;
-		GSDevice::RecycledTextureT<GSTextureVK> primid;
-		GSDevice::RecycledTextureT<GSTextureVK> rt_copy;
-		GSVector2i rtsize;
-
 		ClearValueList GetClearValues(u32 stencil = 0) const;
 	};
 
@@ -649,7 +640,7 @@ public:
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None, const GSVector2i& viewport_size = {});
-	void OMSetRenderTargets(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void OMSetRenderTargets(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
@@ -657,31 +648,30 @@ public:
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	// Helper functions for RenderHW.
-	void SetConstantBuffers(const GSHWDrawConfig& config);
-	void DATEStencilSetup(const DrawTargets& targets, GSHWDrawConfig& config);
-	void DATEStencilOneClear(const DrawTargets& targets, const GSHWDrawConfig& config);
-	bool DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config);
-	void ColorClipEarlyResolveOrActivate(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
-	bool ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config);
-	void ColorClipConvert(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
-	void ColorClipResolve(DrawTargets& targets, GSHWDrawConfig& config);
-	void OptimizeRenderPassRestart(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
-	bool CreateRTCopyForFeedback(DrawTargets& targets, const GSHWDrawConfig& config);
-	void SetFeedbackLoopTextures(DrawTargets& targets, const PipelineSelector& pipe);
-	void SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& config);
-	void BeginTFXRenderPass(const DrawTargets& targets, const GSHWDrawConfig& config,
+	void DATEStencilSetup(const DrawTargetsVK& targets, GSHWDrawConfig& config);
+	void DATEStencilOneClear(const DrawTargetsVK& targets, const GSHWDrawConfig& config);
+	bool DATEPrimIDSetup(DrawTargetsVK& targets, GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void ColorClipEarlyResolveOrActivate(DrawTargetsVK& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool ColorClipCreate(DrawTargetsVK& targets, GSHWDrawConfig& config);
+	void ColorClipConvert(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
+	void ColorClipResolve(DrawTargetsVK& targets, GSHWDrawConfig& config);
+	void OptimizeRenderPassRestart(DrawTargetsVK& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
+	bool CreateRTCopyForFeedback(DrawTargetsVK& targets, const GSHWDrawConfig& config);
+	void SetFeedbackLoopTextures(const DrawTargetsVK& targets, const PipelineSelector& pipe);
+	void SetROVTextures(const DrawTargetsVK& targets, const GSHWDrawConfig& config);
+	void BeginTFXRenderPass(const DrawTargetsVK& targets, const GSHWDrawConfig& config,
 		const PipelineSelector& pipe, const GSVector4i& drawarea);
-	void DoBlendMultiPass(GSHWDrawConfig& config);
-	void DoAlphaSecondPass(const DrawTargets& targets, GSHWDrawConfig& config);
+	void DoBlendMultiPass(const GSHWDrawConfig& config);
+	void DoAlphaSecondPass(const DrawTargetsVK& targets, GSHWDrawConfig& config);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	PipelineSelector GetHWPipelineSelector(GSHWDrawConfig& config, DrawPass pass);
+	PipelineSelector GetHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
 	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
-	void FeedbackBarrier(const DrawTargets& targets, const PipelineSelector& pipe);
-	void SendHWDraw(const DrawTargets& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe);
+	void FeedbackBarrier(const DrawTargetsVK& targets, const PipelineSelector& pipe);
+	void SendHWDraw(const DrawTargetsVK& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe);
 
 	//////////////////////////////////////////////////////////////////////////
 	// Vulkan State

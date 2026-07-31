@@ -3776,7 +3776,7 @@ void GSDeviceVK::OMSetRenderTargets(
 	SetScissor(scissor);
 }
 
-void GSDeviceVK::OMSetRenderTargets(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
+void GSDeviceVK::OMSetRenderTargets(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
 {
 	OMSetRenderTargets(targets.rt, targets.ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), targets.rtsize);
 }
@@ -5779,7 +5779,7 @@ void GSDeviceVK::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
 	}
 }
 
-GSDeviceVK::ClearValueList GSDeviceVK::DrawTargets::GetClearValues(u32 stencil) const
+GSDeviceVK::ClearValueList GSDeviceVK::DrawTargetsVK::GetClearValues(u32 stencil) const
 {
 	ClearValueList cvl;
 	cvl.count = 0;
@@ -5790,7 +5790,7 @@ GSDeviceVK::ClearValueList GSDeviceVK::DrawTargets::GetClearValues(u32 stencil) 
 	return cvl;
 }
 
-void GSDeviceVK::DATEStencilSetup(const DrawTargets& targets, GSHWDrawConfig& config)
+void GSDeviceVK::DATEStencilSetup(const DrawTargetsVK& targets, GSHWDrawConfig& config)
 {
 	const bool need_barrier = config.require_one_barrier || (config.require_full_barrier && m_features.texture_barrier);
 
@@ -5826,7 +5826,7 @@ void GSDeviceVK::DATEStencilSetup(const DrawTargets& targets, GSHWDrawConfig& co
 	}
 }
 
-void GSDeviceVK::DATEStencilOneClear(const DrawTargets& targets, const GSHWDrawConfig& config)
+void GSDeviceVK::DATEStencilOneClear(const DrawTargetsVK& targets, const GSHWDrawConfig& config)
 {
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
 	{
@@ -5837,21 +5837,21 @@ void GSDeviceVK::DATEStencilOneClear(const DrawTargets& targets, const GSHWDrawC
 	}
 }
 
-bool GSDeviceVK::DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config)
+bool GSDeviceVK::DATEPrimIDSetup(DrawTargetsVK& targets, GSHWDrawConfig& config, const PipelineSelector& pipe)
 {
 	if (config.destination_alpha != GSHWDrawConfig::DestinationAlphaMode::PrimIDTracking)
 		return true;
 
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
 
+	// DATE PrimID steps:
+	// 1. Clear pass: Sample the RT and draw -1 for failing values and INT_MAX for passing values.
+	// 2. Init pass: Draw main geometry and record first primitive ID that fails using MIN blending.
+	// 3. Main draw: Discard primitives whose primitive ID is larger than the primid texture value.
+
 	{
 		GL_PUSH("DATE PrimID clear pass {%d,%d}-{%d,%d}", config.drawarea.left, config.drawarea.top,
 			config.drawarea.right, config.drawarea.bottom);
-
-		// DATE PrimID steps:
-		// 1. Clear pass: Sample the RT and draw -1 for failing values and INT_MAX for passing values.
-		// 2. Init pass: Draw main geometry and record first primitive ID that fails using MIN blending.
-		// 3. Main draw: Discard primitives whose primitive ID is larger than the primid texture's.
 
 		const GSVector2i rtsize(targets.rt->GetSize());
 		targets.primid.reset(static_cast<GSTextureVK*>(CreateRenderTarget(targets.rtsize, GSTexture::Format::PrimID, false)));
@@ -5863,8 +5863,8 @@ bool GSDeviceVK::DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config)
 
 		EndRenderPass();
 
-		// Sample from RT alpha 
-		SetUtilityTexture(targets.colclip_rt ? targets.colclip_rt : targets.rt, m_point_sampler); // FIXME(TJ): Will targets.rt already be the colclip texture if needed?
+		// Sample from RT alpha .
+		SetUtilityTexture(targets.colclip_rt ? targets.colclip_rt : targets.rt, m_point_sampler);
 		OMSetRenderTargets(targets.primid.get(), targets.ds, config.drawarea);
 
 		// Clear depth if needed.
@@ -5880,7 +5880,7 @@ bool GSDeviceVK::DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config)
 			BeginRenderPass(m_primid_image_setup_render_passes[ds][0], config.drawarea);
 		}
 
-		// draw the quad to prefill the image
+		// Draw the quad to prefill the image.
 		const GSVector4 src = GSVector4(config.drawarea) / GSVector4(rtsize).xyxy();
 		const GSVector4 dst = src * 2.0f - 1.0f;
 		const GSVertexPT1 vertices[] = {
@@ -5897,12 +5897,13 @@ bool GSDeviceVK::DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config)
 	}
 
 	{
+		// Image is now filled with either -1 or INT_MAX, so now we can do the init pass.
 		GL_PUSH("DATE PrimID init pass");
 
-		// Clear primid texture since we're drawing to it.
+		// Unbind primid texture since we're drawing to it.
 		PSSetShaderResource(TFX_TEXTURE_PRIMID, m_null_texture.get(), false);
 
-		// Remove unnecessary config for the prepass.
+		// Remove unnecessary config for the init pass.
 		PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::PrimID);
 		pipe.dss.zwe = false;
 		pipe.cms.wrgba = 0;
@@ -5929,7 +5930,7 @@ bool GSDeviceVK::DATEPrimIDSetup(DrawTargets& targets, GSHWDrawConfig& config)
 	return true;
 }
 
-void GSDeviceVK::BeginTFXRenderPass(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe,
+void GSDeviceVK::BeginTFXRenderPass(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe,
 	const GSVector4i& drawarea)
 {
 	const VkAttachmentLoadOp rt_op = GetLoadOpForTexture(targets.rt);
@@ -5953,7 +5954,7 @@ void GSDeviceVK::BeginTFXRenderPass(const DrawTargets& targets, const GSHWDrawCo
 	}
 }
 
-void GSDeviceVK::ColorClipEarlyResolveOrActivate(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
+void GSDeviceVK::ColorClipEarlyResolveOrActivate(DrawTargetsVK& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
 {
 	if (targets.colclip_rt)
 	{
@@ -5963,8 +5964,6 @@ void GSDeviceVK::ColorClipEarlyResolveOrActivate(DrawTargets& targets, GSHWDrawC
 
 			EndRenderPass();
 			targets.colclip_rt->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
-
-			PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::Main);
 
 			const GSVector4i rtrect = GSVector4i::loadh(targets.rtsize);
 
@@ -5993,7 +5992,7 @@ void GSDeviceVK::ColorClipEarlyResolveOrActivate(DrawTargets& targets, GSHWDrawC
 	}
 }
 
-bool GSDeviceVK::ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config)
+bool GSDeviceVK::ColorClipCreate(DrawTargetsVK& targets, GSHWDrawConfig& config)
 {
 	if (!config.ps.colclip_hw)
 		return true;
@@ -6001,16 +6000,19 @@ bool GSDeviceVK::ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config)
 	if (!targets.colclip_rt)
 	{
 		config.colclip_update_area = config.drawarea;
+
 		EndRenderPass();
+
 		targets.colclip_rt = static_cast<GSTextureVK*>(CreateFeedbackTarget(targets.rtsize, GSTexture::Format::ColorClip, false));
 		if (!targets.colclip_rt)
 		{
 			Console.Warning("VK: Failed to allocate ColorClip render target, aborting draw.");
 			return false;
 		}
+
 		g_gs_device->SetColorClipTexture(targets.colclip_rt);
 
-		// propagate clear value through if the colclip render is the first
+		// Propagate clear value through if the colclip render is the first.
 		if (targets.rt->GetState() == GSTexture::State::Cleared)
 		{
 			targets.colclip_rt->SetState(GSTexture::State::Cleared);
@@ -6025,7 +6027,7 @@ bool GSDeviceVK::ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config)
 			targets.rt->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
 		}
 
-		// we're not drawing to the RT, so we can use it as a source
+		// We're not drawing to the RT, so we can use it as a source.
 		if (config.require_one_barrier && !m_features.texture_barrier)
 			PSSetShaderResource(TFX_TEXTURE_RT, targets.rt, true);
 	}
@@ -6035,22 +6037,19 @@ bool GSDeviceVK::ColorClipCreate(DrawTargets& targets, GSHWDrawConfig& config)
 	return true;
 }
 
-void GSDeviceVK::ColorClipConvert(const DrawTargets& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
+void GSDeviceVK::ColorClipConvert(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe)
 {
-	if (targets.colclip_rt &&
-		(config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly ||
-			config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) &&
-		config.rt->GetState() == GSTexture::State::Dirty)
+	if (targets.colclip_rt && config.HasColorClipConvert() && config.rt->GetState() == GSTexture::State::Dirty)
 	{
 		GL_PUSH("ColorClip Render Target Setup");
-		pxAssert(targets.colclip_rt == targets.rt); // Should have been set equal earlier.
+		pxAssert(targets.colclip_rt == targets.rt);
 
 		OMSetRenderTargets(targets.colclip_rt, targets.ds, GSVector4i::loadh(targets.rtsize),
 			static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags));
 		SetUtilityTexture(config.rt, m_point_sampler);
 		SetPipeline(m_colclip_setup_pipelines[pipe.ds][pipe.IsRTFeedbackLoop()]);
 
-		const GSVector4 drawareaf = GSVector4((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ?
+		const GSVector4 drawareaf((config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly) ?
 			GSVector4i::loadh(targets.rtsize) : config.drawarea);
 		const GSVector4 sRect(drawareaf / GSVector4(targets.rtsize).xyxy());
 		DrawStretchRect(sRect, drawareaf, targets.rtsize);
@@ -6061,15 +6060,14 @@ void GSDeviceVK::ColorClipConvert(const DrawTargets& targets, const GSHWDrawConf
 	}
 }
 
-void GSDeviceVK::ColorClipResolve(DrawTargets& targets, GSHWDrawConfig& config)
+void GSDeviceVK::ColorClipResolve(DrawTargetsVK& targets, GSHWDrawConfig& config)
 {
-	// Blit colorclip texture back to the main RT.
+	// Blit colorclip texture back to the main RT or just update draw area.
 	if (targets.colclip_rt)
 	{
 		config.colclip_update_area = config.colclip_update_area.runion(config.drawarea);
 
-		if ((config.colclip_mode == GSHWDrawConfig::ColClipMode::ResolveOnly ||
-			config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve))
+		if (config.HasColorClipResolve())
 		{
 			GL_PUSH("Blit ColorClip back to RT");
 			pxAssert(targets.colclip_rt == targets.rt);
@@ -6081,7 +6079,7 @@ void GSDeviceVK::ColorClipResolve(DrawTargets& targets, GSHWDrawConfig& config)
 			targets.rt = static_cast<GSTextureVK*>(config.rt);
 
 			config.ps.colclip_hw = false;
-			PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::Main);
+			const PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::Main);
 
 			OMSetRenderTargets(targets.rt, targets.ds,
 				(config.colclip_mode == GSHWDrawConfig::ColClipMode::ResolveOnly) ? GSVector4i::loadh(targets.rtsize) : config.scissor,
@@ -6102,21 +6100,21 @@ void GSDeviceVK::ColorClipResolve(DrawTargets& targets, GSHWDrawConfig& config)
 	}
 }
 
-void GSDeviceVK::OptimizeRenderPassRestart(DrawTargets& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
+void GSDeviceVK::OptimizeRenderPassRestart(DrawTargetsVK& targets, GSHWDrawConfig& config, PipelineSelector& pipe)
 {
 	if (config.ps.colclip_hw &&
 		(config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve ||
 			config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertOnly))
 	{
-		// colclip hw requires blitting.
+		// Colclip HW requires blitting.
 		EndRenderPass();
 	}
 	else if (InRenderPass() &&
 		((targets.rt && m_current_render_target == targets.rt) ||
 			(targets.ds && m_current_depth_target == targets.ds)))
 	{
-		// avoid restarting the render pass just to switch from rt+depth to rt and vice versa
-		// keep the depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
+		// Avoid restarting the render pass just to switch from rt+depth to rt and vice versa.
+		// Keep depth even if doing colclip hw draws, because the next draw will probably re-enable depth.
 		if (!(targets.rt || targets.rt_rov) && m_current_render_target && config.tex != m_current_render_target &&
 			targets.ds && m_current_render_target->GetSize() == targets.ds->GetSize())
 		{
@@ -6139,7 +6137,7 @@ void GSDeviceVK::OptimizeRenderPassRestart(DrawTargets& targets, GSHWDrawConfig&
 	}
 }
 
-bool GSDeviceVK::CreateRTCopyForFeedback(DrawTargets& targets, const GSHWDrawConfig& config)
+bool GSDeviceVK::CreateRTCopyForFeedback(DrawTargetsVK& targets, const GSHWDrawConfig& config)
 {
 	// Create a copy of the RT in case we don't support barriers.
 
@@ -6194,7 +6192,7 @@ bool GSDeviceVK::CreateRTCopyForFeedback(DrawTargets& targets, const GSHWDrawCon
 	return true;
 }
 
-void GSDeviceVK::SetFeedbackLoopTextures(DrawTargets& targets, const PipelineSelector& pipe)
+void GSDeviceVK::SetFeedbackLoopTextures(const DrawTargetsVK& targets, const PipelineSelector& pipe)
 {
 	if (pipe.IsRTFeedbackLoop() && targets.rt)
 	{
@@ -6233,36 +6231,36 @@ void GSDeviceVK::SetFeedbackLoopTextures(DrawTargets& targets, const PipelineSel
 	}
 }
 
-void GSDeviceVK::SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& config)
+void GSDeviceVK::SetROVTextures(const DrawTargetsVK& targets, const GSHWDrawConfig& config)
 {
-	GSTextureVK* vkRt = static_cast<GSTextureVK*>(targets.rt_rov);
-	GSTextureVK* vkDs = static_cast<GSTextureVK*>(targets.ds_rov);
-	GSTextureVK* oldVkRt = m_tfx_textures[TFX_TEXTURE_RT_ROV] != m_null_texture.get() ?
+	GSTextureVK* rt = targets.rt_rov;
+	GSTextureVK* ds = targets.ds_rov;
+	GSTextureVK* old_rt = m_tfx_textures[TFX_TEXTURE_RT_ROV] != m_null_texture.get() ?
 		m_tfx_textures[TFX_TEXTURE_RT_ROV] : nullptr;
-	GSTextureVK* oldVkDs = m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] != m_null_texture.get() ?
+	GSTextureVK* old_ds = m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] != m_null_texture.get() ?
 		m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] : nullptr;
 
-	if (!(vkRt || vkDs || oldVkRt || oldVkDs))
+	if (!(rt || ds || old_rt || old_ds))
 		return;
 
-	pxAssert(!(vkRt || vkDs) || m_features.rov);
+	pxAssert(!(rt || ds) || m_features.rov);
 
-	if (vkRt)
+	if (rt)
 	{
-		PSSetShaderResource(TFX_TEXTURE_RT_ROV, vkRt, true, ResourceType::UAV);
+		PSSetShaderResource(TFX_TEXTURE_RT_ROV, rt, true, ResourceType::UAV);
 
 		// Unbind conflicting RT texture
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 
 		// Unbind conflicting source texture
-		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == vkRt)
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == rt)
 		{
 			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
 		}
 
 		if (config.ps.HasColorOutput())
 		{
-			vkRt->SetState(GSTexture::State::Dirty);
+			rt->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -6271,22 +6269,22 @@ void GSDeviceVK::SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& conf
 		PSSetShaderResource(TFX_TEXTURE_RT_ROV, nullptr, false);
 	}
 
-	if (vkDs)
+	if (ds)
 	{
-		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, vkDs, true, ResourceType::UAV);
+		PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, ds, true, ResourceType::UAV);
 
 		// Unbind conflicting depth texture
 		PSSetShaderResource(TFX_TEXTURE_DEPTH, nullptr, false);
 
 		// Unbind conflicting source texture
-		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == vkDs)
+		if (m_tfx_textures[TFX_TEXTURE_TEXTURE] == ds)
 		{
 			PSSetShaderResource(TFX_TEXTURE_TEXTURE, nullptr, false);
 		}
 
 		if (config.ps.HasDepthROVWrite())
 		{
-			vkDs->SetState(GSTexture::State::Dirty);
+			ds->SetState(GSTexture::State::Dirty);
 		}
 	}
 	else
@@ -6299,12 +6297,12 @@ void GSDeviceVK::SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& conf
 	{
 		// This is to fix issues with some systems that seem to require barriers even with FSI.
 		// Adds a barriers to the UAVs before every draw. Can result in a large performance hit.
-		if ((vkRt || vkDs) && InRenderPass())
+		if ((rt || ds) && InRenderPass())
 		{
 			GL_INS("Ending render pass due to UAV barrier");
 			EndRenderPass();
 		}
-		for (GSTextureVK* tex : std::array{ vkRt, vkDs })
+		for (GSTextureVK* tex : std::array{ rt, ds })
 		{
 			if (tex)
 			{
@@ -6321,13 +6319,7 @@ void GSDeviceVK::SetROVTextures(DrawTargets& targets, const GSHWDrawConfig& conf
 	}
 }
 
-void GSDeviceVK::SetConstantBuffers(const GSHWDrawConfig& config)
-{
-	SetVSConstantBuffer(config.cb_vs);
-	SetPSConstantBuffer(config.cb_ps);
-}
-
-void GSDeviceVK::DoBlendMultiPass(GSHWDrawConfig& config)
+void GSDeviceVK::DoBlendMultiPass(const GSHWDrawConfig& config)
 {
 	if (config.blend_multi_pass.enable)
 	{
@@ -6336,17 +6328,18 @@ void GSDeviceVK::DoBlendMultiPass(GSHWDrawConfig& config)
 		if (config.blend_multi_pass.blend.constant_enable)
 			SetBlendConstants(config.blend_multi_pass.blend.constant);
 
-		PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::BlendMulti);
+		const PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::BlendMulti);
+
 		if (BindDrawPipeline(pipe))
 			Draw(config, DrawPass::BlendMulti);
 	}
 }
 
-void GSDeviceVK::DoAlphaSecondPass(const DrawTargets& targets, GSHWDrawConfig& config)
+void GSDeviceVK::DoAlphaSecondPass(const DrawTargetsVK& targets, GSHWDrawConfig& config)
 {
 	if (config.alpha_second_pass.enable)
 	{
-		// cbuffer will definitely be dirty if aref changes, no need to check it
+		// Update constant buffer if AREF changes.
 		if (config.cb_ps.FogColor_AREF.a != config.alpha_second_pass.ps_aref)
 		{
 			config.cb_ps.FogColor_AREF.a = config.alpha_second_pass.ps_aref;
@@ -6354,14 +6347,18 @@ void GSDeviceVK::DoAlphaSecondPass(const DrawTargets& targets, GSHWDrawConfig& c
 		}
 
 		PipelineSelector pipe = GetHWPipelineSelector(config, DrawPass::AlphaSecond);
+
 		if (BindDrawPipeline(pipe))
+		{
+			SetFeedbackLoopTextures(targets, pipe);
 			SendHWDraw(targets, config, DrawPass::AlphaSecond, pipe);
+		}
 	}
 }
 
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
-	DrawTargets targets = {
+	DrawTargetsVK targets = {
 		config.ps.HasColorROV() ? nullptr : static_cast<GSTextureVK*>(config.rt),
 		config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds),
 		config.ps.HasColorROV() ? static_cast<GSTextureVK*>(config.rt) : nullptr,
@@ -6369,11 +6366,20 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture()),
 		nullptr,
 		nullptr,
+		nullptr,
+		nullptr,
 		config.rt ? config.rt->GetSize() : config.ds->GetSize(),
 	};
 
-	// Set constants buffers first, in case they trigger command lists execution.
-	SetConstantBuffers(config);
+	PipelineSelector main_pipe = GetHWPipelineSelector(config, DrawPass::Main);
+
+	ColorClipEarlyResolveOrActivate(targets, config, main_pipe);
+
+	DATEStencilSetup(targets, config);
+
+	// Stream constants buffers first, in case they trigger command lists execution.
+	SetVSConstantBuffer(config.cb_vs);
+	SetPSConstantBuffer(config.cb_ps);
 
 	// Bind textures before starting the render pass, in case we need to transition them.
 	if (config.tex)
@@ -6390,19 +6396,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (config.topology == GSHWDrawConfig::Topology::Line)
 		SetLineWidth(config.line_expand ? config.cb_ps.ScaleFactor.z : 1.0f);
 
-	if (!DATEPrimIDSetup(targets, config))
+	if (!DATEPrimIDSetup(targets, config, main_pipe))
 		return;
-
-	PipelineSelector main_pipe = GetHWPipelineSelector(config, DrawPass::Main);
-
-	ColorClipEarlyResolveOrActivate(targets, config, main_pipe);
-
-	DATEStencilSetup(targets, config);
 
 	if (!ColorClipCreate(targets, config))
 		return;
 
-	// Clear unused source texture binding when it's bound to RT or DS.
+	// Clear texture binding when it's bound to RT or DS.
 	if (!config.tex)
 	{
 		PSUnbindSourceTextureConflict(targets.rt);
@@ -6413,18 +6413,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	CreateRTCopyForFeedback(targets, config);
 
-	SetFeedbackLoopTextures(targets, main_pipe);
-	
 	SetROVTextures(targets, config);
 
 	OMSetRenderTargets(targets, config, main_pipe);
 
-	// Start main render pass.
-	{
-		// Use just draw area for colclip draws, otherwise use the whole RT.
-		BeginTFXRenderPass(targets, config, main_pipe,
-			config.IsColorClipConvertAndResolve() ? config.drawarea : GSVector4i::loadh(targets.rtsize));
-	}
+	// Use just draw area for colclip draws, otherwise use the whole RT.
+	BeginTFXRenderPass(targets, config, main_pipe,
+		config.IsColorClipConvertAndResolve() ? config.drawarea : GSVector4i::loadh(targets.rtsize));
 
 	DATEStencilOneClear(targets, config);
 
@@ -6435,18 +6430,19 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		UploadHWDrawVerticesAndIndices(config);
 
 	if (BindDrawPipeline(main_pipe))
+	{
+		SetFeedbackLoopTextures(targets, main_pipe);
 		SendHWDraw(targets, config, DrawPass::Main, main_pipe);
+	}
 
 	DoBlendMultiPass(config);
 
 	DoAlphaSecondPass(targets, config);
 
 	ColorClipResolve(targets, config);
-
-	config.colclip_mode = GSHWDrawConfig::ColClipMode::NoModify;
 }
 
-GSDeviceVK::PipelineSelector GSDeviceVK::GetHWPipelineSelector(GSHWDrawConfig& config, DrawPass pass)
+GSDeviceVK::PipelineSelector GSDeviceVK::GetHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass)
 {
 	const GSHWDrawConfig::VSSelector vs = config.GetVS(pass);
 	const GSHWDrawConfig::PSSelector ps = config.GetPS(pass);
@@ -6537,7 +6533,7 @@ VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags() const
 	                                 VK_DEPENDENCY_BY_REGION_BIT;
 }
 
-void GSDeviceVK::FeedbackBarrier(const DrawTargets& targets, const PipelineSelector& pipe)
+void GSDeviceVK::FeedbackBarrier(const DrawTargetsVK& targets, const PipelineSelector& pipe)
 {
 	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
 
@@ -6558,7 +6554,7 @@ void GSDeviceVK::FeedbackBarrier(const DrawTargets& targets, const PipelineSelec
 	}
 }
 
-void GSDeviceVK::SendHWDraw(const DrawTargets& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe)
+void GSDeviceVK::SendHWDraw(const DrawTargetsVK& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe)
 {
 	const bool one_barrier = config.GetOneBarrier(pass);
 	const bool full_barrier = config.GetFullBarrier(pass);
