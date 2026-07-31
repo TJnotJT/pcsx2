@@ -44,6 +44,10 @@ enum class ShaderConvert
 	DATM_0,
 	DATM_1_RTA_CORRECTION,
 	DATM_0_RTA_CORRECTION,
+	PRIMID_CLEAR_DATM_1,
+	PRIMID_CLEAR_DATM_0,
+	PRIMID_CLEAR_DATM_1_RTA_CORRECTION,
+	PRIMID_CLEAR_DATM_0_RTA_CORRECTION,
 	COLCLIP_INIT,
 	COLCLIP_RESOLVE,
 	RTA_CORRECTION,
@@ -244,15 +248,31 @@ static inline constexpr ShaderConvert SetDATMShader(SetDATM datm)
 {
 	switch (datm)
 	{
-	case SetDATM::DATM1_RTA_CORRECTION:
-		return ShaderConvert::DATM_1_RTA_CORRECTION;
-	case SetDATM::DATM0_RTA_CORRECTION:
-		return ShaderConvert::DATM_0_RTA_CORRECTION;
-	case SetDATM::DATM1:
-		return ShaderConvert::DATM_1;
-	case SetDATM::DATM0:
-	default:
-		return ShaderConvert::DATM_0;
+		case SetDATM::DATM1_RTA_CORRECTION:
+			return ShaderConvert::DATM_1_RTA_CORRECTION;
+		case SetDATM::DATM0_RTA_CORRECTION:
+			return ShaderConvert::DATM_0_RTA_CORRECTION;
+		case SetDATM::DATM1:
+			return ShaderConvert::DATM_1;
+		case SetDATM::DATM0:
+		default:
+			return ShaderConvert::DATM_0;
+	}
+}
+
+static inline constexpr ShaderConvert ClearPrimIDShader(SetDATM datm)
+{
+	switch (datm)
+	{
+		case SetDATM::DATM1_RTA_CORRECTION:
+			return ShaderConvert::PRIMID_CLEAR_DATM_1_RTA_CORRECTION;
+		case SetDATM::DATM0_RTA_CORRECTION:
+			return ShaderConvert::PRIMID_CLEAR_DATM_0_RTA_CORRECTION;
+		case SetDATM::DATM1:
+			return ShaderConvert::PRIMID_CLEAR_DATM_1;
+		case SetDATM::DATM0:
+		default:
+			return ShaderConvert::PRIMID_CLEAR_DATM_0;
 	}
 }
 
@@ -925,6 +945,16 @@ struct alignas(16) GSHWDrawConfig
 		{
 			return rov_depth == PS_ROV_DEPTH::READ_WRITE;
 		}
+
+		__fi bool HasColorClip() const
+		{
+			return colclip_hw;
+		}
+
+		__fi bool HasDATEPrimiDInit() const
+		{
+			return date == PS_DATE::PrimIDInitDATM0 || date == PS_DATE::PrimIDInitDATM1;
+		}
 	};
 	static_assert(sizeof(PSSelector) == 16, "PSSelector is 12 bytes");
 #pragma pack(pop)
@@ -1418,6 +1448,11 @@ struct alignas(16) GSHWDrawConfig
 			destination_alpha == DestinationAlphaMode::StencilOne;
 	}
 
+	bool IsTextureFeedbackLoop() const
+	{
+		return tex && (tex == rt || tex == ds);
+	}
+
 	// Draw pass selectors
 	bool GetFullBarrier(DrawPass pass) const
 	{
@@ -1523,6 +1558,82 @@ struct alignas(16) GSHWDrawConfig
 		bool cbvs = true, bool cbps = true);
 };
 
+struct alignas(8) GSPipelineSelector
+{
+	GSHWDrawConfig::PSSelector ps;
+
+	enum class RT
+	{
+		None,
+		Color,
+		ColorFeedback,
+		ColorClip,
+		ColorClipFeedback,
+		PrimID,
+	};
+
+	enum class DS
+	{
+		None,
+		Depth,
+		DepthStencil,
+		DepthFeedback,
+		DepthReadOnly,
+		DepthStencilReadOnly,
+	};
+
+	union
+	{
+		struct
+		{
+			u32 topology : 2;
+			RT rt : 3;
+			DS ds : 3;
+			u32 line_width : 1;
+		};
+
+		u32 key;
+	};
+
+	GSHWDrawConfig::BlendState bs;
+	GSHWDrawConfig::VSSelector vs;
+	GSHWDrawConfig::DepthStencilSelector dss;
+	GSHWDrawConfig::ColorMaskSelector cms;
+	u8 pad[5];
+
+	__fi bool operator==(const GSPipelineSelector& p) const { return BitEqual(*this, p); }
+	__fi bool operator!=(const GSPipelineSelector& p) const { return !BitEqual(*this, p); }
+
+	__fi GSPipelineSelector() { std::memset(this, 0, sizeof(*this)); }
+
+	__fi bool HasRT() const { return rt != RT::None; }
+	__fi bool HasColorClip() const { return rt == RT::ColorClip || rt == RT::ColorClipFeedback; }
+	__fi bool HasPrimID() const { return rt == RT::PrimID; }
+	__fi bool HasDS() const { return ds != DS::None; }
+	__fi bool HasStencil() const { return ds == DS::DepthStencil || ds == DS::DepthStencilReadOnly; }
+	__fi bool HasRTFeedback() const { return rt == RT::ColorFeedback || rt == RT::ColorClipFeedback; }
+	__fi bool HasDSFeedback() const { return ds == DS::DepthFeedback; }
+	__fi bool HasRTROV() const { return ps.HasColorROV(); }
+	__fi bool HasDSROV() const { return ps.HasDepthROV(); }
+	__fi bool HasDSReadOnly() const { return ds == DS::DepthReadOnly || ds == DS::DepthStencilReadOnly; }
+};
+
+struct GSPipelineSelectorHash
+{
+	std::size_t operator()(const GSPipelineSelector& e) const noexcept
+	{
+		std::size_t hash = 0;
+		HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
+		return hash;
+	}
+};
+
+static_assert(sizeof(GSPipelineSelector) ==
+	sizeof(GSPipelineSelector::ps) + sizeof(GSPipelineSelector::key) +
+	sizeof(GSPipelineSelector::bs) + sizeof(GSPipelineSelector::vs) +
+	sizeof(GSPipelineSelector::dss) + sizeof(GSPipelineSelector::cms) +
+	sizeof(GSPipelineSelector::pad), "Pipeline selector is not packed");
+
 static inline u32 GetExpansionFactor(GSHWDrawConfig::VSExpand expand)
 {
 	switch (expand)
@@ -1619,6 +1730,13 @@ public:
 	using RecycledTextureT = std::unique_ptr<T, TextureRecycleDeleter>;
 	using RecycledTexture = RecycledTextureT<GSTexture>;
 
+	enum class TextureUsage
+	{
+		ReadOnly,
+		ReadWrite,
+		Feedback,
+	};
+
 	template <typename T>
 	struct DrawTargets
 	{
@@ -1632,6 +1750,63 @@ public:
 		RecycledTextureT<T> rt_copy;
 		RecycledTextureT<T> ds_copy;
 		GSVector2i rtsize;
+	};
+
+	using RTUsage = GSPipelineSelector::RT;
+	using DSUsage = GSPipelineSelector::DS;
+
+	enum class TFXTextureClass
+	{
+		Texture,
+		Palette,
+		PrimID,
+		RT,
+		Depth,
+		RTROV,
+		DSROV,
+		Count,
+	};
+
+	static constexpr u32 NumTFXTextures = static_cast<u32>(TFXTextureClass::Count);
+
+	class TFXTargets
+	{
+	public:
+		TFXTargets(const GSHWDrawConfig& config);
+
+		GSTexture* RT() const { return m_rt; }
+		GSTexture* DS() const { return m_ds; }
+		GSTexture* RTROV() const { return m_rt_rov; }
+		GSTexture* DSROV() const { return m_ds_rov; }
+		GSTexture* ColorClipRT() const { return m_colclip_rt; }
+		GSTexture* DSRT() const { return m_ds_as_rt; }
+		GSTexture* PrimID() const { return m_primid.get(); }
+		GSTexture* RTCopy() const { return m_rt_copy.get(); }
+		GSTexture* DSCopy() const { return m_ds_copy.get(); }
+		const GSVector2i& RTSize() const { return m_rtsize; }
+		const GSVector4i& RTRect() const { return m_rtrect; }
+
+		GSTexture* SetRT(GSTexture* rt) { return m_rt = rt; }
+		GSTexture* SetDS(GSTexture* ds) { return m_ds = ds; }
+		GSTexture* SetRTROV(GSTexture* rv_rov) { return m_rt_rov = rv_rov; }
+		GSTexture* SetDSROV(GSTexture* ds_rov) { return m_ds_rov = ds_rov; }
+		GSTexture* SetColorClipRT(GSTexture* colclip_rt) { return m_colclip_rt = colclip_rt; }
+		GSTexture* SetDSRT(GSTexture* ds_as_rt) { return m_ds_as_rt = ds_as_rt; }
+		GSTexture* SetPrimID(GSTexture* primid) { m_primid.reset(primid); return primid; }
+		GSTexture* SetRTCopy(GSTexture* rt_copy) { m_rt_copy.reset(rt_copy); return m_rt_copy.get(); }
+		GSTexture* SetDSCopy(GSTexture* ds_copy) { m_ds_copy.reset(ds_copy); return m_ds_copy.get(); }
+	private:
+		GSTexture* m_rt;
+		GSTexture* m_ds;
+		GSTexture* m_rt_rov;
+		GSTexture* m_ds_rov;
+		GSTexture* m_colclip_rt;
+		GSTexture* m_ds_as_rt;
+		RecycledTexture m_primid;
+		RecycledTexture m_rt_copy;
+		RecycledTexture m_ds_copy;
+		GSVector2i m_rtsize;
+		GSVector4i m_rtrect;
 	};
 
 	enum BlendFactor : u8
@@ -1696,6 +1871,21 @@ protected:
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
+	GSTexture* m_current_rt = nullptr;
+	GSTexture* m_current_ds = nullptr;
+	RTUsage m_current_rt_usage = RTUsage::None;
+	DSUsage m_current_ds_usage = DSUsage::None;
+
+	struct TFXTexture
+	{
+		GSTexture* tex;
+		TextureUsage usage;
+	};
+
+	std::array<TFXTexture, NumTFXTextures> m_current_tfx_textures{};
+
+	GSTexture* m_current_utility_texture = nullptr;
+
 	bool AcquireWindow(bool recreate_window);
 
 	virtual GSTexture* CreateSurface(GSTexture::Usage usage, int width, int height, int levels, GSTexture::Format format) = 0;
@@ -1740,6 +1930,8 @@ public:
 	/// Create a temporary color clone of depth for depth feedback
 	virtual void BeginDSAsRT(GSTexture* ds, const GSVector4i& drawarea);
 	void EndDSAsRT();
+
+	GSTexture* GetDSAsRTTexture() const { return m_ds_as_rt; }
 
 	/// Returns a string representing the specified API.
 	static const char* RenderAPIToString(RenderAPI api);
@@ -1905,7 +2097,81 @@ public:
 	/// Uses box downsampling to resize a texture.
 	virtual void FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect) = 0;
 
-	virtual void RenderHW(GSHWDrawConfig& config) = 0;
+	// RenderHW helpers.
+	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb_vs);
+	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb_ps);
+
+	static RTUsage DefaultRTUsage(GSTexture* rt)
+	{
+		switch (rt ? rt->GetFormat() : GSTexture::Format::Invalid)
+		{
+			case GSTexture::Format::Color:
+				return RTUsage::Color;
+			case GSTexture::Format::ColorClip:
+				return RTUsage::ColorClip;
+			case GSTexture::Format::PrimID:
+				return RTUsage::PrimID;
+			default:
+				return RTUsage::None;
+		}
+	}
+
+	static DSUsage DefaultDSUsage(GSTexture* ds)
+	{
+		return ds ? DSUsage::Depth : DSUsage::None;
+	}
+
+	// FIXME(TJ): Should unbind textures unless the usage is feedback.
+	virtual void BaseEndRenderPass() {}
+	virtual bool BaseInRenderPass() { return true; }
+	virtual void BaseCommitClear(GSTexture* tex) {}
+	virtual void BasePrepareTexture(GSTexture* tex, TextureUsage usage) {}
+
+	void BaseSetTargets(GSTexture* rt, GSPipelineSelector::RT rt_usage, GSTexture* ds, GSPipelineSelector::DS ds_usage) {}
+	void BaseSetColorTarget(GSTexture* tgt, GSPipelineSelector::RT usage) {}
+	void BaseSetDepthTarget(GSTexture* tgt, GSPipelineSelector::DS usage) {}
+	void BaseSetScissor(const GSVector4i& scissor) {}
+	void BaseSetViewport(const GSVector4i& viewport) {}
+	
+	virtual void TFXBindTextures() {}
+	virtual void TFXDATEStencilOneClear() {}
+	virtual bool TFXBindPipeline(const GSPipelineSelector& pipe) { return true; }
+	virtual void TFXFeedbackBarrier(GSTexture* rt, GSTexture* ds) {}
+	virtual void TFXSetSampler(GSHWDrawConfig::SamplerSelector sampler) {}
+	virtual void TFXSetBlendConstants(u8 color) {}
+	virtual void TFXSetLineWidth(float width) {}
+
+	void TFXSetTexture(TFXTextureClass klass, GSTexture* tex, TextureUsage usage = TextureUsage::ReadOnly);
+	void TFXRemoveTexture(GSTexture* tex);
+	void TFXSetROVs(const TFXTargets& targets, const GSHWDrawConfig& config);
+
+	virtual void TFXBeginRenderPass(const GSVector4i& drawarea) {}
+
+	virtual void UtilSetPipeline(RTUsage rt, DSUsage ds, ShaderConvert shader) {}
+	virtual void UtilBeginRenderPass(ShaderConvert shader) {}
+	virtual void UtilSetTexture(GSTexture* tex, Filter filter) {}
+	virtual void UtilDrawStretchRect(const GSVector4& sRect, const GSVector4& dRect, const GSVector2i& ds) {}
+
+	virtual void TFXUploadVerticesAndIndices(const GSHWDrawConfig& config) {}
+	virtual void TFXDraw(const GSHWDrawConfig& config, DrawPass pass) {}
+	virtual void TFXDraw(const GSHWDrawConfig& config, DrawPass pass, u32 offset, u32 count) {}
+	
+	GSPipelineSelector TFXGetPipelineSelector(const GSHWDrawConfig& config, DrawPass pass);
+	void TFXDATEStencilSetup(const TFXTargets& targets, GSHWDrawConfig& config);
+	void TFXDATEStencilOneClear(const TFXTargets& targets, const GSHWDrawConfig& config);
+	bool TFXDATEPrimIDSetup(TFXTargets& targets, GSHWDrawConfig& config, const GSPipelineSelector& pipe);
+	void TFXColorClipEarlyResolveOrActivate(TFXTargets& targets, GSHWDrawConfig& config, GSPipelineSelector& pipe);
+	bool TFXColorClipCreate(TFXTargets& targets, GSHWDrawConfig& config);
+	void TFXColorClipConvert(const TFXTargets& targets, const GSHWDrawConfig& config, const GSPipelineSelector& pipe);
+	void TFXColorClipResolve(TFXTargets& targets, GSHWDrawConfig& config);
+	void TFXOptimizeRenderPassRestart(TFXTargets& targets, GSHWDrawConfig& config, GSPipelineSelector& pipe);
+	bool TFXCreateRTCopyForFeedback(TFXTargets& targets, const GSHWDrawConfig& config);
+	void TFXBlendMultiPass(const GSHWDrawConfig& config);
+	void TFXAlphaSecondPass(const TFXTargets& targets, GSHWDrawConfig& config);
+	void TFXRender(GSHWDrawConfig& config);
+	void TFXDrawPass(const TFXTargets& targets, const GSHWDrawConfig& config, DrawPass pass, const GSPipelineSelector& pipe);
+
+	virtual void RenderHW(GSHWDrawConfig& config);
 
 	virtual void ClearSamplerCache() = 0;
 

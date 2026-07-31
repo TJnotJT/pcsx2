@@ -6442,6 +6442,31 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	ColorClipResolve(targets, config);
 }
 
+//void GSDeviceVK::TFXPrepareShaderResource(GSTexture* tex, TextureUsage usage)
+//{
+//	if (tex && usage == TextureUsage::ReadOnly)
+//		static_cast<GSTextureVK*>(config.tex)->TransitionToLayout(GSTextureVK::Layout::ShaderReadOnly);
+//}
+//
+//void GSDeviceVK::TFXBindResources(const GSHWDrawConfig& config)
+//{
+//	if (config.tex)
+//		PSSetShaderResource(TFXTextureClass::Texture, config.tex,
+//			config.IsTextureFeedbackLoop() ? TextureUsage::Feedback : TextureUsage::ReadOnly);
+//	
+//	if (config.pal)
+//		PSSetShaderResource(TFXTextureClass::Palette, config.pal, TextureUsage::ReadOnly);
+//	
+//	PSSetSampler(config.sampler);
+//	
+//	if (config.blend.constant_enable)
+//		SetBlendConstants(config.blend.constant);
+//}
+
+//virtual void UploadHWDrawVerticesAndIndices(const GSHWDrawConfig& config) override;
+//
+//virtual void BindDrawPipeline(const PipelineSelector& pipe) override;
+
 GSDeviceVK::PipelineSelector GSDeviceVK::GetHWPipelineSelector(const GSHWDrawConfig& config, DrawPass pass)
 {
 	const GSHWDrawConfig::VSSelector vs = config.GetVS(pass);
