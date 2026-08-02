@@ -5781,12 +5781,9 @@ void GSRendererHW::DetermineAlphaScaling(GSTextureCache::Target* rt, GSTextureCa
 
 		can_scale_rt_alpha = !needs_ad && (GSUtil::GetChannelMask(m_cached_ctx.FRAME.PSM) & 0x8) && rt_new_alpha_max <= 128;
 
-		// Don't scale alpha with ROV as it may enable FBMask for channel masking.
-		const bool possible_rov = rt && g_gs_device->Features().rov && GSConfig.HWROV;
-
 		const bool partial_fbmask = (m_conf.ps.fbmask && m_conf.cb_ps.FbMask.a != 0xFF && m_conf.cb_ps.FbMask.a != 0);
 		const bool rta_decorrection = m_channel_shuffle || m_texture_shuffle ||
-			(m_conf.colormask.wa && (rt_new_alpha_max > 128 || partial_fbmask)) || possible_rov;
+			(m_conf.colormask.wa && (rt_new_alpha_max > 128));
 
 		if (rta_decorrection)
 		{

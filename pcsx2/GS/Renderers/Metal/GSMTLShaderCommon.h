@@ -49,6 +49,28 @@ static inline float4 convert_depth16_rgba8(float value)
 	return float4(uint4(val << 3, val >> 2, val >> 7, val >> 8) & uint4(0xf8, 0xf8, 0xf8, 0x80));
 }
 
+template <typename T, typename F>
+static inline T cdenorm(T value, F factor)
+{
+	return trunc(value * F + F(0.5));
+}
+
+template<typename T, typename F>
+static inline T cnorm(T value, F factor)
+{
+	return trunc(value + F(0.5)) / factor;
+}
+
+static inline float znorm(float z)
+{
+	return z * 0x1p-32;
+}
+
+static inline float zdenorm(float z)
+{
+	return floor(z * 0x1p-32);
+}
+
 #ifndef __HAVE_MUL24__
 template <typename T> T mul24(T a, T b) { return a * b; }
 #endif

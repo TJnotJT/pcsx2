@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#define CDENORM(x, factor) trunc((x) * (factor) + 0.5f)
+#define CNORM(x, factor) (trunc((x) + 0.5f) / (factor))
+#define ZDENORM(z) floor((z) * exp2(32.0f))
+#define ZNORM(z) ((z) * exp2(-32.0f))
+
 #define FMT_32 0
 #define FMT_24 1
 #define FMT_16 2
@@ -526,7 +531,7 @@ float4 sample_p(uint u)
 
 float4 sample_p_norm(float u)
 {
-	return sample_p(uint(u * 255.5f));
+	return sample_p(uint(CDENORM(u, 255.0f)));
 }
 
 float4 clamp_wrap_uv(float4 uv)
@@ -634,11 +639,11 @@ uint4 sample_4_index(float4 uv, float uv_w, int2 xy)
 		
 	if (PS_RTA_SRC_CORRECTION)
 	{
-		i = uint4(round(c * 128.25f)); // Denormalize value
+		i = uint4(CDENORM(c, 128.0f)); // Denormalize value
 	}
 	else
 	{
-		i = uint4(c * 255.5f); // Denormalize value
+		i = uint4(CDENORM(c, 255.0f)); // Denormalize value
 	}
 
 	if (PS_PAL_FMT == 1)
@@ -677,7 +682,7 @@ uint fetch_raw_depth(int2 xy)
 #else
 	float4 col = Texture.Load(int3(xy, 0));
 #endif
-	return (uint)(col.r * exp2(32.0f));
+	return (uint)ZDENORM(col.r);
 }
 
 float4 fetch_raw_color(int2 xy)
@@ -755,7 +760,7 @@ float4 sample_depth(float2 st, float2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert msb based on the palette
-		t = Palette.Load(int3((depth >> 8u) & 0xFFu, 0, 0)) * 255.0f;
+		t = CDENORM(Palette.Load(int3((depth >> 8u) & 0xFFu, 0, 0)), 255.0f);
 	}
 	else if (PS_URBAN_CHAOS_HLE == 1)
 	{
@@ -769,7 +774,7 @@ float4 sample_depth(float2 st, float2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert lsb based on the palette
-		t = Palette.Load(int3(depth & 0xFFu, 0, 0)) * 255.0f;
+		t = CDENORM(Palette.Load(int3(depth & 0xFFu, 0, 0)), 255.0f);
 
 		// Msb is easier
 		float green = (float)((depth >> 8u) & 0xFFu) * 36.0f;
@@ -781,7 +786,7 @@ float4 sample_depth(float2 st, float2 pos)
 		// Based on ps_convert_depth32_rgba8 of convert
 
 		// Convert a FLOAT32 depth texture into a RGBA color texture
-		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+		uint d = uint(ZDENORM(fetch_c(uv).r));
 		t = float4(uint4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24)));
 	}
 	else if (PS_DEPTH_FMT == 2)
@@ -789,13 +794,13 @@ float4 sample_depth(float2 st, float2 pos)
 		// Based on ps_convert_depth16_rgb5a1 of convert
 
 		// Convert a FLOAT32 (only 16 lsb) depth into a RGB5A1 color texture
-		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+		uint d = uint(ZDENORM(fetch_c(uv).r));
 		t = float4(uint4((d & 0x1Fu), ((d >> 5) & 0x1Fu), ((d >> 10) & 0x1Fu), (d >> 15) & 0x01u)) * float4(8.0f, 8.0f, 8.0f, 128.0f);
 	}
 	else if (PS_DEPTH_FMT == 3)
 	{
 		// Convert a RGBA/RGB5A1 color texture into a RGBA/RGB5A1 color texture
-		t = fetch_c(uv) * 255.0f;
+		t = CDENORM(fetch_c(uv), 255.0f);
 	}
 
 	if (PS_AEM_FMT == FMT_24)
@@ -808,7 +813,7 @@ float4 sample_depth(float2 st, float2 pos)
 	}
 	else if (PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE)
 	{
-		t = trunc(sample_4p(uint4(t.aaaa))[0] * 255.0f + 0.05f);
+		t = CDENORM(sample_4p(uint4(t.aaaa))[0], 255.0f);
 	}
 
 	return t;
@@ -832,7 +837,7 @@ float4 fetch_red(int2 xy)
 		rt = fetch_raw_color(xy);
 	}
 
-	return sample_p_norm(rt.r) * 255.0f;
+	return CDENORM(sample_p_norm(rt.r), 255.0f);
 }
 
 float4 fetch_green(int2 xy)
@@ -849,7 +854,7 @@ float4 fetch_green(int2 xy)
 		rt = fetch_raw_color(xy);
 	}
 
-	return sample_p_norm(rt.g) * 255.0f;
+	return CDENORM(sample_p_norm(rt.g), 255.0f);
 }
 
 float4 fetch_blue(int2 xy)
@@ -866,20 +871,20 @@ float4 fetch_blue(int2 xy)
 		rt = fetch_raw_color(xy);
 	}
 
-	return sample_p_norm(rt.b) * 255.0f;
+	return CDENORM(sample_p_norm(rt.b), 255.0f);
 }
 
 float4 fetch_alpha(int2 xy)
 {
 	float4 rt = fetch_raw_color(xy);
-	return sample_p_norm(rt.a) * 255.0f;
+	return CDENORM(sample_p_norm(rt.a), 255.0f);
 }
 
 float4 fetch_rgb(int2 xy)
 {
 	float4 rt = fetch_raw_color(xy);
 	float4 c = float4(sample_p_norm(rt.r).r, sample_p_norm(rt.g).g, sample_p_norm(rt.b).b, 1.0);
-	return c * 255.0f;
+	return CDENORM(c, 255.0f);
 }
 
 float4 fetch_gXbY(int2 xy)
@@ -892,7 +897,7 @@ float4 fetch_gXbY(int2 xy)
 	}
 	else
 	{
-		int4 rt = (int4)(fetch_raw_color(xy) * 255.0);
+		int4 rt = (int4)(CDENORM(fetch_raw_color(xy), 255.0));
 		int green = (rt.g >> ChannelShuffle.w) & ChannelShuffle.z;
 		int blue = (rt.b << ChannelShuffle.y) & ChannelShuffle.x;
 		return (float4)(green | blue);
@@ -950,7 +955,7 @@ float4 sample_color(float2 st, float uv_w, int2 xy)
 		}
 		else if(PS_AEM_FMT == FMT_16)
 		{
-			c[i].a = c[i].a >= 0.5 ? TA.y : !PS_AEM || any(int3(c[i].rgb * 255.0f) & 0xF8) ? TA.x : 0;
+			c[i].a = c[i].a >= 0.5 ? TA.y : !PS_AEM || any(int3(CDENORM(c[i].rgb, 255.0f)) & 0xF8) ? TA.x : 0;
 		}
 	}
 
@@ -964,9 +969,13 @@ float4 sample_color(float2 st, float uv_w, int2 xy)
 	}
 
 	if (PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION)
-		t.a = t.a * (128.5f / 255.0f);
+		t.a = CDENORM(t.a, 128.0f);
+	else
+		t.a = CDENORM(t.a, 255.0f);
+
+	t.rgb = CDENORM(t.rgb, 255.0f);
 			
-	return trunc(t * 255.0f + 0.05f);
+	return t;
 }
 
 float4 tfx(float4 T, float4 C)
@@ -1031,7 +1040,7 @@ float4 fog(float4 c, float f)
 {
 	if(PS_FOG)
 	{
-		c.rgb = trunc(lerp(FogColor, c.rgb, (f * 255.0f) / 256.0f));
+		c.rgb = trunc(lerp(FogColor, c.rgb, CDENORM(f, 255.0f) / 256.0f));
 	}
 
 	return c;
@@ -1083,7 +1092,7 @@ float4 ps_color(PS_INPUT input)
 			T.a = float(denorm_c_before.g & 0x80u);
 		}
 		
-		T.a = (T.a >= 127.5f ? TA.y : !PS_AEM || any(int3(T.rgb) & 0xF8) ? TA.x : 0) * 255.0f;
+		T.a = CDENORM(T.a >= 127.5f ? TA.y : !PS_AEM || any(int3(T.rgb) & 0xF8) ? TA.x : 0, 255.0f);
 	}
 
 	float4 C = tfx(T, input.c);
@@ -1097,8 +1106,9 @@ void ps_fbmask(inout float4 C, float2 pos_xy)
 {
 	if (PS_FBMASK)
 	{
-		float multi = PS_COLCLIP_HW ? 65535.0f : 255.0f;
-		float4 RT = trunc(RtLoad(int2(pos_xy)) * multi + 0.1f);
+		float4 RT = RtLoad(int2(pos_xy));
+		RT.rgb = CDENORM(RT.rgb, PS_COLCLIP_HW ? 65535.0f : 255.0f);
+		RT.a = CDENORM(RT.a, 255.0f);
 		C = (float4)(((uint4)C & ~FbMask) | ((uint4)RT & FbMask));
 	}
 }
@@ -1195,9 +1205,9 @@ void ps_blend(inout float4 Color, inout float4 As_rgba, float2 pos_xy)
 			}
 		}
 		
-		float Ad = PS_RTA_CORRECTION ? trunc(RT.a * 128.0f + 0.1f) / 128.0f : trunc(RT.a * 255.0f + 0.1f) / 128.0f;
+		float Ad = CDENORM(RT.a, PS_RTA_CORRECTION ? 128.0f : 255.0f) / 128.0f;
 		float color_multi = PS_COLCLIP_HW ? 65535.0f : 255.0f;
-		float3 Cd = trunc(RT.rgb * color_multi + 0.1f);
+		float3 Cd = CDENORM(RT.rgb, color_multi);
 		float3 Cs = Color.rgb;
 
 		float3 A = (PS_BLEND_A == 0) ? Cs : ((PS_BLEND_A == 1) ? Cd : (float3)0.0f);
@@ -1329,7 +1339,7 @@ void ps_main(PS_INPUT input)
 {
 	// Must floor before depth testing.
 #if PS_ZFLOOR
-	input.p.z = floor(input.p.z * exp2(32.0f)) * exp2(-32.0f);
+	input.p.z = ZNORM(ZDENORM(input.p.z));
 #endif
 
 #if PS_ROV_COLOR
@@ -1366,9 +1376,9 @@ void ps_main(PS_INPUT input)
 	#endif
 	#if PS_ABE
 		if (floor(C.a) == 128.0f) // The coverage is only used if the fragment alpha is 128.
-			C.a = 128.0f * cov;
+			C.a = CDENORM(cov, 128.0f);
 	#else
-		C.a = 128.0f * cov;
+		C.a = CDENORM(cov, 128.0f);
 	#endif
 #elif PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
@@ -1392,12 +1402,12 @@ void ps_main(PS_INPUT input)
 	float4 alpha_blend = (float4)0.0f;
 	if (SW_AD_TO_HW)
 	{
-		float4 RT = PS_RTA_CORRECTION ? trunc(RtLoad(input.p.xy) * 128.0f + 0.1f) : trunc(RtLoad(input.p.xy) * 255.0f + 0.1f);
-		alpha_blend = (float4)(RT.a / 128.0f);
+		float RT_a = CDENORM(RtLoad(input.p.xy).a, PS_RTA_CORRECTION ? 128.0f : 255.0f);
+		alpha_blend = (float4)CNORM(RT_a, 128.0f);
 	}
 	else
 	{
-		alpha_blend = (float4)(C.a / 128.0f);
+		alpha_blend = (float4)CNORM(C.a, 128.0f);
 	}
 
 	// Alpha correction
@@ -1414,27 +1424,21 @@ void ps_main(PS_INPUT input)
 
 #if PS_DATE >= 5
 
+// FIXME(TJ): Apply norm/denorm here also!
+
 #if PS_WRITE_RG == 1
 	// Pseudo 16 bits access.
-	float rt_a = RtLoad(input.p.xy).g;
+	float rt_a = CDENORM(RtLoad(input.p.xy).g, PS_RTA_CORRECTION ? 128.0f : 255.0f);
 #else
-	float rt_a = RtLoad(input.p.xy).a;
+	float rt_a = CDENORM(RtLoad(input.p.xy).a, PS_RTA_CORRECTION ? 128.0f : 255.0f);
 #endif
 
 #if (PS_DATE & 3) == 1
 	// DATM == 0: Pixel with alpha equal to 1 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = (254.5f / 255.0f) < rt_a;
-	#else
-		bool bad = (127.5f / 255.0f) < rt_a;
-	#endif
+	bool bad = 127.5f <= rt_a;
 #elif (PS_DATE & 3) == 2
 	// DATM == 1: Pixel with alpha equal to 0 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = rt_a < (254.5f / 255.0f);
-	#else
-		bool bad = rt_a < (127.5f / 255.0f);
-	#endif
+	bool bad = rt_a < 127.5f;
 #endif
 
 if (bad)
@@ -1510,7 +1514,7 @@ if (bad)
 		else if (PS_READ16_SRC)
 		{
 			uint4 denorm_c = uint4(C);
-			uint2 denorm_TA = uint2(float2(TA.xy) * 255.0f + 0.5f);
+			uint2 denorm_TA = uint2(CDENORM(float2(TA.xy), 255.0f));
 			C.rb = (float2)float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7u) << 5));
 			C.ga = (float2)float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80u));
 		}
@@ -1548,8 +1552,8 @@ if (bad)
 
 	// Output color scaling
 #if !PS_NO_COLOR
-	o_col0.a = PS_RTA_CORRECTION ? C.a / 128.0f : C.a / 255.0f;
-	o_col0.rgb = PS_COLCLIP_HW ? float3(C.rgb / 65535.0f) : C.rgb / 255.0f;
+	o_col0.a = CNORM(C.a, PS_RTA_CORRECTION ? 128.0f : 255.0f);
+	o_col0.rgb = CNORM(C.rgb, PS_COLCLIP_HW ? 65535.0f : 255.0f);
 #if !PS_NO_COLOR1
 	o_col1 = alpha_blend;
 #endif
@@ -1665,7 +1669,7 @@ VS_OUTPUT vs_main(VS_INPUT input)
 	output.p = float4(input.p, input.z, 1.0f) - float4(0.05f, 0.05f, 0, 0);
 
 	output.p.xy = output.p.xy * float2(VertexScale.x, -VertexScale.y) - float2(VertexOffset.x, -VertexOffset.y);
-	output.p.z *= exp2(-32.0f);		// integer->float depth
+	output.p.z = ZNORM(output.p.z); // integer->float depth
 
 	if(VS_TME)
 	{

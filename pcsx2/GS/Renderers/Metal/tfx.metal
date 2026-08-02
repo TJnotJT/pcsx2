@@ -227,14 +227,13 @@ static void texture_coord(thread const MainVSIn& v, thread MainVSOut& out, const
 
 static MainVSOut vs_main_run(thread const MainVSIn& v, constant GSMTLMainVSUniform& cb)
 {
-	constexpr float exp_min32 = 0x1p-32;
 	MainVSOut out;
 	// Clamp to max depth, gs doesn't wrap
 	uint z = min(v.z, cb.max_depth);
 	out.p.xy = float2(v.p) - float2(0.05, 0.05);
 	out.p.xy = out.p.xy * float2(cb.vertex_scale.x, -cb.vertex_scale.y) - float2(cb.vertex_offset.x, -cb.vertex_offset.y);
 	out.p.w = 1;
-	out.p.z = float(z) * exp_min32;
+	out.p.z = znorm(float(z));
 
 	texture_coord(v, out, cb);
 
@@ -808,7 +807,7 @@ struct PSMain
 
 	float4 sample_p_norm(float u)
 	{
-		return sample_p(uint(u * 255.5f));
+		return sample_p(uint(cdenorm(u, 255.0f)));
 	}
 
 	float4 clamp_wrap_uv(float4 uv)
@@ -919,11 +918,11 @@ struct PSMain
 		
 		if (PS_RTA_SRC_CORRECTION)
 		{
-			i = uint4(round(c * 128.25f)); // Denormalize value
+			i = uint4(cdenorm(c, 128.0f)); // Denormalize value
 		}
 		else
 		{
-			i = uint4(c * 255.5f); // Denormalize value
+			i = uint4(cdenorm(c, 255.5f)); // Denormalize value
 		}
 		
 		if (PS_PAL_FMT == 1)
@@ -946,7 +945,7 @@ struct PSMain
 
 	uint fetch_raw_depth()
 	{
-		return tex_depth.read(ushort2(in.p.xy + cb.channel_shuffle_offset)) * 0x1p32f;
+		return zdenorm(tex_depth.read(ushort2(in.p.xy + cb.channel_shuffle_offset)));
 	}
 
 	float4 fetch_raw_color()
@@ -1014,7 +1013,7 @@ struct PSMain
 			// Warning: UV can't be used in channel effect
 			ushort depth = fetch_raw_depth();
 			// Convert msb based on the palette
-			t = palette.read(ushort2((depth >> 8) & 0xFF, 0)) * 255.f;
+			t = cdenorm(palette.read(ushort2((depth >> 8) & 0xFF, 0)), 255.f);
 		}
 		else if (PS_URBAN_CHAOS_HLE)
 		{
@@ -1028,7 +1027,7 @@ struct PSMain
 			ushort depth = fetch_raw_depth();
 
 			// Convert lsb based on the palette
-			t = palette.read(ushort2(depth & 0xFF, 0)) * 255.f;
+			t = cdenorm(palette.read(ushort2(depth & 0xFF, 0)), 255.f);
 
 			// Msb is easier
 			float green = float((depth >> 8) & 0xFF) * 36.f;
@@ -1046,7 +1045,7 @@ struct PSMain
 		}
 		else if (PS_DEPTH_FMT == 3)
 		{
-			t = fetch_c(uv) * 255.f;
+			t = cdenorm(fetch_c(uv), 255.f);
 		}
 
 		// macOS 10.15 ICE's on bool3(t.rgb), so use != 0 instead
@@ -1055,7 +1054,7 @@ struct PSMain
 		else if (PS_AEM_FMT == FMT_16)
 			t.a = t.a >= 128.f ? 255.f * cb.ta.y : (!PS_AEM || any(t.rgb != 0)) ? 255.f * cb.ta.x : 0.f;
 		else if (PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE)
-			t = trunc(sample_4p(uint4(t.aaaa))[0] * 255.0f + 0.05f);
+			t = cdenorm(sample_4p(uint4(t.aaaa))[0], 255.0f);
 			
 		return t;
 	}
@@ -1065,30 +1064,30 @@ struct PSMain
 	float4 fetch_red()
 	{
 		float rt = PS_TEX_IS_DEPTH ? float(fetch_raw_depth() & 0xFF) / 255.f : fetch_raw_color().r;
-		return sample_p_norm(rt) * 255.f;
+		return cdenorm(sample_p_norm(rt), 255.f);
 	}
 
 	float4 fetch_green()
 	{
 		float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth() >> 8) & 0xFF) / 255.f : fetch_raw_color().g;
-		return sample_p_norm(rt) * 255.f;
+		return cdenorm(sample_p_norm(rt), 255.f);
 	}
 
 	float4 fetch_blue()
 	{
 		float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth() >> 16) & 0xFF) / 255.f : fetch_raw_color().b;
-		return sample_p_norm(rt) * 255.f;
+		return cdenorm(sample_p_norm(rt), 255.f);
 	}
 
 	float4 fetch_alpha()
 	{
-		return sample_p_norm(fetch_raw_color().a) * 255.f;
+		return cdenorm(sample_p_norm(fetch_raw_color().a), 255.f);
 	}
 
 	float4 fetch_rgb()
 	{
 		float4 rt = fetch_raw_color();
-		return float4(sample_p_norm(rt.r).r, sample_p_norm(rt.g).g, sample_p_norm(rt.b).b, 1) * 255.f;
+		return cdenorm(float4(sample_p_norm(rt.r).r, sample_p_norm(rt.g).g, sample_p_norm(rt.b).b, 1), 255.f);
 	}
 
 	float4 fetch_gXbY()
@@ -1101,7 +1100,7 @@ struct PSMain
 		}
 		else
 		{
-			uint4 rt = uint4(fetch_raw_color() * 255.5f);
+			uint4 rt = uint4(cdenorm(fetch_raw_color(), 255.0f));
 			uint green = (rt.g >> cb.channel_shuffle.green_shift) & cb.channel_shuffle.green_mask;
 			uint blue  = (rt.b >> cb.channel_shuffle.blue_shift)  & cb.channel_shuffle.blue_mask;
 			return float4(green | blue);
@@ -1154,7 +1153,7 @@ struct PSMain
 			if (PS_AEM_FMT == FMT_24)
 				c[i].a = !PS_AEM || any(c[i].rgb != 0) ? cb.ta.x : 0.f;
 			else if (PS_AEM_FMT == FMT_16)
-				c[i].a = c[i].a >= 0.5 ? cb.ta.y : !PS_AEM || any((int3(c[i].rgb * 255.0f) & 0xF8) != 0) ? cb.ta.x : 0.f;
+				c[i].a = c[i].a >= 0.5 ? cb.ta.y : !PS_AEM || any((int3(cdenorm(c[i].rgb, 255.0f)) & 0xF8) != 0) ? cb.ta.x : 0.f;
 		}
 
 		if (PS_LTF)
@@ -1163,13 +1162,13 @@ struct PSMain
 			t = c[0];
 
 		if (PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION)
-			t.a = t.a * (128.5f / 255.0f);
-			
-		// The 0.05f helps to fix the overbloom of sotc
-		// I think the issue is related to the rounding of texture coodinate. The linear (from fixed unit)
-		// interpolation could be slightly below the correct one.
+			t.a = cdenorm(t.a, 128.f);
+		else
+			t.a = cdenorm(t.a, 255.0f);
 		
-		return trunc(t * 255.f + 0.05f);
+		t.rgb = cdenorm(t.rgb, 255.0f);
+		
+		return t;
 	}
 
 	float4 tfx(float4 T, float4 C)
@@ -1227,7 +1226,7 @@ struct PSMain
 	void fog(thread float4& C, float f)
 	{
 		if (PS_FOG)
-			C.rgb = trunc(mix(cb.fog_color, C.rgb, (f * 255.0f) / 256.0f));
+			C.rgb = trunc(mix(cb.fog_color, C.rgb, cdenorm(f, 255.0f) / 256.0f));
 	}
 
 	float4 ps_color()
@@ -1281,7 +1280,7 @@ struct PSMain
 				T.a = float(denorm_c_before.g & 0x80);
 			}
 			
-			T.a = (T.a >= 127.5 ? cb.ta.y : !PS_AEM || any((int3(T.rgb) & 0xF8) != 0) ? cb.ta.x : 0.f) * 255.f;
+			T.a = cdenorm((T.a >= 127.5 ? cb.ta.y : !PS_AEM || any((int3(T.rgb) & 0xF8) != 0) ? cb.ta.x : 0.f), 255.f);
 		}
 	
 		float4 C = tfx(T, IIP ? in.c : in.fc);
@@ -1380,7 +1379,7 @@ struct PSMain
 				As_rgba.rgb = float3(1.f);
 			}
 
-			float Ad = PS_RTA_CORRECTION ? trunc(current_color.a * 128.1f) / 128.f : trunc(current_color.a * 255.1f) / 128.f;
+			float Ad = cdenorm(current_color.a, PS_RTA_CORRECTION ? 128.f : 255.f) / 128.f;
 
 			if (PS_SHUFFLE && NEEDS_RT)
 			{
@@ -1495,7 +1494,7 @@ struct PSMain
 		MainResult out = {};
 		float input_z = in.p.z;
 		if (PS_ZFLOOR)
-			input_z = floor(input_z * 0x1p32) * 0x1p-32;
+			input_z = znorm(zdenorm(input_z));
 
 		if (PS_ZTST == ZTST::GEQUAL || PS_ZTST == ZTST::GREATER)
 		{
@@ -1514,8 +1513,8 @@ struct PSMain
 		if (PS_DATE >= 5)
 		{
 			// 1 => DATM == 0, 2 => DATM == 1
-			float rt_a = PS_WRITE_RG ? current_color.g : current_color.a;
-			bool bad = PS_RTA_CORRECTION ? ((PS_DATE & 3) == 1 ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) : ((PS_DATE & 3) == 1 ? (rt_a > 0.5) : (rt_a < 0.5));
+			float rt_a = cdenorm(PS_WRITE_RG ? current_color.g : current_color.a, PS_RTA_CORRECTION ? 128.f : 255.f);
+			bool bad = (PS_DATE & 3) == 1 ? rt_a >= 127.5f : rt_a < 127.5f;
 
 			if (bad)
 				discard();
@@ -1540,7 +1539,7 @@ struct PSMain
 				? saturate(cb.line_cov_scale * (1.f - abs(in.inv_cov))) // Blur only outer part of the line by scaling coverage.
 				: saturate(1.f - abs(in.inv_cov));
 			if (!PS_ABE || floor(C.a) == 128.f) // The coverage is only used if the fragment alpha is 128.
-				C.a = 128.f * cov;
+				C.a = cdenorm(cov, 128.f);
 		}
 		else if (PS_FIXED_ONE_A)
 		{
@@ -1555,7 +1554,7 @@ struct PSMain
 		float4 alpha_blend = float4(0.f);
 		if (SW_AD_TO_HW)
 		{
-			alpha_blend = PS_RTA_CORRECTION ? float4(trunc(current_color.a * 128.f) / 128.f) : float4(trunc(current_color.a * 255.5f) / 128.f);
+			alpha_blend = cdenorm(current_color.a, PS_RTA_CORRECTION ? 128.f : 255.f) / 128.f;
 		}
 		else
 		{
@@ -1620,7 +1619,7 @@ struct PSMain
 			else if (PS_READ16_SRC)
 			{
 				uint4 denorm_c = uint4(C);
-				uint2 denorm_TA = uint2(cb.ta * 255.5f);
+				uint2 denorm_TA = uint2(cdenorm(cb.ta, 255.5f));
 				
 				C.rb = (denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7) << 5);
 				C.ga = (denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80);
@@ -1658,8 +1657,8 @@ struct PSMain
 
 		if (!PS_NO_COLOR)
 		{
-			out.c0.a = PS_RTA_CORRECTION ? C.a / 128.f : C.a / 255.f;
-			out.c0.rgb = PS_COLCLIP_HW ? float3(C.rgb / 65535.f) : C.rgb / 255.f;
+			out.c0.a = cnorm(C.a, PS_RTA_CORRECTION ? 128.f : 255.f);
+			out.c0.rgb = cnorm(C.rgb, PS_COLCLIP_HW ? 65535.f : 255.f);
 		}
 		if (!PS_NO_COLOR1)
 			out.c1 = alpha_blend;

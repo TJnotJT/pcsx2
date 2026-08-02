@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#define CDENORM(x, factor) trunc((x) * (factor) + 0.5f)
+#define CNORM(x, factor) (trunc((x) + 0.5f) / (factor))
+#define ZDENORM(z) floor((z) * exp2(32.0f))
+#define ZNORM(z) ((z) * exp2(-32.0f))
+
 #if defined(VERTEX_SHADER)
 
 struct VS_INPUT
@@ -94,13 +99,13 @@ struct PS_OUTPUT
 
 uint rgba8_to_uint(float4 c)
 {
-	uint4 i = uint4(c * 255.5f) & 0xFFu;
+	uint4 i = uint4(CDENORM(c, 255.0f)) & 0xFFu;
 	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
 }
 
 uint rgb5a1_to_uint(float4 c)
 {
-	uint4 i = uint4(c * 255.5f) & uint4(0xF8u, 0xF8u, 0xF8u, 0x80u);
+	uint4 i = uint4(CDENORM(c, 255.0f)) & uint4(0xF8u, 0xF8u, 0xF8u, 0x80u);
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
@@ -226,28 +231,28 @@ OUTPUT_TYPE ps_convert_rgb5a1_16bits(PS_INPUT input) : OUTPUT_SV
 #if defined(__ps_datm1__)
 void ps_datm1(PS_INPUT input)
 {
-	clip(sample_c(input.t).a - 127.5f / 255); // >= 0x80 pass
+	clip(CDENORM(sample_c(input.t).a, 255.0f) - 127.5f); // >= 0x80 pass
 }
 #endif
 
 #if defined(__ps_datm0__)
 void ps_datm0(PS_INPUT input)
 {
-	clip(127.5f / 255 - sample_c(input.t).a); // < 0x80 pass (== 0x80 should not pass)
+	clip(127.5f - CDENORM(sample_c(input.t).a, 255.0f)); // < 0x80 pass (== 0x80 should not pass)
 }
 #endif
 
 #if defined(__ps_datm1_rta_correction__)
 void ps_datm1_rta_correction(PS_INPUT input)
 {
-	clip(sample_c(input.t).a - 254.5f / 255); // >= 0x80 pass
+	clip(CDENORM(sample_c(input.t).a, 128.0f) - 127.5f); // >= 0x80 pass
 }
 #endif
 
 #if defined(__ps_datm0_rta_correction__)
 void ps_datm0_rta_correction(PS_INPUT input)
 {
-	clip(254.5f / 255 - sample_c(input.t).a); // < 0x80 pass (== 0x80 should not pass)
+	clip(127.5f - CDENORM(sample_c(input.t).a, 128.0f)); // < 0x80 pass (== 0x80 should not pass)
 }
 #endif
 
@@ -256,7 +261,7 @@ PS_OUTPUT ps_rta_correction(PS_INPUT input)
 {
 	PS_OUTPUT output;
 	float4 value = sample_c(input.t);
-	output.o = float4(value.rgb, value.a / (128.25f / 255.0f));
+	output.o = float4(value.rgb, CDENORM(value.a, 255.0f) / 128.0f);
 	return output;
 }
 #endif
@@ -266,7 +271,7 @@ PS_OUTPUT ps_rta_decorrection(PS_INPUT input)
 {
 	PS_OUTPUT output;
 	float4 value = sample_c(input.t);
-	output.o = float4(value.rgb, value.a * (128.25f / 255.0f));
+	output.o = float4(value.rgb, CDENORM(value.a, 128.0f) / 255.0f);
 	return output;
 }
 #endif
@@ -276,7 +281,7 @@ PS_OUTPUT ps_colclip_init(PS_INPUT input)
 {
 	PS_OUTPUT output;
 	float4 value = sample_c(input.t);
-	output.o = float4(round(value.rgb * 255) / 65535, value.a);
+	output.o = float4(CDENORM(value.rgb, 255.0f) / 65535.0f, value.a);
 	return output;
 }
 #endif
@@ -286,7 +291,7 @@ PS_OUTPUT ps_colclip_resolve(PS_INPUT input)
 {
 	PS_OUTPUT output;
 	float4 value = sample_c(input.t);
-	output.o = float4(float3(uint3(value.rgb * 65535.5) & 255) / 255, value.a);
+	output.o = float4(float3(uint3(CDENORM(value.rgb, 65535.0)) & 255) / 255.0f, value.a);
 	return output;
 }
 #endif
@@ -649,7 +654,7 @@ PS_OUTPUT ps_yuv(PS_INPUT input)
 float ps_primid_image_init_0(PS_INPUT input) : SV_Target
 {
 	float c;
-	if ((127.5f / 255.0f) < sample_c(input.t).a) // < 0x80 pass (== 0x80 should not pass)
+	if (127.5f <= CDENORM(sample_c(input.t).a, 255.0f)) // < 0x80 pass (== 0x80 should not pass)
 		c = float(-1);
 	else
 		c = float(0x7FFFFFFF);
@@ -661,7 +666,7 @@ float ps_primid_image_init_0(PS_INPUT input) : SV_Target
 float ps_primid_image_init_1(PS_INPUT input) : SV_Target
 {
 	float c;
-	if (sample_c(input.t).a < (127.5f / 255.0f)) // >= 0x80 pass
+	if (CDENORM(sample_c(input.t).a, 255.0f) < 127.5f) // >= 0x80 pass
 		c = float(-1);
 	else
 		c = float(0x7FFFFFFF);
@@ -673,7 +678,7 @@ float ps_primid_image_init_1(PS_INPUT input) : SV_Target
 float ps_primid_image_init_2(PS_INPUT input) : SV_Target
 {
 	float c;
-	if ((254.5f / 255.0f) < sample_c(input.t).a) // < 0x80 pass (== 0x80 should not pass)
+	if (127.5f <= CDENORM(sample_c(input.t).a, 128.0f)) // < 0x80 pass (== 0x80 should not pass)
 		c = float(-1);
 	else
 		c = float(0x7FFFFFFF);
@@ -685,7 +690,7 @@ float ps_primid_image_init_2(PS_INPUT input) : SV_Target
 float ps_primid_image_init_3(PS_INPUT input) : SV_Target
 {
 	float c;
-	if (sample_c(input.t).a < (254.5f / 255.0f)) // >= 0x80 pass
+	if (CDENORM(sample_c(input.t).a, 128.0f) < 127.5f) // >= 0x80 pass
 		c = float(-1);
 	else
 		c = float(0x7FFFFFFF);
