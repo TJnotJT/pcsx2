@@ -337,51 +337,6 @@ public:
 		}
 	}
 
-	struct alignas(8) PipelineSelector
-	{
-		GSHWDrawConfig::PSSelector ps;
-
-		union
-		{
-			struct
-			{
-				u32 topology : 2;
-				u32 rt : 1;
-				u32 ds : 1;
-				u32 line_width : 1;
-				u32 feedback_loop_flags : 3;
-			};
-
-			u32 key;
-		};
-
-		GSHWDrawConfig::BlendState bs;
-		GSHWDrawConfig::VSSelector vs;
-		GSHWDrawConfig::DepthStencilSelector dss;
-		GSHWDrawConfig::ColorMaskSelector cms;
-		u8 pad;
-
-		__fi bool operator==(const PipelineSelector& p) const { return BitEqual(*this, p); }
-		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
-
-		__fi PipelineSelector() { std::memset(this, 0, sizeof(*this)); }
-
-		__fi bool IsRTFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteRT) != 0); }
-		__fi bool IsDepthFeedbackLoop() const { return ((feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth) != 0); }
-		__fi bool IsTestingAndSamplingDepth() const { return ((feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth)) != 0); }
-	};
-	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
-
-	struct PipelineSelectorHash
-	{
-		std::size_t operator()(const PipelineSelector& e) const noexcept
-		{
-			std::size_t hash = 0;
-			HashCombine(hash, e.vs.key, e.ps.key_hi, e.ps.key_lo, e.dss.key, e.cms.key, e.bs.key, e.key);
-			return hash;
-		}
-	};
-
 	enum : u32
 	{
 		NUM_TFX_DYNAMIC_OFFSETS = 2,
@@ -460,7 +415,7 @@ private:
 	std::unordered_map<u32, VkShaderModule> m_tfx_vertex_shaders;
 	std::unordered_map<GSHWDrawConfig::PSSelector, VkShaderModule, GSHWDrawConfig::PSSelectorHash>
 		m_tfx_fragment_shaders;
-	std::unordered_map<PipelineSelector, VkPipeline, PipelineSelectorHash> m_tfx_pipelines;
+	std::unordered_map<GSPipelineSelector, VkPipeline, GSPipelineSelectorHash> m_tfx_pipelines;
 
 	VkRenderPass m_utility_color_render_pass_load = VK_NULL_HANDLE;
 	VkRenderPass m_utility_color_render_pass_clear = VK_NULL_HANDLE;
@@ -501,8 +456,8 @@ private:
 
 	VkShaderModule GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
 	VkShaderModule GetTFXFragmentShader(const GSHWDrawConfig::PSSelector& sel);
-	VkPipeline CreateTFXPipeline(const PipelineSelector& p);
-	VkPipeline GetTFXPipeline(const PipelineSelector& p);
+	VkPipeline CreateTFXPipeline(const GSPipelineSelector& p);
+	VkPipeline GetTFXPipeline(const GSPipelineSelector& p);
 
 	VkShaderModule GetUtilityVertexShader(const std::string& source, const char* replace_main);
 	VkShaderModule GetUtilityFragmentShader(const std::string& source, const char* replace_main);
@@ -623,6 +578,15 @@ public:
 	{
 		VkClearValue cv[2];
 		u32 count;
+
+		ClearValueList(GSTexture* rt, GSTexture* ds, u32 stencil)
+		{
+			count = 0;
+			if (rt)
+				GSVector4::store<true>(&cv[count++].color, rt->GetClearForFormat());
+			if (ds)
+				cv[count++].depthStencil = { ds->GetClearDepth(), stencil };
+		}
 	};
 
 	struct DrawTargetsVK : DrawTargets<GSTextureVK>
@@ -634,22 +598,18 @@ public:
 	void IASetIndexBuffer(const void* index, size_t count);
 	void VSSetIndexBuffer(const void* index, size_t count);
 
-	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
-	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 	void PSUnbindSourceTextureConflict(GSTexture* tex);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None, const GSVector2i& viewport_size = {});
 	void OMSetRenderTargets(const DrawTargetsVK& targets, const GSHWDrawConfig& config, const PipelineSelector& pipe);
 
-	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
-	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
 	void SetVSPushConstants(u32 base_vertex, u32 base_index = 0, bool force_update = false);
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	// Helper functions for RenderHW.
 	void DATEStencilSetup(const DrawTargetsVK& targets, GSHWDrawConfig& config);
-	void DATEStencilOneClear(const DrawTargetsVK& targets, const GSHWDrawConfig& config);
+	
 	bool DATEPrimIDSetup(DrawTargetsVK& targets, GSHWDrawConfig& config, const PipelineSelector& pipe);
 	void ColorClipEarlyResolveOrActivate(DrawTargetsVK& targets, GSHWDrawConfig& config, PipelineSelector& pipe);
 	bool ColorClipCreate(DrawTargetsVK& targets, GSHWDrawConfig& config);
@@ -670,8 +630,38 @@ public:
 	VkImageMemoryBarrier GetColorBufferFeedbackBarrier(GSTextureVK* rt) const;
 	VkImageMemoryBarrier GetDepthStencilBufferFeedbackBarrier(GSTextureVK* ds) const;
 	VkDependencyFlags GetFeedbackBarrierDependencyFlags() const;
-	void FeedbackBarrier(const DrawTargetsVK& targets, const PipelineSelector& pipe);
 	void SendHWDraw(const DrawTargetsVK& targets, const GSHWDrawConfig& config, DrawPass pass, const PipelineSelector& pipe);
+
+	virtual GSTextureVK* TFXTextureTexture() { static_cast<GSTextureVK*>(GSDevice::TFXTextureTexture()); }
+	virtual GSTextureVK* TFXTexturePalette() { static_cast<GSTextureVK*>(GSDevice::TFXTexturePalette()); }
+	virtual GSTextureVK* TFXTextureRT() { static_cast<GSTextureVK*>(GSDevice::TFXTextureRT()); }
+	virtual GSTextureVK* TFXTexturePrimID() { static_cast<GSTextureVK*>(GSDevice::TFXTexturePrimID()); }
+	virtual GSTextureVK* TFXTextureDepth() { static_cast<GSTextureVK*>(GSDevice::TFXTextureDepth()); }
+	virtual GSTextureVK* TFXTextureRTROV() { static_cast<GSTextureVK*>(GSDevice::TFXTextureRTROV()); }
+	virtual GSTextureVK* TFXTextureDSROV() { static_cast<GSTextureVK*>(GSDevice::TFXTextureDSROV()); }
+
+	GSTextureVK* TFXRT() { return static_cast<GSTextureVK*>(FB().RT()); }
+	GSTextureVK* TFXDS() { return static_cast<GSTextureVK*>(FB().DS()); }
+
+	void TFXSetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb_vs) override;
+	void TFXSetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb_ps) override;
+	void TFXBindTextures() override;
+	void TFXDATEStencilOneClear(const GSVector4i& area) override;
+	bool TFXBindPipeline(const GSPipelineSelector& pipe) override;
+	void TFXFeedbackBarrier(GSTexture* rt, GSTexture* ds) override;
+	void TFXSetSampler(GSHWDrawConfig::SamplerSelector sampler) override;
+	void TFXSetBlendConstants(u8 color) override;
+	void TFXSetLineWidth(float width) override;
+
+	void TFXBeginRenderPass(const GSVector4i& drawarea) override;
+	void TFXUploadVerticesAndIndices(const GSHWDrawConfig& config) override;
+	void TFXDraw(const GSHWDrawConfig& config, DrawPass pass) override;
+	void TFXDraw(const GSHWDrawConfig& config, DrawPass pass, u32 offset, u32 count) override;
+
+	void UtilSetPipeline(RTUsage rt, DSUsage ds, ShaderConvert shader) override;
+	void UtilBeginRenderPass(ShaderConvert shader) override;
+	void UtilSetTexture(GSTexture* tex, Filter filter) override;
+	void UtilDrawStretchRect(const GSVector4& sRect, const GSVector4& dRect, const GSVector2i& ds) override;
 
 	//////////////////////////////////////////////////////////////////////////
 	// Vulkan State
@@ -697,10 +687,8 @@ public:
 	bool ApplyTFXState(bool already_execed = false);
 
 	void SetIndexBuffer(VkBuffer buffer);
-	void SetBlendConstants(u8 color);
-	void SetLineWidth(float width);
 
-	void SetUtilityTexture(GSTexture* tex, VkSampler sampler);
+	void SetUtilityTexture(GSTexture* tex, VkSampler sampler); // HERE
 	void SetUtilityPushConstants(const void* data, u32 size);
 	void UnbindTexture(GSTextureVK* tex);
 
@@ -714,9 +702,9 @@ public:
 	void BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, float depth, u8 stencil);
 	void EndRenderPass();
 
-	void SetViewport(const VkViewport& viewport);
-	void SetScissor(const GSVector4i& scissor);
-	void SetPipeline(VkPipeline pipeline);
+	void VKCommitViewport(const GSVector4i& viewport);
+	void VKCommitScissor(const GSVector4i& scissor);
+	void VKCommitPipeline(VkPipeline pipeline);
 
 private:
 	enum DIRTY_FLAG : u32
@@ -775,18 +763,41 @@ private:
 
 	VkBuffer m_index_buffer = VK_NULL_HANDLE;
 
-	GSTextureVK* m_current_render_target = nullptr;
-	GSTextureVK* m_current_depth_target = nullptr;
+	class VKFramebuffer : public GSFramebuffer
+	{
+	public:
+		bool Update(GSFramebuffer& other)
+		{
+			GSTexture* rt = other.RT();
+			GSTexture* ds = other.DS();
+			GSFramebufferFlags flags = other.Flags() &
+				(GSFramebufferFlags::ColorFeedback | GSFramebufferFlags::DepthFeedback);
+			GSVector2i size = other.Size();
+
+			bool changed = rt != RT() || ds != DS() || flags != Flags() || size != Size();
+
+			SetRTDS(rt, ds, size);
+			SetFlags(flags);
+
+			return changed;
+		}
+
+		GSTextureVK* RT() const { return static_cast<GSTextureVK*>(GSFramebuffer::RT()); }
+		GSTextureVK* DS() const { return static_cast<GSTextureVK*>(GSFramebuffer::DS()); }
+	};
+
+	void VKCommitFramebuffer();
+
+	VKFramebuffer m_fb_vk;
 	VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE;
 	VkRenderPass m_current_render_pass = VK_NULL_HANDLE;
 	GSVector4i m_current_render_pass_area = GSVector4i::zero();
 
-	GSVector4i m_scissor = GSVector4i::zero();
-	VkViewport m_viewport = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
+	VkRect2D m_vk_scissor = { {0, 0}, {0u, 0u} };
+	VkViewport m_vk_viewport = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
 	float m_current_line_width = 1.0f;
 	u8 m_blend_constant_color = 0;
 
-	std::array<GSTextureVK*, NUM_TFX_TEXTURES> m_tfx_textures{};
 	VkSampler m_tfx_sampler = VK_NULL_HANDLE;
 	u32 m_tfx_sampler_sel = 0;
 	VkDescriptorSet m_tfx_ubo_descriptor_set = VK_NULL_HANDLE;

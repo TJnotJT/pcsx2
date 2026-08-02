@@ -1218,6 +1218,52 @@ bool GSHWDrawConfig::BlendState::IsEffective(ColorMaskSelector colormask) const
 	                  ((colormask.key & 8u) && (src_factor_alpha != GSDevice::CONST_ONE || dst_factor_alpha != GSDevice::CONST_ZERO)));
 }
 
+void GSDevice::BaseSetTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, GSFramebufferFlags fb, GSVector2i size)
+{
+	m_fb.SetTargets(rt, ds_as_rt, ds, size);
+	m_fb.SetFlags(fb);
+}
+
+void GSDevice::BaseSetRTDS(GSTexture* rt, GSTexture* ds, GSFramebufferFlags fb, GSVector2i size)
+{
+	BaseSetTargets(rt, nullptr, ds, fb, size);
+}
+
+void GSDevice::BaseSetRT(GSTexture* rt, GSFramebufferFlags fb, GSVector2i size)
+{
+	BaseSetTargets(rt, nullptr, nullptr, fb, size);
+}
+
+void GSDevice::BaseSetTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, GSVector2i size)
+{
+	BaseSetTargets(rt, ds_as_rt, ds, GSFramebufferFlags::None, size);
+}
+
+void GSDevice::BaseSetRTDS(GSTexture* rt, GSTexture* ds, GSVector2i size)
+{
+	BaseSetRTDS(rt, ds, GSFramebufferFlags::None, size);
+}
+
+void GSDevice::BaseSetRT(GSTexture* rt, GSVector2i size)
+{
+	BaseSetRT(rt, GSFramebufferFlags::None, size);
+}
+
+void GSDevice::BaseSetNullFB(GSVector2i size)
+{
+	m_fb.SetNull(size);
+}
+
+void GSDevice::BaseSetScissor(const GSVector4i& scissor)
+{
+	m_fb.SetScissor(scissor);
+}
+
+void GSDevice::BaseSetViewport(const GSVector4i& viewport)
+{
+	m_fb.SetViewport(viewport);
+}
+
 void GSDevice::TFXSetTexture(TFXTextureClass klass, GSTexture* tex, TextureUsage usage)
 {
 	TFXSetTexture(static_cast<u32>(klass), tex, usage);
@@ -1227,15 +1273,19 @@ void GSDevice::TFXSetTexture(u32 klass, GSTexture* tex, TextureUsage usage)
 {
 	if (tex && usage != TextureUsage::Feedback)
 		BasePrepareTexture(tex, usage);
-	m_current_tfx_textures[klass] = { tex, usage };
+	m_tfx_textures[klass] = tex;
+	m_tfx_usages[klass] = usage;
 }
 
 void GSDevice::TFXRemoveTexture(GSTexture* tex)
 {
 	for (u32 i = 0; i < NumTFXTextures; i++)
 	{
-		if (m_current_tfx_textures[i].tex == tex)
-			m_current_tfx_textures[i] = {};
+		if (m_tfx_textures[i] == tex)
+		{
+			m_tfx_textures[i] = nullptr;
+			m_tfx_usages[i] = TextureUsage::ReadOnly;
+		}
 	}
 }
 
@@ -1262,29 +1312,25 @@ GSPipelineSelector GSDevice::TFXGetPipelineSelector(const GSHWDrawConfig& config
 	const bool color_feedback = barrier && config.IsFeedbackLoopRT(ps);
 	const bool depth_feedback = barrier && config.IsFeedbackLoopDepth(ps);
 
-	// RT setup
+	// Framebuffer setup
+	GSFramebufferFlags fb = GSFramebufferFlags::None;
 	pipe.rt = GSPipelineSelector::RT::None;
 	if (config.rt && !ps.HasColorROV())
 	{
 		if (ps.HasDATEPrimiDInit())
 			pipe.rt = GSPipelineSelector::RT::PrimID;
 		else if (ps.HasColorClip())
-			pipe.rt = color_feedback ? GSPipelineSelector::RT::ColorClipFeedback : GSPipelineSelector::RT::ColorClip;
+			pipe.rt = GSPipelineSelector::RT::ColorClip;
 		else
-			pipe.rt = color_feedback ? GSPipelineSelector::RT::ColorFeedback : GSPipelineSelector::RT::Color;
+			pipe.rt = GSPipelineSelector::RT::Color;
+	
+		SetFlag(fb, GSFramebufferFlags::ColorFeedback, config.IsFeedbackLoopRT(ps));
 	}
-
-	// DS Setup
-	pipe.ds = GSPipelineSelector::DS::None;
-	if (config.ds && !ps.HasDepthROV())
-	{
-		if (config.HasDATEStencil())
-			pipe.ds = dss.zwe ? GSPipelineSelector::DS::DepthStencil : GSPipelineSelector::DS::DepthStencilReadOnly;
-		else if (!dss.zwe)
-			pipe.ds = dss.zwe ? GSPipelineSelector::DS::Depth : GSPipelineSelector::DS::DepthReadOnly;
-		else
-			pipe.ds = depth_feedback ? GSPipelineSelector::DS::DepthFeedback : GSPipelineSelector::DS::Depth;
-	}
+	pipe.ds_as_rt = m_ds_as_rt != nullptr;
+	pipe.ds = config.ds && !ps.HasDepthROV();
+	SetFlag(fb, GSFramebufferFlags::Stencil, config.HasDATEStencil());
+	SetFlag(fb, GSFramebufferFlags::DepthFeedback, config.IsFeedbackLoopDepth(ps));
+	pipe.fb = fb;
 
 	pipe.line_width = config.line_expand;
 
@@ -1309,7 +1355,7 @@ void GSDevice::TFXColorClipEarlyResolveOrActivate(TFXTargets& targets, GSHWDrawC
 
 			BasePrepareTexture(targets.ColorClipRT(), TextureUsage::ReadOnly);
 
-			BaseSetTargets(targets.RT(), pipe.rt, targets.DS(), pipe.ds);
+			BaseSetRTDS(targets.RT(), targets.DS(), pipe.fb);
 			BaseSetViewport(targets.RTRect());
 			BaseSetScissor(targets.RTRect());
 
@@ -1318,7 +1364,7 @@ void GSDevice::TFXColorClipEarlyResolveOrActivate(TFXTargets& targets, GSHWDrawC
 			const GSVector4 drawareaf = GSVector4(config.colclip_update_area);
 			const GSVector4 sRect(drawareaf / GSVector4(targets.RTRect()).xyxy());
 
-			UtilSetPipeline(pipe.rt, pipe.ds, ShaderConvert::COLCLIP_RESOLVE);
+			UtilSetPipeline(ShaderConvertN::COLCLIP_RESOLVE, pipe.fb);
 
 			UtilSetTexture(targets.ColorClipRT(), Nearest);
 
@@ -1355,11 +1401,11 @@ void GSDevice::TFXDATEStencilSetup(const TFXTargets& targets, GSHWDrawConfig& co
 
 		UtilSetTexture(targets.RT(), Nearest);
 
-		BaseSetTargets(nullptr, RTUsage::None, targets.DS(), DSUsage::DepthStencil);
+		BaseSetRTDS(nullptr, targets.DS(), GSFramebufferFlags::Stencil);
 		BaseSetScissor(config.drawarea);
 		BaseSetViewport(targets.RTRect());
 
-		UtilSetPipeline(RTUsage::None, DSUsage::DepthStencil, SetDATMShader(config.datm));
+		UtilSetPipeline(SetDATMShader(config.datm), GSFramebufferFlags::Stencil);
 
 		UtilBeginRenderPass(SetDATMShader(config.datm));
 
@@ -1397,11 +1443,10 @@ bool GSDevice::TFXDATEPrimIDSetup(TFXTargets& targets, GSHWDrawConfig& config, c
 
 		BaseEndRenderPass();
 
-		// Sample from RT alpha .
+		// Sample from RT alpha.
 		UtilSetTexture(targets.ColorClipRT() ? targets.ColorClipRT() : targets.RT(), Nearest);
 		
-		BaseSetTargets(targets.PrimID(), DefaultRTUsage(targets.PrimID()),
-			targets.DS(), DefaultDSUsage(targets.DS()));
+		BaseSetRTDS(targets.PrimID(), targets.DS());
 		BaseSetScissor(config.drawarea);
 		BaseSetViewport(targets.RTRect());
 
@@ -1412,7 +1457,7 @@ bool GSDevice::TFXDATEPrimIDSetup(TFXTargets& targets, GSHWDrawConfig& config, c
 		const GSVector4 dst = GSVector4(config.drawarea);
 		const GSVector4 src = dst / GSVector4(dst).xyxy();
 
-		UtilSetPipeline(DefaultRTUsage(targets.PrimID()), DefaultDSUsage(targets.DS()), convert);
+		UtilSetPipeline(convert);
 		
 		UtilDrawStretchRect(src, dst, targets.RTSize());
 	}
@@ -1426,7 +1471,7 @@ bool GSDevice::TFXDATEPrimIDSetup(TFXTargets& targets, GSHWDrawConfig& config, c
 		pipe.dss.zwe = false;
 		pipe.cms.wrgba = 0;
 		pipe.bs = {};
-		pipe.rt = RTUsage::PrimID;
+		pipe.rt = GSPipelineSelector::RT::PrimID;
 		pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
 		pipe.ps.no_color = false;
 		pipe.ps.no_color1 = true;
@@ -1739,13 +1784,13 @@ void GSDevice::RenderHW(GSHWDrawConfig& config)
 	if (m_features.rov)
 		TFXSetROVs(targets, config);
 
-	BaseSetTargets(targets.RT(), main_pipe.rt, targets.DS(), main_pipe.ds);
+	BaseSetTargets(targets.RT(), targets.DSRT(), targets.DS(), main_pipe.fb, targets.RTSize());
 
 	// Use just draw area for one pass colclip draw, otherwise use the whole RT.
 	TFXBeginRenderPass(config.IsColorClipConvertAndResolve() ? config.drawarea : targets.RTRect());
 
 	if (config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::StencilOne)
-		TFXDATEStencilOneClear();
+		TFXDATEStencilOneClear(config.drawarea);
 
 	TFXColorClipConvert(targets, config, main_pipe);
 

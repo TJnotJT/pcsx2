@@ -1558,38 +1558,161 @@ struct alignas(16) GSHWDrawConfig
 		bool cbvs = true, bool cbps = true);
 };
 
+enum class GSFramebufferFlags : u32
+{
+	None          = 0,
+	Stencil       = 1,
+	ColorFeedback = 2,
+	DepthFeedback = 4,
+	ReadOnlyDS    = 8,
+};
+
+MARK_ENUM_AS_FLAGS(GSFramebufferFlags);
+
+template <typename T>
+T& SetFlag(T& dst, T flag, bool value)
+{
+	dst = (value ? (dst | flag) : (dst & ~flag));
+	return dst;
+}
+
+struct GSFramebuffer
+{
+public:
+	GSFramebuffer() { std::memset(this, 0, sizeof(*this)); }
+
+	GSTexture* RT() const { return m_rt; }
+	GSTexture* DS() const { return m_ds; }
+	GSTexture* DSAsRT() const { return m_ds_as_rt; }
+	bool ColorFeedback() const { return m_flags & GSFramebufferFlags::ColorFeedback; }
+	bool DepthFeedback() const { return m_flags & GSFramebufferFlags::DepthFeedback; }
+	bool Stencil() const { return m_flags & GSFramebufferFlags::Stencil; }
+	bool ReadOnlyDS() const { return m_flags & GSFramebufferFlags::ReadOnlyDS; }
+	GSFramebufferFlags Flags() const { return m_flags; }
+	GSVector2i Size() const { return m_size; }
+	GSVector4i SizeRect() const { return GSVector4i::loadh(m_size); }
+
+	void SetTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, GSVector2i size = {})
+	{
+		m_rt = rt;
+		m_ds_as_rt = ds_as_rt;
+		m_ds = ds;
+		m_size = rt ? rt->GetSize() : (ds_as_rt ? ds_as_rt->GetSize() : (ds ? ds->GetSize() : size));
+
+		if (!m_rt)
+			SetFlag(m_flags, GSFramebufferFlags::ColorFeedback, false);
+		if (!m_ds)
+			SetFlag(m_flags, GSFramebufferFlags::Stencil | GSFramebufferFlags::ReadOnlyDS, false);
+		if (!(m_ds || m_ds_as_rt))
+			SetFlag(m_flags, GSFramebufferFlags::DepthFeedback, false);
+
+		pxAssert(Validate());
+	}
+
+	void SetRTDS(GSTexture* rt, GSTexture* ds, GSVector2i size = {})
+	{
+		SetTargets(rt, nullptr, ds, size);
+	}
+
+	void SetRT(GSTexture* rt, GSVector2i size = {})
+	{
+		SetTargets(rt, nullptr, nullptr, size);
+	}
+
+	void SetNull(GSVector2i size)
+	{
+		SetTargets(nullptr, nullptr, nullptr, size);
+	}
+
+	void SetColorFeedback(bool color)
+	{
+		SetFlag(m_flags, GSFramebufferFlags::ColorFeedback, color);
+	}
+
+	void SetDepthFeedback(bool depth)
+	{
+		SetFlag(m_flags, GSFramebufferFlags::DepthFeedback, depth);
+	}
+
+	void SetStencil(bool stencil)
+	{
+		SetFlag(m_flags, GSFramebufferFlags::Stencil, stencil);
+	}
+
+	void SetReadOnlyDS(bool read_only_ds)
+	{
+		SetFlag(m_flags, GSFramebufferFlags::ReadOnlyDS, read_only_ds);
+	}
+
+	void SetFlags(GSFramebufferFlags flags)
+	{
+		m_flags = flags;
+	}
+
+	bool Validate() const
+	{
+		// Sizes
+		if (m_rt && m_rt->GetSize() != m_size)
+			return false;
+		if (m_ds_as_rt && m_ds_as_rt->GetSize() != m_size)
+			return false;
+		if (m_ds && m_ds->GetSize() != m_size)
+			return false;
+		
+		// Formats
+		if (m_rt && !(m_rt->GetFormat() == GSTexture::Format::Color ||
+			m_rt->GetFormat() == GSTexture::Format::ColorClip ||
+			m_rt->GetFormat() == GSTexture::Format::PrimID))
+		{
+			return false;
+		}
+		if (m_ds_as_rt && m_ds_as_rt->GetFormat() != GSTexture::Format::DepthColor)
+			return false;
+		if (m_ds && !m_ds->IsDepthStencil())
+			return false;
+
+		// Flags
+		if (!m_rt && (m_flags & GSFramebufferFlags::ColorFeedback))
+			return false;
+		if (!m_ds && (m_flags & (GSFramebufferFlags::Stencil | GSFramebufferFlags::ReadOnlyDS)))
+			return false;
+		if (!(m_ds || m_ds_as_rt) && (m_flags & GSFramebufferFlags::DepthFeedback))
+			return false;
+	}
+
+private:
+	GSTexture* m_rt;
+	GSTexture* m_ds_as_rt;
+	GSTexture* m_ds;
+	GSFramebufferFlags m_flags;
+	GSVector2i m_size;
+};
+
 struct alignas(8) GSPipelineSelector
 {
 	GSHWDrawConfig::PSSelector ps;
 
-	enum class RT
+	enum class RT : u32
 	{
 		None,
 		Color,
-		ColorFeedback,
 		ColorClip,
-		ColorClipFeedback,
 		PrimID,
-	};
-
-	enum class DS
-	{
-		None,
-		Depth,
-		DepthStencil,
-		DepthFeedback,
-		DepthReadOnly,
-		DepthStencilReadOnly,
 	};
 
 	union
 	{
 		struct
 		{
-			u32 topology : 2;
-			RT rt : 3;
-			DS ds : 3;
-			u32 line_width : 1;
+			struct
+			{
+				u32 topology : 2;
+				u32 line_width : 1;
+				RT rt : 1;
+				u32 ds_as_rt : 1;
+				u32 ds : 1;
+				GSFramebufferFlags fb : 4;
+			};
 		};
 
 		u32 key;
@@ -1607,15 +1730,14 @@ struct alignas(8) GSPipelineSelector
 	__fi GSPipelineSelector() { std::memset(this, 0, sizeof(*this)); }
 
 	__fi bool HasRT() const { return rt != RT::None; }
-	__fi bool HasColorClip() const { return rt == RT::ColorClip || rt == RT::ColorClipFeedback; }
+	__fi bool HasColorClip() const { return rt == RT::ColorClip; }
 	__fi bool HasPrimID() const { return rt == RT::PrimID; }
-	__fi bool HasDS() const { return ds != DS::None; }
-	__fi bool HasStencil() const { return ds == DS::DepthStencil || ds == DS::DepthStencilReadOnly; }
-	__fi bool HasRTFeedback() const { return rt == RT::ColorFeedback || rt == RT::ColorClipFeedback; }
-	__fi bool HasDSFeedback() const { return ds == DS::DepthFeedback; }
+	__fi bool HasDS() const { return ds; }
+	__fi bool HasStencil() const { return fb & GSFramebufferFlags::Stencil; }
+	__fi bool HasColorFeedback() const { return fb & GSFramebufferFlags::ColorFeedback; }
+	__fi bool HasDepthFeedback() const { return fb & GSFramebufferFlags::DepthFeedback; }
 	__fi bool HasRTROV() const { return ps.HasColorROV(); }
 	__fi bool HasDSROV() const { return ps.HasDepthROV(); }
-	__fi bool HasDSReadOnly() const { return ds == DS::DepthReadOnly || ds == DS::DepthStencilReadOnly; }
 };
 
 struct GSPipelineSelectorHash
@@ -1752,9 +1874,6 @@ public:
 		GSVector2i rtsize;
 	};
 
-	using RTUsage = GSPipelineSelector::RT;
-	using DSUsage = GSPipelineSelector::DS;
-
 	enum class TFXTextureClass
 	{
 		Texture,
@@ -1871,20 +1990,12 @@ protected:
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
-	GSTexture* m_current_rt = nullptr;
-	GSTexture* m_current_ds = nullptr;
-	RTUsage m_current_rt_usage = RTUsage::None;
-	DSUsage m_current_ds_usage = DSUsage::None;
+	GSFramebuffer m_fb;
 
-	struct TFXTexture
-	{
-		GSTexture* tex;
-		TextureUsage usage;
-	};
+	std::array<GSTexture*, NumTFXTextures> m_tfx_textures{};
+	std::array<TextureUsage, NumTFXTextures> m_tfx_usages{};
 
-	std::array<TFXTexture, NumTFXTextures> m_current_tfx_textures{};
-
-	GSTexture* m_current_utility_texture = nullptr;
+	GSTexture* m_utility_texture = nullptr;
 
 	bool AcquireWindow(bool recreate_window);
 
@@ -2097,46 +2208,27 @@ public:
 	/// Uses box downsampling to resize a texture.
 	virtual void FilteredDownsampleTexture(GSTexture* sTex, GSTexture* dTex, u32 downsample_factor, const GSVector2i& clamp_min, const GSVector4& dRect) = 0;
 
-	// RenderHW helpers.
-	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb_vs);
-	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb_ps);
-
-	static RTUsage DefaultRTUsage(GSTexture* rt)
-	{
-		switch (rt ? rt->GetFormat() : GSTexture::Format::Invalid)
-		{
-			case GSTexture::Format::Color:
-				return RTUsage::Color;
-			case GSTexture::Format::ColorClip:
-				return RTUsage::ColorClip;
-			case GSTexture::Format::PrimID:
-				return RTUsage::PrimID;
-			default:
-				return RTUsage::None;
-		}
-	}
-
-	static DSUsage DefaultDSUsage(GSTexture* ds)
-	{
-		return ds ? DSUsage::Depth : DSUsage::None;
-	}
-
 	// FIXME(TJ): Should unbind textures unless the usage is feedback.
 	virtual void BaseEndRenderPass() {}
 	virtual bool BaseInRenderPass() { return true; }
 	virtual void BaseCommitClear(GSTexture* tex) {}
 	virtual void BasePrepareTexture(GSTexture* tex, TextureUsage usage) {}
 
-	void BaseSetTargets(GSTexture* rt, GSPipelineSelector::RT rt_usage, GSTexture* ds, GSPipelineSelector::DS ds_usage) {}
-	void BaseSetColorTarget(GSTexture* tgt, GSPipelineSelector::RT usage) {}
-	void BaseSetDepthTarget(GSTexture* tgt, GSPipelineSelector::DS usage) {}
-	void BaseSetScissor(const GSVector4i& scissor) {}
-	void BaseSetViewport(const GSVector4i& viewport) {}
+	GSFramebuffer BaseFramebuffer() { return m_fb; }
+	void BaseSetTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, GSFramebufferFlags fb = GSFramebufferFlags::None, GSVector2i size = {});
+	void BaseSetRTDS(GSTexture* rt, GSTexture* ds, GSFramebufferFlags fb = GSFramebufferFlags::None, GSVector2i size = {});
+	void BaseSetRT(GSTexture* rt, GSFramebufferFlags fb = GSFramebufferFlags::None, GSVector2i size = {});
+	void BaseSetTargets(GSTexture* rt, GSTexture* ds_as_rt, GSTexture* ds, GSVector2i size = {});
+	void BaseSetRTDS(GSTexture* rt, GSTexture* ds, GSVector2i size = {});
+	void BaseSetRT(GSTexture* rt, GSVector2i size = {});
+	void BaseSetNullFB(GSVector2i size = {});
+	void BaseSetScissor(const GSVector4i& scissor);
+	void BaseSetViewport(const GSVector4i& viewport);
 	
 	virtual void TFXSetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb_vs) {}
 	virtual void TFXSetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb_ps) {}
 	virtual void TFXBindTextures() {}
-	virtual void TFXDATEStencilOneClear() {}
+	virtual void TFXDATEStencilOneClear(const GSVector4i& area) {}
 	virtual bool TFXBindPipeline(const GSPipelineSelector& pipe) { return true; }
 	virtual void TFXFeedbackBarrier(GSTexture* rt, GSTexture* ds) {}
 	virtual void TFXSetSampler(GSHWDrawConfig::SamplerSelector sampler) {}
@@ -2145,21 +2237,25 @@ public:
 
 	void TFXSetTexture(TFXTextureClass klass, GSTexture* tex, TextureUsage usage = TextureUsage::ReadOnly);
 	void TFXSetTexture(u32 klass, GSTexture* tex, TextureUsage usage = TextureUsage::ReadOnly);
-	TFXTexture TFXGetTexture(TFXTextureClass klass) { TFXGetTexture(static_cast<u32>(klass)); }
-	TFXTexture TFXGetTexture(u32 klass) { return m_current_tfx_textures[klass]; }
-	virtual GSTexture* TFXTextureTexture() { TFXGetTexture(TFXTextureClass::Texture).tex; }
-	virtual GSTexture* TFXTexturePalette() { TFXGetTexture(TFXTextureClass::Palette).tex; }
-	virtual GSTexture* TFXTextureRT() { TFXGetTexture(TFXTextureClass::RT).tex; }
-	virtual GSTexture* TFXTexturePrimID() { TFXGetTexture(TFXTextureClass::PrimID).tex; }
-	virtual GSTexture* TFXTextureDepth() { TFXGetTexture(TFXTextureClass::Depth).tex; }
-	virtual GSTexture* TFXTextureRTROV() { TFXGetTexture(TFXTextureClass::RTROV).tex; }
-	virtual GSTexture* TFXTextureDSROV() { TFXGetTexture(TFXTextureClass::DSROV).tex; }
+	GSTexture* TFXGetTexture(TFXTextureClass klass) const { TFXGetTexture(static_cast<u32>(klass)); }
+	GSTexture* TFXGetTexture(u32 klass) const { return m_tfx_textures[klass]; }
+	TextureUsage TFXGetUsage(u32 klass) const { return m_tfx_usages[klass]; }
+	TextureUsage TFXGetUsage(TFXTextureClass klass) const { return TFXGetUsage(static_cast<u32>(klass)); }
+	const GSFramebuffer& FB() const { return m_fb; }
+	GSTexture* TFXTextureTexture() const { TFXGetTexture(TFXTextureClass::Texture); }
+	GSTexture* TFXTexturePalette() const { TFXGetTexture(TFXTextureClass::Palette); }
+	GSTexture* TFXTextureRT() const { TFXGetTexture(TFXTextureClass::RT); }
+	GSTexture* TFXTexturePrimID() const { TFXGetTexture(TFXTextureClass::PrimID); }
+	GSTexture* TFXTextureDepth() const { TFXGetTexture(TFXTextureClass::Depth); }
+	GSTexture* TFXTextureRTROV() const { TFXGetTexture(TFXTextureClass::RTROV); }
+	GSTexture* TFXTextureDSROV() const { TFXGetTexture(TFXTextureClass::DSROV); }
+
 	void TFXRemoveTexture(GSTexture* tex);
 	void TFXSetROVs(const TFXTargets& targets, const GSHWDrawConfig& config);
 
 	virtual void TFXBeginRenderPass(const GSVector4i& drawarea) {}
 
-	virtual void UtilSetPipeline(RTUsage rt, DSUsage ds, ShaderConvert shader) {}
+	virtual void UtilSetPipeline(ShaderConvert shader, GSFramebufferFlags fb = GSFramebufferFlags::None) {}
 	virtual void UtilBeginRenderPass(ShaderConvert shader) {}
 	virtual void UtilSetTexture(GSTexture* tex, Filter filter) {}
 	virtual void UtilDrawStretchRect(const GSVector4& sRect, const GSVector4& dRect, const GSVector2i& ds) {}
