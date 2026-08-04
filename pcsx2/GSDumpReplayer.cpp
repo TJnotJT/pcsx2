@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "PerformanceMetrics.h"
 #include "GS.h"
 #include "GS/GSLzma.h"
 #include "GSDumpReplayer.h"
@@ -38,6 +39,7 @@ static void GSDumpReplayerCancelInstruction();
 static void GSDumpReplayerCpuClear(u32 addr, u32 size);
 
 static std::unique_ptr<GSDumpFile> s_dump_file;
+static bool s_first_loop = true;
 static u32 s_current_packet = 0;
 static u32 s_dump_frame_number = 0;
 static s32 s_dump_loop_count = 0;
@@ -46,6 +48,13 @@ static bool s_needs_state_loaded = false;
 static u64 s_frame_ticks = 0;
 static u64 s_next_frame_time = 0;
 static bool s_is_dump_runner = false;
+
+static bool s_use_frame_range = false;
+static bool s_init_frame_range = false;
+static u32 s_frame_start = 0;
+static u32 s_frame_end = 0;
+static u32 s_frame_start_packet = 0;
+static u32 s_frame_end_packet = 0;
 
 R5900cpu GSDumpReplayerCpu = {
 	GSDumpReplayerCpuReserve,
@@ -83,6 +92,13 @@ void GSDumpReplayer::SetLoopCount(s32 loop_count)
 int GSDumpReplayer::GetLoopCount()
 {
 	return s_dump_loop_count;
+}
+
+void GSDumpReplayer::SetFrameRange(u32 start, u32 end)
+{
+	s_use_frame_range = true;
+	s_frame_start = start;
+	s_frame_end = end;
 }
 
 bool GSDumpReplayer::Initialize(const char* filename, Error* error)
@@ -256,17 +272,10 @@ static void GSDumpReplayerFrameLimit()
 	s_next_frame_time = std::max(now, s_next_frame_time + s_frame_ticks);
 }
 
-void GSDumpReplayerCpuStep()
+void AdvanceNextLoop()
 {
-	if (s_needs_state_loaded)
-	{
-		GSDumpReplayerLoadInitialState();
-		s_needs_state_loaded = false;
-	}
-
-	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
-	s_current_packet = (s_current_packet + 1) % static_cast<u32>(s_dump_file->GetPackets().size());
-	if (s_current_packet == 0)
+	const bool end_of_dump = (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()));
+	if (end_of_dump || (!s_first_loop && s_init_frame_range && s_current_packet > s_frame_end_packet))
 	{
 		s_dump_frame_number = 0;
 		if (s_dump_loop_count > 0)
@@ -277,7 +286,63 @@ void GSDumpReplayerCpuStep()
 			s_dump_running = false;
 		}
 	}
+}
 
+void UpdateFrameRangePackets()
+{
+	if (s_use_frame_range && !s_init_frame_range)
+	{
+		if (s_dump_frame_number == s_frame_start)
+		{
+			s_frame_start_packet = s_current_packet;
+		}
+		else if (s_dump_frame_number == s_frame_end)
+		{
+			s_frame_end_packet = s_current_packet;
+			s_init_frame_range = true;
+		}
+	}
+}
+
+void CheckFrameRange()
+{
+	if (s_init_frame_range)
+	{
+		if (!s_first_loop)
+		{
+			if (s_current_packet > s_frame_end_packet || s_current_packet < s_frame_start_packet)
+			{
+				s_dump_frame_number = s_frame_start;
+				s_current_packet = s_frame_start_packet;
+			}
+		}
+	}
+	else if (s_current_packet == static_cast<u32>(s_dump_file->GetPackets().size()))
+	{
+		s_frame_end_packet = s_current_packet;
+		s_init_frame_range = true;
+	}
+}
+
+void GSDumpReplayerCpuStep()
+{
+	if (s_needs_state_loaded)
+	{
+		GSDumpReplayerLoadInitialState();
+		s_needs_state_loaded = false;
+	}
+
+	// Increment the packet index.
+	s_current_packet++;
+
+	// Increment the loop counter.
+	AdvanceNextLoop();
+	
+	// Adjust packet index based on the frame range we're replaying.
+	CheckFrameRange();
+
+	// Send the packet data to the GS thread.
+	const GSDumpFile::GSData& packet = s_dump_file->GetPackets()[s_current_packet];
 	switch (packet.id)
 	{
 		case GSDumpTypes::GSType::Transfer:
@@ -323,6 +388,7 @@ void GSDumpReplayerCpuStep()
 			if (VMManager::Internal::IsExecutionInterrupted())
 				GSDumpReplayerExitExecution();
 			Host::PumpMessagesOnCPUThread();
+			UpdateFrameRangePackets();
 		}
 		break;
 
@@ -342,6 +408,20 @@ void GSDumpReplayerCpuStep()
 			std::memcpy(PS2MEM_GS, packet.data, std::min<s32>(static_cast<u32>(packet.length), Ps2MemSize::GSregs));
 		}
 		break;
+	}
+
+	// Loop packet index.
+	s_current_packet %= static_cast<u32>(s_dump_file->GetPackets().size());
+
+	if (s_current_packet == 0)
+		s_first_loop = false;
+
+	// FIXME: Add function to dump the stats.
+	if (!s_dump_running)
+	{
+		MTGS::WaitGS();
+		Console.WarningFmt("GPU TIME: {}", PerformanceMetrics::GetIntervalGPUAverageTime());
+		Console.WarningFmt("GS TIME: {}", PerformanceMetrics::GetIntervalGSAverageTime());
 	}
 }
 

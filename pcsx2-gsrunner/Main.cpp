@@ -655,6 +655,7 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			{
 				s_loop_count = StringUtil::FromChars<s32>(argv[++i]).value_or(0);
 				Console.WriteLn("Looping dump playback %d times.", s_loop_count);
+				s_settings_interface.SetIntValue("EmuCore/GS", "DumpReplayLoops", s_loop_count);
 				continue;
 			}
 			else if (CHECK_ARG_PARAM("-renderer"))
@@ -953,12 +954,11 @@ static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 		if (VMManager::Initialize(*params) == VMBootResult::StartupSuccess)
 		{
 			// run until end
-			GSDumpReplayer::SetLoopCount(s_loop_count);
 			VMManager::SetState(VMState::Running);
 			if (s_perf_enable)
 			{
 				VMManager::SetLimiterMode(LimiterModeType::Unlimited);
-				g_gs_device->SetGPUTimingEnabled(true);
+				g_gs_device->SetGPUTimingEnabled(true, s_settings_interface.GetBoolValue("EmuCore/GS", "IntervalStats", false));
 			}
 			while (VMManager::GetState() == VMState::Running)
 				VMManager::Execute();

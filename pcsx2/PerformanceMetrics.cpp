@@ -126,6 +126,23 @@ void PerformanceMetrics::Reset()
 		stat.last_cpu_time = stat.handle.GetCPUTime();
 }
 
+static double GetCPUTimeToPCTFactor(u64 ticks_delta)
+{
+	return 100.0 * static_cast<double>(GetTickFrequency()) /
+		(static_cast<double>(ticks_delta) * static_cast<double>(Threading::GetThreadTicksPerSecond()));
+}
+
+static double GetCPUTimeToMSFactor(u64 frames)
+{
+	return 1000.0 / static_cast<double>(Threading::GetThreadTicksPerSecond()) / static_cast<double>(frames);
+}
+
+template<typename T>
+T IfIntervalEnabled(T val)
+{
+	return s_interval_stats_enable ? val : 0;
+}
+
 void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_skipping_present)
 {
 	if (!is_skipping_present)
@@ -183,11 +200,8 @@ void PerformanceMetrics::Update(bool gs_register_write, bool fb_blit, bool is_sk
 	const u64 ticks_delta = ticks - s_last_ticks;
 	s_last_ticks = ticks;
 
-	const double pct_divider =
-		100.0 * (1.0 / ((static_cast<double>(ticks_delta) * static_cast<double>(Threading::GetThreadTicksPerSecond())) /
-						   static_cast<double>(GetTickFrequency())));
-	const double time_divider = 1000.0 * (1.0 / static_cast<double>(Threading::GetThreadTicksPerSecond())) *
-								(1.0 / static_cast<double>(s_frames_since_last_update));
+	const double pct_divider = GetCPUTimeToPCTFactor(ticks_delta);
+	const double time_divider = GetCPUTimeToMSFactor(s_frames_since_last_update);
 
 	const u64 cpu_time = s_cpu_thread_handle.GetCPUTime();
 	const u64 gs_time = MTGS::GetThreadHandle().GetCPUTime();
