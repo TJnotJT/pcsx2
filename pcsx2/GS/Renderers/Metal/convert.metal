@@ -72,7 +72,7 @@ fragment float4 ps_copy(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 fragment ushort ps_convert_rgb5a1_16bits(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 c = res.sample(data.t);
-	uint4 cu = uint4(c * 255.f + 0.5f);
+	uint4 cu = uint4(cdenorm(c, 255.f));
 	return (cu.x >> 3) | ((cu.y << 2) & 0x03e0) | ((cu.z << 7) & 0x7c00) | ((cu.w << 8) & 0x8000);
 }
 
@@ -88,70 +88,70 @@ fragment float4 ps_clear(float4 p [[position]], constant float4& color [[buffer(
 
 fragment void ps_datm1(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	if (tex.read(p).a < (127.5f / 255.f))
+	if (cdenorm(tex.read(p).a, 255.f) < 127.5f)
 		discard_fragment();
 }
 
 fragment void ps_datm0_rta_correction(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	if (tex.read(p).a > (254.5f / 255.f))
+	if (cdenorm(tex.read(p).a, 255.f) >= 127.5f)
 		discard_fragment();
 }
 
 fragment void ps_datm1_rta_correction(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	if (tex.read(p).a < (254.5f / 255.f))
+	if (cdenorm(tex.read(p).a, 128.0f) < 127.5f)
 		discard_fragment();
 }
 
 fragment void ps_datm0(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	if (tex.read(p).a > (127.5f / 255.f))
+	if (cdenorm(tex.read(p).a, 128.0f) >= 127.5f)
 		discard_fragment();
 }
 
 fragment float4 ps_primid_init_datm1(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	return tex.read(p).a < (127.5f / 255.f) ? -1 : FLT_MAX;
+	return cdenorm(tex.read(p).a, 255.f) < 127.5f ? -1 : FLT_MAX;
 }
 
 fragment float4 ps_primid_init_datm0(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	return tex.read(p).a > (127.5f / 255.f) ? -1 : FLT_MAX;
+	return cdenorm(tex.read(p).a, 255.f) >= 127.5f ? -1 : FLT_MAX;
 }
 
 fragment float4 ps_primid_rta_init_datm1(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	return tex.read(p).a < (254.5f / 255.f) ? -1 : FLT_MAX;
+	return cdenorm(tex.read(p).a, 128.f) < 127.5f ? -1 : FLT_MAX;
 }
 
 fragment float4 ps_primid_rta_init_datm0(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
-	return tex.read(p).a > (254.5f / 255.f) ? -1 : FLT_MAX;
+	return cdenorm(tex.read(p).a, 128.f) >= 127.5f ? -1 : FLT_MAX;
 }
 
 fragment float4 ps_rta_correction(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 in = res.sample(data.t);
-	return float4(in.rgb, in.a / (128.25f / 255.0f));
+	return float4(in.rgb, cdenorm(in.a, 255.f) / 128.f);
 }
 
 fragment float4 ps_rta_decorrection(ConvertShaderData data [[stage_in]], ConvertPSRes res)
 {
 	float4 in = res.sample(data.t);
-	return float4(in.rgb, in.a * (128.25f / 255.0f));
+	return float4(in.rgb, cdenorm(in.a, 128.f) / 255.f);
 }
 
 fragment float4 ps_colclip_init(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
 	float4 in = tex.read(p);
-	return float4(round(in.rgb * 255.f) / 65535.f, in.a);
+	return float4(cdenorm(in.rgb, 255.f) / 65535.f, in.a);
 }
 
 fragment float4 ps_colclip_resolve(float4 p [[position]], DirectReadTextureIn<float> tex)
 {
 	float4 in = tex.read(p);
-	return float4(float3(uint3(in.rgb * 65535.5f) & 255) / 255.f, in.a);
+	return float4(float3(uint3(cdenorm(in.rgb, 65535.f)) & 255) / 255.f, in.a);
 }
 
 fragment float4 ps_filter_transparency(ConvertShaderData data [[stage_in]], ConvertPSRes res)
@@ -198,7 +198,7 @@ fragment float4 ps_downsample_copy(ConvertShaderData data [[stage_in]],
 
 static float rgba8_to_depth32(half4 unorm)
 {
-	return float(as_type<uint>(uchar4(unorm * 255.5h))) * 0x1p-32f;
+	return float(as_type<uint>(uchar4(cdenorm(unorm, 255.h)))) * 0x1p-32f;
 }
 
 static float rgba8_to_depth24(half4 unorm)
@@ -208,12 +208,12 @@ static float rgba8_to_depth24(half4 unorm)
 
 static float rgba8_to_depth16(half4 unorm)
 {
-	return float(as_type<ushort>(uchar2(unorm.rg * 255.5h))) * 0x1p-32f;
+	return float(as_type<ushort>(uchar2(cdenorm(unorm.rg, 255.h)))) * 0x1p-32f;
 }
 
 static float rgb5a1_to_depth16(half4 unorm)
 {
-	uint4 cu = uint4(unorm * 255.5h);
+	uint4 cu = uint4(cdenorm(unorm, 255.h));
 	uint out = (cu.x >> 3) | ((cu.y << 2) & 0x03e0) | ((cu.z << 7) & 0x7c00) | ((cu.w << 8) & 0x8000);
 	return float(out) * 0x1p-32f;
 }

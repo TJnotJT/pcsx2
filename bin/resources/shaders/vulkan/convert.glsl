@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#define CDENORM(x, factor) trunc((x) * (factor) + 0.5f)
+#define CNORM(x, factor) (trunc((x) + 0.5f) / (factor))
+#define ZDENORM(z) floor((z) * exp2(32.0f))
+#define ZNORM(z) ((z) * exp2(-32.0f))
+
 #ifdef VERTEX_SHADER
 
 layout(location = 0) in vec4 a_pos;
@@ -55,19 +60,19 @@ vec4 sample_c(vec2 uv)
 
 uint rgba8_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & 0xFFu;
+	uvec4 i = uvec4(CDENORM(c, 255.0f)) & 0xFFu;
 	return i.r | (i.g << 8) | (i.b << 16) | (i.a << 24);
 }
 
 uint rgb5a1_to_uint(vec4 c)
 {
-	uvec4 i = uvec4(c * 255.5f) & uvec4(0xF8u, 0xF8u, 0xF8u, 0x80u);
+	uvec4 i = uvec4(CDENORM(c, 255.0f)) & uvec4(0xF8u, 0xF8u, 0xF8u, 0x80u);
 	return (i.r >> 3) | (i.g << 2) | (i.b << 7) | (i.a << 8);
 }
 
 uint depth_to_uint(float d)
 {
-	return uint(d * exp2(32.0f));
+	return uint(ZDENORM(d));
 }
 
 vec4 uint_to_rgba8(uint i)
@@ -82,7 +87,7 @@ vec4 uint_to_rgb5a1(uint i)
 
 float uint_to_depth32(uint i)
 {
-	return float(i) * exp2(-32.0f);
+	return ZNORM(float(i));
 }
 
 float uint_to_depth24(uint i)
@@ -188,7 +193,7 @@ void ps_convert_rgb5a1_16bits()
 #ifdef ps_datm1
 void ps_datm1()
 {
-	if(sample_c(v_tex).a < (127.5f / 255.0f)) // >= 0x80 pass
+	if(CDENORM(sample_c(v_tex).a, 255.0f) < 127.5f) // >= 0x80 pass
 		discard;
 }
 #endif
@@ -196,7 +201,7 @@ void ps_datm1()
 #ifdef ps_datm0
 void ps_datm0()
 {
-	if((127.5f / 255.0f) < sample_c(v_tex).a) // < 0x80 pass (== 0x80 should not pass)
+	if(127.5f <= CDENORM(sample_c(v_tex).a, 255.0f)) // < 0x80 pass (== 0x80 should not pass)
 		discard;
 }
 #endif
@@ -204,7 +209,7 @@ void ps_datm0()
 #ifdef ps_datm1_rta_correction
 void ps_datm1_rta_correction()
 {
-	if(sample_c(v_tex).a < (254.5f / 255.0f)) // >= 0x80 pass
+	if(CDENORM(sample_c(v_tex).a, 128.0f) < 127.5f) // >= 0x80 pass
 		discard;
 }
 #endif
@@ -212,7 +217,7 @@ void ps_datm1_rta_correction()
 #ifdef ps_datm0_rta_correction
 void ps_datm0_rta_correction()
 {
-	if((254.5f / 255.0f) < sample_c(v_tex).a) // < 0x80 pass (== 0x80 should not pass)
+	if(127.5f < CDENORM(sample_c(v_tex).a, 128.0f)) // < 0x80 pass (== 0x80 should not pass)
 		discard;
 }
 #endif
@@ -221,7 +226,7 @@ void ps_datm0_rta_correction()
 void ps_rta_correction()
 {
 	vec4 value = sample_c(v_tex);
-	OUTPUT = vec4(value.rgb, value.a / (128.25f / 255.0f));
+	OUTPUT = vec4(value.rgb, CDENORM(value.a, 255.0f) / 128.0f);
 }
 #endif
 
@@ -229,7 +234,7 @@ void ps_rta_correction()
 void ps_rta_decorrection()
 {
 	vec4 value = sample_c(v_tex);
-	OUTPUT = vec4(value.rgb, value.a * (128.25f / 255.0f));
+	OUTPUT = vec4(value.rgb, CDENORM(value.a, 128.0f) / 255.0f);
 }
 #endif
 
@@ -237,7 +242,7 @@ void ps_rta_decorrection()
 void ps_colclip_init()
 {
 	vec4 value = sample_c(v_tex);
-	OUTPUT = vec4(roundEven(value.rgb * 255.0f) / 65535.0f, value.a);
+	OUTPUT = vec4(CDENORM(value.rgb, 255.0f) / 65535.0f, value.a);
 }
 #endif
 
@@ -245,7 +250,7 @@ void ps_colclip_init()
 void ps_colclip_resolve()
 {
 	vec4 value = sample_c(v_tex);
-	OUTPUT = vec4(vec3(uvec3(value.rgb * 65535.5f) & 255u) / 255.0f, value.a);
+	OUTPUT = vec4(vec3(uvec3(CDENORM(value.rgb, 65535.5f)) & 255u) / 255.0f, value.a);
 }
 #endif
 
@@ -446,7 +451,7 @@ void ps_convert_rgb5a1_8i()
 
 	vec4 pixel = texelFetch(samp0, ivec2(coord), 0);
 
-	uvec4 denorm_c = uvec4(pixel * 255.5f);
+	uvec4 denorm_c = uvec4(CDENORM(pixel, 255));
 	if ((pos.y & 2u) == 0u)
 	{
 		uint red = (denorm_c.r >> 3) & 0x1Fu;
@@ -631,19 +636,19 @@ void main()
 	o_col0 = vec4(0x7FFFFFFF);
 
 	#ifdef ps_primid_image_init_0
-		if((127.5f / 255.0f) < sample_c(v_tex).a) // < 0x80 pass (== 0x80 should not pass)
+		if(127.f <= CDENORM(sample_c(v_tex).a, 255.0f)) // < 0x80 pass (== 0x80 should not pass)
 			o_col0 = vec4(-1);
 	#endif
 	#ifdef ps_primid_image_init_1
-		if(sample_c(v_tex).a < (127.5f / 255.0f)) // >= 0x80 pass
+		if(CDENORM(sample_c(v_tex).a, 255.0f) < 127.5f) // >= 0x80 pass
 			o_col0 = vec4(-1);
 	#endif
 	#ifdef ps_primid_image_init_2
-		if((254.5f / 255.0f) < sample_c(v_tex).a) // < 0x80 pass (== 0x80 should not pass)
+		if(127.5f <= CDENORM(sample_c(v_tex).a, 128.0f)) // < 0x80 pass (== 0x80 should not pass)
 			o_col0 = vec4(-1);
 	#endif
 	#ifdef ps_primid_image_init_3
-		if(sample_c(v_tex).a < (254.5f / 255.0f)) // >= 0x80 pass
+		if(CDENORM(sample_c(v_tex).a, 128.0f) < 127.5f) // >= 0x80 pass
 			o_col0 = vec4(-1);
 	#endif
 }

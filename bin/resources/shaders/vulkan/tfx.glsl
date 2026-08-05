@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#define CDENORM(x, factor) trunc((x) * (factor) + 0.5f)
+#define CNORM(x, factor) (trunc((x) + 0.5f) / (factor))
+#define ZDENORM(z) floor((z) * exp2(32.0f))
+#define ZNORM(z) ((z) * exp2(-32.0f))
+
 //////////////////////////////////////////////////////////////////////
 // Vertex Shader
 //////////////////////////////////////////////////////////////////////
@@ -64,7 +69,7 @@ void main()
 
 	gl_Position = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
 	gl_Position.xy = gl_Position.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
-	gl_Position.z *= exp2(-32.0f);		// integer->float depth
+	gl_Position.z = ZNORM(gl_Position.z); // integer->float depth
 	gl_Position.y = -gl_Position.y;
 
 	#if VS_TME
@@ -162,7 +167,7 @@ ProcessedVertex load_vertex(uint index)
 	uint z = min(a_z, MaxDepth);
 	vtx.p = vec4(a_p, float(z), 1.0f) - vec4(0.05f, 0.05f, 0, 0);
 	vtx.p.xy = vtx.p.xy * vec2(VertexScale.x, -VertexScale.y) - vec2(VertexOffset.x, -VertexOffset.y);
-	vtx.p.z *= exp2(-32.0f);		// integer->float depth
+	vtx.p.z = ZNORM(vtx.p.z); // integer->float depth
 	vtx.p.y = -vtx.p.y;
 
 	#if VS_TME
@@ -1001,9 +1006,9 @@ uvec4 sample_4_index(vec4 uv)
 	// Denormalize value
 
 #if PS_RTA_SRC_CORRECTION
-	uvec4 i = uvec4(round(c * 128.25f));
+	uvec4 i = uvec4(CDENORM(c, 128.0f));
 #else
-	uvec4 i = uvec4(c * 255.5f);
+	uvec4 i = uvec4(CDENORM(c, 255.0f));
 #endif
 
 	#if PS_PAL_FMT == 1
@@ -1037,7 +1042,7 @@ uint fetch_raw_depth(ivec2 xy)
 #else
 	vec4 col = texelFetch(Texture, xy, 0);
 #endif
-	return uint(col.r * exp2(32.0f));
+	return uint(ZDENORM(col.r));
 }
 
 vec4 fetch_raw_color(ivec2 xy)
@@ -1119,7 +1124,7 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert msb based on the palette
-		t = texelFetch(Palette, ivec2((depth >> 8u) & 0xFFu, 0), 0) * 255.0f;
+		t = CDENORM(texelFetch(Palette, ivec2((depth >> 8u) & 0xFFu, 0), 0), 255.0f);
 	}
 	#elif (PS_URBAN_CHAOS_HLE == 1)
 	{
@@ -1133,7 +1138,7 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert lsb based on the palette
-		t = texelFetch(Palette, ivec2(depth & 0xFFu, 0), 0) * 255.0f;
+		t = CDENORM(texelFetch(Palette, ivec2(depth & 0xFFu, 0), 0), 255.0f);
 
 		// Msb is easier
 		float green = float(((depth >> 8u) & 0xFFu) * 36.0f);
@@ -1145,7 +1150,7 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 		// Based on ps_convert_depth32_rgba8 of convert
 
 		// Convert a vec32 depth texture into a RGBA color texture
-		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+		uint d = uint(ZDENORM(fetch_c(uv).r));
 		t = vec4(uvec4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24)));
 	}
 	#elif (PS_DEPTH_FMT == 2)
@@ -1153,27 +1158,27 @@ vec4 sample_depth(vec2 st, ivec2 pos)
 		// Based on ps_convert_depth16_rgb5a1 of convert
 
 		// Convert a vec32 (only 16 lsb) depth into a RGB5A1 color texture
-		uint d = uint(fetch_c(uv).r * exp2(32.0f));
+		uint d = uint(ZDENORM(fetch_c(uv).r));
 		t = vec4(uvec4((d & 0x1Fu), ((d >> 5) & 0x1Fu), ((d >> 10) & 0x1Fu), (d >> 15) & 0x01u)) * vec4(8.0f, 8.0f, 8.0f, 128.0f);
 	}
 	#elif (PS_DEPTH_FMT == 3)
 	{
 		// Convert a RGBA/RGB5A1 color texture into a RGBA/RGB5A1 color texture
-		t = fetch_c(uv) * 255.0f;
+		t = CDENORM(fetch_c(uv), 255.0f);
 	}
 	#endif
 
 	#if (PS_AEM_FMT == FMT_24)
 	{
-		t.a = ((PS_AEM == 0) || any(bvec3(t.rgb))) ? 255.0f * TA.x : 0.0f;
+		t.a = ((PS_AEM == 0) || any(bvec3(t.rgb))) ? CDENORM(TA.x, 255.0f) : 0.0f;
 	}
 	#elif (PS_AEM_FMT == FMT_16)
 	{
-		t.a = t.a >= 128.0f ? 255.0f * TA.y : ((PS_AEM == 0) || any(bvec3(t.rgb))) ? 255.0f * TA.x : 0.0f;
+		t.a = t.a >= 128.0f ? CDENORM(TA.y, 255.0f) : ((PS_AEM == 0) || any(bvec3(t.rgb))) ? CDENORM(TA.x, 255.0f) : 0.0f;
 	}
 	#elif PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE
 	{
-		t = trunc(sample_4p(uvec4(t.aaaa))[0] * 255.0f + 0.05f);
+		t = CDENORM(sample_4p(uvec4(t.aaaa))[0], 255.0f);
 	}
 	#endif
 
@@ -1195,7 +1200,7 @@ vec4 fetch_red(ivec2 xy)
 		rt = fetch_raw_color(xy);
 	#endif
 
-	return sample_p_norm(rt.r) * 255.0f;
+	return CDENORM(sample_p_norm(rt.r), 255.0f);
 }
 
 vec4 fetch_green(ivec2 xy)
@@ -1209,7 +1214,7 @@ vec4 fetch_green(ivec2 xy)
 		rt = fetch_raw_color(xy);
 	#endif
 
-	return sample_p_norm(rt.g) * 255.0f;
+	return CDENORM(sample_p_norm(rt.g), 255.0f);
 }
 
 vec4 fetch_blue(ivec2 xy)
@@ -1223,20 +1228,20 @@ vec4 fetch_blue(ivec2 xy)
 		rt = fetch_raw_color(xy);
 	#endif
 
-	return sample_p_norm(rt.b) * 255.0f;
+	return CDENORM(sample_p_norm(rt.b), 255.0f);
 }
 
 vec4 fetch_alpha(ivec2 xy)
 {
 	vec4 rt = fetch_raw_color(xy);
-	return sample_p_norm(rt.a) * 255.0f;
+	return CDENORM(sample_p_norm(rt.a), 255.0f);
 }
 
 vec4 fetch_rgb(ivec2 xy)
 {
 	vec4 rt = fetch_raw_color(xy);
 	vec4 c = vec4(sample_p_norm(rt.r).r, sample_p_norm(rt.g).g, sample_p_norm(rt.b).b, 1.0);
-	return c * 255.0f;
+	return CDENORM(c, 255.0f);
 }
 
 vec4 fetch_gXbY(ivec2 xy)
@@ -1246,7 +1251,7 @@ vec4 fetch_gXbY(ivec2 xy)
 		uint bg = (depth >> (8u + uint(ChannelShuffle.w))) & 0xFFu;
 		return vec4(bg);
 	#else
-		ivec4 rt = ivec4(fetch_raw_color(xy) * 255.0);
+		ivec4 rt = ivec4(CDENORM(fetch_raw_color(xy), 255.0f));
 		int green = (rt.g >> ChannelShuffle.w) & ChannelShuffle.z;
 		int blue = (rt.b << ChannelShuffle.y) & ChannelShuffle.x;
 		return vec4(float(green | blue));
@@ -1303,7 +1308,7 @@ vec4 sample_color(vec2 st)
 		#if (PS_AEM_FMT == FMT_24)
 			c[i].a = (PS_AEM == 0 || any(bvec3(c[i].rgb))) ? TA.x : 0.0f;
 		#elif (PS_AEM_FMT == FMT_16)
-			c[i].a = (c[i].a >= 0.5) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(c[i].rgb * 255.0f) & ivec3(0xF8)))) ? TA.x : 0.0f);
+			c[i].a = (c[i].a >= 0.5) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(CDENORM(c[i].rgb, 255.0f)) & ivec3(0xF8)))) ? TA.x : 0.0f);
 		#endif
 	}
 
@@ -1317,9 +1322,14 @@ vec4 sample_color(vec2 st)
 	}
 	#endif
 #if PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION
-	t.a = t.a * (128.5f / 255.0f);
+	t.a = CDENORM(t.a, 128.0f);
+#else
+	t.a = CDENORM(t.a, 255.0f);
 #endif
-	return trunc(t * 255.0f + 0.05f);
+
+	t.rgb = CDENORM(t.rgb, 255.0f);
+
+	return t;
 }
 
 #endif // NEEDS_TEX
@@ -1385,7 +1395,7 @@ bool atst(vec4 C)
 vec4 fog(vec4 c, float f)
 {
 	#if PS_FOG
-		c.rgb = trunc(mix(FogColor, c.rgb, (f * 255.0f) / 256.0f));
+		c.rgb = trunc(mix(FogColor, c.rgb, CDENORM(f, 255.0f) / 256.0f));
 	#endif
 
 	return c;
@@ -1435,7 +1445,7 @@ vec4 ps_color()
 			T.a = float(denorm_c_before.g & 0x80u);
 		#endif
 
-		T.a = ((T.a >= 127.5f) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(T.rgb) & ivec3(0xF8)))) ? TA.x : 0.0f)) * 255.0f;
+		T.a = CDENORM(((T.a >= 127.5f) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(T.rgb) & ivec3(0xF8)))) ? TA.x : 0.0f)), 255.0f);
 	#endif
 
 	vec4 C = tfx(T, vsIn.c);
@@ -1448,10 +1458,11 @@ vec4 ps_color()
 void ps_fbmask(inout vec4 C)
 {
 	#if PS_FBMASK
+		vec4 RT = sample_from_rt();
 		#if PS_COLCLIP_HW == 1
-			vec4 RT = trunc(sample_from_rt() * 65535.0f);
+			RT = vec4(CDENORM(RT.rgb, 65535.0f), CDENORM(RT.a, 255.0f));
 		#else
-			vec4 RT = trunc(sample_from_rt() * 255.0f + 0.1f);
+			RT = CDENORM(RT, 255.0f);
 		#endif
 		C = vec4((uvec4(C) & ~FbMask) | (uvec4(RT) & FbMask));
 	#endif
@@ -1551,9 +1562,9 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 		#endif
 
 		#if PS_RTA_CORRECTION
-			float Ad = trunc(RT.a * 128.0f + 0.1f) / 128.0f;
+			float Ad = CDENORM(RT.a, 128.0f) / 128.0f;
 		#else
-			float Ad = trunc(RT.a * 255.0f + 0.1f) / 128.0f;
+			float Ad = CDENORM(RT.a, 255.0f) / 128.0f;
 		#endif
 
 		#if PS_SHUFFLE && PS_FEEDBACK_LOOP_IS_NEEDED_RT
@@ -1573,9 +1584,9 @@ void ps_blend(inout vec4 Color, inout vec4 As_rgba)
 
 			// Let the compiler do its jobs !
 			#if PS_COLCLIP_HW == 1
-			vec3 Cd = trunc(RT.rgb * 65535.0f);
+			vec3 Cd = CDENORM(RT.rgb, 65535.0f);
 			#else
-			vec3 Cd = trunc(RT.rgb * 255.0f + 0.1f);
+			vec3 Cd = CDENORM(RT.rgb, 255.0f);
 			#endif
 			vec3 Cs = Color.rgb;
 
@@ -1730,7 +1741,7 @@ void main()
 
 	// Must floor before depth testing.
 #if PS_ZFLOOR
-	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
+	input_z = ZNORM(ZDENORM(input_z));
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH
@@ -1767,25 +1778,17 @@ void main()
 
 #if PS_WRITE_RG == 1
 	// Pseudo 16 bits access.
-	float rt_a = sample_from_rt().g;
+	float rt_a = CDENORM(sample_from_rt().g, PS_RTA_CORRECTION != 0 ? 128.0f : 255.0f);
 #else
-	float rt_a = sample_from_rt().a;
+	float rt_a = CDENORM(sample_from_rt().a, PS_RTA_CORRECTION != 0 ? 128.0f : 255.0f);
 #endif
 
 #if (PS_DATE & 3) == 1
 	// DATM == 0: Pixel with alpha equal to 1 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = (254.5f / 255.0f) < rt_a;
-	#else
-		bool bad = (127.5f / 255.0f) < rt_a;
-	#endif
+	bool bad = 127.5f <= rt_a;
 #elif (PS_DATE & 3) == 2
 	// DATM == 1: Pixel with alpha equal to 0 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = rt_a < (254.5f / 255.0f);
-	#else
-		bool bad = rt_a < (127.5f / 255.0f);
-	#endif
+	bool bad = rt_a < 127.5f;
 #endif
 
 	if (bad) {
@@ -1815,9 +1818,9 @@ void main()
 	#endif
 	#if PS_ABE
 		if (floor(C.a) == 128.0f) // The coverage is only used if the fragment alpha is 128.
-			C.a = 128.0f * cov;
+			C.a = CDENORM(cov, 128.0f);
 	#else
-		C.a = 128.0f * cov;
+		C.a = CDENORM(cov, 128.0f);
 	#endif
 #elif PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
@@ -1834,14 +1837,14 @@ void main()
 
 #if SW_AD_TO_HW
 	#if PS_RTA_CORRECTION
-		vec4 RT = trunc(sample_from_rt() * 128.0f + 0.1f);
+		vec4 RT = CDENORM(sample_from_rt(), 128.0f);
 	#else
-		vec4 RT = trunc(sample_from_rt() * 255.0f + 0.1f);
+		vec4 RT = CDENORM(sample_from_rt(), 255.0f);
 	#endif
 
-	vec4 alpha_blend = vec4(RT.a / 128.0f);
+	vec4 alpha_blend = vec4(CNORM(RT.a, 128.0f));
 #else
-	vec4 alpha_blend = vec4(C.a / 128.0f);
+	vec4 alpha_blend = vec4(CNORM(C.a, 128.0f));
 #endif
 
 	// Correct the ALPHA value based on the output format
@@ -1924,14 +1927,14 @@ void main()
 	// Output color scaling
 	#if !PS_NO_COLOR
 		#if PS_RTA_CORRECTION
-			o_col0.a = C.a / 128.0f;
+			o_col0.a = CNORM(C.a, 128.0f);
 		#else
-			o_col0.a = C.a / 255.0f;
+			o_col0.a = CNORM(C.a, 255.0f);
 		#endif
 		#if PS_COLCLIP_HW == 1
-			o_col0.rgb = vec3(C.rgb / 65535.0f);
+			o_col0.rgb = CNORM(C.rgb, 65535.0f);
 		#else
-			o_col0.rgb = C.rgb / 255.0f;
+			o_col0.rgb = CNORM(C.rgb, 255.0f);
 		#endif
 		#if !PS_NO_COLOR1
 			o_col1 = alpha_blend;

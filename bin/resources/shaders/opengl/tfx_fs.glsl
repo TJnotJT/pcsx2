@@ -3,6 +3,11 @@
 
 //#version 420 // Keep it for text editor detection
 
+#define CDENORM(x, factor) trunc((x) * (factor) + 0.5f)
+#define CNORM(x, factor) (trunc((x) + 0.5f) / (factor))
+#define ZDENORM(z) floor((z) * exp2(32.0f))
+#define ZNORM(z) ((z) * exp2(-32.0f))
+
 #define FMT_32 0
 #define FMT_24 1
 #define FMT_16 2
@@ -389,7 +394,7 @@ vec4 sample_p(uint idx)
 
 vec4 sample_p_norm(float u)
 {
-	return sample_p(uint(u * 255.5f));
+	return sample_p(uint(CDENORM(u, 255.0f)));
 }
 
 vec4 clamp_wrap_uv(vec4 uv)
@@ -490,9 +495,9 @@ uvec4 sample_4_index(vec4 uv)
 	c.w = sample_c(uv.zw).a;
 
 #if PS_RTA_SRC_CORRECTION
-	uvec4 i = uvec4(round(c * 128.25f)); // Denormalize value
+	uvec4 i = uvec4(CDENORM(c, 128.0f)); // Denormalize value
 #else
-	uvec4 i = uvec4(c * 255.5f); // Denormalize value
+	uvec4 i = uvec4(CDENORM(c, 255.0f)); // Denormalize value
 #endif
 
 #if PS_PAL_FMT == 1
@@ -522,12 +527,10 @@ mat4 sample_4p(uvec4 u)
 
 uint fetch_raw_depth()
 {
-	float multiplier = exp2(32.0f);
-
 #if PS_TEX_IS_FB == 1
-	return uint(sample_from_rt().r * multiplier);
+	return uint(ZDENORM(sample_from_rt().r));
 #else
-	return uint(texelFetch(TextureSampler, ivec2(gl_FragCoord.xy + ChannelShuffleOffset), 0).r * multiplier);
+	return uint(ZDENORM(texelFetch(TextureSampler, ivec2(gl_FragCoord.xy + ChannelShuffleOffset), 0).r));
 #endif
 }
 
@@ -603,7 +606,7 @@ vec4 sample_depth(vec2 st)
 	uint depth = fetch_raw_depth();
 
 	// Convert msb based on the palette
-	t = texelFetch(PaletteSampler, ivec2((depth >> 8u) & 0xFFu, 0), 0) * 255.0f;
+	t = CDENORM(texelFetch(PaletteSampler, ivec2((depth >> 8u) & 0xFFu, 0), 0), 255.0f);
 
 #elif PS_URBAN_CHAOS_HLE == 1
 	// Depth buffer is read as a RGB5A1 texture. The game try to extract the green channel.
@@ -616,7 +619,7 @@ vec4 sample_depth(vec2 st)
 	uint depth = fetch_raw_depth();
 
 	// Convert lsb based on the palette
-	t = texelFetch(PaletteSampler, ivec2((depth & 0xFFu), 0), 0) * 255.0f;
+	t = CDENORM(texelFetch(PaletteSampler, ivec2((depth & 0xFFu), 0), 0), 255.0f);
 
 	// Msb is easier
 	float green = float((depth >> 8u) & 0xFFu) * 36.0f;
@@ -628,18 +631,18 @@ vec4 sample_depth(vec2 st)
 #elif PS_DEPTH_FMT == 1
 	// Based on ps_convert_depth32_rgba8 of convert
 	// Convert a GL_FLOAT32 depth texture into a RGBA color texture
-	uint d = uint(fetch_c(uv).r * exp2(32.0f));
+	uint d = uint(ZDENORM(fetch_c(uv).r));
 	t = vec4(uvec4((d & 0xFFu), ((d >> 8) & 0xFFu), ((d >> 16) & 0xFFu), (d >> 24)));
 
 #elif PS_DEPTH_FMT == 2
 	// Based on ps_convert_depth16_rgb5a1 of convert
 	// Convert a GL_FLOAT32 (only 16 lsb) depth into a RGB5A1 color texture
-	uint d = uint(fetch_c(uv).r * exp2(32.0f));
+	uint d = uint(ZDENORM(fetch_c(uv).r));
 	t = vec4(uvec4((d & 0x1Fu), ((d >> 5) & 0x1Fu), ((d >> 10) & 0x1Fu), (d >> 15) & 0x01u)) * vec4(8.0f, 8.0f, 8.0f, 128.0f);
 
 #elif PS_DEPTH_FMT == 3
 	// Convert a RGBA/RGB5A1 color texture into a RGBA/RGB5A1 color texture
-	t = fetch_c(uv) * 255.0f;
+	t = CDENORM(fetch_c(uv), 255.0f);
 
 #endif
 
@@ -649,7 +652,7 @@ vec4 sample_depth(vec2 st)
 #elif (PS_AEM_FMT == FMT_16)
 	t.a = t.a >= 128.0f ? 255.0f * TA.y : ( (PS_AEM == 0) || any(bvec3(t.rgb)) ) ? 255.0f * TA.x : 0.0f;
 #elif PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE
-	t = trunc(sample_4p(uvec4(t.aaaa))[0] * 255.0f + 0.05f);
+	t = CDENORM(sample_4p(uvec4(t.aaaa))[0], 255.0f);
 #endif
 
 	return t;
@@ -666,7 +669,7 @@ vec4 fetch_red()
 #else
 	vec4 rt = fetch_raw_color();
 #endif
-	return sample_p_norm(rt.r) * 255.0f;
+	return CDENORM(sample_p_norm(rt.r), 255.0f);
 }
 
 vec4 fetch_green()
@@ -677,7 +680,7 @@ vec4 fetch_green()
 #else
 	vec4 rt = fetch_raw_color();
 #endif
-	return sample_p_norm(rt.g) * 255.0f;
+	return CDENORM(sample_p_norm(rt.g), 255.0f);
 }
 
 vec4 fetch_blue()
@@ -688,20 +691,20 @@ vec4 fetch_blue()
 #else
 	vec4 rt = fetch_raw_color();
 #endif
-	return sample_p_norm(rt.b) * 255.0f;
+	return CDENORM(sample_p_norm(rt.b), 255.0f);
 }
 
 vec4 fetch_alpha()
 {
 	vec4 rt = fetch_raw_color();
-	return sample_p_norm(rt.a) * 255.0f;
+	return CDENORM(sample_p_norm(rt.a), 255.0f);
 }
 
 vec4 fetch_rgb()
 {
 	vec4 rt = fetch_raw_color();
 	vec4 c = vec4(sample_p_norm(rt.r).r, sample_p_norm(rt.g).g, sample_p_norm(rt.b).b, 1.0f);
-	return c * 255.0f;
+	return CDENORM(c, 255.0f);
 }
 
 vec4 fetch_gXbY()
@@ -711,7 +714,7 @@ vec4 fetch_gXbY()
 	uint bg = (depth >> (8u + uint(ChannelShuffle.w))) & 0xFFu;
 	return vec4(bg);
 #else
-	ivec4 rt = ivec4(fetch_raw_color() * 255.0f);
+	ivec4 rt = ivec4(CDENORM(fetch_raw_color(), 255.0f));
 	int green = (rt.g >> ChannelShuffle.w) & ChannelShuffle.z;
 	int blue  = (rt.b << ChannelShuffle.y) & ChannelShuffle.x;
 	return vec4(green | blue);
@@ -783,7 +786,7 @@ vec4 sample_color(vec2 st)
 		c[i].a = ( (PS_AEM == 0) || any(bvec3(c[i].rgb))  ) ? TA.x : 0.0f;
 		//c[i].a = ( (PS_AEM == 0) || (sum > 0.0f) ) ? TA.x : 0.0f;
 #elif (PS_AEM_FMT == FMT_16)
-		c[i].a = c[i].a >= 0.5 ? TA.y : ( (PS_AEM == 0) || any(bvec3(ivec3(c[i].rgb * 255.0f) & ivec3(0xF8))) ) ? TA.x : 0.0f;
+		c[i].a = c[i].a >= 0.5 ? TA.y : ( (PS_AEM == 0) || any(bvec3(ivec3(CDENORM(c[i].rgb, 255.0f)) & ivec3(0xF8))) ) ? TA.x : 0.0f;
 		//c[i].a = c[i].a >= 0.5 ? TA.y : ( (PS_AEM == 0) || (sum > 0.0f) ) ? TA.x : 0.0f;
 #endif
 	}
@@ -801,7 +804,7 @@ vec4 sample_color(vec2 st)
 	// The 0.05f helps to fix the overbloom of sotc
 	// I think the issue is related to the rounding of texture coodinate. The linear (from fixed unit)
 	// interpolation could be slightly below the correct one.
-	return trunc(t * 255.0f + 0.05f);
+	return trunc(CDENORM(t, 255.0f));
 }
 
 #endif // NEEDS_TEX
@@ -867,7 +870,7 @@ bool atst(vec4 C)
 void fog(inout vec4 C, float f)
 {
 #if PS_FOG != 0
-	C.rgb = trunc(mix(FogColor, C.rgb, (f * 255.0f) / 256.0f));
+	C.rgb = trunc(mix(FogColor, C.rgb, CDENORM(f, 255.0f) / 256.0f));
 #endif
 }
 
@@ -918,7 +921,7 @@ vec4 ps_color()
 			T.a = float(denorm_c_before.g & 0x80u);
 		#endif
 
-		T.a = ((T.a >= 127.5f) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(T.rgb) & ivec3(0xF8)))) ? TA.x : 0.0f)) * 255.0f;
+		T.a = CDENORM(((T.a >= 127.5f) ? TA.y : ((PS_AEM == 0 || any(bvec3(ivec3(T.rgb) & ivec3(0xF8)))) ? TA.x : 0.0f)), 255.0f);
 	#endif
 
 	vec4 C = tfx(T, PSin.c);
@@ -932,11 +935,13 @@ void ps_fbmask(inout vec4 C)
 {
 	// FIXME do I need special case for 16 bits
 #if PS_FBMASK
+	vec4 RT = sample_from_rt();
 	#if PS_COLCLIP_HW == 1
-		vec4 RT = trunc(sample_from_rt() * 65535.0f);
+		RT.rgb = CDENORM(RT.rgb, 65535.0f);
 	#else
-		vec4 RT = trunc(sample_from_rt() * 255.0f + 0.1f);
+		RT.rgb = CDENORM(RT.rgb, 255.0f);
 	#endif
+	RT.a = CDENORM(RT.a, 255.0f);
 	C = vec4((uvec4(C) & ~FbMask) | (uvec4(RT) & FbMask));
 #endif
 }
@@ -1032,9 +1037,9 @@ float As = As_rgba.a;
 #endif
 
 	#if PS_RTA_CORRECTION
-		float Ad = trunc(RT.a * 128.0f + 0.1f) / 128.0f;
+		float Ad = CDENORM(RT.a, 128.0f) / 128.0f;
 	#else
-		float Ad = trunc(RT.a * 255.0f + 0.1f) / 128.0f;
+		float Ad = CDENORM(RT.a, 255.0f) / 128.0f;
 	#endif
 
 	#if PS_SHUFFLE && SW_BLEND_NEEDS_RT
@@ -1054,9 +1059,9 @@ float As = As_rgba.a;
 
 	// Let the compiler do its jobs !
 	#if PS_COLCLIP_HW == 1
-		vec3 Cd = trunc(RT.rgb * 65535.0f);
+		vec3 Cd = CDENORM(RT.rgb, 65535.0f);
 	#else
-		vec3 Cd = trunc(RT.rgb * 255.0f + 0.1f);
+		vec3 Cd = CDENORM(RT.rgb, 255.0f);
 	#endif
 	vec3 Cs = Color.rgb;
 
@@ -1194,7 +1199,7 @@ void ps_main()
 
 	// Must floor before depth testing.
 #if PS_ZFLOOR
-	input_z = floor(input_z * exp2(32.0f)) * exp2(-32.0f);
+	input_z = ZNORM(ZDENORM(input_z));
 #endif
 
 #if PS_ZTST == ZTST_GEQUAL
@@ -1215,25 +1220,17 @@ void ps_main()
 
 #if PS_WRITE_RG == 1
 	// Pseudo 16 bits access.
-	float rt_a = sample_from_rt().g;
+	float rt_a = CDENORM(sample_from_rt().g, PS_RTA_CORRECTION != 0 ? 128.0f : 255.0f);
 #else
-	float rt_a = sample_from_rt().a;
+	float rt_a = CDENORM(sample_from_rt().a, PS_RTA_CORRECTION != 0 ? 128.0f : 255.0f);
 #endif
 
 #if (PS_DATE & 3) == 1
 	// DATM == 0: Pixel with alpha equal to 1 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = (254.5f / 255.0f) < rt_a;
-	#else
-		bool bad = (127.5f / 255.0f) < rt_a;
-	#endif
+	bool bad = 127.5f <= rt_a;
 #elif (PS_DATE & 3) == 2
 	// DATM == 1: Pixel with alpha equal to 0 will failed
-	#if PS_RTA_CORRECTION
-		bool bad = rt_a < (254.5f / 255.0f);
-	#else
-		bool bad = rt_a < (127.5f / 255.0f);
-	#endif
+	bool bad = rt_a < 127.5f;
 #endif
 
 	if (bad) {
@@ -1263,9 +1260,9 @@ void ps_main()
 	#endif
 	#if PS_ABE
 		if (floor(C.a) == 128.0f) // The coverage is only used if the fragment alpha is 128.
-			C.a = 128.0f * cov;
+			C.a = CDENORM(cov, 128.0f);
 	#else
-		C.a = 128.0f * cov;
+		C.a = CDENORM(cov, 128.0f);
 	#endif
 #elif PS_FIXED_ONE_A
 	// AA (Fixed one) will output a coverage of 1.0 as alpha
@@ -1281,14 +1278,14 @@ void ps_main()
 
 #if SW_AD_TO_HW
 	#if PS_RTA_CORRECTION
-		vec4 RT = trunc(sample_from_rt() * 128.0f + 0.1f);
+		vec4 RT = CDENORM(sample_from_rt(), 128.0f);
 	#else
-		vec4 RT = trunc(sample_from_rt() * 255.0f + 0.1f);
+		vec4 RT = CDENORM(sample_from_rt(), 255.0f);
 	#endif
 
-	vec4 alpha_blend = vec4(RT.a / 128.0f);
+	vec4 alpha_blend = vec4(CNORM(RT.a, 128.0f));
 #else
-	vec4 alpha_blend = vec4(C.a / 128.0f);
+	vec4 alpha_blend = vec4(CNORM(C.a, 128.0f));
 #endif
 
 	// Correct the ALPHA value based on the output format
@@ -1337,7 +1334,7 @@ void ps_main()
 	// Copy of a 16bit source in to this target
 	#elif PS_READ16_SRC
 		uvec4 denorm_c = uvec4(C);
-		uvec2 denorm_TA = uvec2(vec2(TA.xy) * 255.0f + 0.5f);
+		uvec2 denorm_TA = uvec2(CDENORM(vec2(TA.xy), 255.0f));
 
 		C.rb = vec2(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7u) << 5)));
 		C.ga = vec2(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80u)));
@@ -1369,14 +1366,14 @@ void ps_main()
 
 #if !PS_NO_COLOR
 	#if PS_RTA_CORRECTION
-		C.a = C.a / 128.0f;
+		C.a = CNORM(C.a, 128.0f);
 	#else
-		C.a = C.a / 255.0f;
+		C.a = CNORM(C.a, 255.0f);
 	#endif
 	#if PS_COLCLIP_HW == 1
-		C.rgb = vec3(C.rgb / 65535.0f);
+		C.rgb = CNORM(C.rgb, 65535.0f);
 	#else
-		C.rgb = C.rgb / 255.0f;
+		C.rgb = CNORM(C.rgb, 255.0f);
 	#endif
 
 	// Alpha test with feedback
