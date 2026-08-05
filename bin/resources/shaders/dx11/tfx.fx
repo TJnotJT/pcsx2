@@ -1108,7 +1108,7 @@ void ps_fbmask(inout float4 C, float2 pos_xy)
 	{
 		float4 RT = RtLoad(int2(pos_xy));
 		RT.rgb = CDENORM(RT.rgb, PS_COLCLIP_HW ? 65535.0f : 255.0f);
-		RT.a = CDENORM(RT.a, 255.0f);
+		RT.a = CDENORM(RT.a, PS_RTA_CORRECTION ? 128.0f : 255.0f);
 		C = (float4)(((uint4)C & ~FbMask) | ((uint4)RT & FbMask));
 	}
 }

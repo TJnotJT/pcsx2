@@ -936,12 +936,8 @@ void ps_fbmask(inout vec4 C)
 	// FIXME do I need special case for 16 bits
 #if PS_FBMASK
 	vec4 RT = sample_from_rt();
-	#if PS_COLCLIP_HW == 1
-		RT.rgb = CDENORM(RT.rgb, 65535.0f);
-	#else
-		RT.rgb = CDENORM(RT.rgb, 255.0f);
-	#endif
-	RT.a = CDENORM(RT.a, 255.0f);
+	RT.rgb = CDENORM(RT.rgb, PS_COLCLIP_HW != 0 ? 65535.0f : 255.0f);
+	RT.a = CDENORM(RT.a, PS_RTA_CORRECTION != 0 ? 128.0f : 255.0f);
 	C = vec4((uvec4(C) & ~FbMask) | (uvec4(RT) & FbMask));
 #endif
 }

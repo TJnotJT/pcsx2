@@ -1294,8 +1294,9 @@ struct PSMain
 	{
 		if (PS_FBMASK)
 		{
-			float multi = PS_COLCLIP_HW ? 65535.f : 255.f;
-			float4 RT = float4(cdenorm(RT.rgb, multi), cdenorm(RT.a, 255.f));
+			float4 RT = current_color;
+			RT.rgb = cdenorm(RT.rgb, PS_COLCLIP_HW ? 65535.f : 255.f);
+			RT.a = cdenorm(RT.a, PS_RTA_CORRECTION ? 128.f : 255.f);
 			C = float4((uint4(int4(C)) & (cb.fbmask ^ 0xff)) | (uint4(RT) & cb.fbmask));
 		}
 	}
