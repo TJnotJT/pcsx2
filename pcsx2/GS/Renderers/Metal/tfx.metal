@@ -18,7 +18,7 @@ constant bool FST                   [[function_constant(GSMTLConstantIndex_FST)]
 constant bool IIP                   [[function_constant(GSMTLConstantIndex_IIP)]];
 constant bool VS_ROUND_UV           [[function_constant(GSMTLConstantIndex_VS_ROUND_UV)]];
 constant uint VS_CLAMP_UV_RAW       [[function_constant(GSMTLConstantIndex_VS_CLAMP_UV)]];
-constant bool VS_ALIGN_UV_RAW       [[function_constant(GSMTLConstantIndex_VS_ALIGN_UV)]];
+constant uint VS_ALIGN_UV_RAW       [[function_constant(GSMTLConstantIndex_VS_ALIGN_UV)]];
 constant bool VS_POINT_SIZE         [[function_constant(GSMTLConstantIndex_VS_POINT_SIZE)]];
 constant uint VS_EXPAND_TYPE_RAW    [[function_constant(GSMTLConstantIndex_VS_EXPAND_TYPE)]];
 constant uint PS_AEM_FMT            [[function_constant(GSMTLConstantIndex_PS_AEM_FMT)]];
