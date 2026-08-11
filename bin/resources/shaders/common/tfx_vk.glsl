@@ -7,7 +7,7 @@
 #define HAS_FEEDBACK_LOOP_LAYOUT 1
 #extension GL_ARB_fragment_shader_interlock : require
 #extension GL_ARB_shader_image_load_store : require
-#define VERTEX_SHADER 1
+#define FRAGMENT_SHADER 1
 
 #define STATIC
 #define DFDX dFdx
@@ -20,6 +20,7 @@
 #define VGREATER(X, Y) greaterThan((X), (Y))
 #define VLESS(X, Y) lessThan((X), (Y))
 #define VNOTEQUAL(X, Y) notEqual((X), (Y))
+#define GPU_DISCARD discard
 
 #define FLOAT2 vec2
 #define FLOAT3 vec3
@@ -45,10 +46,10 @@
 
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
-#define EXP_MIN_32 exp2(-32.0f)
+#define EXP2_MIN_32 exp2(-32.0f)
+#define EXP2_POS_32 exp2(32.0f)
 
 #define PS_UV_MSK_FIX(CB) floatBitsToUint(CB.uv_min_max)
-#define PS_DISCARD discard
 #define PS_SAMPLE_TEX(STATE, POS) texture(Texture, (POS))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) textureLod(Texture, (POS), (LOD))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) PS_SAMPLE_TEX(STATE, (POS))
@@ -56,6 +57,7 @@
 #define PS_READ_TEX(STATE, POS, LOD) texelFetch(Texture, (POS), (LOD))
 #define PS_READ_TEX_DEPTH(STATE, POS, LOD) PS_READ_TEX(STATE, (POS), (LOD))
 #define PS_READ_PALETTE(STATE, IDX) texelFetch(Palette, (POS), (LOD))
+#define PS_READ_PRIMID(STATE, POS) texelFetch(PrimMinTexture, (POS), 0)
 #define PS_GET_TEX_DIMS(STATE) UINT2(textureSize(Texture, 0))
 #define PS_GET_TEX_DEPTH_DIMS(STATE) PS_GET_TEX_DIMS(STATE)
 
@@ -292,6 +294,63 @@ void main()
 
 #ifdef FRAGMENT_SHADER
 
+#ifndef PS_FST
+#define PS_FST 0
+#define PS_WMS 0
+#define PS_WMT 0
+#define PS_ADJS 0
+#define PS_ADJT 0
+#define PS_FMT FMT_32
+#define PS_AEM 0
+#define PS_TFX 0
+#define PS_TCC 1
+#define PS_ATST 1
+#define PS_AFAIL 0
+#define PS_FOG 0
+#define PS_BLEND_HW 0
+#define PS_A_MASKED 0
+#define PS_FBA 0
+#define PS_FBMASK 0
+#define PS_LTF 1
+#define PS_TCOFFSETHACK 0
+#define PS_SHUFFLE 0
+#define PS_SHUFFLE_SAME 0
+#define PS_PROCESS_BA 0
+#define PS_PROCESS_RG 0
+#define PS_SHUFFLE_ACROSS 0
+#define PS_WRITE_RG 0
+#define PS_READ16_SRC 0
+#define PS_DST_FMT 0
+#define PS_DEPTH_FMT 0
+#define PS_PAL_FMT 0
+#define PS_CHANNEL_FETCH 0
+#define PS_TALES_OF_ABYSS_HLE 0
+#define PS_URBAN_CHAOS_HLE 0
+#define PS_COLCLIP_HW 0
+#define PS_COLCLIP 0
+#define PS_BLEND_A 0
+#define PS_BLEND_B 0
+#define PS_BLEND_C 0
+#define PS_BLEND_D 0
+#define PS_FIXED_ONE_A 0
+#define PS_PABE 0
+#define PS_DITHER 0
+#define PS_DITHER_ADJUST 0
+#define PS_ZCLAMP 0
+#define PS_ZFLOOR 0
+#define PS_SCANMSK 0
+#define PS_AUTOMATIC_LOD 0
+#define PS_MANUAL_LOD 0
+#define PS_TEX_IS_FB 0
+#define PS_NO_COLOR 0
+#define PS_NO_COLOR1 0
+#define PS_DATE 0
+#define PS_ROV_COLOR 0
+#define PS_ROV_DEPTH 0
+#endif
+
+#define PS_TEX_IS_DEPTH 0
+
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
@@ -370,6 +429,8 @@ PSUniformsGeneric GetPSUniforms()
 	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
 
 	cb.line_cov_scale = LineCovScale;
+
+  return cb;
 }
 
 layout(location = 0) in VSOutput
@@ -394,6 +455,7 @@ PSInputGeneric GetPSInput()
   psinput.c = vsIn.c;
   psinput.inv_cov = vsIn.inv_cov;
   psinput.interior = vsIn.interior;
+  return psinput;
 }
 
 #if PS_RETURN_COLOR

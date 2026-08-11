@@ -14,6 +14,7 @@
 #define VGREATER(X, Y) ((X) > (Y))
 #define VLESS(X, Y) ((X) < (Y))
 #define VNOTEQUAL(X, Y) ((X) != (Y))
+#define GPU_DISCARD discard_fragment()
 
 #define FLOAT2 float2
 #define FLOAT3 float3
@@ -39,17 +40,18 @@
 
 #define PRIMID_MAX FLT_MAX
 #define VS_Y_FLIP -1.0f
-#define EXP_MIN_32 0x1-32p
+#define EXP_MIN_32 0x1p-32f
+#define EXP_POS_32 0x1p+32f
 
 #define PS_UV_MSK_FIX(CB) as_type<uint4>(CB.uv_min_max)
-#define PS_DISCARD discard_fragment()
 #define PS_SAMPLE_TEX(STATE, ...) STATE.tex.sample(STATE.sampler, __VA_ARGS__)
 #define PS_SAMPLE_TEX_LOD(STATE, ...) STATE.tex.sample(STATE.sampler, __VA_ARGS__)
 #define PS_SAMPLE_TEX_DEPTH(STATE, ...) STATE.tex_depth.sample(STATE.sampler, __VA_ARGS__)
 #define PS_SAMPLE_TEX_DEPTH_LOD(STATE, ...) STATE.tex_depth.sample(STATE.sampler, __VA_ARGS__)
 #define PS_READ_TEX(STATE, POS, LOD) STATE.tex.read((POS), (LOD)) 
 #define PS_READ_TEX_DEPTH(STATE, POS, LOD) STATE.tex_depth.read((POS), (LOD)) 
-#define PS_READ_PALETTE(STATE, IDX) STATE.palette.read(UINT2((IDX), 0))
+#define PS_READ_PALETTE(STATE, IDX) STATE.palette.read(UINT2(IDX), 0)
+#define PS_READ_PRIMID(STATE, POS) STATE.prim_id_tex.read(UINT2(POS), 0)
 #define PS_GET_TEX_DIMS(STATE) UINT2(STATE.tex.get_width(), STATE.tex.get_height())
 #define PS_GET_TEX_DEPTH_DIMS(STATE) UINT2(STATE.tex_depth.get_width(), STATE.tex_depth.get_height())
 
@@ -235,6 +237,7 @@ constant bool PS_INTERIOR = PS_AA1 == AA1::TRIANGLE_SW_Z;
 
 constant bool VS_FST = FST;
 constant bool VS_IIP = IIP;
+constant bool PS_IIP = IIP;
 
 struct MainVSIn
 {

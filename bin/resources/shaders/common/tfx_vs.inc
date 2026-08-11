@@ -31,7 +31,7 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
   vout.p.y *= VS_Y_FLIP;
 	vout.p.w = 1.0f;
-	vout.p.z = float(z) * EXP_MIN_32;
+	vout.p.z = float(z) * EXP2_MIN_32;
 
 	texture_coord(v, vout, cb);
 
