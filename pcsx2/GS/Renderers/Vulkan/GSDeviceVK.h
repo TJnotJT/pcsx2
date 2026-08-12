@@ -297,6 +297,8 @@ private:
 	bool m_gpu_pipeline_statistics_enabled = false;
 	bool m_gpu_pipeline_statistics_supported = false;
 
+	bool m_subgroup_size_control = false;
+
 	std::array<FrameResources, NUM_COMMAND_BUFFERS> m_frame_resources;
 	u64 m_next_fence_counter = 1;
 	u64 m_completed_fence_counter = 0;
@@ -309,6 +311,7 @@ private:
 	VkPhysicalDeviceFeatures m_device_features = {};
 	VkPhysicalDeviceProperties m_device_properties = {};
 	VkPhysicalDeviceDriverPropertiesKHR m_device_driver_properties = {};
+	VkPhysicalDeviceSubgroupSizeControlProperties m_device_properties_subgroup_size_control = {};
 	OptionalExtensions m_optional_extensions = {};
 
 	u32 m_max_framebuffer_width = 0;

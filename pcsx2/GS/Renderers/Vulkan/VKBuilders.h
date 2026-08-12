@@ -232,10 +232,19 @@ namespace Vulkan
 
 		VkPipeline Create(VkDevice device, VkPipelineCache pipeline_cache = VK_NULL_HANDLE, bool clear = true);
 
-		void SetShaderStage(VkShaderStageFlagBits stage, VkShaderModule module, const char* entry_point);
-		void SetVertexShader(VkShaderModule module) { SetShaderStage(VK_SHADER_STAGE_VERTEX_BIT, module, "main"); }
-		void SetGeometryShader(VkShaderModule module) { SetShaderStage(VK_SHADER_STAGE_GEOMETRY_BIT, module, "main"); }
-		void SetFragmentShader(VkShaderModule module) { SetShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, module, "main"); }
+		void SetShaderStage(VkShaderStageFlagBits stage, VkShaderModule module, const char* entry_point, int subgroup_size = 0);
+		void SetVertexShader(VkShaderModule module, int subgroup_size = 0)
+		{
+			SetShaderStage(VK_SHADER_STAGE_VERTEX_BIT, module, "main", subgroup_size);
+		}
+		void SetGeometryShader(VkShaderModule module, int subgroup_size = 0)
+		{
+			SetShaderStage(VK_SHADER_STAGE_GEOMETRY_BIT, module, "main", subgroup_size);
+		}
+		void SetFragmentShader(VkShaderModule module, int subgroup_size = 0)
+		{
+			SetShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, module, "main", subgroup_size);
+		}
 
 		void AddVertexBuffer(u32 binding, u32 stride, VkVertexInputRate input_rate = VK_VERTEX_INPUT_RATE_VERTEX);
 		void AddVertexAttribute(u32 location, u32 binding, VkFormat format, u32 offset);
@@ -287,6 +296,7 @@ namespace Vulkan
 	private:
 		VkGraphicsPipelineCreateInfo m_ci;
 		std::array<VkPipelineShaderStageCreateInfo, MAX_SHADER_STAGES> m_shader_stages;
+		std::array<VkPipelineShaderStageRequiredSubgroupSizeCreateInfo, MAX_SHADER_STAGES> m_subgroup_size_control;
 
 		VkPipelineVertexInputStateCreateInfo m_vertex_input_state;
 		std::array<VkVertexInputBindingDescription, MAX_VERTEX_BUFFERS> m_vertex_buffers;

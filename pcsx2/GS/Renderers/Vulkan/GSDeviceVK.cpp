@@ -419,7 +419,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 	m_optional_extensions.vk_khr_driver_properties = SupportsExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
 	m_optional_extensions.vk_khr_dynamic_rendering_local_read =
 		SupportsExtension(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME, false);
-
+	
 	if (m_optional_extensions.vk_swapchain_maintenance1)
 	{
 		const bool khr_swapchain_maintenance1 = SupportsExtension(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME, false);
@@ -454,6 +454,9 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 bool GSDeviceVK::SelectDeviceFeatures()
 {
 	VkPhysicalDeviceFeatures2 available_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	VkPhysicalDeviceVulkan13Features features13 =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+	Vulkan::AddPointerToChain(&available_features2, &features13);
 	vkGetPhysicalDeviceFeatures2(m_physical_device, &available_features2);
 	const VkPhysicalDeviceFeatures& available_features = available_features2.features;
 
@@ -466,6 +469,8 @@ bool GSDeviceVK::SelectDeviceFeatures()
 	m_device_features.geometryShader = available_features.geometryShader;
 	m_device_features.fragmentStoresAndAtomics = available_features.fragmentStoresAndAtomics;
 	m_device_features.pipelineStatisticsQuery = available_features.pipelineStatisticsQuery;
+
+	m_subgroup_size_control = features13.subgroupSizeControl;
 
 	return true;
 }
@@ -637,6 +642,7 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 
 	featuresVK13.dynamicRendering = VK_TRUE;
 	featuresVK13.synchronization2 = VK_TRUE;
+	featuresVK13.subgroupSizeControl = m_subgroup_size_control ? VK_TRUE : VK_FALSE;
 	Vulkan::AddPointerToChain(&device_info, &featuresVK13);
 	if (m_optional_extensions.vk_ext_provoking_vertex)
 	{
@@ -2642,8 +2648,12 @@ bool GSDeviceVK::CreateDeviceAndSwapChain()
 
 	// Read device physical memory properties, we need it for allocating buffers
 	VkPhysicalDeviceProperties2 properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	VkPhysicalDeviceSubgroupSizeControlProperties subgroup_size_control_properties =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES };
+	Vulkan::AddPointerToChain(&properties, &subgroup_size_control_properties);
 	vkGetPhysicalDeviceProperties2(m_physical_device, &properties);
 	m_device_properties = properties.properties;
+	m_device_properties_subgroup_size_control = subgroup_size_control_properties;
 
 	// Stores the GPU name
 	m_name = m_device_properties.deviceName;
@@ -2814,6 +2824,14 @@ bool GSDeviceVK::CheckFeatures()
 	                 m_device_features.fragmentStoresAndAtomics &&
 	                 has_rov_storage_flags &&
 	                 !m_features.framebuffer_fetch;
+
+
+	if (m_subgroup_size_control)
+		DevCon.WriteLn("Subgroup size control: supported (sizes %d to %d)",
+			m_device_properties_subgroup_size_control.minSubgroupSize,
+			m_device_properties_subgroup_size_control.maxSubgroupSize);
+	else
+		DevCon.WriteLn("Subgroup size control: not supported");
 
 	return true;
 }
@@ -5044,7 +5062,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 
 	// Shaders
 	gpb.SetVertexShader(vs);
-	gpb.SetFragmentShader(fs);
+	gpb.SetFragmentShader(fs, m_subgroup_size_control ? std::min(32u, m_device_properties_subgroup_size_control.maxSubgroupSize) : 0);
 
 	// IA
 	if (p.vs.expand == GSHWDrawConfig::VSExpand::None)

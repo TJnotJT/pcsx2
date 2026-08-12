@@ -627,7 +627,7 @@ VkPipeline Vulkan::GraphicsPipelineBuilder::Create(
 }
 
 void Vulkan::GraphicsPipelineBuilder::SetShaderStage(
-	VkShaderStageFlagBits stage, VkShaderModule module, const char* entry_point)
+	VkShaderStageFlagBits stage, VkShaderModule module, const char* entry_point, int subgroup_size)
 {
 	pxAssert(m_ci.stageCount < MAX_SHADER_STAGES);
 
@@ -648,6 +648,14 @@ void Vulkan::GraphicsPipelineBuilder::SetShaderStage(
 	s.stage = stage;
 	s.module = module;
 	s.pName = entry_point;
+
+	if (subgroup_size > 0)
+	{
+		m_subgroup_size_control[index] = {
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,
+			.requiredSubgroupSize = static_cast<u32>(subgroup_size) };
+		Vulkan::AddPointerToChain(&s, &m_subgroup_size_control[index]);
+	}
 }
 
 void Vulkan::GraphicsPipelineBuilder::AddVertexBuffer(
