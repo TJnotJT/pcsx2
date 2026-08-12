@@ -76,6 +76,7 @@ struct PSInputGeneric
 	FLOAT4 t;
 	FLOAT4 ti;
 	FLOAT4 c;
+	FLOAT4 fc;
 	float inv_cov;
 	uint interior;
 };
@@ -123,3 +124,17 @@ struct PSOutputGeneric
 	FLOAT4 c1;
 	float depth;
 };
+
+#ifndef __METAL_VERSION__
+FLOAT4 convert_depth32_rgba8(float value)
+{
+	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
+	return UINT_BITCAST_FLOAT4(val);
+}
+
+FLOAT4 convert_depth16_rgba8(float value)
+{
+	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
+	return FLOAT4(UINT4(val << 3, val >> 2, val >> 7, val >> 8) & UINT4(0xf8, 0xf8, 0xf8, 0x80));
+}
+#endif

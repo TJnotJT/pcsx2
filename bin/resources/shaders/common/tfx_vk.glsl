@@ -9,6 +9,30 @@
 #extension GL_ARB_shader_image_load_store : require
 #define FRAGMENT_SHADER 1
 
+#define FLOAT2 vec2
+#define FLOAT3 vec3
+#define FLOAT4 vec4
+#define FLOAT2x2 mat2x2
+#define FLOAT2x4 mat2x4
+#define FLOAT4x4 mat4x4
+#define UINT2 uvec2
+#define UINT3 uvec3
+#define UINT4 uvec4
+#define INT2 ivec2
+#define INT3 ivec3
+#define INT4 ivec4
+#define USHORT uint
+#define USHORT2 uvec2
+#define USHORT3 uvec3
+#define USHORT4 uvec4
+#define SHORT int
+#define SHORT2 ivec2
+#define SHORT3 ivec3
+#define SHORT4 ivec4
+#define BOOL2 bvec2
+#define BOOL3 bvec3
+#define BOOL4 bvec4
+
 #define STATIC
 #define DFDX dFdx
 #define DFDY dFdy
@@ -20,29 +44,18 @@
 #define VGREATER(X, Y) greaterThan((X), (Y))
 #define VLESS(X, Y) lessThan((X), (Y))
 #define VNOTEQUAL(X, Y) notEqual((X), (Y))
+#define RSQRT(X) inversesqrt(X)
 #define GPU_DISCARD discard
-
-#define FLOAT2 vec2
-#define FLOAT3 vec3
-#define FLOAT4 vec4
-#define FLOAT2x2 mat2x2
-#define FLOAT2x4 mat2x4
-#define FLOAT4x4 mat4x4
-#define UINT2 uvec2
-#define UINT3 uvec3
-#define UINT4 uvec4
-#define USHORT2 uvec2
-#define USHORT3 uvec3
-#define USHORT4 uvec4
-#define INT2 ivec2
-#define INT3 ivec3
-#define INT4 ivec4
+#define LEVEL(X) (X)
+#define SATURATE(X) clamp((X), 0.0f, 1.0f)
+#define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
+#define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 
 #define VERTICES_PARAM(NAME) uint NAME
 #define INDICES_PARAM(NAME) uint NAME
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define OUT_PARAM(TYPE, NAME) out TYPE NAME
-#define IN_OUT_VAR(TYPE, NAME) inout TYPE NAME
+#define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
@@ -50,14 +63,14 @@
 #define EXP2_POS_32 exp2(32.0f)
 
 #define PS_UV_MSK_FIX(CB) floatBitsToUint(CB.uv_min_max)
-#define PS_SAMPLE_TEX(STATE, POS) texture(Texture, (POS))
-#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) textureLod(Texture, (POS), (LOD))
+#define PS_SAMPLE_TEX(STATE, POS) texture(Texture, FLOAT2(POS))
+#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) textureLod(Texture, FLOAT2(POS), float(LOD))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) PS_SAMPLE_TEX(STATE, (POS))
 #define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD))
-#define PS_READ_TEX(STATE, POS, LOD) texelFetch(Texture, (POS), (LOD))
+#define PS_READ_TEX(STATE, POS, LOD) texelFetch(Texture, INT2(POS), int(LOD))
 #define PS_READ_TEX_DEPTH(STATE, POS, LOD) PS_READ_TEX(STATE, (POS), (LOD))
-#define PS_READ_PALETTE(STATE, IDX) texelFetch(Palette, (POS), (LOD))
-#define PS_READ_PRIMID(STATE, POS) texelFetch(PrimMinTexture, (POS), 0)
+#define PS_READ_PALETTE(STATE, POS) texelFetch(Palette, INT2(POS), 0)
+#define PS_READ_PRIMID(STATE, POS) texelFetch(PrimMinTexture, INT2(POS), 0)
 #define PS_GET_TEX_DIMS(STATE) UINT2(textureSize(Texture, 0))
 #define PS_GET_TEX_DEPTH_DIMS(STATE) PS_GET_TEX_DIMS(STATE)
 
@@ -347,19 +360,31 @@ void main()
 #define PS_DATE 0
 #define PS_ROV_COLOR 0
 #define PS_ROV_DEPTH 0
+#define PS_SW_ANISO 0
+#define PS_REGION_RECT 0
+#define PS_RTA_SRC_CORRECTION 0
+#define PS_AEM_FMT 0
+#define PS_CHANNEL 0
+#define PS_IIP 0
+#define PS_ROUND_INV 0
+#define PS_BLEND_MIX 0
+#define PS_RTA_CORRECTION 0
+#define PS_ZTST 0
+#define PS_AA1 0
+#define PS_ABE 0
 #endif
 
 #define PS_TEX_IS_DEPTH 0
 
-#define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
+#define SW_BLEND (PS_BLEND_A != 0 || PS_BLEND_B != 0 || PS_BLEND_D != 0)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
-#define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
+#define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED != FALSE)
 #define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 #define ZTST_NEEDS_DEPTH (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 #define AA1_NEEDS_DEPTH (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
 
-#define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB == 1 || AFAIL_NEEDS_RT || PS_FBMASK || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
+#define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB != FALSE || AFAIL_NEEDS_RT || PS_FBMASK != FALSE || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
 #define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
 #define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
 
@@ -370,6 +395,8 @@ void main()
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
 #define NEEDS_TEX (PS_TFX != 4)
+#define NEEDS_RT PS_FEEDBACK_LOOP_IS_NEEDED_RT
+#define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
 layout(std140, set = 0, binding = 1) uniform cb1
 {
@@ -453,6 +480,7 @@ PSInputGeneric GetPSInput()
   psinput.t = vsIn.t;
   psinput.ti = vsIn.ti;
   psinput.c = vsIn.c;
+  psinput.fc = vsIn.c;
   psinput.inv_cov = vsIn.inv_cov;
   psinput.interior = vsIn.interior;
   return psinput;
@@ -469,52 +497,25 @@ PSInputGeneric GetPSInput()
 	vec4 o_col0;
 #endif
 
-#if PS_ROV_COLOR
-	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
-	vec4 rov_rt_value;
-	vec4 sample_from_rt() { return rov_rt_value; }
-#endif
-
-#if PS_ROV_DEPTH
-	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-	float rov_depth_value;
-	float sample_from_depth() { return rov_depth_value; }
-#endif
-
-#if NEEDS_TEX
 layout(set = 1, binding = 0) uniform sampler2D Texture;
 layout(set = 1, binding = 1) uniform texture2D Palette;
-#endif
-
-#if PS_FEEDBACK_LOOP_IS_NEEDED_RT || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-	#if defined(DISABLE_TEXTURE_BARRIER) || defined(HAS_FEEDBACK_LOOP_LAYOUT)
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
-			layout(set = 1, binding = 2) uniform texture2D RtSampler;
-			vec4 sample_from_rt() { return texelFetch(RtSampler, ivec2(gl_FragCoord.xy), 0); }
-		#endif
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-			layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-			float sample_from_depth() { return texelFetch(DepthSampler, ivec2(gl_FragCoord.xy), 0).r; }
-		#endif
-	#else
-		// Must consider each case separately since the input attachment indices must be consecutive.
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
-			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-			float sample_from_depth() { return subpassLoad(DepthSampler).r; }
-		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
-			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-			vec4 sample_from_rt() { return subpassLoad(RtSampler); }
-		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
-			float sample_from_depth() { return subpassLoad(DepthSampler).r; }
-		#endif
-	#endif
-#endif
-
-#if PS_DATE > 0
 layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
+layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
+layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+
+#if USE_FEEDBACK_SAMPLER
+	layout(set = 1, binding = 2) uniform texture2D RtSampler;
+	layout(set = 1, binding = 4) uniform texture2D DepthSampler;
+#else
+	// Must consider each case separately since the input attachment indices must be consecutive.
+	#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+		layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
+	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
+		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
+	#endif
 #endif
 
 #if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
@@ -529,6 +530,32 @@ layout(pixel_interlock_ordered) in;
 layout(early_fragment_tests) in;
 #endif
 
+vec4 RtLoad(ivec2 xy)
+{
+	#if PS_ROV_COLOR
+		return imageLoad(RtImageRov, xy);
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT && USE_FEEDBACK_SAMPLER
+		return texelFetch(RtSampler, xy, 0);
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		return subpassLoad(RtSampler);
+	#else
+		return vec4(0.0f);
+	#endif
+}
+
+float DepthLoad(ivec2 xy)
+{
+	#if PS_ROV_COLOR
+		return imageLoad(DepthImageRov, xy).r;
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && USE_FEEDBACK_SAMPLER
+		return texelFetch(DepthSampler, xy, 0).r;
+	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		return subpassLoad(DepthSampler).r;
+	#else
+		return 0.0f;
+	#endif
+}
+
 #include "tfx_ps.inc"
 
 void main()
@@ -536,7 +563,7 @@ void main()
 	float input_z = gl_FragCoord.z;
 
   PSMain state;
-  state.in = GetPSInput();
+  state.psinput = GetPSInput();
   state.cb = GetPSUniforms();
   state.tex = 0;
   state.tex_depth = 0;
@@ -546,55 +573,32 @@ void main()
   state.color_discarded = false;
   state.depth_discarded = false;
 
-  uint2 coord = uint2(state.in.p.xy);
+  ivec2 coord = ivec2(state.psinput.p.xy);
 
   #if PS_ROV_COLOR || PS_ROV_DEPTH
     beginInvocationInterlockARB();
   #endif
 
-  // Initialize current depth value.
-  if (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH != 0)
-	{
-		if (PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
-			state.current_depth = imageLoad(DepthImageRov, coord).r;
-		else
-			state.current_depth = sample_from_depth();
-	}
-  else
-  {
-    state.current_depth = 0.0f;
-  }
+	state.current_depth = DepthLoad(coord);
 
-  // Initialize current RT color.
-	if (PS_FEEDBACK_LOOP_IS_NEEDED_RT != 0)
-	{
-		#if PS_ROV_COLOR
-      state.current_color = imageLoad(RtImageRov, coord);
-		#else
-      state.current_color = sample_from_rt();
-    #endif
-	}
-	else
-	{
-		state.current_color = 0;
-	}
+	state.current_color = RtLoad(coord);
 
-  PSOutputGeneric out = ps_main_impl(state);
+  PSOutputGeneric psout = ps_main_impl(state);
 	
 	// Writing back color (result already written to o_col0 for non-ROV)
 	#if PS_RETURN_COLOR_ROV
-		o_col0 = mix(o_col0, sample_from_rt(), equal(FbMask, uvec4(0xFFu))); // channel masking
+		psout.c0 = mix(psout.c0, state.current_color, equal(FbMask, uvec4(0xFFu))); // channel masking
 
 		if (!state.color_discarded)
-			imageStore(RtImageRov, ivec2(gl_FragCoord.xy), o_col0);
+			imageStore(RtImageRov, coord, psout.c0);
 	#endif
 	
 	// Writing back depth
 	#if PS_RETURN_DEPTH
-		gl_FragDepth = input_z;
+		gl_FragDepth = psout.depth;
 	#elif PS_RETURN_DEPTH_ROV
 		if (!state.depth_discarded)
-			imageStore(DepthImageRov, ivec2(gl_FragCoord.xy), vec4(input_z, 0, 0, 1.0f));
+			imageStore(DepthImageRov, coord, vec4(psout.depth, 0, 0, 1.0f));
 	#endif
 
 	#if PS_ROV_COLOR || PS_ROV_DEPTH

@@ -1,9 +1,19 @@
+FLOAT2 float2_bcast(float val)
+{
+  return FLOAT2(val, val);
+}
+
+FLOAT3 float3_bcast(float val)
+{
+  return FLOAT3(val, val, val);
+}
+
 FLOAT4 float4_bcast(float val)
 {
   return FLOAT4(val, val, val, val);
 }
 
-STATIC void dsicard_all(IN_OUT_VAR(PSMain, state))
+STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
 {
   if (PS_ROV_COLOR != FALSE || PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
     state.color_discarded = state.depth_discarded = true;
@@ -11,7 +21,7 @@ STATIC void dsicard_all(IN_OUT_VAR(PSMain, state))
     GPU_DISCARD;
 }
 
-STATIC void discard_color(IN_OUT_VAR(PSMain, state), OUT_PARAM(FLOAT4, color))
+STATIC void discard_color(IN_OUT_PARAM(PSMain, state), OUT_PARAM(FLOAT4, color))
 {
   if (PS_ROV_COLOR != FALSE)
     state.color_discarded = true;
@@ -19,7 +29,7 @@ STATIC void discard_color(IN_OUT_VAR(PSMain, state), OUT_PARAM(FLOAT4, color))
     color = state.current_color;
 }
 
-STATIC void discard_depth(IN_OUT_VAR(PSMain, state), OUT_PARAM(float, depth))
+STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), OUT_PARAM(float, depth))
 {
   if (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
     state.depth_discarded = true;
@@ -27,7 +37,7 @@ STATIC void discard_depth(IN_OUT_VAR(PSMain, state), OUT_PARAM(float, depth))
     depth = state.current_depth;
 }
 
-FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
+FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
 {
   if (PS_TEX_IS_DEPTH != FALSE)
     return FLOAT4(PS_SAMPLE_TEX_DEPTH_LOD(state, uv, lod));
@@ -43,7 +53,7 @@ FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
     return PS_SAMPLE_TEX(state, uv);
 }
 
-FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod = 0)
+FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod)
 {
   if (PS_TEX_IS_DEPTH != FALSE)
     return FLOAT4(PS_READ_TEX_DEPTH(state, pos, lod));
@@ -51,7 +61,12 @@ FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod = 0)
     return PS_READ_TEX(state, pos, lod);
 }
 
-uint2 get_tex_dims(IN_PARAM(PSMain, state))
+FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos)
+{
+  return read_tex(state, pos, 0);
+}
+
+UINT2 get_tex_dims(IN_PARAM(PSMain, state))
 {
   if (PS_TEX_IS_DEPTH != FALSE)
     return PS_GET_TEX_DEPTH_DIMS(state);
@@ -59,7 +74,7 @@ uint2 get_tex_dims(IN_PARAM(PSMain, state))
     return PS_GET_TEX_DIMS(state);
 }
 
-STATIC float manual_lod_impl(IN_PARAM(IN_PARAM(PSUniformsGeneric, cb), state), float uv_w)
+STATIC float manual_lod(IN_PARAM(PSMain, state), float uv_w)
 {
   // FIXME add LOD: K - ( LOG2(Q) * (1 << L))
   float K = state.cb.lod_params.x;
@@ -73,10 +88,10 @@ STATIC float manual_lod_impl(IN_PARAM(IN_PARAM(PSUniformsGeneric, cb), state), f
   return min(gs_lod, max_lod) - bias;
 }
 
-STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
+STATIC FLOAT4 sample_c_af(IN_OUT_PARAM(PSMain, state), FLOAT2 uv, float uv_w)
 {
   // HW sampler will reject bad UVs, match that here.
-  uv = any(isnan(uv) | isinf(uv)) ? FLOAT2(0.0f, 0.0f) : uv;
+  uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? FLOAT2(0.0f, 0.0f) : uv;
 
   // Large floating point values risk NaN/Inf values.
   // Above this value floats lose decimal precision, so seems a resonable limit for UVs.
@@ -97,7 +112,7 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
   float f = (dX.x * dY.y - dX.y * dY.x);
   bool d_par = f < 0.001f;
   bool d_per = dot(dX, dY) < 0.001f;
-  bool d_inf_nan = any(isinf(dX) | isinf(dY) | isnan(dX) | isnan(dY));
+  bool d_inf_nan = any(BOOL2(INT2(isinf(dX)) | INT2(isinf(dY)) | INT2(isnan(dX)) | INT2(isnan(dY))));
 
   if (!(d_zero || d_par || d_per || d_inf_nan))
   {
@@ -117,8 +132,8 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
     float sqrtA = sqrt(F * (t + p));
     float sqrtB = sqrt(F * (t - p));
 
-    float inv_sqrt_denom_plus  = rsqrt(denom_plus);
-    float inv_sqrt_denom_minus = rsqrt(denom_minus);
+    float inv_sqrt_denom_plus  = RSQRT(denom_plus);
+    float inv_sqrt_denom_minus = RSQRT(denom_minus);
 
     FLOAT2 new_dX = FLOAT2(
       sqrtA * inv_sqrt_denom_plus,
@@ -130,7 +145,7 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
       sqrtA * inv_sqrt_denom_minus
     );
 
-    d_inf_nan = any(isinf(new_dX) | isinf(new_dY) | isnan(new_dX) | isnan(new_dY));
+    d_inf_nan = any(BOOL2(INT2(isinf(new_dX)) | INT2(isinf(new_dY)) | INT2(isnan(new_dX)) | INT2(isnan(new_dY))));
     if (!d_inf_nan)
     {
       dX = new_dX;
@@ -173,12 +188,12 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
     aniso_line = aniso_line_dir * 0.5f * (1.0f / sz);
   }
 
-  float lod = PS_AUTOMATIC_LOD ? log2(length_lod) : PS_MANUAL_LOD ? manual_lod(uv_w) : 0.0f;
+  float lod = PS_AUTOMATIC_LOD != FALSE ? log2(length_lod) : PS_MANUAL_LOD != FALSE ? manual_lod(state, uv_w) : 0.0f;
 
   FLOAT4 colour;
   if (aniso_ratio == 1.0f)
   {
-    colour = sample_tex(state, uv, level(lod));
+    colour = sample_tex_lod(state, uv, LEVEL(lod));
   }
   else
   {
@@ -188,7 +203,7 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
     {
       FLOAT2 d = -aniso_line + (0.5f + i) * segment;
       FLOAT2 uv_sample = uv + d;
-      FLOAT4 sample_colour = sample_tex(state, uv_sample, level(lod));
+      FLOAT4 sample_colour = sample_tex_lod(state, uv_sample, LEVEL(lod));
       num += sample_colour;
     }
 
@@ -197,42 +212,42 @@ STATIC FLOAT4 sample_c_af(IN_OUT_VAR(PSMain, state), FLOAT2 uv, float uv_w)
   return colour;
 }
 
-static FLOAT4 sample_c(IN_PARAM(PSMain, state), FLOAT2 uv)
+STATIC FLOAT4 sample_c(IN_PARAM(PSMain, state), FLOAT2 uv)
 {
-  if (PS_TEX_IS_FB)
+  if (PS_TEX_IS_FB != 0)
     return state.current_color;
-  if (PS_REGION_RECT)
-    return read_tex(state, uint2(uv));
+  if (PS_REGION_RECT != 0)
+    return read_tex(state, UINT2(uv));
 
-  if (!PS_ADJS && !PS_ADJT)
+  if (PS_ADJS == FALSE && PS_ADJT == FALSE)
   {
     uv *= state.cb.st_scale;
   }
   else
   {
-    if (PS_ADJS)
+    if (PS_ADJS != FALSE)
       uv.x = (uv.x - state.cb.st_range.x) * state.cb.st_range.z;
     else
       uv.x = uv.x * state.cb.st_scale.x;
-    if (PS_ADJT)
+    if (PS_ADJT != FALSE)
       uv.y = (uv.y - state.cb.st_range.y) * state.cb.st_range.w;
     else
       uv.y = uv.y * state.cb.st_scale.y;
   }
 
   if (PS_SW_ANISO > 1)
-    return sample_c_af(uv, in.t.w);
-  else if (PS_AUTOMATIC_LOD)
-    return sample_tex(tex_sampler, uv);
-  else if (PS_MANUAL_LOD)
-    return sample_tex_lod(tex_sampler, uv, level(manual_lod(in.t.w)));
+    return sample_c_af(state, uv, state.psinput.t.w);
+  else if (PS_AUTOMATIC_LOD != FALSE)
+    return sample_tex(state, uv);
+  else if (PS_MANUAL_LOD != FALSE)
+    return sample_tex_lod(state, uv, LEVEL(manual_lod(state, state.psinput.t.w)));
   else
-    return sample_tex_lod(tex_sampler, uv, level(0));
+    return sample_tex_lod(state, uv, LEVEL(0));
 }
 
 FLOAT4 sample_p(IN_PARAM(PSMain, state), uint idx)
 {
-  return PS_READ_PALETTE(state, idx);
+  return PS_READ_PALETTE(state, UINT2(idx, 0));
 }
 
 FLOAT4 sample_p_norm(IN_PARAM(PSMain, state), float u)
@@ -246,13 +261,13 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
 
   if (PS_WMS == PS_WMT)
   {
-    if (PS_REGION_RECT && PS_WMS == 0)
+    if (PS_REGION_RECT != FALSE && PS_WMS == 0)
     {
       uv = fract(uv);
     }
-    else if (PS_REGION_RECT && PS_WMS == 1)
+    else if (PS_REGION_RECT != FALSE && PS_WMS == 1)
     {
-      uv = saturate(uv);
+      uv = SATURATE(uv);
     }
     else if (PS_WMS == 2)
     {
@@ -262,21 +277,22 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
     {
       // wrap negative uv coords to avoid an off by one error that shifted
       // textures. Fixes Xenosaga's hair issue.
-      if (!FST)
+      if (PS_FST == FALSE)
         uv = fract(uv);
 
-      uv = FLOAT4((USHORT4(uv * tex_size) & USHORT4(state.cb.uv_msk_fix.xyxy)) | USHORT4(state.cb.uv_msk_fix.zwzw)) / tex_size;
+      UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+      uv = FLOAT4((USHORT4(uv * tex_size) & USHORT4(uv_msk_fix.xyxy)) | USHORT4(uv_msk_fix.zwzw)) / tex_size;
     }
   }
   else
   {
-    if (PS_REGION_RECT && PS_WMS == 0)
+    if (PS_REGION_RECT != FALSE && PS_WMS == 0)
     {
       uv.xz = fract(uv.xz);
     }
-    else if (PS_REGION_RECT && PS_WMS == 1)
+    else if (PS_REGION_RECT != FALSE && PS_WMS == 1)
     {
-      uv.xz = saturate(uv.xz);
+      uv.xz = SATURATE(uv.xz);
     }
     else if (PS_WMS == 2)
     {
@@ -284,19 +300,20 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
     }
     else if (PS_WMS == 3)
     {
-      if (!FST)
+      if (PS_FST == FALSE)
         uv.xz = fract(uv.xz);
 
-      uv.xz = FLOAT2((USHORT2(uv.xz * tex_size.xx) & USHORT2(state.cb.uv_msk_fix.xx)) | USHORT2(state.cb.uv_msk_fix.zz)) / tex_size.xx;
+      UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+      uv.xz = FLOAT2((USHORT2(uv.xz * tex_size.xx) & USHORT2(uv_msk_fix.xx)) | USHORT2(uv_msk_fix.zz)) / tex_size.xx;
     }
 
-    if (PS_REGION_RECT && PS_WMT == 0)
+    if (PS_REGION_RECT != FALSE && PS_WMT == 0)
     {
       uv.yw = fract(uv.yw);
     }
-    else if (PS_REGION_RECT && PS_WMT == 1)
+    else if (PS_REGION_RECT != FALSE && PS_WMT == 1)
     {
-      uv.yw = saturate(uv.yw);
+      uv.yw = SATURATE(uv.yw);
     }
     else if (PS_WMT == 2)
     {
@@ -304,14 +321,15 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
     }
     else if (PS_WMT == 3)
     {
-      if (!FST)
+      if (PS_FST == FALSE)
         uv.yw = fract(uv.yw);
 
-      uv.yw = FLOAT2((USHORT2(uv.yw * tex_size.yy) & USHORT2(state.cb.uv_msk_fix.yy)) | USHORT2(state.cb.uv_msk_fix.ww)) / tex_size.yy;
+      UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+      uv.yw = FLOAT2((USHORT2(uv.yw * tex_size.yy) & USHORT2(uv_msk_fix.yy)) | USHORT2(uv_msk_fix.ww)) / tex_size.yy;
     }
   }
 
-  if (PS_REGION_RECT)
+  if (PS_REGION_RECT != FALSE)
   {
     // Normalized -> Integer Coordinates.
     uv = clamp(uv * state.cb.wh.zwzw + state.cb.st_range.xyxy, state.cb.st_range.xyxy, state.cb.st_range.zwzw);
@@ -322,12 +340,12 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
 
 FLOAT4x4 sample_4c(IN_PARAM(PSMain, state), FLOAT4 uv)
 {
-  return {
+  return FLOAT4x4(
     sample_c(state, uv.xy),
     sample_c(state, uv.zy),
     sample_c(state, uv.xw),
-    sample_c(state, uv.zw),
-  };
+    sample_c(state, uv.zw)
+  );
 }
 
 UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
@@ -346,7 +364,7 @@ UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
   
   UINT4 i;
   
-  if (PS_RTA_SRC_CORRECTION)
+  if (PS_RTA_SRC_CORRECTION != FALSE)
   {
     i = UINT4(round(c * 128.25f)); // Denormalize value
   }
@@ -365,35 +383,35 @@ UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
 
 FLOAT4x4 sample_4p(IN_PARAM(PSMain, state), UINT4 u)
 {
-  return {
+  return FLOAT4x4(
     sample_p(state, u.x),
     sample_p(state, u.y),
     sample_p(state, u.z),
-    sample_p(state, u.w),
-  };
+    sample_p(state, u.w)
+  );
 }
 
 uint fetch_raw_depth(IN_PARAM(PSMain, state))
 {
-  return uint(PS_READ_TEX_DEPTH(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset)) * EXP2_POS_32);
+  return uint(PS_READ_TEX_DEPTH(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0) * EXP2_POS_32);
 }
 
 FLOAT4 fetch_raw_color(IN_PARAM(PSMain, state))
 {
-  if (PS_TEX_IS_FB)
+  if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
   else
-    return PS_READ_TEX(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset));
+    return PS_READ_TEX(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0);
 }
 
 FLOAT4 fetch_c(IN_PARAM(PSMain, state), USHORT2 uv)
 {
-  if (PS_TEX_IS_FB)
-    return current_color;
-  else if (PS_TEX_IS_DEPTH)
+  if (PS_TEX_IS_FB != FALSE)
+    return state.current_color;
+  else if (PS_TEX_IS_DEPTH != FALSE)
     return PS_READ_TEX_DEPTH(state, uv, 0);
   else
-    return PS_READ_TEX(state, tex, uv, 0);
+    return PS_READ_TEX(state, uv, 0);
 }
 
 USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMain, state), USHORT2 uv)
@@ -428,22 +446,22 @@ USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMain, state), USHORT2 uv)
 
 FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 {
-  FLOAT2 uv_f = FLOAT2(clamp_wrap_uv_depth(USHORT2(st))) * FLOAT2(state.cb.scale_factor.x);
+  FLOAT2 uv_f = FLOAT2(clamp_wrap_uv_depth(state, USHORT2(st))) * FLOAT2(state.cb.scale_factor.x);
 
-  if (PS_REGION_RECT)
+  if (PS_REGION_RECT != FALSE)
     uv_f = clamp(uv_f + state.cb.st_range.xy, state.cb.st_range.xy, state.cb.st_range.zw);
 
   USHORT2 uv = USHORT2(uv_f);
   FLOAT4 t = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
 
-  if (PS_TALES_OF_ABYSS_HLE)
+  if (PS_TALES_OF_ABYSS_HLE != FALSE)
   {
     // Warning: UV can't be used in channel effect
-    ushort depth = fetch_raw_depth(state);
+    USHORT depth = fetch_raw_depth(state);
     // Convert msb based on the palette
     t = PS_READ_PALETTE(state, USHORT2((depth >> 8) & 0xFF, 0)) * 255.f;
   }
-  else if (PS_URBAN_CHAOS_HLE)
+  else if (PS_URBAN_CHAOS_HLE != FALSE)
   {
     // Depth buffer is read as a RGB5A1 texture. The game try to extract the green channel.
     // So it will do a first channel trick to extract lsb, value is right-shifted.
@@ -452,10 +470,10 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
     // To be faster both steps (msb&lsb) are done in a single pass.
 
     // Warning: UV can't be used in channel effect
-    ushort depth = fetch_raw_depth(state);
+    USHORT depth = fetch_raw_depth(state);
 
     // Convert lsb based on the palette
-    t = PS_READ_PALETTE(state, UNSHORT(depth & 0xFF, 0)) * 255.f;
+    t = PS_READ_PALETTE(state, USHORT2(depth & 0xFF, 0)) * 255.f;
 
     // Msb is easier
     float green = float((depth >> 8) & 0xFF) * 36.f;
@@ -465,11 +483,11 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
   }
   else if (PS_DEPTH_FMT == 1)
   {
-    t = convert_depth32_rgba8(fetch_c(uv).r);
+    t = convert_depth32_rgba8(fetch_c(state, uv).r);
   }
   else if (PS_DEPTH_FMT == 2)
   {
-    t = convert_depth16_rgba8(fetch_c(uv).r);
+    t = convert_depth16_rgba8(fetch_c(state, uv).r);
   }
   else if (PS_DEPTH_FMT == 3)
   {
@@ -478,10 +496,10 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
   // macOS 10.15 ICE's on bool3(t.rgb), so use != 0 instead
   if (PS_AEM_FMT == FMT_24)
-    t.a = (!PS_AEM || any(t.rgb != 0)) ? 255.f * cb.ta.x : 0.f;
+    t.a = (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
   else if (PS_AEM_FMT == FMT_16)
-    t.a = t.a >= 128.f ? 255.f * cb.ta.y : (!PS_AEM || any(t.rgb != 0)) ? 255.f * cb.ta.x : 0.f;
-  else if (PS_PAL_FMT != 0 && !PS_TALES_OF_ABYSS_HLE && !PS_URBAN_CHAOS_HLE)
+    t.a = t.a >= 128.f ? 255.f * state.cb.ta.y : (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
+  else if (PS_PAL_FMT != 0 && PS_TALES_OF_ABYSS_HLE == FALSE && PS_URBAN_CHAOS_HLE == FALSE)
     t = trunc(sample_4p(state, UINT4(t.aaaa))[0] * 255.0f + 0.05f);
   
   return t;
@@ -489,27 +507,27 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
 // MARK: Fetch a Single Channel
 
-FLOAT4 fetch_red(IN_PARAM(PSMain, state), FLOAT2 st)
+FLOAT4 fetch_red(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH ? float(fetch_raw_depth(state) & 0xFF) / 255.f : fetch_raw_color(state).r;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFF) / 255.f : fetch_raw_color(state).r;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_green(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth(state) >> 8) & 0xFF) / 255.f : fetch_raw_color(state).g;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFF) / 255.f : fetch_raw_color(state).g;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_blue(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth() >> 16) & 0xFF) / 255.f : fetch_raw_color().b;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFF) / 255.f : fetch_raw_color(state).b;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_alpha(IN_PARAM(PSMain, state))
 {
-  return sample_p_norm(state, fetch_raw_color().a) * 255.f;
+  return sample_p_norm(state, fetch_raw_color(state).a) * 255.f;
 }
 
 FLOAT4 fetch_rgb(IN_PARAM(PSMain, state))
@@ -520,46 +538,46 @@ FLOAT4 fetch_rgb(IN_PARAM(PSMain, state))
 
 FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
 {
-  if (PS_TEX_IS_DEPTH)
+  if (PS_TEX_IS_DEPTH != FALSE)
   {
     uint depth = fetch_raw_depth(state);
-    uint bg = (depth >> (8 + cb.channel_shuffle.green_shift)) & 0xFF;
+    uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFF;
     return FLOAT4(bg);
   }
   else
   {
-    uint4 rt = uint4(fetch_raw_color(state) * 255.5f);
-    uint green = (rt.g >> state.cb.channel_shuffle.green_shift) & state.cb.channel_shuffle.green_mask;
-    uint blue  = (rt.b >> state.cb.channel_shuffle.blue_shift)  & state.cb.channel_shuffle.blue_mask;
+    UINT4 rt = UINT4(fetch_raw_color(state) * 255.5f);
+    uint green = (rt.g >> state.cb.channel_shuffle_green_shift) & state.cb.channel_shuffle_green_mask;
+    uint blue  = (rt.b >> state.cb.channel_shuffle_blue_shift)  & state.cb.channel_shuffle_blue_mask;
     return FLOAT4(green | blue);
   }
 }
 
 FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
 {
-  if (PS_TCOFFSETHACK)
+  if (PS_TCOFFSETHACK != FALSE)
     st += state.cb.tc_offset;
 
   FLOAT4 t;
   FLOAT4x4 c;
   FLOAT2 dd;
 
-  if (!PS_LTF && PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && !PS_REGION_RECT && PS_WMS < 2 && PS_WMT < 2)
+  if (PS_LTF == FALSE && PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_REGION_RECT == FALSE && PS_WMS < 2 && PS_WMT < 2)
   {
     c[0] = sample_c(state, st);
   }
   else
   {
     FLOAT4 uv;
-    if (PS_LTF)
+    if (PS_LTF != FALSE)
     {
       uv = st.xyxy + state.cb.half_texel;
-      dd = fract(uv.xy * cb.wh.zw);
-      if (!FST)
+      dd = fract(uv.xy * state.cb.wh.zw);
+      if (PS_FST == FALSE)
       {
         // Background in Shin Megami Tensei Lucifers
         // I suspect that uv isn't a standard number, so fract is outside of the [0;1] range
-        dd = saturate(dd);
+        dd = SATURATE(dd);
       }
     }
     else
@@ -579,17 +597,17 @@ FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
   {
     // macOS 10.15 ICE's on bool3(c[i].rgb), so use != 0 instead
     if (PS_AEM_FMT == FMT_24)
-      c[i].a = !PS_AEM || any(c[i].rgb != 0) ? state.cb.ta.x : 0.f;
+      c[i].a = PS_AEM == FALSE || any(VNOTEQUAL(c[i].rgb, FLOAT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
     else if (PS_AEM_FMT == FMT_16)
-      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : !PS_AEM || any((int3(c[i].rgb * 255.0f) & 0xF8) != 0) ? state.cb.ta.x : 0.f;
+      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL(INT3(c[i].rgb * 255.0f) & 0xF8, INT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
   }
 
-  if (PS_LTF)
+  if (PS_LTF != FALSE)
     t = mix(mix(c[0], c[1], dd.x), mix(c[2], c[3], dd.x), dd.y);
   else
     t = c[0];
 
-  if (PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION)
+  if (PS_AEM_FMT == FMT_32 && PS_PAL_FMT == 0 && PS_RTA_SRC_CORRECTION != FALSE)
     t.a = t.a * (128.5f / 255.0f);
     
   // The 0.05f helps to fix the overbloom of sotc
@@ -614,7 +632,7 @@ FLOAT4 tfx(IN_PARAM(PSMain, state), FLOAT4 T, FLOAT4 C)
   else
     C_out = C;
 
-  if (!PS_TCC)
+  if (PS_TCC == FALSE)
     C_out.a = C.a;
 
   // Clamp only when it is useful
@@ -651,16 +669,16 @@ bool atst(IN_PARAM(PSMain, state), FLOAT4 C)
   return true;
 }
 
-void fog(IN_PARAM(PSMain, state), IN_OUT_PARAMS(FLOAT4, C), float f)
+void fog(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float f)
 {
-  if (PS_FOG)
+  if (PS_FOG != FALSE)
     C.rgb = trunc(mix(state.cb.fog_color, C.rgb, (f * 255.0f) / 256.0f));
 }
 
 FLOAT4 ps_color(IN_PARAM(PSMain, state))
 {
   FLOAT2 st, st_int;
-  if (!FST)
+  if (PS_FST == FALSE)
   {
     st = state.psinput.t.xy / state.psinput.t.w;
     st_int = state.psinput.ti.zw / state.psinput.t.w;
@@ -709,10 +727,10 @@ FLOAT4 ps_color(IN_PARAM(PSMain, state))
       T.a = float(denorm_c_before.g & 0x80);
     }
     
-    T.a = (T.a >= 127.5 ? state.cb.ta.y : !PS_AEM || any((int3(T.rgb) & 0xF8) != 0) ? state.cb.ta.x : 0.f) * 255.f;
+    T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
   }
 
-  FLOAT4 C = tfx(state, T, PS_IIP ? state.psinput.c : state.psinput.fc);
+  FLOAT4 C = tfx(state, T, PS_IIP != FALSE ? state.psinput.c : state.psinput.fc);
 
   fog(state, C, state.psinput.t.z);
 
@@ -724,7 +742,7 @@ void ps_fbmask(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
   if (PS_FBMASK != FALSE)
   {
     float multi = (PS_COLCLIP_HW != FALSE) ? 65535.0 : 255.5;
-    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xff)) | (UINT4(current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
+    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xff)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
   }
 }
 
@@ -747,7 +765,7 @@ void ps_dither(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float As)
     value *= Alpha > 0.f ? min(1.f / Alpha, 1.f) : 1.f;
   }
 
-  if (PS_ROUND_INV)
+  if (PS_ROUND_INV != FALSE)
     C.rgb -= value;
   else
     C.rgb += value;
@@ -782,7 +800,7 @@ void ps_color_clamp_wrap(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
     C.rgb = FLOAT3(SHORT3(C.rgb) & 0xF8);
 }
 
-#define PICK3(SELECTOR, ZERO, ONE, TWO) SELECT((selector) == 0, (zero), SELECT((selector) == 1, (one), (two)))
+#define PICK3(SELECTOR, ZERO, ONE, TWO) ((SELECTOR) == 0 ? (ZERO) : (SELECTOR) == 1 ? (ONE) : (TWO))
 
 void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM(FLOAT4, As_rgba))
 {
@@ -812,33 +830,33 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       UINT4 denorm_rt = UINT4(state.current_color);
       if ((PS_PROCESS_BA & SHUFFLE_WRITE) != 0)
       {
-        current_color.r = float((denorm_rt.b << 3) & 0xF8);
-        current_color.g = float(((denorm_rt.b >> 2) & 0x38) | ((denorm_rt.a << 6) & 0xC0));
-        current_color.b = float((denorm_rt.a << 1) & 0xF8);
-        current_color.a = float(denorm_rt.a & 0x80);
+        state.current_color.r = float((denorm_rt.b << 3) & 0xF8);
+        state.current_color.g = float(((denorm_rt.b >> 2) & 0x38) | ((denorm_rt.a << 6) & 0xC0));
+        state.current_color.b = float((denorm_rt.a << 1) & 0xF8);
+        state.current_color.a = float(denorm_rt.a & 0x80);
       }
       else
       {
-        current_color.r = float((denorm_rt.r << 3) & 0xF8);
-        current_color.g = float(((denorm_rt.r >> 2) & 0x38) | ((denorm_rt.g << 6) & 0xC0));
-        current_color.b = float((denorm_rt.g << 1) & 0xF8);
-        current_color.a = float(denorm_rt.g & 0x80);
+        state.current_color.r = float((denorm_rt.r << 3) & 0xF8);
+        state.current_color.g = float(((denorm_rt.r >> 2) & 0x38) | ((denorm_rt.g << 6) & 0xC0));
+        state.current_color.b = float((denorm_rt.g << 1) & 0xF8);
+        state.current_color.a = float(denorm_rt.g & 0x80);
       }
     }
-    float multi = PS_COLCLIP_HW ? 65535.0 : 255.5;
+    float multi = PS_COLCLIP_HW != FALSE ? 65535.0 : 255.5;
     FLOAT3 Cd = trunc(state.current_color.rgb * multi);
     FLOAT3 Cs = Color.rgb;
 
     FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
     FLOAT3 B = PICK3(PS_BLEND_B, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
-    float  C = PICK3(PS_BLEND_C, As, Ad, cb.alpha_fix);
+    float  C = PICK3(PS_BLEND_C, As, Ad, state.cb.alpha_fix);
     FLOAT3 D = PICK3(PS_BLEND_D, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
 
     // As/Af clamp alpha for Blend mix
     // We shouldn't clamp blend mix with blend hw 1 as we want alpha higher
     float C_clamped = C;
     if (PS_BLEND_MIX > 0 && PS_BLEND_HW != 1 && PS_BLEND_HW != 2)
-      C_clamped = saturate(C_clamped);
+      C_clamped = SATURATE(C_clamped);
 
     if (PS_BLEND_A == PS_BLEND_B)
       Color.rgb = D;
@@ -893,13 +911,13 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
     if (PS_BLEND_HW == 1)
     {
       // Needed for Cd * (As/Ad/F + 1) blending modes
-      Color.rgb = 255.f;
+      Color.rgb = float3_bcast(255.f);
     }
     else if (PS_BLEND_HW == 2)
     {
       // Cd*As,Cd*Ad or Cd*F
-      float Alpha = PS_BLEND_C == 2 ? cb.alpha_fix : As;
-      Color.rgb = saturate(Alpha - 1.f) * 255.f;
+      float Alpha = PS_BLEND_C == 2 ? state.cb.alpha_fix : As;
+      Color.rgb = float3_bcast(SATURATE(Alpha - 1.f) * 255.f);
     }
     else if (PS_BLEND_HW == 3 && PS_RTA_CORRECTION == 0)
     {
@@ -923,7 +941,7 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
       !(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE))
     {
       UINT4 denorm_c_after = UINT4(C);
-      if (PS_PROCESS_BA & SHUFFLE_READ)
+      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
       {
         C.b = float(((denorm_c_after.r >> 3) & 0x1F) | ((denorm_c_after.g << 2) & 0xE0));
         C.a = float(((denorm_c_after.g >> 6) & 0x3) | ((denorm_c_after.b >> 1) & 0x7C) | (denorm_c_after.a & 0x80));
@@ -938,21 +956,21 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
     // Special case for 32bit input and 16bit output, shuffle used by The Godfather
     if (PS_SHUFFLE_SAME != FALSE)
     {
-      uint4 denorm_c = uint4(C);
+      UINT4 denorm_c = UINT4(C);
       
-      if (PS_PROCESS_BA & SHUFFLE_READ)
-        C = (denorm_c.b & 0x7F) | (denorm_c.a & 0x80);
+      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
+        C = float4_bcast(float((denorm_c.b & 0x7F) | (denorm_c.a & 0x80)));
       else
         C.ga = C.rg;
     }
     // Copy of a 16bit source in to this target
     else if (PS_READ16_SRC != FALSE)
     {
-      uint4 denorm_c = uint4(C);
-      uint2 denorm_TA = uint2(cb.ta * 255.5f);
+      UINT4 denorm_c = UINT4(C);
+      UINT2 denorm_TA = UINT2(state.cb.ta * 255.5f);
       
-      C.rb = (denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7) << 5);
-      C.ga = (denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80);
+      C.rb = float2_bcast(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7) << 5)));
+      C.ga = float2_bcast(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80)));
     }
     else if (PS_SHUFFLE_ACROSS != FALSE)
     {
@@ -977,77 +995,77 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
 
 PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
 {
-  PSOutputGeneric out;
-  out.c0 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-  out.c1 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-  out.depth = 0.0f;
+  PSOutputGeneric psout;
+  psout.c0 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+  psout.c1 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+  psout.depth = 0.0f;
 
   float input_z = state.psinput.p.z;
   if (PS_ZFLOOR != FALSE)
-    input_z = floor(input_z * 0x1p32) * 0x1p-32;
+    input_z = floor(input_z * EXP2_POS_32) * EXP2_MIN_32;
 
   if (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
   {
     if (PS_ZTST == ZTST_GEQUAL && input_z < state.current_depth)
-      dsicard_all();
+      discard_all(state);
     if (PS_ZTST == ZTST_GREATER && input_z <= state.current_depth)
-      dsicard_all();
+      discard_all(state);
   }
 
   if ((PS_SCANMSK & 2) != 0)
   {
-    if ((uint(in.p.y) & 1) == (PS_SCANMSK & 1))
-      dsicard_all();
+    if ((uint(state.psinput.p.y) & 1) == (PS_SCANMSK & 1))
+      discard_all(state);
   }
 
   if (PS_DATE >= 5)
   {
     // 1 => DATM == 0, 2 => DATM == 1
-    float rt_a = PS_WRITE_RG != FALSE ? current_color.g : current_color.a;
+    float rt_a = PS_WRITE_RG != FALSE ? state.current_color.g : state.current_color.a;
     bool bad = PS_RTA_CORRECTION != FALSE ?
       ((PS_DATE & 3) == 1 ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) :
       ((PS_DATE & 3) == 1 ? (rt_a > 0.5) : (rt_a < 0.5));
 
     if (bad)
-      dsicard_all();
+      discard_all(state);
   }
 
   if (PS_DATE == 3)
   {
-    float stencil_ceil = PS_READ_PRIMID(UINT2(state.psinput.p.xy)).r;
+    float stencil_ceil = PS_READ_PRIMID(state, UINT2(state.psinput.p.xy)).r;
     // Note prim_id == stencil_ceil will be the primitive that will update
     // the bad alpha value so we must keep it.
-    if (float(prim_id) > stencil_ceil)
-      dsicard_all();
+    if (float(state.prim_id) > stencil_ceil)
+      discard_all(state);
   }
 
-  FLOAT4 C = ps_color();
+  FLOAT4 C = ps_color(state);
 
   // Must be done before alpha correction
 
-  if (PS_AA1 != AA1_NONE)
+  if (PS_AA1 != PS_AA1_NONE)
   {
-    float cov = PS_AA1 == AA1_LINE
-      ? saturate(cb.line_cov_scale * (1.f - abs(state.psinput.inv_cov))) // Blur only outer part of the line by scaling coverage.
-      : saturate(1.f - abs(state.psinput.inv_cov));
-    if (!PS_ABE || floor(C.a) == 128.f) // The coverage is only used if the fragment alpha is 128.
+    float cov = PS_AA1 == PS_AA1_LINE
+      ? SATURATE(state.cb.line_cov_scale * (1.f - abs(state.psinput.inv_cov))) // Blur only outer part of the line by scaling coverage.
+      : SATURATE(1.f - abs(state.psinput.inv_cov));
+    if (PS_ABE == FALSE || floor(C.a) == 128.f) // The coverage is only used if the fragment alpha is 128.
       C.a = 128.f * cov;
   }
-  else if (PS_FIXED_ONE_A)
+  else if (PS_FIXED_ONE_A != FALSE)
   {
     // AA (Fixed one) will output a coverage of 1.0 as alpha
     C.a = 128.0f;
   }
 
-  bool atst_pass = atst(C);
-  if (PS_AFAIL == PS_AFAIL_KEEP && !atst_pass)
-    dsicard_all();
+  bool atst_pass = atst(state, C);
+  if (PS_AFAIL == AFAIL_KEEP && !atst_pass)
+    discard_all(state);
 
   FLOAT4 alpha_blend = float4_bcast(0.f);
   if (SW_AD_TO_HW)
   {
     alpha_blend = float4_bcast(PS_RTA_CORRECTION != FALSE ?
-      FLOAT4(trunc(current_color.a * 128.f) / 128.f) : FLOAT4(trunc(current_color.a * 255.5f) / 128.f));
+      trunc(state.current_color.a * 128.f) / 128.f : trunc(state.current_color.a * 255.5f) / 128.f);
   }
   else
   {
@@ -1059,7 +1077,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
     float A_one = 128.f;
     C.a = (PS_FBA != FALSE) ? A_one : step(128.f, C.a) * A_one;
   }
-  else if (PS_DST_FMT == FMT_32 && PS_FBA)
+  else if (PS_DST_FMT == FMT_32 && PS_FBA != FALSE)
   {
     if (C.a < 128.f)
       C.a += 128.f;
@@ -1069,14 +1087,14 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
   if (PS_DATE == 1)
   {
     // DATM == 0, Pixel with alpha equal to 1 will failed (128-255)
-    out.c0 = C.a > 127.5f ? float(prim_id) : float(PRIMID_MAX);
-    return out;
+    psout.c0 = float4_bcast(C.a > 127.5f ? float(state.prim_id) : float(PRIMID_MAX));
+    return psout;
   }
   else if (PS_DATE == 2)
   {
     // DATM == 1, Pixel with alpha equal to 0 will failed (0-127)
-    out.c0 = C.a < 127.5f ? float(prim_id) : PRIMID_MAX;
-    return out;
+    psout.c0 = float4_bcast(C.a < 127.5f ? float(state.prim_id) : PRIMID_MAX);
+    return psout;
   }
 
   ps_blend(state, C, alpha_blend);
@@ -1091,16 +1109,16 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
   ps_fbmask(state, C);
 
   // Use alpha blend factor to determine whether to update A.
-  if (PS_AFAIL == PS_AFAIL_RGB_ONLY_DSB)
+  if (PS_AFAIL == AFAIL_RGB_ONLY_DSB)
     alpha_blend.a = float(atst_pass);
 
   if (PS_NO_COLOR == FALSE)
   {
-    out.c0.a = PS_RTA_CORRECTION != FALSE ? C.a / 128.f : C.a / 255.f;
-    out.c0.rgb = PS_COLCLIP_HW != FALSE ? FLOAT3(C.rgb / 65535.f) : C.rgb / 255.f;
+    psout.c0.a = PS_RTA_CORRECTION != FALSE ? C.a / 128.f : C.a / 255.f;
+    psout.c0.rgb = PS_COLCLIP_HW != FALSE ? FLOAT3(C.rgb / 65535.f) : C.rgb / 255.f;
   }
   if (PS_NO_COLOR1 == FALSE)
-    out.c1 = alpha_blend;
+    psout.c1 = alpha_blend;
 
   if (PS_ZCLAMP != FALSE)
     input_z = min(input_z, state.cb.max_depth);
@@ -1110,16 +1128,16 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
 
   if (!atst_pass)
   {
-    if (PS_AFAIL == PS_AFAIL_RGB_ONLY_SW_Z || PS_AFAIL == PS_AFAIL_RGB_ONLY)
-      out.c0.a = state.current_color.a; // discard alpha
-    else if (PS_AFAIL == PS_AFAIL_ZB_ONLY)
-      discard_color(state, out.c0);
+    if (PS_AFAIL == AFAIL_RGB_ONLY_SW_Z || PS_AFAIL == AFAIL_RGB_ONLY)
+      psout.c0.a = state.current_color.a; // discard alpha
+    else if (PS_AFAIL == AFAIL_ZB_ONLY)
+      discard_color(state, psout.c0);
 
-    if (PS_AFAIL == PS_AFAIL_RGB_ONLY_SW_Z || PS_AFAIL == PS_AFAIL_FB_ONLY)
+    if (PS_AFAIL == AFAIL_RGB_ONLY_SW_Z || PS_AFAIL == AFAIL_FB_ONLY)
       discard_depth(state, input_z);
   }
 
-  out.depth = input_z;
+  psout.depth = input_z;
 
-  return out;
+  return psout;
 }

@@ -3,6 +3,30 @@
 
 #include "GSMTLShaderCommon.h"
 
+#define FLOAT2 float2
+#define FLOAT3 float3
+#define FLOAT4 float4
+#define FLOAT2x2 float2x2
+#define FLOAT2x4 float2x4
+#define FLOAT4x4 float4x4
+#define UINT2 uint2
+#define UINT3 uint3
+#define UINT4 uint4
+#define INT2 int2
+#define INT3 int3
+#define INT4 int4
+#define USHORT ushort
+#define USHORT2 ushort2
+#define USHORT3 ushort3
+#define USHORT4 ushort4
+#define SHORT short
+#define SHORT2 short2
+#define SHORT3 short3
+#define SHORT4 short4
+#define BOOL2 bool2
+#define BOOL3 bool3
+#define BOOL4 bool4
+
 #define STATIC static
 #define DFDX dfdx
 #define DFDY dfdy
@@ -14,29 +38,18 @@
 #define VGREATER(X, Y) ((X) > (Y))
 #define VLESS(X, Y) ((X) < (Y))
 #define VNOTEQUAL(X, Y) ((X) != (Y))
+#define RSQRT(X) rsqrt(X)
 #define GPU_DISCARD discard_fragment()
-
-#define FLOAT2 float2
-#define FLOAT3 float3
-#define FLOAT4 float4
-#define FLOAT2x2 float2x2
-#define FLOAT2x4 float2x4
-#define FLOAT4x4 float4x4
-#define UINT2 uint2
-#define UINT3 uint3
-#define UINT4 uint4
-#define USHORT2 ushort2
-#define USHORT3 ushort3
-#define USHORT4 ushort4
-#define INT2 int2
-#define INT3 int3
-#define INT4 int4
+#define LEVEL(X) level(x)
+#define SATURATE(X) saturate(X)
+#define FLOAT_BITCAST_UINT(X) as_type<uint>(X)
+#define UINT_BITCAST_FLOAT4(X) FLOAT4(as_type<uchar4>(X))
 
 #define VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
 #define INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME
 #define OUT_PARAM(TYPE, NAME) thread TYPE & NAME
-#define IN_OUT_VAR(TYPE, NAME) thread TYPE & NAME
+#define IN_OUT_PARAM(TYPE, NAME) thread TYPE & NAME
 
 #define PRIMID_MAX FLT_MAX
 #define VS_Y_FLIP -1.0f
@@ -44,13 +57,13 @@
 #define EXP_POS_32 0x1p+32f
 
 #define PS_UV_MSK_FIX(CB) as_type<uint4>(CB.uv_min_max)
-#define PS_SAMPLE_TEX(STATE, ...) STATE.tex.sample(STATE.sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_LOD(STATE, ...) STATE.tex.sample(STATE.sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_DEPTH(STATE, ...) STATE.tex_depth.sample(STATE.sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, ...) STATE.tex_depth.sample(STATE.sampler, __VA_ARGS__)
+#define PS_SAMPLE_TEX(STATE, ...) STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__)
+#define PS_SAMPLE_TEX_LOD(STATE, ...) STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__)
+#define PS_SAMPLE_TEX_DEPTH(STATE, ...) STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__)
+#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, ...) STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__)
 #define PS_READ_TEX(STATE, POS, LOD) STATE.tex.read((POS), (LOD)) 
-#define PS_READ_TEX_DEPTH(STATE, POS, LOD) STATE.tex_depth.read((POS), (LOD)) 
-#define PS_READ_PALETTE(STATE, IDX) STATE.palette.read(UINT2(IDX), 0)
+#define PS_READ_TEX_DEPTH(STATE, POS, LOD) STATE.tex_depth.read((POS), (LOD))
+#define PS_READ_PALETTE(STATE, IDX) STATE.palette.read(UINT2(IDX, 0), 0)
 #define PS_READ_PRIMID(STATE, POS) STATE.prim_id_tex.read(UINT2(POS), 0)
 #define PS_GET_TEX_DIMS(STATE) UINT2(STATE.tex.get_width(), STATE.tex.get_height())
 #define PS_GET_TEX_DEPTH_DIMS(STATE) UINT2(STATE.tex_depth.get_width(), STATE.tex_depth.get_height())
@@ -69,13 +82,13 @@
 #define ZTST_GREATER ZTST::GREATER
 #endif
 
-#ifndef AFAIL_KEEP
-#define AFAIL_KEEP AFAIL::KEEP
-#define AFAIL_FB_ONLY AFAIL::FB_ONLY
-#define AFAIL_ZB_ONLY AFAIL::ZB_ONLY
-#define AFAIL_RGB_ONLY AFAIL::RGB_ONLY
-#define AFAIL_RGB_ONLY_DSB AFAIL::RGB_ONLY_DSB
-#define AFAIL_RGB_ONLY_SW_Z AFAIL::RGB_ONLY_SW_Z
+#ifndef PS_AFAIL_KEEP
+#define PS_AFAIL_KEEP AFAIL::KEEP
+#define PS_AFAIL_FB_ONLY AFAIL::FB_ONLY
+#define PS_AFAIL_ZB_ONLY AFAIL::ZB_ONLY
+#define PS_AFAIL_RGB_ONLY AFAIL::RGB_ONLY
+#define PS_AFAIL_RGB_ONLY_DSB AFAIL::RGB_ONLY_DSB
+#define PS_AFAIL_RGB_ONLY_SW_Z AFAIL::RGB_ONLY_SW_Z
 #endif
 
 #ifndef PS_ATST_NONE
@@ -236,6 +249,7 @@ constant bool PS_COVERAGE = PS_AA1 != AA1::NONE;
 constant bool PS_INTERIOR = PS_AA1 == AA1::TRIANGLE_SW_Z;
 
 constant bool VS_FST = FST;
+constant bool PS_FST = FST;
 constant bool VS_IIP = IIP;
 constant bool PS_IIP = IIP;
 
