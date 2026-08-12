@@ -126,15 +126,30 @@ struct PSOutputGeneric
 };
 
 #ifndef __METAL_VERSION__
-FLOAT4 convert_depth32_rgba8(float value)
+STATIC FLOAT4 convert_depth32_rgba8(float value)
 {
 	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
 	return UINT_BITCAST_FLOAT4(val);
 }
 
-FLOAT4 convert_depth16_rgba8(float value)
+STATIC FLOAT4 convert_depth16_rgba8(float value)
 {
 	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
 	return FLOAT4(UINT4(val << 3, val >> 2, val >> 7, val >> 8) & UINT4(0xf8, 0xf8, 0xf8, 0x80));
 }
 #endif
+
+STATIC FLOAT2 float2_bcast(float val)
+{
+  return FLOAT2(val, val);
+}
+
+STATIC FLOAT3 float3_bcast(float val)
+{
+  return FLOAT3(val, val, val);
+}
+
+STATIC FLOAT4 float4_bcast(float val)
+{
+  return FLOAT4(val, val, val, val);
+}

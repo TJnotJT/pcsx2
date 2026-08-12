@@ -42,6 +42,9 @@
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
 #define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
+#define MAT_MUL(X, Y) ((X) * (Y))
+#define FRACT(X) fract(X)
+#define MIX mix
 
 #define VERTICES_PARAM(NAME) uint NAME
 #define INDICES_PARAM(NAME) uint NAME
@@ -53,17 +56,28 @@
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
-#define PS_UV_MSK_FIX(CB) floatBitsToUint(CB.uv_min_max)
-#define PS_SAMPLE_TEX(STATE, POS) texture(Texture, FLOAT2(POS))
-#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) textureLod(Texture, FLOAT2(POS), float(LOD))
-#define PS_SAMPLE_TEX_DEPTH(STATE, POS) PS_SAMPLE_TEX(STATE, (POS))
-#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD))
-#define PS_READ_TEX(STATE, POS, LOD) texelFetch(Texture, INT2(POS), int(LOD))
-#define PS_READ_TEX_DEPTH(STATE, POS, LOD) PS_READ_TEX(STATE, (POS), (LOD))
-#define PS_READ_PALETTE(STATE, POS) texelFetch(Palette, INT2(POS), 0)
-#define PS_READ_PRIMID(STATE, POS) texelFetch(PrimMinTexture, INT2(POS), 0)
-#define PS_GET_TEX_DIMS(STATE) UINT2(textureSize(Texture, 0))
-#define PS_GET_TEX_DEPTH_DIMS(STATE) PS_GET_TEX_DIMS(STATE)
+#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
+#define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
+#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
+#define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)
+#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) (PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD)).r)
+#define PS_READ_TEX(STATE, POS, LOD) (texelFetch(Texture, INT2(POS), int(LOD)))
+#define PS_READ_TEX_DEPTH(STATE, POS, LOD) (PS_READ_TEX(STATE, (POS), (LOD)).r)
+#define PS_READ_PALETTE(STATE, POS) (texelFetch(Palette, INT2(POS), 0))
+#define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
+#define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
+#define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
+
+#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
+#define LOAD_INDEX(INDICES, VID) load_index(VID)
+
+#define FMT_32 0
+#define FMT_24 1
+#define FMT_16 2
+
+#define SHUFFLE_READ  1
+#define SHUFFLE_WRITE 2
+#define SHUFFLE_READWRITE 3
 
 #ifndef VS_EXPAND_NONE
 #define VS_EXPAND_NONE 0
@@ -109,24 +123,13 @@
 #define PS_ROV_DEPTH_READ_ONLY 2
 #endif
 
-#define FMT_32 0
-#define FMT_24 1
-#define FMT_16 2
-
-#define SHUFFLE_READ  1
-#define SHUFFLE_WRITE 2
-#define SHUFFLE_READWRITE 3
-
-#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
-#define LOAD_INDEX(INDICES, VID) load_index(VID)
-
 #include "tfx_defs.inc"
 
 //////////////////////////////////////////////////////////////////////
 // Vertex Shader
 //////////////////////////////////////////////////////////////////////
 
-#if defined(VERTEX_SHADER)
+#ifdef VERTEX_SHADER
 
 #ifndef VS_TME
 #define VS_TME 0
@@ -263,22 +266,22 @@ layout(location = 6) in vec4 a_f;
 
 VSInputGeneric GetVSInput()
 {
-  VSInputGeneric vsinput;
-  vsinput.st = a_st;
-  vsinput.c = FLOAT4(a_c);
-  vsinput.q = a_q;
-  vsinput.p = a_p;
-  vsinput.z = a_z;
-  vsinput.uv = a_uv;
-  vsinput.f = a_f;
-  return vsinput;
+  VSInputGeneric vin;
+  vin.st = a_st;
+  vin.c = FLOAT4(a_c);
+  vin.q = a_q;
+  vin.p = a_p;
+  vin.z = a_z;
+  vin.uv = a_uv;
+  vin.f = a_f;
+  return vin;
 }
 
 void main()
 {
-  VSInputGeneric vsinput = GetVSInput();
+  VSInputGeneric vin = GetVSInput();
   VSUniformsGeneric cb = GetVSUniforms();
-	VSOutputGeneric vout = vs_main_impl(vsinput, cb);
+	VSOutputGeneric vout = vs_main_impl(vin, cb);
   WriteVSOutput(vout);
 }
 
@@ -363,8 +366,6 @@ void main()
 #define PS_AA1 0
 #define PS_ABE 0
 #endif
-
-#define PS_TEX_IS_DEPTH 0
 
 #define SW_BLEND (PS_BLEND_A != 0 || PS_BLEND_B != 0 || PS_BLEND_D != 0)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
@@ -550,15 +551,14 @@ float DepthLoad(ivec2 xy)
 
 void main()
 {
-	float input_z = gl_FragCoord.z;
-
   PSMain state;
   state.psinput = GetPSInput();
   state.cb = GetPSUniforms();
-  state.tex = 0;
-  state.tex_depth = 0;
-  state.palette = 0;
-  state.prim_id_tex = 0;
+  state.tex = 0; // unused
+  state.tex_depth = 0; // unused
+  state.palette = 0; // unused
+  state.prim_id_tex = 0; // unused
+	state.tex_sampler = 0; // unused
   state.prim_id = gl_PrimitiveID;
   state.color_discarded = false;
   state.depth_discarded = false;

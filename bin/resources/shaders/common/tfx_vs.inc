@@ -1,6 +1,15 @@
-STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
 {
-	FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
+	VSOutputGeneric vout;
+	// Clamp to max depth, gs doesn't wrap
+	uint z = min(v.z, cb.max_depth);
+	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
+	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
+  vout.p.y *= VS_Y_FLIP;
+	vout.p.w = 1.0f;
+	vout.p.z = float(z) * EXP2_MIN_32;
+
+  FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;
 
 	// Float coordinate
@@ -20,20 +29,6 @@ STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGene
 		// Some games uses float coordinate for post-processing effects
 		vout.ti.zw = st / cb.texture_scale;
 	}
-}
-
-STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
-{
-	VSOutputGeneric vout;
-	// Clamp to max depth, gs doesn't wrap
-	uint z = min(v.z, cb.max_depth);
-	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
-	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
-  vout.p.y *= VS_Y_FLIP;
-	vout.p.w = 1.0f;
-	vout.p.z = float(z) * EXP2_MIN_32;
-
-	texture_coord(v, vout, cb);
 
   vout.c = v.c;
 
@@ -128,19 +123,19 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Get the position -> barycentric weight matrix
 	FLOAT2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
 
-	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : inv_dp_mat * dp;
+	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : MAT_MUL(inv_dp_mat, dp);
 
 	v0.p.xy += dp * cb.point_size; // Extrapolate position
 
 	// Extrapolate texture coords
 	if (VS_FST != FALSE)
 	{
-			v0.ti.zw += dt * weights;
+			v0.ti.zw += MAT_MUL(dt, weights);
 			v0.ti.xy = v0.ti.zw * cb.texture_scale;
 	}
 	else
 	{
-		v0.t.xy += dt * weights;
+		v0.t.xy += MAT_MUL(dt, weights);
 		v0.ti.zw = v0.t.xy / cb.texture_scale;
 		v0.t.w += dot(dq, weights);
 	}
@@ -148,7 +143,7 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Extrapolate and clamp color
 	if (VS_IIP != FALSE)
 	{
-		v0.c += dc * weights;
+		v0.c += MAT_MUL(dc, weights);
 		v0.c = clamp(v0.c, 0, 255);
 	}
 
@@ -164,12 +159,12 @@ STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), I
 
 STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
-  VSOutputGeneric point = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
   if ((vid & 1) != 0)
-    point.p.x += cb.point_size.x;
+    vout.p.x += cb.point_size.x;
   if ((vid & 2) != 0)
-    point.p.y += cb.point_size.y;
-  return point;
+    vout.p.y += cb.point_size.y;
+  return vout;
 }
 
 STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
@@ -178,11 +173,11 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
   bool is_bottom = (vid & 2) != 0;
   bool is_right = (vid & 1) != 0;
   uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
-  VSOutputGeneric point = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
   VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
 
   // Use bottom minus top for delta regardless of which vertex we are expanding.
-  FLOAT2 line_delta = is_bottom ? point.p.xy - other.p.xy : other.p.xy - point.p.xy;
+  FLOAT2 line_delta = is_bottom ? vout.p.xy - other.p.xy : other.p.xy - vout.p.xy;
   FLOAT2 line_vector = normalize(line_delta / cb.vertex_scale);
   FLOAT2 line_expand = FLOAT2(line_vector.y, -line_vector.x);
 
@@ -191,16 +186,16 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
 
   FLOAT2 line_width = (line_expand * cb.point_size) / 2;
   FLOAT2 offset = is_right ? line_width : -line_width;
-  point.p.xy += offset;
+  vout.p.xy += offset;
 
   if (VS_EXPAND_TYPE == VS_EXPAND_LINE_AA1)
-    point.inv_cov = is_right ? 1.f : -1.f;
+    vout.inv_cov = is_right ? 1.f : -1.f;
 
   // Lines will be run as (0 1 2) (1 2 3)
   // This means that both triangles will have a point based off the top line point as their first point
   // So we don't have to do anything for !IIP
 
-  return point;
+  return vout;
 }
 
 STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))

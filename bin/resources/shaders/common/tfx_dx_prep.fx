@@ -1,3 +1,1077 @@
+// SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
+// SPDX-License-Identifier: GPL-3.0+
+
+#define FLOAT2 float2
+#define FLOAT3 float3
+#define FLOAT4 float4
+#define FLOAT2x2 float2x2
+#define FLOAT2x4 float2x4
+#define FLOAT4x4 float4x4
+#define UINT2 uint2
+#define UINT3 uint3
+#define UINT4 uint4
+#define INT2 int2
+#define INT3 int3
+#define INT4 int4
+#define USHORT uint
+#define USHORT2 uint2
+#define USHORT3 uint3
+#define USHORT4 uint4
+#define SHORT int
+#define SHORT2 int2
+#define SHORT3 int3
+#define SHORT4 int4
+#define BOOL2 bool2
+#define BOOL3 bool3
+#define BOOL4 bool4
+
+#define STATIC
+#define DFDX ddx
+#define DFDY ddy
+
+#define SELECT(COND, TRUE_VAL, FALSE_VAL) ((COND) ? (FALSE_VAL) : (TRUE_VAL))
+#define VEQUAL(X, Y) ((X) == (Y))
+#define VGEQUAL(X, Y) ((X) >= (Y))
+#define VLEQUAL(X, Y) ((X) <= (Y))
+#define VGREATER(X, Y) ((X) > (Y))
+#define VLESS(X, Y) ((X) < (Y))
+#define VNOTEQUAL(X, Y) ((X) != (Y))
+#define RSQRT(X) rsqrt(X)
+#define GPU_DISCARD discard
+#define LEVEL(X) (X)
+#define SATURATE(X) saturate(X)
+#define FLOAT_BITCAST_UINT(X) asuint(X)
+#define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
+#define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
+#define FRACT(X) frac(X)
+#define MIX lerp
+
+#define VERTICES_PARAM(NAME) uint NAME
+#define INDICES_PARAM(NAME) uint NAME
+#define IN_PARAM(TYPE, NAME) TYPE NAME
+#define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
+
+#define PRIMID_MAX 0x7FFFFFFF
+#define VS_Y_FLIP -1.0f
+#define EXP2_MIN_32 exp2(-32.0f)
+#define EXP2_POS_32 exp2(32.0f)
+
+#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
+#define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
+#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
+#define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)
+#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) (PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD)).r)
+#define PS_READ_TEX(STATE, POS, LOD) (Texture.Load(INT3(INT2(POS), int(LOD))))
+#define PS_READ_TEX_DEPTH(STATE, POS, LOD) (PS_READ_TEX(STATE, (POS), (LOD)).r)
+#define PS_READ_PALETTE(STATE, POS) (Palette.Load(INT3(INT2(POS), 0)))
+#define PS_READ_PRIMID(STATE, POS) (PrimMinTexture.Load(INT3(INT2(POS), 0)).r)
+#define PS_GET_TEX_DIMS(STATE, OUT_VAR) (Texture.GetDimensions(OUT_VAR.x, OUT_VAR.y))
+#define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
+
+#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
+#define LOAD_INDEX(INDICES, VID) load_index(VID)
+
+// DX does not support point/line size.
+#define VS_POINT_SIZE 0
+
+#define FMT_32 0
+#define FMT_24 1
+#define FMT_16 2
+
+#define SHUFFLE_READ  1
+#define SHUFFLE_WRITE 2
+#define SHUFFLE_READWRITE 3
+
+#ifndef VS_EXPAND_NONE
+#define VS_EXPAND_NONE 0
+#define VS_EXPAND_POINT 1
+#define VS_EXPAND_LINE 2
+#define VS_EXPAND_SPRITE 3
+#define VS_EXPAND_LINE_AA1 4
+#define VS_EXPAND_TRIANGLE_AA1 5
+#endif
+
+#ifndef ZTST_GEQUAL
+#define ZTST_GEQUAL 2
+#define ZTST_GREATER 3
+#endif
+
+#ifndef AFAIL_KEEP
+#define AFAIL_KEEP 0
+#define AFAIL_FB_ONLY 1
+#define AFAIL_ZB_ONLY 2
+#define AFAIL_RGB_ONLY 3
+#define AFAIL_RGB_ONLY_DSB 4
+#define AFAIL_RGB_ONLY_SW_Z 5
+#endif
+
+#ifndef PS_ATST_NONE
+#define PS_ATST_NONE 0
+#define PS_ATST_LEQUAL 1
+#define PS_ATST_GEQUAL 2
+#define PS_ATST_EQUAL 3
+#define PS_ATST_NOTEQUAL 4
+#endif
+
+#ifndef PS_AA1_NONE
+#define PS_AA1_NONE 0
+#define PS_AA1_LINE 1
+#define PS_AA1_TRIANGLE 2
+#define PS_AA1_TRIANGLE_SW_Z 3
+#endif
+
+#ifndef PS_ROV_DEPTH_NONE
+#define PS_ROV_DEPTH_NONE 0
+#define PS_ROV_DEPTH_READ_WRITE 1
+#define PS_ROV_DEPTH_READ_ONLY 2
+#endif
+
+#ifdef __METAL_VERSION__
+  #define FALSE false
+#else
+  #define FALSE 0
+#endif
+
+struct VSUniformsGeneric
+{
+	FLOAT2 vertex_scale;
+	FLOAT2 vertex_offset;
+	FLOAT2 texture_scale;
+	FLOAT2 texture_offset;
+	FLOAT2 point_size;
+	uint max_depth;
+	float line_aa1_width;
+};
+
+struct VSInputGeneric
+{
+	FLOAT2 st;
+	FLOAT4 c;
+	float  q;
+	UINT2  p;
+	uint   z;
+	UINT2  uv;
+	FLOAT4 f;
+};
+
+struct VSOutputGeneric
+{
+	FLOAT4 p;
+  FLOAT4 t;
+	FLOAT4 ti;
+  FLOAT4 c;
+	float inv_cov;
+	uint interior;
+	float point_size;
+};
+
+struct PSUniformsGeneric
+{
+  FLOAT3 fog_color;
+  float aref;
+	FLOAT4 wh; ///< xy => PS2, zw => actual (upscaled)
+	FLOAT2 ta;
+	float max_depth;
+	float alpha_fix;
+	UINT4 fbmask;
+
+	FLOAT4 half_texel;
+  FLOAT4 uv_min_max;
+	FLOAT4 lod_params;
+	FLOAT4 st_range;
+  
+  uint channel_shuffle_blue_mask;
+  uint channel_shuffle_blue_shift;
+  uint channel_shuffle_green_mask;
+  uint channel_shuffle_green_shift;
+
+	FLOAT2 channel_shuffle_offset;
+	FLOAT2 tc_offset;
+	FLOAT2 st_scale;
+	FLOAT4x4 dither_matrix;
+
+	FLOAT4 scale_factor;
+
+	float line_cov_scale;
+	float _pad0;
+	float _pad1;
+	float _pad2;
+};
+
+struct PSInputGeneric
+{
+	FLOAT4 p;
+	FLOAT4 t;
+	FLOAT4 ti;
+	FLOAT4 c;
+	FLOAT4 fc;
+	float inv_cov;
+	uint interior;
+};
+
+// Main state of the pixel shader invocation.
+#ifdef __METAL_VERSION__
+  struct PSMain
+  {
+    texture2d<float> tex;
+    depth2d<float> tex_depth;
+    texture2d<float> palette;
+    texture2d<float> prim_id_tex;
+    sampler tex_sampler;
+    float4 current_color;
+    float current_depth;
+    uint prim_id;
+    bool color_discarded = false;
+    bool depth_discarded = false;
+    const thread MainPSIn& psinput;
+    constant GSMTLMainPSUniform& cb;
+
+    PSMain(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
+  };
+#else
+  struct PSMain
+  {
+    uint tex; // unused
+    uint tex_depth; // unused
+    uint palette; // unused
+    uint prim_id_tex; // unused
+    uint tex_sampler; // unused
+    FLOAT4 current_color;
+    float current_depth;
+    uint prim_id;
+    bool color_discarded;
+    bool depth_discarded;
+    PSInputGeneric psinput;
+    PSUniformsGeneric cb;
+  };
+#endif
+
+struct PSOutputGeneric
+{
+	FLOAT4 c0;
+	FLOAT4 c1;
+	float depth;
+};
+
+#ifndef __METAL_VERSION__
+STATIC FLOAT4 convert_depth32_rgba8(float value)
+{
+	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
+	return UINT_BITCAST_FLOAT4(val);
+}
+
+STATIC FLOAT4 convert_depth16_rgba8(float value)
+{
+	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
+	return FLOAT4(UINT4(val << 3, val >> 2, val >> 7, val >> 8) & UINT4(0xf8, 0xf8, 0xf8, 0x80));
+}
+#endif
+
+STATIC FLOAT2 float2_bcast(float val)
+{
+  return FLOAT2(val, val);
+}
+
+STATIC FLOAT3 float3_bcast(float val)
+{
+  return FLOAT3(val, val, val);
+}
+
+STATIC FLOAT4 float4_bcast(float val)
+{
+  return FLOAT4(val, val, val, val);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// Vertex Shader
+//////////////////////////////////////////////////////////////////////
+
+#ifdef VERTEX_SHADER
+
+#ifndef VS_TME
+#define VS_TME 0
+#define VS_FST 0
+#define VS_IIP 0
+#define VS_POINT_SIZE 0
+#define VS_EXPAND_TYPE 0
+#endif
+
+struct VS_INPUT
+{
+	float2 st : TEXCOORD0;
+	uint4 c : COLOR0;
+	float q : TEXCOORD1;
+	uint2 p : POSITION0;
+	uint z : POSITION1;
+	uint2 uv : TEXCOORD2;
+	float4 f : COLOR1;
+};
+
+struct VS_RAW_INPUT
+{
+	float2 ST;
+	uint RGBA;
+	float Q;
+	uint XY;
+	uint Z;
+	uint UV;
+	uint FOG;
+};
+
+struct VS_OUTPUT
+{
+	float4 p : SV_Position;
+	float4 t : TEXCOORD0;
+	float4 ti : TEXCOORD2;
+
+#if VS_IIP != 0
+	float4 c : COLOR0;
+#else
+	nointerpolation float4 c : COLOR0;
+#endif
+
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
+};
+
+#ifdef DX12
+cbuffer cb0 : register(b0)
+#else
+cbuffer cb0
+#endif
+{
+	float2 VertexScale;
+	float2 VertexOffset;
+	float2 TextureScale;
+	float2 TextureOffset;
+	float2 PointSize;
+	uint MaxDepth;
+	float LineAA1Width;
+};
+
+#ifdef DX12
+cbuffer cb2 : register(b2)
+#else
+cbuffer cb2
+#endif
+{
+	uint BaseVertex;
+	uint BaseIndex;
+	uint _cb2_pad0;
+	uint _cb2_pad1;
+};
+
+StructuredBuffer<VS_RAW_INPUT> vertices : register(t0);
+StructuredBuffer<uint> IndexBuffer : register(t5);
+
+VSUniformsGeneric GetVSUniforms()
+{
+  VSUniformsGeneric cb;
+  cb.vertex_scale = VertexScale;
+  cb.vertex_offset = VertexOffset;
+  cb.texture_scale = TextureScale;
+  cb.texture_offset = TextureOffset;
+  cb.point_size = PointSize;
+  cb.max_depth = MaxDepth;
+  cb.line_aa1_width = LineAA1Width;
+  return cb;
+}
+
+VSInputGeneric GetVSInput(VS_INPUT vin)
+{
+  VSInputGeneric vin_gen;
+  vin_gen.st = vin.st;
+  vin_gen.c = FLOAT4(vin.c);
+  vin_gen.q = vin.q;
+  vin_gen.p = vin.p;
+  vin_gen.z = vin.z;
+  vin_gen.uv = vin.uv;
+  vin_gen.f = vin.f;
+  return vin_gen;
+}
+
+VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
+{
+  VS_OUTPUT vout;
+	vout.p = vout_gen.p;
+	vout.t = vout_gen.t;
+	vout.ti = vout_gen.ti;
+	vout.c = vout_gen.c;
+	vout.inv_cov = vout_gen.inv_cov;
+	vout.interior = vout_gen.interior;
+  return vout;
+}
+
+uint load_index(uint _i)
+{
+	uint i = _i + BaseIndex;
+	// i is even => load lower 16 bits; i odd => load upper 16 bits.
+	uint shift = (i & 1u) << 4u;
+	return (IndexBuffer.Load(i >> 1u) >> shift) & 0xFFFFu;
+}
+
+VSInputGeneric load_vertex(uint index)
+{
+	VS_RAW_INPUT raw = vertices.Load(BaseVertex + index);
+
+	VSInputGeneric vert;
+	vert.st = raw.ST;
+	vert.c = uint4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
+	vert.q = raw.Q;
+	vert.p = uint2(raw.XY & 0xFFFFu, raw.XY >> 16);
+	vert.z = raw.Z;
+	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
+	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
+	return vert;
+}
+
+STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
+{
+	VSOutputGeneric vout;
+	// Clamp to max depth, gs doesn't wrap
+	uint z = min(v.z, cb.max_depth);
+	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
+	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
+  vout.p.y *= VS_Y_FLIP;
+	vout.p.w = 1.0f;
+	vout.p.z = float(z) * EXP2_MIN_32;
+
+  FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
+	FLOAT2 st = v.st - cb.texture_offset;
+
+	// Float coordinate
+	vout.t.xy = st;
+	vout.t.w = v.q;
+
+	// Integer coordinate => normalized
+	vout.ti.xy = uv * cb.texture_scale;
+
+	if (VS_FST != FALSE)
+	{
+		// Integer coordinate => integral
+		vout.ti.zw = uv;
+	}
+	else
+	{
+		// Some games uses float coordinate for post-processing effects
+		vout.ti.zw = st / cb.texture_scale;
+	}
+
+  vout.c = v.c;
+
+	vout.t.z = v.f.x; // pack fog with texture
+
+	if (VS_POINT_SIZE != FALSE)
+		vout.point_size = cb.point_size.x;
+
+	return vout;
+}
+
+// Convert XY from NDC to GS pixel coordinates (i.e. 1.0 = 1 GS pixel).
+STATIC FLOAT2 get_xy_unscaled(FLOAT2 xy, IN_PARAM(VSUniformsGeneric, cb))
+{
+	return round(xy / cb.vertex_scale) / 16.0f;
+}
+
+// Get the XY deltas in GS pixel coordinates, using first vertex as the origin.
+STATIC FLOAT2x2 get_xy_deltas_unscaled(IN_PARAM(VSOutputGeneric, v0), IN_PARAM(VSOutputGeneric, v1), IN_PARAM(VSOutputGeneric, v2), IN_PARAM(VSUniformsGeneric, cb))
+{
+	FLOAT2 xy0 = get_xy_unscaled(v0.p.xy, cb);
+	FLOAT2 xy1 = get_xy_unscaled(v1.p.xy, cb);
+	FLOAT2 xy2 = get_xy_unscaled(v2.p.xy, cb);
+	return FLOAT2x2(xy1 - xy0, xy2 - xy0);
+}
+
+// Get the AA1 outward expand direction to the edge formed by the first two vertices.
+// This is up or down for shallow (X dominant) edges, and right or left for steep (Y dominant) edges.
+// Similar expansion to line AA1 except instead of expanding on both sides of the line,
+// expand on on the side towards the outside of the triangle.
+STATIC FLOAT2 get_aa1_triangle_expand_dir(IN_PARAM(VSOutputGeneric, v0), IN_PARAM(VSOutputGeneric, v1), IN_PARAM(VSOutputGeneric, v2), IN_PARAM(VSUniformsGeneric, cb))
+{
+	FLOAT2x2 xy_deltas = get_xy_deltas_unscaled(v0, v1, v2, cb);
+	FLOAT2 line_delta = xy_deltas[0];
+	FLOAT2 line_opposite = xy_deltas[1];
+
+	FLOAT2 line_normal = FLOAT2(line_delta.y, -line_delta.x);
+	FLOAT2 line_expand = abs(line_delta.x) >= abs(line_delta.y) ? FLOAT2(0.0f, 1.0f) : FLOAT2(1.0f, 0.0f);
+
+	if ((dot(line_expand, line_normal) >= 0.0f) == (dot(line_opposite, line_normal) >= 0.0f))
+	{
+		// Expand direction point towards the interior so flip it.
+		line_expand = -line_expand;
+	}
+
+	return line_expand;
+}
+
+// This works for GLSL, HLSL, MSL in spite of different row/column ordering.
+STATIC FLOAT2x2 get_inverse(IN_PARAM(FLOAT2x2, mat), float det)
+{
+	return FLOAT2x2(mat[1][1], -mat[0][1], -mat[1][0], mat[0][0]) * (1 / det);
+}
+
+// Extrapolate triangle attributes from the first vertex along the given direction.
+// dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
+STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_PARAM(VSOutputGeneric, v1), IN_PARAM(VSOutputGeneric, v2),
+	IN_PARAM(FLOAT2x2, dp_mat), FLOAT2 dp, IN_PARAM(VSUniformsGeneric, cb))
+{
+	// Get texture deltas
+	FLOAT2x2 dt;
+	if (VS_FST != FALSE)
+	{
+		dt = FLOAT2x2(v1.ti.zw - v0.ti.zw, v2.ti.zw - v0.ti.zw);
+	}
+	else
+	{
+		dt = FLOAT2x2(v1.t.xy - v0.t.xy, v2.t.xy - v0.t.xy);
+	}
+
+	// Get color delta if interpolating
+	FLOAT2x4 dc;
+	if (VS_IIP != FALSE)
+	{
+		dc = FLOAT2x4(v1.c - v0.c, v2.c - v0.c);
+	}
+
+	FLOAT2 dz = FLOAT2(v1.p.z - v0.p.z, v2.p.z - v0.p.z); // Z deltas
+
+	FLOAT2 df = FLOAT2(v1.t.z - v0.t.z, v2.t.z - v0.t.z); // Fog deltas
+
+	FLOAT2 dq = FLOAT2(v1.t.w - v0.t.w, v2.t.w - v0.t.w); // Q deltas
+
+	// To prevent unstable extrapolation, do not extrapolate if the
+	// minimum perpendicular length of the triangle is < 2 pixels.
+	float dp_det = determinant(dp_mat); // Twice signed triangle area.
+	float len0 = length(dp_mat[0]);
+	float len1 = length(dp_mat[1]);
+	float len2 = length(dp_mat[1] - dp_mat[0]);
+	float min_perp_length = abs(dp_det) / max(max(len0, len1), len2);
+
+	// Get the position -> barycentric weight matrix
+	FLOAT2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
+
+	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : MAT_MUL(inv_dp_mat, dp);
+
+	v0.p.xy += dp * cb.point_size; // Extrapolate position
+
+	// Extrapolate texture coords
+	if (VS_FST != FALSE)
+	{
+			v0.ti.zw += MAT_MUL(dt, weights);
+			v0.ti.xy = v0.ti.zw * cb.texture_scale;
+	}
+	else
+	{
+		v0.t.xy += MAT_MUL(dt, weights);
+		v0.ti.zw = v0.t.xy / cb.texture_scale;
+		v0.t.w += dot(dq, weights);
+	}
+
+	// Extrapolate and clamp color
+	if (VS_IIP != FALSE)
+	{
+		v0.c += MAT_MUL(dc, weights);
+		v0.c = clamp(v0.c, 0, 255);
+	}
+
+	v0.p.z += dot(dz, weights); // Extrapolate depth
+
+	v0.t.z += dot(df, weights); // Extrapolate fog
+}
+
+STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+{
+  return vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+}
+
+STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+{
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+  if ((vid & 1) != 0)
+    vout.p.x += cb.point_size.x;
+  if ((vid & 2) != 0)
+    vout.p.y += cb.point_size.y;
+  return vout;
+}
+
+STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+{
+  uint vid_base = vid >> 2;
+  bool is_bottom = (vid & 2) != 0;
+  bool is_right = (vid & 1) != 0;
+  uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
+  VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
+
+  // Use bottom minus top for delta regardless of which vertex we are expanding.
+  FLOAT2 line_delta = is_bottom ? vout.p.xy - other.p.xy : other.p.xy - vout.p.xy;
+  FLOAT2 line_vector = normalize(line_delta / cb.vertex_scale);
+  FLOAT2 line_expand = FLOAT2(line_vector.y, -line_vector.x);
+
+  if (VS_EXPAND_TYPE == VS_EXPAND_LINE_AA1)
+    line_expand *= 2.f * cb.line_aa1_width;
+
+  FLOAT2 line_width = (line_expand * cb.point_size) / 2;
+  FLOAT2 offset = is_right ? line_width : -line_width;
+  vout.p.xy += offset;
+
+  if (VS_EXPAND_TYPE == VS_EXPAND_LINE_AA1)
+    vout.inv_cov = is_right ? 1.f : -1.f;
+
+  // Lines will be run as (0 1 2) (1 2 3)
+  // This means that both triangles will have a point based off the top line point as their first point
+  // So we don't have to do anything for !IIP
+
+  return vout;
+}
+
+STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+{
+  uint vid_base = vid >> 1;
+  bool is_bottom = (vid & 2) != 0;
+  bool is_right = (vid & 1) != 0;
+  // Sprite points are always in pairs
+  uint vid_lt = vid_base & ~1;
+  uint vid_rb = vid_base | 1;
+
+  VSOutputGeneric lt = vs_main_impl(LOAD_VERTEX(vertices, vid_lt), cb);
+  VSOutputGeneric rb = vs_main_impl(LOAD_VERTEX(vertices, vid_rb), cb);
+  VSOutputGeneric vout = rb;
+
+  if (!is_right)
+  {
+    vout.p.x = lt.p.x;
+    vout.t.x = lt.t.x;
+    vout.ti.xz = lt.ti.xz;
+  }
+
+  if (!is_bottom)
+  {
+    vout.p.y = lt.p.y;
+    vout.t.y = lt.t.y;
+    vout.ti.yw = lt.ti.yw;
+  }
+
+  return vout;
+}
+
+STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb), INDICES_PARAM(indices))
+{
+  // Triangles with AA1 are expanded as follows:
+  // - Vertices 0-2: Interior of triangle (1 triangle).
+  // - Vertices 3-8: First edge expanded (2 triangles).
+  // - Vertices 9-14: Second edge expanded (2 triangles).
+  // - Vertices 15-20: Third edge expanded (2 triangles).
+  // - Vertices 21-26: First corner cap (2 triangles).
+  // - Vertices 27-32: Second corner cap (2 triangles).
+  // - Vertices 33-38: Third corner cap (2 triangles).
+
+  uint prim_id = vid / 39;
+  uint prim_offset = vid - 39 * prim_id; // range: 0-38
+  bool interior = prim_offset < 3;
+  bool edge = 3 <= prim_offset && prim_offset < 21;
+
+  VSOutputGeneric vout;
+  if (interior)
+  {
+    vout = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + prim_offset)), cb);
+    vout.inv_cov = 0.f;
+    vout.interior = 1;
+  }
+  else if (edge)
+  {
+    // Vertex indices for this edge. We need all 3 for determining exterior/interior.
+    uint prim_offset_edges = prim_offset - 3; // range: 0-17
+    uint i0 = prim_offset_edges / 6;
+    uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+    uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
+    uint edge_offset = prim_offset_edges - 6 * i0; // range: 0-5
+
+    // Note: order of top/bottom, inside/outside is arbitrary,
+    // as long as it assembles into two triangles forming a quad.
+    bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
+    bool is_outside = (edge_offset & 1) != 0;
+
+    vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
+    VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
+    VSOutputGeneric opposite = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + i2)), cb);
+
+    FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
+
+    FLOAT2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vout, other, opposite, cb) : FLOAT2(0.0f, 0.0f);
+
+    // Do actual extrapolation, or no-op if expand_dir == 0.
+    extrapolate_aa1_triangle_edge(vout, other, opposite, pos_deltas, expand_dir, cb);
+
+    vout.inv_cov = is_outside ? 1.0f : 0.0f; // No coverage on outside, otherwise full.
+
+    vout.interior = 0;
+  }
+  else // Corner cap
+  {
+    // Vertex indices for this cap. We need all 3 for determining exterior/interior.
+    uint prim_offset_cap = prim_offset - 21; // range: 0-8
+    uint i0 = prim_offset_cap / 6;
+    uint i1 = (i0 >= 2) ? i0 - 2 : i0 + 1;
+    uint i2 = (i0 >= 1) ? i0 - 1 : i0 + 2;
+    uint cap_offset = prim_offset_cap - 6 * i0; // range: 0-5
+
+    bool is_near_corner = cap_offset == 0 || cap_offset == 3;
+    bool is_far_corner = cap_offset == 2 || cap_offset == 5;
+    bool is_first_tri = cap_offset < 3;
+
+    vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + i0)), cb);
+    VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_first_tri ? i1 : i2))), cb);
+    VSOutputGeneric opposite = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_first_tri ? i2 : i1))), cb);
+
+    FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
+
+    // Get the edge expansion directions of both incident edges.
+    FLOAT2 edge_expand_dir_0 = get_aa1_triangle_expand_dir(vout, other, opposite, cb);
+    FLOAT2 edge_expand_dir_1 = get_aa1_triangle_expand_dir(vout, opposite, other, cb);
+
+    // Check if the corner is already filled by the expanded edges.
+    // This happens if the expand directions are the same.
+    // If so we output a degenerate triangle at this corner.
+    bool corner_filled = all(VEQUAL(edge_expand_dir_0, edge_expand_dir_1));
+
+    // Nothing if corner is filled, otherwise opposite to the bisector of the corner angle.
+    FLOAT2 far_corner_dir = corner_filled ? FLOAT2(0.0f, 0.0f) : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
+
+    // Determine the expand direction.
+    FLOAT2 expand_dir = is_near_corner ? FLOAT2(0.0f, 0.0f) : // No extrapolation
+                        is_far_corner ? far_corner_dir :      // Opposite to the angle bisector of corner
+                        edge_expand_dir_0;                    // Standard AA1 edge expansion
+
+    // Do the actual extrapolation (no-op if expand_dir == 0).
+    extrapolate_aa1_triangle_edge(vout, other, opposite, pos_deltas, expand_dir, cb);
+
+    vout.inv_cov = is_near_corner ? 0.0f : 1.0f; // Full coverage at near corner, otherwise none.
+  
+    vout.interior = 0;
+  }
+
+  return vout;
+}
+
+STATIC VSOutputGeneric vs_expand_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb), INDICES_PARAM(indices))
+{
+	switch (VS_EXPAND_TYPE)
+	{
+		case VS_EXPAND_NONE:
+			return vs_expand_none_impl(vid, vertices, cb);
+		case VS_EXPAND_POINT:
+      return vs_expand_point_impl(vid, vertices, cb);
+		case VS_EXPAND_LINE:
+		case VS_EXPAND_LINE_AA1:
+      return vs_expand_line_impl(vid, vertices, cb);
+		case VS_EXPAND_SPRITE:
+      return vs_expand_sprite_impl(vid, vertices, cb);
+		case VS_EXPAND_TRIANGLE_AA1:
+      return vs_expand_triangle_aa1_impl(vid, vertices, cb, indices);
+	}
+}
+
+
+
+#if VS_EXPAND_TYPE == VS_EXPAND_NONE
+
+VS_OUTPUT vs_main(VS_INPUT vin)
+{
+	VSInputGeneric vin_gen = GetVSInput(vin);
+  VSUniformsGeneric cb = GetVSUniforms();
+	VSOutputGeneric vout_gen = vs_main_impl(vin_gen, cb);
+	return GetVSOutput(vout_gen);
+}
+
+#else // VS_EXPAND_TYPE
+
+VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
+{
+  VSUniformsGeneric cb = GetVSUniforms();
+  VSOutputGeneric vout_gen = vs_expand_impl(vid, 0, cb, 0);
+  return GetVSOutput(vout_gen);
+}
+
+#endif // VS_EXPAND
+
+#endif // VERTEX_SHADER
+
+#ifdef PIXEL_SHADER
+
+#define PS_PRIM_CHECKING_INIT (PS_DATE == 1 || PS_DATE == 2)
+#define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
+#define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
+#define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
+#define NEEDS_RT_FOR_BLEND (((PS_BLEND_A != PS_BLEND_B) && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1)) || PS_BLEND_D == 1 || SW_AD_TO_HW)
+#define NEEDS_RT_EARLY (PS_TEX_IS_FB || PS_DATE >= 5)
+#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
+#define NEEDS_RT (NEEDS_RT_FOR_AFAIL || NEEDS_RT_EARLY || (!PS_PRIM_CHECKING_INIT && (PS_FBMASK || NEEDS_RT_FOR_BLEND)))
+#define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
+#define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
+#define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
+#define SW_DEPTH (NEEDS_DEPTH_FOR_AFAIL || NEEDS_DEPTH_FOR_ZTST || NEEDS_DEPTH_FOR_AA1)
+#define ZWRITE (PS_ZFLOOR || PS_ZCLAMP || SW_DEPTH)
+#define NEED_PRIMID (PS_DATE >= 1 && PS_DATE <= 3)
+
+#define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
+#define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
+#define PS_RETURN_DEPTH_ROV (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
+#define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
+#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
+
+#ifndef PS_FST
+#define PS_FST 0
+#define PS_WMS 0
+#define PS_WMT 0
+#define PS_ADJS 0
+#define PS_ADJT 0
+#define PS_FMT FMT_32
+#define PS_AEM 0
+#define PS_TFX 0
+#define PS_TCC 1
+#define PS_ATST 1
+#define PS_AFAIL 0
+#define PS_FOG 0
+#define PS_BLEND_HW 0
+#define PS_A_MASKED 0
+#define PS_FBA 0
+#define PS_FBMASK 0
+#define PS_LTF 1
+#define PS_TCOFFSETHACK 0
+#define PS_SHUFFLE 0
+#define PS_SHUFFLE_SAME 0
+#define PS_PROCESS_BA 0
+#define PS_PROCESS_RG 0
+#define PS_SHUFFLE_ACROSS 0
+#define PS_WRITE_RG 0
+#define PS_READ16_SRC 0
+#define PS_DST_FMT 0
+#define PS_DEPTH_FMT 0
+#define PS_PAL_FMT 0
+#define PS_CHANNEL 0
+#define PS_TALES_OF_ABYSS_HLE 0
+#define PS_URBAN_CHAOS_HLE 0
+#define PS_COLCLIP_HW 0
+#define PS_COLCLIP 0
+#define PS_BLEND_A 0
+#define PS_BLEND_B 0
+#define PS_BLEND_C 0
+#define PS_BLEND_D 0
+#define PS_FIXED_ONE_A 0
+#define PS_PABE 0
+#define PS_DITHER 0
+#define PS_DITHER_ADJUST 0
+#define PS_ZCLAMP 0
+#define PS_ZFLOOR 0
+#define PS_SCANMSK 0
+#define PS_AUTOMATIC_LOD 0
+#define PS_MANUAL_LOD 0
+#define PS_TEX_IS_FB 0
+#define PS_NO_COLOR 0
+#define PS_NO_COLOR1 0
+#define PS_DATE 0
+#define PS_ROV_COLOR 0
+#define PS_ROV_DEPTH 0
+#define PS_SW_ANISO 0
+#define PS_REGION_RECT 0
+#define PS_RTA_SRC_CORRECTION 0
+#define PS_AEM_FMT 0
+#define PS_IIP 0
+#define PS_ROUND_INV 0
+#define PS_BLEND_MIX 0
+#define PS_RTA_CORRECTION 0
+#define PS_ZTST 0
+#define PS_AA1 0
+#define PS_ABE 0
+#endif
+
+struct PS_INPUT
+{
+	noperspective centroid float4 p : SV_Position;
+	float4 t : TEXCOORD0;
+	float4 ti : TEXCOORD2;
+#if PS_IIP != 0
+	float4 c : COLOR0;
+#else
+	nointerpolation float4 c : COLOR0;
+#endif
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
+#if NEED_PRIMID
+	uint prim_id : SV_PrimitiveID;
+#endif
+};
+
+struct PS_OUTPUT
+{
+#define NUM_RTS 0
+
+#if PS_RETURN_COLOR
+	#if PS_DATE == 1 || PS_DATE == 2
+		float c0 : SV_Target;
+	#else
+		
+		float4 c0 : SV_Target0;
+
+		#undef NUM_RTS
+		#define NUM_RTS 1
+		
+		#if !PS_NO_COLOR1
+			float4 c1 : SV_Target1;
+		#endif
+	#endif
+#endif
+
+#if PS_RETURN_DEPTH
+	// In DX12 we do depth feedback loops with a color copy.
+	#if SW_DEPTH && PS_NO_COLOR1 && PS_DEPTH_FEEDBACK_SUPPORT == 2
+		#if NUM_RTS > 0
+			float depth_color : SV_Target1;
+		#else
+			float depth_color : SV_Target0;
+		#endif
+	#endif
+	#if PS_HAS_CONSERVATIVE_DEPTH && !SW_DEPTH
+		float depth : SV_DepthLessEqual;
+	#else
+		float depth : SV_Depth;
+	#endif
+#endif
+
+#undef NUM_RTS
+};
+
+Texture2D<float4> Texture : register(t0);
+SamplerState TextureSampler : register(s0);
+Texture2D<float4> Palette : register(t1);
+Texture2D<float> PrimMinTexture : register(t3);
+#if PS_ROV_COLOR
+	RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
+#else
+	Texture2D<float4> RtTexture : register(t2);
+#endif
+#if PS_ROV_DEPTH
+	RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+#else
+	Texture2D<float> DepthTexture : register(t4);
+#endif
+
+#ifdef DX12
+cbuffer cb1 : register(b1)
+#else
+cbuffer cb1
+#endif
+{
+	float3 FogColor;
+	float AREF;
+	float4 WH;
+	float2 TA;
+	float MaxDepthPS;
+	float Af;
+	uint4 FbMask;
+	float4 HalfTexel;
+	float4 MinMax;
+	float4 LODParams;
+	float4 STRange;
+	int4 ChannelShuffle;
+	float2 ChannelShuffleOffset;
+	float2 TC_OffsetHack;
+	float2 STScale;
+	float4x4 DitherMatrix;
+	float ScaledScaleFactor;
+	float RcpScaleFactor;
+	float _pad0_cb1;
+	float _pad1_cb1;
+	float LineCovScale;
+	float _pad2_cb1;
+	float _pad3_cb1;
+	float _pad4_cb1;
+};
+
+PSInputGeneric GetPSInput(PS_INPUT psin)
+{
+  PSInputGeneric psin_gen;
+  psin_gen.p = psin.p;
+  psin_gen.t = psin.t;
+  psin_gen.ti = psin.ti;
+  psin_gen.c = psin.c;
+  psin_gen.fc = psin.c;
+  psin_gen.inv_cov = psin.inv_cov;
+  psin_gen.interior = psin.interior;
+  return psin_gen;
+}
+
+PSUniformsGeneric GetPSUniforms()
+{
+  PSUniformsGeneric cb;
+
+  cb.fog_color = FogColor;
+  cb.aref = AREF;
+	cb.wh = WH;
+	cb.ta = TA;
+	cb.max_depth = MaxDepthPS;
+	cb.alpha_fix = Af;
+	cb.fbmask = FbMask;
+
+	cb.half_texel = HalfTexel;
+  cb.uv_min_max = MinMax;
+	cb.lod_params = LODParams;
+	cb.st_range = STRange;
+  
+  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
+  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
+  cb.channel_shuffle_green_mask = ChannelShuffle.z;
+  cb.channel_shuffle_green_shift = ChannelShuffle.w;
+
+	cb.channel_shuffle_offset = ChannelShuffleOffset;
+	cb.tc_offset = TC_OffsetHack;
+	cb.st_scale = STScale;
+	cb.dither_matrix = DitherMatrix;
+
+	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
+
+	cb.line_cov_scale = LineCovScale;
+	cb._pad0 = 0;
+	cb._pad1 = 0;
+	cb._pad2 = 0;
+
+  return cb;
+}
+
+float4 RtLoad(int2 xy)
+{
+#if PS_ROV_COLOR
+	return RtTextureRov[xy];
+#else
+	return RtTexture.Load(int3(int2(xy), 0));
+#endif
+}
+
+float DepthLoad(int2 xy)
+{
+#if PS_ROV_DEPTH
+	return DepthTextureRov[xy];
+#else
+	return DepthTexture.Load(int3(int2(xy), 0));
+#endif
+}
+
+void RtWrite(int2 xy, float4 c)
+{
+#if PS_ROV_COLOR
+	RtTextureRov[xy] = c;
+#endif
+}
+
+void DepthWrite(int2 xy, float d)
+{
+#if PS_ROV_DEPTH
+	DepthTextureRov[xy] = d;
+#endif
+}
+
 // Metal needs to distinguish depth texture from color texture, other APIs don't.
 #ifndef __METAL_VERSION__
 	#define PS_TEX_IS_DEPTH 0
@@ -1133,3 +2207,73 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
 
   return psout;
 }
+
+
+#if PS_ROV_EARLYDEPTHSTENCIL
+[earlydepthstencil]
+#endif
+
+#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
+PS_OUTPUT ps_main(PS_INPUT input)
+#else
+void ps_main(PS_INPUT input)
+#endif
+{
+	PSMain state;
+  state.psinput = GetPSInput(input);
+  state.cb = GetPSUniforms();
+  state.tex = 0; // unused
+  state.tex_depth = 0; // unused
+  state.palette = 0; // unused
+  state.prim_id_tex = 0; // unused
+  state.tex_sampler = 0; // unused
+	#if NEED_PRIMID
+  	state.prim_id = input.prim_id;
+	#else
+		state.prim_id = 0;
+	#endif
+  state.color_discarded = false;
+  state.depth_discarded = false;
+
+	int2 coord = int2(state.psinput.p.xy);
+
+	state.current_depth = DepthLoad(coord);
+
+	state.current_color = RtLoad(coord);
+
+	#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
+		PS_OUTPUT psout;
+	#endif
+
+	PSOutputGeneric psout_gen = ps_main_impl(state);
+
+	// Color write back
+	#if PS_RETURN_COLOR
+		psout.c0 = psout_gen.c0;
+		#if !PS_NO_COLOR1
+			psout.c1 = psout_gen.c1;
+		#endif
+	#elif PS_RETURN_COLOR_ROV
+		psout_gen.c0 = (FbMask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
+		if (!state.color_discarded)
+			RtTextureRov[state.psinput.p.xy] = psout_gen.c0;
+	#endif
+
+	// Depth write back
+	#if PS_RETURN_DEPTH
+		psout.depth = psout_gen.depth;
+		#if SW_DEPTH && PS_NO_COLOR1 && PS_DEPTH_FEEDBACK_SUPPORT == 2
+			// Output color clone for feedback.
+			psout.depth_color = psout_gen.depth;
+		#endif
+	#elif PS_RETURN_DEPTH_ROV
+		if (!state.depth_discarded)
+			DepthTextureRov[state.psinput.p.xy] = psout_gen.depth;
+	#endif
+
+	#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)
+		return psout;
+	#endif
+}
+
+#endif // PIXEL_SHADER

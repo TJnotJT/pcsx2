@@ -44,6 +44,9 @@
 #define SATURATE(X) saturate(X)
 #define FLOAT_BITCAST_UINT(X) as_type<uint>(X)
 #define UINT_BITCAST_FLOAT4(X) FLOAT4(as_type<uchar4>(X))
+#define MAT_MUL(X, Y) ((X) * (Y))
+#define FRACT(X) fract(X)
+#define MIX mix
 
 #define VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
 #define INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
@@ -55,17 +58,17 @@
 #define EXP_MIN_32 0x1p-32f
 #define EXP_POS_32 0x1p+32f
 
-#define PS_UV_MSK_FIX(CB) as_type<uint4>(CB.uv_min_max)
-#define PS_SAMPLE_TEX(STATE, ...) STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_LOD(STATE, ...) STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_DEPTH(STATE, ...) STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__)
-#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, ...) STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__)
-#define PS_READ_TEX(STATE, POS, LOD) STATE.tex.read((POS), (LOD)) 
-#define PS_READ_TEX_DEPTH(STATE, POS, LOD) STATE.tex_depth.read((POS), (LOD))
-#define PS_READ_PALETTE(STATE, IDX) STATE.palette.read(UINT2(IDX, 0), 0)
-#define PS_READ_PRIMID(STATE, POS) STATE.prim_id_tex.read(UINT2(POS), 0)
-#define PS_GET_TEX_DIMS(STATE) UINT2(STATE.tex.get_width(), STATE.tex.get_height())
-#define PS_GET_TEX_DEPTH_DIMS(STATE) UINT2(STATE.tex_depth.get_width(), STATE.tex_depth.get_height())
+#define PS_UV_MSK_FIX(CB) (as_type<uint4>(CB.uv_min_max))
+#define PS_SAMPLE_TEX(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))
+#define PS_SAMPLE_TEX_LOD(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))
+#define PS_SAMPLE_TEX_DEPTH(STATE, ...) (STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__))
+#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, ...) (STATE.tex_depth.sample(STATE.tex_sampler, __VA_ARGS__))
+#define PS_READ_TEX(STATE, POS, LOD) (STATE.tex.read((POS), (LOD)))
+#define PS_READ_TEX_DEPTH(STATE, POS, LOD) (STATE.tex_depth.read((POS), (LOD)))
+#define PS_READ_PALETTE(STATE, IDX) (STATE.palette.read(UINT2(IDX, 0), 0))
+#define PS_READ_PRIMID(STATE, POS) (STATE.prim_id_tex.read(UINT2(POS), 0).r)
+#define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(STATE.tex.get_width(), STATE.tex.get_height()))
+#define PS_GET_TEX_DEPTH_DIMS(STATE) (OUT_VAR = UINT2(STATE.tex_depth.get_width(), STATE.tex_depth.get_height()))
 
 #ifndef VS_EXPAND_NONE
 #define VS_EXPAND_NONE VSExpand::None
