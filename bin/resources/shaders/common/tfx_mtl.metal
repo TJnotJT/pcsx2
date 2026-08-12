@@ -48,7 +48,6 @@
 #define VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
 #define INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME
-#define OUT_PARAM(TYPE, NAME) thread TYPE & NAME
 #define IN_OUT_PARAM(TYPE, NAME) thread TYPE & NAME
 
 #define PRIMID_MAX FLT_MAX

@@ -1,4 +1,4 @@
-STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
+STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
 {
 	FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;

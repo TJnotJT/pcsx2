@@ -46,7 +46,6 @@
 #define VERTICES_PARAM(NAME) uint NAME
 #define INDICES_PARAM(NAME) uint NAME
 #define IN_PARAM(TYPE, NAME) TYPE NAME
-#define OUT_PARAM(TYPE, NAME) out TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
 #define PRIMID_MAX 0x7FFFFFFF
@@ -340,7 +339,7 @@ VSInputGeneric load_vertex(uint index)
 }
 
 // Include generic functions.
-STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
+STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
 {
 	FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;
@@ -1062,7 +1061,7 @@ STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
     GPU_DISCARD;
 }
 
-STATIC void discard_color(IN_OUT_PARAM(PSMain, state), OUT_PARAM(FLOAT4, color))
+STATIC void discard_color(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, color))
 {
   if (PS_ROV_COLOR != FALSE)
     state.color_discarded = true;
@@ -1070,7 +1069,7 @@ STATIC void discard_color(IN_OUT_PARAM(PSMain, state), OUT_PARAM(FLOAT4, color))
     color = state.current_color;
 }
 
-STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), OUT_PARAM(float, depth))
+STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth))
 {
   if (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
     state.depth_discarded = true;

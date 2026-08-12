@@ -46,7 +46,6 @@
 #define VERTICES_PARAM(NAME) uint NAME
 #define INDICES_PARAM(NAME) uint NAME
 #define IN_PARAM(TYPE, NAME) TYPE NAME
-#define OUT_PARAM(TYPE, NAME) out TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
 #define PRIMID_MAX 0x7FFFFFFF
@@ -157,7 +156,6 @@ struct RawVertex
 	uint FOG;
 };
 
-#if VS_EXPAND_TYPE != VS_EXPAND_NONE
 layout(std140, set = 0, binding = 2) readonly buffer VertexBuffer {
 	RawVertex vertex_buffer[];
 };
@@ -199,17 +197,6 @@ VSInputGeneric load_vertex(uint index)
 
   return v;
 }
-#else
-uint load_index(uint _i)
-{
-	return 0;
-}
-
-VSInputGeneric load_vertex(uint index)
-{
-	return VSInputGeneric{};
-}
-#endif
 
 // Include generic functions.
 #include "tfx_vs.inc"

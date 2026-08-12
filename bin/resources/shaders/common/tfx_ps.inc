@@ -21,7 +21,7 @@ STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
     GPU_DISCARD;
 }
 
-STATIC void discard_color(IN_OUT_PARAM(PSMain, state), OUT_PARAM(FLOAT4, color))
+STATIC void discard_color(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, color))
 {
   if (PS_ROV_COLOR != FALSE)
     state.color_discarded = true;
@@ -29,7 +29,7 @@ STATIC void discard_color(IN_OUT_PARAM(PSMain, state), OUT_PARAM(FLOAT4, color))
     color = state.current_color;
 }
 
-STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), OUT_PARAM(float, depth))
+STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth))
 {
   if (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
     state.depth_discarded = true;
