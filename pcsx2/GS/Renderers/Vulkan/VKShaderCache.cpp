@@ -259,6 +259,7 @@ std::optional<VKShaderCache::SPIRVCodeVector> VKShaderCache::CompileShaderToSPV(
 		                                     : "null result object");
 		ERROR_LOG("Failed to compile shader to SPIR-V: {}\n{}", compilation_status_to_string(status), errors);
 		DumpBadShader(source, errors);
+		printf("");
 	}
 	else
 	{

@@ -360,7 +360,7 @@ vertex MainVSOut vs_main_expand(
 	constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]],
 	device const ushort* indices [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]])
 {
-	return MainVSOut(vs_expand_impl(vertices, indices, vid, cb));
+	return MainVSOut(vs_expand_impl(vid, vertices, indices, cb));
 }
 
 // MARK: - Fragment functions

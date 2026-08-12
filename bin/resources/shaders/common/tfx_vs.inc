@@ -90,7 +90,7 @@ STATIC FLOAT2x2 get_inverse(IN_PARAM(FLOAT2x2, mat), float det)
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
 // dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
-STATIC void extrapolate_aa1_triangle_edge(IN_OUT_VAR(VSOutputGeneric, v0), IN_PARAM(VSOutputGeneric, v1), IN_PARAM(VSOutputGeneric, v2),
+STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_PARAM(VSOutputGeneric, v1), IN_PARAM(VSOutputGeneric, v2),
 	IN_PARAM(FLOAT2x2, dp_mat), FLOAT2 dp, IN_PARAM(VSUniformsGeneric, cb))
 {
 	// Get texture deltas

@@ -1,14 +1,6 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
-// FIXME: Remove after done.
-#version 460 core
-#extension GL_EXT_samplerless_texture_functions : require
-#define HAS_FEEDBACK_LOOP_LAYOUT 1
-#extension GL_ARB_fragment_shader_interlock : require
-#extension GL_ARB_shader_image_load_store : require
-#define FRAGMENT_SHADER 1
-
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -165,6 +157,7 @@ struct RawVertex
 	uint FOG;
 };
 
+#if VS_EXPAND_TYPE != VS_EXPAND_NONE
 layout(std140, set = 0, binding = 2) readonly buffer VertexBuffer {
 	RawVertex vertex_buffer[];
 };
@@ -206,6 +199,17 @@ VSInputGeneric load_vertex(uint index)
 
   return v;
 }
+#else
+uint load_index(uint _i)
+{
+	return 0;
+}
+
+VSInputGeneric load_vertex(uint index)
+{
+	return VSInputGeneric{};
+}
+#endif
 
 // Include generic functions.
 #include "tfx_vs.inc"
@@ -260,7 +264,7 @@ void WriteVSOutput(VSOutputGeneric v)
   gl_PointSize = v.point_size;
 }
 
-#if VS_EXPAND == VS_EXPAND_NONE
+#if VS_EXPAND_TYPE == VS_EXPAND_NONE
 
 layout(location = 0) in vec2 a_st;
 layout(location = 1) in uvec4 a_c;
@@ -291,17 +295,17 @@ void main()
   WriteVSOutput(vout);
 }
 
-#else // VS_EXPAND
+#else // VS_EXPAND_TYPE
 
 void main()
 {
 	uint vid = uint(gl_VertexIndex);
   VSUniformsGeneric cb = GetVSUniforms();
-  VSOutputGeneric vout = vs_expand_impl(0, 0, vid, cb);
+  VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
   WriteVSOutput(vout);
 }
 
-#endif // VS_EXPAND
+#endif // VS_EXPAND_TYPE
 
 #endif // VERTEX_SHADER
 
@@ -336,7 +340,7 @@ void main()
 #define PS_DST_FMT 0
 #define PS_DEPTH_FMT 0
 #define PS_PAL_FMT 0
-#define PS_CHANNEL_FETCH 0
+#define PS_CHANNEL 0
 #define PS_TALES_OF_ABYSS_HLE 0
 #define PS_URBAN_CHAOS_HLE 0
 #define PS_COLCLIP_HW 0
@@ -364,7 +368,6 @@ void main()
 #define PS_REGION_RECT 0
 #define PS_RTA_SRC_CORRECTION 0
 #define PS_AEM_FMT 0
-#define PS_CHANNEL 0
 #define PS_IIP 0
 #define PS_ROUND_INV 0
 #define PS_BLEND_MIX 0
@@ -584,11 +587,14 @@ void main()
 	state.current_color = RtLoad(coord);
 
   PSOutputGeneric psout = ps_main_impl(state);
-	
-	// Writing back color (result already written to o_col0 for non-ROV)
-	#if PS_RETURN_COLOR_ROV
-		psout.c0 = mix(psout.c0, state.current_color, equal(FbMask, uvec4(0xFFu))); // channel masking
 
+	#if PS_RETURN_COLOR
+		o_col0 = psout.c0;
+		#if !PS_NO_COLOR1
+			o_col1 = psout.c1;
+		#endif
+	#elif PS_RETURN_COLOR_ROV
+		psout.c0 = mix(psout.c0, state.current_color, equal(FbMask, uvec4(0xFFu))); // channel masking
 		if (!state.color_discarded)
 			imageStore(RtImageRov, coord, psout.c0);
 	#endif
