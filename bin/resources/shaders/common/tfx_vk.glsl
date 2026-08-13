@@ -1,6 +1,18 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#ifndef PCSX2_VULKAN
+	#define PCSX2_VULKAN 0
+#endif
+
+#ifndef PCSX2_OPENGL
+	#define PCSX2_OPENGL 0
+#endif
+
+#if PCSX2_VULKAN == PCSX2_OPENGL
+	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
+#endif
+
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -55,6 +67,12 @@
 #define VS_Y_FLIP 1.0f
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
+
+#if PCSX2_VULKAN
+	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#elif PCSX2_OPENGL
+	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_MIN_32) : ((float(Z) * EXP2_MIN_32) * 2.0f - 1.0f))
+#endif
 
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
@@ -139,8 +157,11 @@
 #define VS_EXPAND_TYPE VS_EXPAND_NONE
 #endif
 
-// The loading functions must be defined before the generic vertex functions are included.
-layout(push_constant) uniform cb2
+#if PCSX2_VULKAN
+	layout(push_constant) uniform cb2
+#elif PCSX2_OPENGL
+	layout(std140, binding = 4) uniform cb22
+#endif
 {
 	uint BaseVertex;
 	uint BaseIndex;
@@ -159,12 +180,24 @@ struct RawVertex
 	uint FOG;
 };
 
-layout(std140, set = 0, binding = 2) readonly buffer VertexBuffer {
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 2)
+#elif PCSX2_OPENGL
+	layout(std140, binding = 2)
+#endif
+readonly buffer VertexBuffer
+{
 	RawVertex vertex_buffer[];
 };
 
 // Warning: use std430 instead of std140 so that the ints are tightly packed.
-layout(std430, set = 0, binding = 3) readonly buffer IndexBuffer {
+#if PCSX2_VULKAN
+	layout(std430, set = 0, binding = 3) 
+#elif PCSX2_OPENGL
+	layout(std430, binding = 3)
+#endif
+readonly buffer IndexBuffer
+{
 	uint index_buffer[];
 };
 
@@ -204,7 +237,11 @@ VSInputGeneric load_vertex(uint index)
 // Include generic functions.
 #include "tfx_vs.inc"
 
-layout(std140, set = 0, binding = 0) uniform cb0
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 0) uniform cb0
+#elif PCSX2_OPENGL
+	layout(std140, binding = 1) uniform cb20
+#endif
 {
 	vec2 VertexScale;
 	vec2 VertexOffset;
@@ -228,17 +265,19 @@ VSUniformsGeneric GetVSUniforms()
   return cb;
 }
 
-layout(location = 0) out VSOutput
+#if PCSX2_VULKAN
+	layout(location = 0) out VSOutput
+#elif PCSX2_OPENGL
+	out SHADER
+#endif
 {
 	vec4 t;
 	vec4 ti;
-
 	#if VS_IIP != 0
 		vec4 c;
 	#else
 		flat vec4 c;
 	#endif
-
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 } vsOut;
@@ -289,7 +328,11 @@ void main()
 
 void main()
 {
-	uint vid = uint(gl_VertexIndex);
+	#if PCSX2_VULKAN
+		uint vid = uint(gl_VertexIndex);
+	#elif PCSX2_OPENGL
+		uint vid = uint(gl_VertexID);
+	#endif
   VSUniformsGeneric cb = GetVSUniforms();
   VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
   WriteVSOutput(vout);
@@ -389,7 +432,11 @@ void main()
 #define NEEDS_RT PS_FEEDBACK_LOOP_IS_NEEDED_RT
 #define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
-layout(std140, set = 0, binding = 1) uniform cb1
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 1) uniform cb1
+#elif PCSX2_OPENGL
+	layout(std140, binding = 0) uniform cb21
+#endif
 {
 	vec3 FogColor;
 	float AREF;
@@ -416,6 +463,59 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	float _pad3_cb1;
 	float _pad4_cb1;
 };
+
+#if PCSX2_VULKAN
+	layout(location = 0) in VSOutput
+#elif PCSX2_OPENGL
+	in SHADER
+#endif
+{
+	vec4 t;
+	vec4 ti;
+	#if PS_IIP != 0
+		vec4 c;
+	#else
+		flat vec4 c;
+	#endif
+	float inv_cov; // We use the inverse to make it simpler to interpolate.
+	flat uint interior; // 1 for triangle interior; 0 for edge;
+} vsIn;
+
+#define TARGET_0_QUALIFIER out
+
+// Only enable framebuffer fetch when we actually need it.
+#if PCSX2_OPENGL && HAS_FRAMEBUFFER_FETCH && NEEDS_RT
+	// We need to force the colour to be defined here, to read from it.
+	// Basically the only scenario where this'll happen is RGBA masked and DATE is active.
+	#undef PS_NO_COLOR
+	#define PS_NO_COLOR 0
+	#if defined(GL_EXT_shader_framebuffer_fetch)
+		#undef TARGET_0_QUALIFIER
+		#define TARGET_0_QUALIFIER inout
+		#define LAST_FRAG_COLOR o_col0
+	#elif defined(GL_ARM_shader_framebuffer_fetch)
+		#define LAST_FRAG_COLOR gl_LastFragColorARM
+	#endif
+#endif
+
+#if PS_RETURN_COLOR
+	#if !PS_NO_COLOR1
+		layout(location = 0, index = 0) TARGET_0_QUALIFIER vec4 o_col0;
+		layout(location = 0, index = 1) out vec4 o_col1;
+	#elif !PS_NO_COLOR
+		layout(location = 0) out vec4 o_col0;
+	#endif
+#endif
+
+// Depth feedback mode 2 is for depth as color.
+// Use FB fetch for the feedback if it's available.
+#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+	#if HAS_FRAMEBUFFER_FETCH
+		layout(location = 1) inout float o_col1;
+	#else
+		layout(location = 1) out float o_col1;
+	#endif
+#endif
 
 PSUniformsGeneric GetPSUniforms()
 {
@@ -451,19 +551,6 @@ PSUniformsGeneric GetPSUniforms()
   return cb;
 }
 
-layout(location = 0) in VSOutput
-{
-	vec4 t;
-	vec4 ti;
-	#if PS_IIP != 0
-		vec4 c;
-	#else
-		flat vec4 c;
-	#endif
-	float inv_cov; // We use the inverse to make it simpler to interpolate.
-	flat uint interior; // 1 for triangle interior; 0 for edge;
-} vsIn;
-
 PSInputGeneric GetPSInput()
 {
   PSInputGeneric psinput;
@@ -477,52 +564,50 @@ PSInputGeneric GetPSInput()
   return psinput;
 }
 
-#if PS_RETURN_COLOR
-	#if !PS_NO_COLOR1
-		layout(location = 0, index = 0) out vec4 o_col0;
-		layout(location = 0, index = 1) out vec4 o_col1;
-	#elif !PS_NO_COLOR
-		layout(location = 0) out vec4 o_col0;
+#if PCSX2_VULKAN
+	layout(set = 1, binding = 0) uniform sampler2D Texture;
+	layout(set = 1, binding = 1) uniform texture2D Palette;
+	layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
+	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
+	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+
+	#if USE_FEEDBACK_SAMPLER
+		layout(set = 1, binding = 2) uniform texture2D RtSampler;
+		layout(set = 1, binding = 4) uniform texture2D DepthSampler;
+	#else
+		// Must consider each case separately since the input attachment indices must be consecutive.
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
+			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
+		#endif
 	#endif
-#elif PS_RETURN_COLOR_ROV
-	vec4 o_col0;
+#elif PCSX2_OPENGL
+	layout(binding = 0) uniform sampler2D Texture;
+	layout(binding = 1) uniform sampler2D Palette;
+	layout(binding = 2) uniform sampler2D RtSampler;
+	layout(binding = 3) uniform sampler2D PrimMinTexture;
+	layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
-layout(set = 1, binding = 0) uniform sampler2D Texture;
-layout(set = 1, binding = 1) uniform texture2D Palette;
-layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
-layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
-layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-
-#if USE_FEEDBACK_SAMPLER
-	layout(set = 1, binding = 2) uniform texture2D RtSampler;
-	layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-#else
-	// Must consider each case separately since the input attachment indices must be consecutive.
-	#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-		layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
-	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
-		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-		layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
-	#endif
-#endif
-
-#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-layout(depth_less) out float gl_FragDepth;
+#if ZWRITE && PS_HAS_CONSERVATIVE_DEPTH && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	layout(depth_less) out float gl_FragDepth;
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH
-layout(pixel_interlock_ordered) in;
+	layout(pixel_interlock_ordered) in;
 #endif
 
 #if PS_ROV_EARLYDEPTHSTENCIL
-layout(early_fragment_tests) in;
+	layout(early_fragment_tests) in;
 #endif
 
 vec4 RtLoad(ivec2 xy)
 {
+#if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(RtImageRov, xy);
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT && USE_FEEDBACK_SAMPLER
@@ -532,10 +617,20 @@ vec4 RtLoad(ivec2 xy)
 	#else
 		return vec4(0.0f);
 	#endif
+#elif PCSX2_OPENGL
+	#if !PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		return vec4(0.0f);
+	#elif HAS_FRAMEBUFFER_FETCH
+		return LAST_FRAG_COLOR;
+	#else
+		return texelFetch(RtSampler, xy, 0);
+	#endif
+#endif
 }
 
 float DepthLoad(ivec2 xy)
 {
+#if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(DepthImageRov, xy).r;
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && USE_FEEDBACK_SAMPLER
@@ -545,6 +640,15 @@ float DepthLoad(ivec2 xy)
 	#else
 		return 0.0f;
 	#endif
+#elif PCSX2_OPENGL
+	#if !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		return 0.0f;
+	#elif HAS_FRAMEBUFFER_FETCH && (DEPTH_FEEDBACK_SUPPORT == 2)
+		return o_col1;
+	#else
+		return texelFetch(DepthSampler, xy, 0).r;
+	#endif
+#endif
 }
 
 #include "tfx_ps.inc"
@@ -589,6 +693,13 @@ void main()
 	// Writing back depth
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = psout.depth;
+		#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+			// Depth as color write. For depth as color feedback we write to both
+			// color copy and real depth to avoid having to copy back to real depth.
+			// Warning: do not write o_col1 until the end since the value might
+			// be needed for FB fetch in sample_from_depth().
+			o_col1 = psout.depth;
+		#endif
 	#elif PS_RETURN_DEPTH_ROV
 		if (!state.depth_discarded)
 			imageStore(DepthImageRov, coord, vec4(psout.depth, 0, 0, 1.0f));

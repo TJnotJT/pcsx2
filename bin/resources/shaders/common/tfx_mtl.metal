@@ -58,6 +58,8 @@
 #define EXP_MIN_32 0x1p-32f
 #define EXP_POS_32 0x1p+32f
 
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+
 #define PS_UV_MSK_FIX(CB) (as_type<uint4>(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))
 #define PS_SAMPLE_TEX_LOD(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))

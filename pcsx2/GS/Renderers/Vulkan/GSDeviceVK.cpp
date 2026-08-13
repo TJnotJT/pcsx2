@@ -3843,17 +3843,20 @@ static void AddShaderHeader(std::stringstream& ss)
 	const GSDevice::FeatureSupport features = dev->Features();
 
 	ss << "#version 460 core\n";
+	
 	ss << "#extension GL_EXT_samplerless_texture_functions : require\n";
 
 	if (!features.texture_barrier)
-		ss << "#define DISABLE_TEXTURE_BARRIER 1\n";
+		AddMacro(ss, "DISABLE_TEXTURE_BARRIER", 1);
 	if (features.texture_barrier && dev->UseFeedbackLoopLayout())
-		ss << "#define HAS_FEEDBACK_LOOP_LAYOUT 1\n";
+		AddMacro(ss, "HAS_FEEDBACK_LOOP_LAYOUT", 1);
 	if (features.rov)
 	{
 		ss << "#extension GL_ARB_fragment_shader_interlock : require\n";
 		ss << "#extension GL_ARB_shader_image_load_store : require\n";
 	}
+
+	AddMacro(ss, "PCSX2_VULKAN", 1);
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)
@@ -4921,7 +4924,6 @@ VkShaderModule GSDeviceVK::GetTFXVertexShader(GSHWDrawConfig::VSSelector sel)
 	AddMacro(ss, "VS_IIP", sel.iip);
 	AddMacro(ss, "VS_POINT_SIZE", sel.point_size);
 	AddMacro(ss, "VS_EXPAND_TYPE", static_cast<int>(sel.expand));
-	AddMacro(ss, "VS_PROVOKING_VERTEX_LAST", static_cast<int>(m_features.provoking_vertex_last));
 	ss << m_tfx_source;
 
 	VkShaderModule mod = g_vulkan_shader_cache->GetVertexShader(ss.str());
@@ -4941,6 +4943,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	std::stringstream ss;
 	AddShaderHeader(ss);
 	AddShaderStageMacro(ss, false, false, true);
+	AddMacro(ss, "PS_HAS_CONSERVATIVE_DEPTH", 1);
 	AddMacro(ss, "PS_FST", sel.fst);
 	AddMacro(ss, "PS_WMS", sel.wms);
 	AddMacro(ss, "PS_WMT", sel.wmt);

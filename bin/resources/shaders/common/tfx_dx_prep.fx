@@ -56,6 +56,8 @@
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP_MIN_32)
+
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
@@ -435,7 +437,7 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
   vout.p.y *= VS_Y_FLIP;
 	vout.p.w = 1.0f;
-	vout.p.z = float(z) * EXP2_MIN_32;
+	vout.p.z = VS_SCALE_RAW_Z(z);
 
   FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;
@@ -588,9 +590,9 @@ STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), I
 STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
-  if ((vid & 1) != 0)
+  if ((vid & 1u) != 0u)
     vout.p.x += cb.point_size.x;
-  if ((vid & 2) != 0)
+  if ((vid & 2u) != 0u)
     vout.p.y += cb.point_size.y;
   return vout;
 }
@@ -598,8 +600,8 @@ STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), 
 STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 2;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
   VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
   VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
@@ -629,11 +631,11 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
 STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 1;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   // Sprite points are always in pairs
-  uint vid_lt = vid_base & ~1;
-  uint vid_rb = vid_base | 1;
+  uint vid_lt = vid_base & ~1u;
+  uint vid_rb = vid_base | 1u;
 
   VSOutputGeneric lt = vs_main_impl(LOAD_VERTEX(vertices, vid_lt), cb);
   VSOutputGeneric rb = vs_main_impl(LOAD_VERTEX(vertices, vid_rb), cb);
@@ -691,7 +693,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     // Note: order of top/bottom, inside/outside is arbitrary,
     // as long as it assembles into two triangles forming a quad.
     bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
-    bool is_outside = (edge_offset & 1) != 0;
+    bool is_outside = (edge_offset & 1u) != 0u;
 
     vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
     VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
@@ -1440,7 +1442,7 @@ UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
   }
   
   if (PS_PAL_FMT == 1)
-    return i & 0xF;
+    return i & 0xFu;
   if (PS_PAL_FMT == 2)
     return i >> 4;
 
@@ -1525,7 +1527,7 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
     // Warning: UV can't be used in channel effect
     USHORT depth = fetch_raw_depth(state);
     // Convert msb based on the palette
-    t = PS_READ_PALETTE(state, USHORT2((depth >> 8) & 0xFF, 0)) * 255.f;
+    t = PS_READ_PALETTE(state, USHORT2((depth >> 8) & 0xFFu, 0)) * 255.f;
   }
   else if (PS_URBAN_CHAOS_HLE != FALSE)
   {
@@ -1539,10 +1541,10 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
     USHORT depth = fetch_raw_depth(state);
 
     // Convert lsb based on the palette
-    t = PS_READ_PALETTE(state, USHORT2(depth & 0xFF, 0)) * 255.f;
+    t = PS_READ_PALETTE(state, USHORT2(depth & 0xFFu, 0)) * 255.f;
 
     // Msb is easier
-    float green = float((depth >> 8) & 0xFF) * 36.f;
+    float green = float((depth >> 8) & 0xFFu) * 36.f;
     green = min(green, 255.0f);
 
     t.g += green;
@@ -1575,19 +1577,19 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
 FLOAT4 fetch_red(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFF) / 255.f : fetch_raw_color(state).r;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFFu) / 255.f : fetch_raw_color(state).r;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_green(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFF) / 255.f : fetch_raw_color(state).g;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFFu) / 255.f : fetch_raw_color(state).g;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_blue(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFF) / 255.f : fetch_raw_color(state).b;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFFu) / 255.f : fetch_raw_color(state).b;
   return sample_p_norm(state, rt) * 255.f;
 }
 
@@ -1607,7 +1609,7 @@ FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
   if (PS_TEX_IS_DEPTH != FALSE)
   {
     uint depth = fetch_raw_depth(state);
-    uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFF;
+    uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFFu;
     return float4_bcast(bg);
   }
   else
@@ -1780,17 +1782,17 @@ FLOAT4 ps_color(IN_PARAM(PSMain, state))
     UINT4 denorm_c_before = UINT4(T);
     if ((PS_PROCESS_BA & SHUFFLE_READ) != FALSE)
     {
-      T.r = float((denorm_c_before.b << 3) & 0xF8);
-      T.g = float(((denorm_c_before.b >> 2) & 0x38) | ((denorm_c_before.a << 6) & 0xC0));
-      T.b = float((denorm_c_before.a << 1) & 0xF8);
-      T.a = float(denorm_c_before.a & 0x80);
+      T.r = float((denorm_c_before.b << 3) & 0xF8u);
+      T.g = float(((denorm_c_before.b >> 2) & 0x38u) | ((denorm_c_before.a << 6) & 0xC0u));
+      T.b = float((denorm_c_before.a << 1) & 0xF8u);
+      T.a = float(denorm_c_before.a & 0x80u);
     }
     else
     {
-      T.r = float((denorm_c_before.r << 3) & 0xF8);
-      T.g = float(((denorm_c_before.r >> 2) & 0x38) | ((denorm_c_before.g << 6) & 0xC0));
-      T.b = float((denorm_c_before.g << 1) & 0xF8);
-      T.a = float(denorm_c_before.g & 0x80);
+      T.r = float((denorm_c_before.r << 3) & 0xF8u);
+      T.g = float(((denorm_c_before.r >> 2) & 0x38u) | ((denorm_c_before.g << 6) & 0xC0u));
+      T.b = float((denorm_c_before.g << 1) & 0xF8u);
+      T.a = float(denorm_c_before.g & 0x80u);
     }
     
     T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
@@ -1808,7 +1810,7 @@ void ps_fbmask(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
   if (PS_FBMASK != FALSE)
   {
     float multi = (PS_COLCLIP_HW != FALSE) ? 65535.0 : 255.5;
-    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xff)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
+    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xffu)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
   }
 }
 
@@ -1821,7 +1823,7 @@ void ps_dither(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float As)
     fpos = USHORT2(state.psinput.p.xy);
   else
     fpos = USHORT2(state.psinput.p.xy * float2_bcast(state.cb.scale_factor.y));
-  float value = state.cb.dither_matrix[fpos.y & 3][fpos.x & 3];
+  float value = state.cb.dither_matrix[fpos.y & 3u][fpos.x & 3u];
 
   // The idea here is we add on the dither amount adjusted by the alpha before it goes to the hw blend
   // so after the alpha blend the resulting value should be the same as (Cs - Cd) * As + Cd + Dither.
@@ -1896,17 +1898,17 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       UINT4 denorm_rt = UINT4(state.current_color);
       if ((PS_PROCESS_BA & SHUFFLE_WRITE) != 0)
       {
-        state.current_color.r = float((denorm_rt.b << 3) & 0xF8);
-        state.current_color.g = float(((denorm_rt.b >> 2) & 0x38) | ((denorm_rt.a << 6) & 0xC0));
-        state.current_color.b = float((denorm_rt.a << 1) & 0xF8);
-        state.current_color.a = float(denorm_rt.a & 0x80);
+        state.current_color.r = float((denorm_rt.b << 3) & 0xF8u);
+        state.current_color.g = float(((denorm_rt.b >> 2) & 0x38u) | ((denorm_rt.a << 6) & 0xC0u));
+        state.current_color.b = float((denorm_rt.a << 1) & 0xF8u);
+        state.current_color.a = float(denorm_rt.a & 0x80u);
       }
       else
       {
-        state.current_color.r = float((denorm_rt.r << 3) & 0xF8);
-        state.current_color.g = float(((denorm_rt.r >> 2) & 0x38) | ((denorm_rt.g << 6) & 0xC0));
-        state.current_color.b = float((denorm_rt.g << 1) & 0xF8);
-        state.current_color.a = float(denorm_rt.g & 0x80);
+        state.current_color.r = float((denorm_rt.r << 3) & 0xF8u);
+        state.current_color.g = float(((denorm_rt.r >> 2) & 0x38u) | ((denorm_rt.g << 6) & 0xC0u));
+        state.current_color.b = float((denorm_rt.g << 1) & 0xF8u);
+        state.current_color.a = float(denorm_rt.g & 0x80u);
       }
     }
     float multi = PS_COLCLIP_HW != FALSE ? 65535.0 : 255.5;
@@ -2009,13 +2011,13 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
       UINT4 denorm_c_after = UINT4(C);
       if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
       {
-        C.b = float(((denorm_c_after.r >> 3) & 0x1F) | ((denorm_c_after.g << 2) & 0xE0));
-        C.a = float(((denorm_c_after.g >> 6) & 0x3) | ((denorm_c_after.b >> 1) & 0x7C) | (denorm_c_after.a & 0x80));
+        C.b = float(((denorm_c_after.r >> 3) & 0x1Fu) | ((denorm_c_after.g << 2) & 0xE0u));
+        C.a = float(((denorm_c_after.g >> 6) & 0x3u) | ((denorm_c_after.b >> 1) & 0x7Cu) | (denorm_c_after.a & 0x80u));
       }
       else
       {
-        C.r = float(((denorm_c_after.r >> 3) & 0x1F) | ((denorm_c_after.g << 2) & 0xE0));
-        C.g = float(((denorm_c_after.g >> 6) & 0x3) | ((denorm_c_after.b >> 1) & 0x7C) | (denorm_c_after.a & 0x80));
+        C.r = float(((denorm_c_after.r >> 3) & 0x1Fu) | ((denorm_c_after.g << 2) & 0xE0u));
+        C.g = float(((denorm_c_after.g >> 6) & 0x3u) | ((denorm_c_after.b >> 1) & 0x7Cu) | (denorm_c_after.a & 0x80u));
       }
     }
 
@@ -2024,8 +2026,8 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
     {
       UINT4 denorm_c = UINT4(C);
       
-      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
-        C = float4_bcast(float((denorm_c.b & 0x7F) | (denorm_c.a & 0x80)));
+      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0u)
+        C = float4_bcast(float((denorm_c.b & 0x7Fu) | (denorm_c.a & 0x80u)));
       else
         C.ga = C.rg;
     }
@@ -2035,8 +2037,8 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
       UINT4 denorm_c = UINT4(C);
       UINT2 denorm_TA = UINT2(state.cb.ta * 255.5f);
       
-      C.rb = float2_bcast(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7) << 5)));
-      C.ga = float2_bcast(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80)));
+      C.rb = float2_bcast(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7u) << 5)));
+      C.ga = float2_bcast(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80u)));
     }
     else if (PS_SHUFFLE_ACROSS != FALSE)
     {
@@ -2045,7 +2047,7 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
         C.br = C.rb;
         C.ag = C.ga;
       }
-      else if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
+      else if ((PS_PROCESS_BA & SHUFFLE_READ) != 0u)
       {
         C.rb = C.bb;
         C.ga = C.aa;
@@ -2078,9 +2080,9 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
       discard_all(state);
   }
 
-  if ((PS_SCANMSK & 2) != 0)
+  if ((uint(PS_SCANMSK) & 2u) != 0u)
   {
-    if ((uint(state.psinput.p.y) & 1) == (PS_SCANMSK & 1))
+    if ((uint(state.psinput.p.y) & 1u) == (uint(PS_SCANMSK) & 1u))
       discard_all(state);
   }
 
@@ -2089,8 +2091,8 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
     // 1 => DATM == 0, 2 => DATM == 1
     float rt_a = PS_WRITE_RG != FALSE ? state.current_color.g : state.current_color.a;
     bool bad = PS_RTA_CORRECTION != FALSE ?
-      ((PS_DATE & 3) == 1 ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) :
-      ((PS_DATE & 3) == 1 ? (rt_a > 0.5) : (rt_a < 0.5));
+      ((uint(PS_DATE) & 3u) == 1u ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) :
+      ((uint(PS_DATE) & 3u) == 1u ? (rt_a > 0.5) : (rt_a < 0.5));
 
     if (bad)
       discard_all(state);

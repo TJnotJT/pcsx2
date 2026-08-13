@@ -14,5 +14,5 @@ def preprocess(in_file, defs_file, vs_file, ps_file, out_file):
     file.write(in_str)
 
 if __name__ == "__main__":
-  # preprocess("tfx_vk.glsl", "tfx_defs.inc", "tfx_vs.inc", "tfx_ps.inc", "tfx_vk_prep.glsl")
+  preprocess("tfx_vk.glsl", "tfx_defs.inc", "tfx_vs.inc", "tfx_ps.inc", "tfx_vk_prep.glsl")
   preprocess("tfx_dx.fx", "tfx_defs.inc", "tfx_vs.inc", "tfx_ps.inc", "tfx_dx_prep.fx")

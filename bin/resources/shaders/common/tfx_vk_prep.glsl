@@ -1,6 +1,18 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#ifndef PCSX2_VULKAN
+	#define PCSX2_VULKAN 0
+#endif
+
+#ifndef PCSX2_OPENGL
+	#define PCSX2_OPENGL 0
+#endif
+
+#if PCSX2_VULKAN == PCSX2_OPENGL
+	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
+#endif
+
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -42,6 +54,9 @@
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
 #define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
+#define MAT_MUL(X, Y) ((X) * (Y))
+#define FRACT(X) fract(X)
+#define MIX mix
 
 #define VERTICES_PARAM(NAME) uint NAME
 #define INDICES_PARAM(NAME) uint NAME
@@ -53,17 +68,34 @@
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
-#define PS_UV_MSK_FIX(CB) floatBitsToUint(CB.uv_min_max)
-#define PS_SAMPLE_TEX(STATE, POS) texture(Texture, FLOAT2(POS))
-#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) textureLod(Texture, FLOAT2(POS), float(LOD))
-#define PS_SAMPLE_TEX_DEPTH(STATE, POS) PS_SAMPLE_TEX(STATE, (POS))
-#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD))
-#define PS_READ_TEX(STATE, POS, LOD) texelFetch(Texture, INT2(POS), int(LOD))
-#define PS_READ_TEX_DEPTH(STATE, POS, LOD) PS_READ_TEX(STATE, (POS), (LOD))
-#define PS_READ_PALETTE(STATE, POS) texelFetch(Palette, INT2(POS), 0)
-#define PS_READ_PRIMID(STATE, POS) texelFetch(PrimMinTexture, INT2(POS), 0)
-#define PS_GET_TEX_DIMS(STATE) UINT2(textureSize(Texture, 0))
-#define PS_GET_TEX_DEPTH_DIMS(STATE) PS_GET_TEX_DIMS(STATE)
+#if PCSX2_VULKAN
+	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#elif PCSX2_OPENGL
+	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_MIN_32) : ((float(Z) * EXP2_MIN_32) * 2.0f - 1.0f))
+#endif
+
+#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
+#define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
+#define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
+#define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)
+#define PS_SAMPLE_TEX_DEPTH_LOD(STATE, POS, LOD) (PS_SAMPLE_TEX_LOD(STATE, (POS), (LOD)).r)
+#define PS_READ_TEX(STATE, POS, LOD) (texelFetch(Texture, INT2(POS), int(LOD)))
+#define PS_READ_TEX_DEPTH(STATE, POS, LOD) (PS_READ_TEX(STATE, (POS), (LOD)).r)
+#define PS_READ_PALETTE(STATE, POS) (texelFetch(Palette, INT2(POS), 0))
+#define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
+#define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
+#define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
+
+#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
+#define LOAD_INDEX(INDICES, VID) load_index(VID)
+
+#define FMT_32 0
+#define FMT_24 1
+#define FMT_16 2
+
+#define SHUFFLE_READ  1
+#define SHUFFLE_WRITE 2
+#define SHUFFLE_READWRITE 3
 
 #ifndef VS_EXPAND_NONE
 #define VS_EXPAND_NONE 0
@@ -108,17 +140,6 @@
 #define PS_ROV_DEPTH_READ_WRITE 1
 #define PS_ROV_DEPTH_READ_ONLY 2
 #endif
-
-#define FMT_32 0
-#define FMT_24 1
-#define FMT_16 2
-
-#define SHUFFLE_READ  1
-#define SHUFFLE_WRITE 2
-#define SHUFFLE_READWRITE 3
-
-#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
-#define LOAD_INDEX(INDICES, VID) load_index(VID)
 
 #ifdef __METAL_VERSION__
   #define FALSE false
@@ -248,25 +269,40 @@ struct PSOutputGeneric
 };
 
 #ifndef __METAL_VERSION__
-FLOAT4 convert_depth32_rgba8(float value)
+STATIC FLOAT4 convert_depth32_rgba8(float value)
 {
 	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
 	return UINT_BITCAST_FLOAT4(val);
 }
 
-FLOAT4 convert_depth16_rgba8(float value)
+STATIC FLOAT4 convert_depth16_rgba8(float value)
 {
 	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
 	return FLOAT4(UINT4(val << 3, val >> 2, val >> 7, val >> 8) & UINT4(0xf8, 0xf8, 0xf8, 0x80));
 }
 #endif
 
+STATIC FLOAT2 float2_bcast(float val)
+{
+  return FLOAT2(val, val);
+}
+
+STATIC FLOAT3 float3_bcast(float val)
+{
+  return FLOAT3(val, val, val);
+}
+
+STATIC FLOAT4 float4_bcast(float val)
+{
+  return FLOAT4(val, val, val, val);
+}
+
 
 //////////////////////////////////////////////////////////////////////
 // Vertex Shader
 //////////////////////////////////////////////////////////////////////
 
-#if defined(VERTEX_SHADER)
+#ifdef VERTEX_SHADER
 
 #ifndef VS_TME
 #define VS_TME 0
@@ -276,8 +312,11 @@ FLOAT4 convert_depth16_rgba8(float value)
 #define VS_EXPAND_TYPE VS_EXPAND_NONE
 #endif
 
-// The loading functions must be defined before the generic vertex functions are included.
-layout(push_constant) uniform cb2
+#if PCSX2_VULKAN
+	layout(push_constant) uniform cb2
+#elif PCSX2_OPENGL
+	layout(std140, binding = 4) uniform cb22
+#endif
 {
 	uint BaseVertex;
 	uint BaseIndex;
@@ -296,12 +335,24 @@ struct RawVertex
 	uint FOG;
 };
 
-layout(std140, set = 0, binding = 2) readonly buffer VertexBuffer {
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 2)
+#elif PCSX2_OPENGL
+	layout(std140, binding = 2)
+#endif
+readonly buffer VertexBuffer
+{
 	RawVertex vertex_buffer[];
 };
 
 // Warning: use std430 instead of std140 so that the ints are tightly packed.
-layout(std430, set = 0, binding = 3) readonly buffer IndexBuffer {
+#if PCSX2_VULKAN
+	layout(std430, set = 0, binding = 3) 
+#elif PCSX2_OPENGL
+	layout(std430, binding = 3)
+#endif
+readonly buffer IndexBuffer
+{
 	uint index_buffer[];
 };
 
@@ -339,9 +390,18 @@ VSInputGeneric load_vertex(uint index)
 }
 
 // Include generic functions.
-STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGeneric, vout), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
 {
-	FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
+	VSOutputGeneric vout;
+	// Clamp to max depth, gs doesn't wrap
+	uint z = min(v.z, cb.max_depth);
+	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
+	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
+  vout.p.y *= VS_Y_FLIP;
+	vout.p.w = 1.0f;
+	vout.p.z = VS_SCALE_RAW_Z(z);
+
+  FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;
 
 	// Float coordinate
@@ -361,20 +421,6 @@ STATIC void texture_coord(IN_PARAM(VSInputGeneric, v), IN_OUT_PARAM(VSOutputGene
 		// Some games uses float coordinate for post-processing effects
 		vout.ti.zw = st / cb.texture_scale;
 	}
-}
-
-STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
-{
-	VSOutputGeneric vout;
-	// Clamp to max depth, gs doesn't wrap
-	uint z = min(v.z, cb.max_depth);
-	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
-	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
-  vout.p.y *= VS_Y_FLIP;
-	vout.p.w = 1.0f;
-	vout.p.z = float(z) * EXP2_MIN_32;
-
-	texture_coord(v, vout, cb);
 
   vout.c = v.c;
 
@@ -469,19 +515,19 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Get the position -> barycentric weight matrix
 	FLOAT2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
 
-	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : inv_dp_mat * dp;
+	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : MAT_MUL(inv_dp_mat, dp);
 
 	v0.p.xy += dp * cb.point_size; // Extrapolate position
 
 	// Extrapolate texture coords
 	if (VS_FST != FALSE)
 	{
-			v0.ti.zw += dt * weights;
+			v0.ti.zw += MAT_MUL(dt, weights);
 			v0.ti.xy = v0.ti.zw * cb.texture_scale;
 	}
 	else
 	{
-		v0.t.xy += dt * weights;
+		v0.t.xy += MAT_MUL(dt, weights);
 		v0.ti.zw = v0.t.xy / cb.texture_scale;
 		v0.t.w += dot(dq, weights);
 	}
@@ -489,7 +535,7 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Extrapolate and clamp color
 	if (VS_IIP != FALSE)
 	{
-		v0.c += dc * weights;
+		v0.c += MAT_MUL(dc, weights);
 		v0.c = clamp(v0.c, 0, 255);
 	}
 
@@ -505,25 +551,25 @@ STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), I
 
 STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
-  VSOutputGeneric point = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
-  if ((vid & 1) != 0)
-    point.p.x += cb.point_size.x;
-  if ((vid & 2) != 0)
-    point.p.y += cb.point_size.y;
-  return point;
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+  if ((vid & 1u) != 0u)
+    vout.p.x += cb.point_size.x;
+  if ((vid & 2u) != 0u)
+    vout.p.y += cb.point_size.y;
+  return vout;
 }
 
 STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 2;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
-  VSOutputGeneric point = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
+  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
   VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
 
   // Use bottom minus top for delta regardless of which vertex we are expanding.
-  FLOAT2 line_delta = is_bottom ? point.p.xy - other.p.xy : other.p.xy - point.p.xy;
+  FLOAT2 line_delta = is_bottom ? vout.p.xy - other.p.xy : other.p.xy - vout.p.xy;
   FLOAT2 line_vector = normalize(line_delta / cb.vertex_scale);
   FLOAT2 line_expand = FLOAT2(line_vector.y, -line_vector.x);
 
@@ -532,26 +578,26 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
 
   FLOAT2 line_width = (line_expand * cb.point_size) / 2;
   FLOAT2 offset = is_right ? line_width : -line_width;
-  point.p.xy += offset;
+  vout.p.xy += offset;
 
   if (VS_EXPAND_TYPE == VS_EXPAND_LINE_AA1)
-    point.inv_cov = is_right ? 1.f : -1.f;
+    vout.inv_cov = is_right ? 1.f : -1.f;
 
   // Lines will be run as (0 1 2) (1 2 3)
   // This means that both triangles will have a point based off the top line point as their first point
   // So we don't have to do anything for !IIP
 
-  return point;
+  return vout;
 }
 
 STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 1;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   // Sprite points are always in pairs
-  uint vid_lt = vid_base & ~1;
-  uint vid_rb = vid_base | 1;
+  uint vid_lt = vid_base & ~1u;
+  uint vid_rb = vid_base | 1u;
 
   VSOutputGeneric lt = vs_main_impl(LOAD_VERTEX(vertices, vid_lt), cb);
   VSOutputGeneric rb = vs_main_impl(LOAD_VERTEX(vertices, vid_rb), cb);
@@ -609,7 +655,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     // Note: order of top/bottom, inside/outside is arbitrary,
     // as long as it assembles into two triangles forming a quad.
     bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
-    bool is_outside = (edge_offset & 1) != 0;
+    bool is_outside = (edge_offset & 1u) != 0u;
 
     vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
     VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
@@ -693,7 +739,11 @@ STATIC VSOutputGeneric vs_expand_impl(uint vid, VERTICES_PARAM(vertices), IN_PAR
 
 
 
-layout(std140, set = 0, binding = 0) uniform cb0
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 0) uniform cb0
+#elif PCSX2_OPENGL
+	layout(std140, binding = 1) uniform cb20
+#endif
 {
 	vec2 VertexScale;
 	vec2 VertexOffset;
@@ -717,17 +767,19 @@ VSUniformsGeneric GetVSUniforms()
   return cb;
 }
 
-layout(location = 0) out VSOutput
+#if PCSX2_VULKAN
+	layout(location = 0) out VSOutput
+#elif PCSX2_OPENGL
+	out SHADER
+#endif
 {
 	vec4 t;
 	vec4 ti;
-
 	#if VS_IIP != 0
 		vec4 c;
 	#else
 		flat vec4 c;
 	#endif
-
 	float inv_cov; // We use the inverse to make it simpler to interpolate.
 	flat uint interior; // 1 for triangle interior; 0 for edge;
 } vsOut;
@@ -755,22 +807,22 @@ layout(location = 6) in vec4 a_f;
 
 VSInputGeneric GetVSInput()
 {
-  VSInputGeneric vsinput;
-  vsinput.st = a_st;
-  vsinput.c = FLOAT4(a_c);
-  vsinput.q = a_q;
-  vsinput.p = a_p;
-  vsinput.z = a_z;
-  vsinput.uv = a_uv;
-  vsinput.f = a_f;
-  return vsinput;
+  VSInputGeneric vin;
+  vin.st = a_st;
+  vin.c = FLOAT4(a_c);
+  vin.q = a_q;
+  vin.p = a_p;
+  vin.z = a_z;
+  vin.uv = a_uv;
+  vin.f = a_f;
+  return vin;
 }
 
 void main()
 {
-  VSInputGeneric vsinput = GetVSInput();
+  VSInputGeneric vin = GetVSInput();
   VSUniformsGeneric cb = GetVSUniforms();
-	VSOutputGeneric vout = vs_main_impl(vsinput, cb);
+	VSOutputGeneric vout = vs_main_impl(vin, cb);
   WriteVSOutput(vout);
 }
 
@@ -778,7 +830,11 @@ void main()
 
 void main()
 {
-	uint vid = uint(gl_VertexIndex);
+	#if PCSX2_VULKAN
+		uint vid = uint(gl_VertexIndex);
+	#elif PCSX2_OPENGL
+		uint vid = uint(gl_VertexID);
+	#endif
   VSUniformsGeneric cb = GetVSUniforms();
   VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
   WriteVSOutput(vout);
@@ -856,8 +912,6 @@ void main()
 #define PS_ABE 0
 #endif
 
-#define PS_TEX_IS_DEPTH 0
-
 #define SW_BLEND (PS_BLEND_A != 0 || PS_BLEND_B != 0 || PS_BLEND_D != 0)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED != FALSE)
@@ -880,7 +934,11 @@ void main()
 #define NEEDS_RT PS_FEEDBACK_LOOP_IS_NEEDED_RT
 #define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
-layout(std140, set = 0, binding = 1) uniform cb1
+#if PCSX2_VULKAN
+	layout(std140, set = 0, binding = 1) uniform cb1
+#elif PCSX2_OPENGL
+	layout(std140, binding = 0) uniform cb21
+#endif
 {
 	vec3 FogColor;
 	float AREF;
@@ -907,6 +965,61 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	float _pad3_cb1;
 	float _pad4_cb1;
 };
+
+#if PCSX2_VULKAN
+	layout(location = 0) in VSOutput
+#elif PCSX2_OPENGL
+	in SHADER
+#endif
+{
+	vec4 t;
+	vec4 ti;
+	#if PS_IIP != 0
+		vec4 c;
+	#else
+		flat vec4 c;
+	#endif
+	float inv_cov; // We use the inverse to make it simpler to interpolate.
+	flat uint interior; // 1 for triangle interior; 0 for edge;
+} vsIn;
+
+#define TARGET_0_QUALIFIER out
+
+// Only enable framebuffer fetch when we actually need it.
+#if PCSX2_OPENGL && HAS_FRAMEBUFFER_FETCH && NEEDS_RT
+	// We need to force the colour to be defined here, to read from it.
+	// Basically the only scenario where this'll happen is RGBA masked and DATE is active.
+	#undef PS_NO_COLOR
+	#define PS_NO_COLOR 0
+	#if defined(GL_EXT_shader_framebuffer_fetch)
+		#undef TARGET_0_QUALIFIER
+		#define TARGET_0_QUALIFIER inout
+		#define LAST_FRAG_COLOR o_col0
+	#elif defined(GL_ARM_shader_framebuffer_fetch)
+		#define LAST_FRAG_COLOR gl_LastFragColorARM
+	#endif
+#endif
+
+#if PS_RETURN_COLOR
+	#if !PS_NO_COLOR1
+		layout(location = 0, index = 0) TARGET_0_QUALIFIER vec4 o_col0;
+		layout(location = 0, index = 1) out vec4 o_col1;
+	#elif !PS_NO_COLOR
+		layout(location = 0) out vec4 o_col0;
+	#endif
+#elif PS_RETURN_COLOR_ROV
+	vec4 o_col0;
+#endif
+
+// Depth feedback mode 2 is for depth as color.
+// Use FB fetch for the feedback if it's available.
+#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+	#if HAS_FRAMEBUFFER_FETCH
+		layout(location = 1) inout float o_col1;
+	#else
+		layout(location = 1) out float o_col1;
+	#endif
+#endif
 
 PSUniformsGeneric GetPSUniforms()
 {
@@ -942,19 +1055,6 @@ PSUniformsGeneric GetPSUniforms()
   return cb;
 }
 
-layout(location = 0) in VSOutput
-{
-	vec4 t;
-	vec4 ti;
-	#if PS_IIP != 0
-		vec4 c;
-	#else
-		flat vec4 c;
-	#endif
-	float inv_cov; // We use the inverse to make it simpler to interpolate.
-	flat uint interior; // 1 for triangle interior; 0 for edge;
-} vsIn;
-
 PSInputGeneric GetPSInput()
 {
   PSInputGeneric psinput;
@@ -968,52 +1068,50 @@ PSInputGeneric GetPSInput()
   return psinput;
 }
 
-#if PS_RETURN_COLOR
-	#if !PS_NO_COLOR1
-		layout(location = 0, index = 0) out vec4 o_col0;
-		layout(location = 0, index = 1) out vec4 o_col1;
-	#elif !PS_NO_COLOR
-		layout(location = 0) out vec4 o_col0;
+#if PCSX2_VULKAN
+	layout(set = 1, binding = 0) uniform sampler2D Texture;
+	layout(set = 1, binding = 1) uniform texture2D Palette;
+	layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
+	layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
+	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
+
+	#if USE_FEEDBACK_SAMPLER
+		layout(set = 1, binding = 2) uniform texture2D RtSampler;
+		layout(set = 1, binding = 4) uniform texture2D DepthSampler;
+	#else
+		// Must consider each case separately since the input attachment indices must be consecutive.
+		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
+			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
+		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
+		#endif
 	#endif
-#elif PS_RETURN_COLOR_ROV
-	vec4 o_col0;
+#elif PCSX2_OPENGL
+	layout(binding = 0) uniform sampler2D Texture;
+	layout(binding = 1) uniform sampler2D Palette;
+	layout(binding = 2) uniform sampler2D RtSampler;
+	layout(binding = 3) uniform sampler2D PrimMinTexture;
+	layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
-layout(set = 1, binding = 0) uniform sampler2D Texture;
-layout(set = 1, binding = 1) uniform texture2D Palette;
-layout(set = 1, binding = 3) uniform texture2D PrimMinTexture;
-layout(set = 1, binding = 5, rgba8) uniform restrict coherent image2D RtImageRov;
-layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
-
-#if USE_FEEDBACK_SAMPLER
-	layout(set = 1, binding = 2) uniform texture2D RtSampler;
-	layout(set = 1, binding = 4) uniform texture2D DepthSampler;
-#else
-	// Must consider each case separately since the input attachment indices must be consecutive.
-	#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-		layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
-	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
-		layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-	#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
-		layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
-	#endif
-#endif
-
-#if ZWRITE && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
-layout(depth_less) out float gl_FragDepth;
+#if ZWRITE && PS_HAS_CONSERVATIVE_DEPTH && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	layout(depth_less) out float gl_FragDepth;
 #endif
 
 #if PS_ROV_COLOR || PS_ROV_DEPTH
-layout(pixel_interlock_ordered) in;
+	layout(pixel_interlock_ordered) in;
 #endif
 
 #if PS_ROV_EARLYDEPTHSTENCIL
-layout(early_fragment_tests) in;
+	layout(early_fragment_tests) in;
 #endif
 
 vec4 RtLoad(ivec2 xy)
 {
+#if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(RtImageRov, xy);
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT && USE_FEEDBACK_SAMPLER
@@ -1023,10 +1121,20 @@ vec4 RtLoad(ivec2 xy)
 	#else
 		return vec4(0.0f);
 	#endif
+#elif PCSX2_OPENGL
+	#if !PS_FEEDBACK_LOOP_IS_NEEDED_RT
+		return vec4(0.0f);
+	#elif HAS_FRAMEBUFFER_FETCH
+		return LAST_FRAG_COLOR;
+	#else
+		return texelFetch(RtSampler, xy, 0);
+	#endif
+#endif
 }
 
 float DepthLoad(ivec2 xy)
 {
+#if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(DepthImageRov, xy).r;
 	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && USE_FEEDBACK_SAMPLER
@@ -1036,22 +1144,21 @@ float DepthLoad(ivec2 xy)
 	#else
 		return 0.0f;
 	#endif
+#elif PCSX2_OPENGL
+	#if !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+		return 0.0f;
+	#elif HAS_FRAMEBUFFER_FETCH && (DEPTH_FEEDBACK_SUPPORT == 2)
+		return o_col1;
+	#else
+		return texelFetch(DepthSampler, xy, 0).r;
+	#endif
+#endif
 }
 
-FLOAT2 float2_bcast(float val)
-{
-  return FLOAT2(val, val);
-}
-
-FLOAT3 float3_bcast(float val)
-{
-  return FLOAT3(val, val, val);
-}
-
-FLOAT4 float4_bcast(float val)
-{
-  return FLOAT4(val, val, val, val);
-}
+// Metal needs to distinguish depth texture from color texture, other APIs don't.
+#ifndef __METAL_VERSION__
+	#define PS_TEX_IS_DEPTH 0
+#endif
 
 STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
 {
@@ -1080,7 +1187,7 @@ STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth
 FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
 {
   if (PS_TEX_IS_DEPTH != FALSE)
-    return FLOAT4(PS_SAMPLE_TEX_DEPTH_LOD(state, uv, lod));
+    return FLOAT4(PS_SAMPLE_TEX_DEPTH_LOD(state, uv, lod), 0.0f, 0.0f, 0.0f);
   else
     return PS_SAMPLE_TEX_LOD(state, uv, lod);
 }
@@ -1088,7 +1195,7 @@ FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
 FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
 {
   if (PS_TEX_IS_DEPTH != FALSE)
-    return FLOAT4(PS_SAMPLE_TEX_DEPTH(state, uv));
+    return FLOAT4(PS_SAMPLE_TEX_DEPTH(state, uv), 0.0f, 0.0f, 0.0);
   else
     return PS_SAMPLE_TEX(state, uv);
 }
@@ -1096,7 +1203,7 @@ FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
 FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod)
 {
   if (PS_TEX_IS_DEPTH != FALSE)
-    return FLOAT4(PS_READ_TEX_DEPTH(state, pos, lod));
+    return FLOAT4(PS_READ_TEX_DEPTH(state, pos, lod), 0.0f, 0.0f, 0.0f);
   else
     return PS_READ_TEX(state, pos, lod);
 }
@@ -1108,10 +1215,12 @@ FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos)
 
 UINT2 get_tex_dims(IN_PARAM(PSMain, state))
 {
+  UINT2 dims = UINT2(0, 0);
   if (PS_TEX_IS_DEPTH != FALSE)
-    return PS_GET_TEX_DEPTH_DIMS(state);
+    PS_GET_TEX_DEPTH_DIMS(state, dims);
   else
-    return PS_GET_TEX_DIMS(state);
+    PS_GET_TEX_DIMS(state, dims);
+  return dims;
 }
 
 STATIC float manual_lod(IN_PARAM(PSMain, state), float uv_w)
@@ -1303,7 +1412,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
   {
     if (PS_REGION_RECT != FALSE && PS_WMS == 0)
     {
-      uv = fract(uv);
+      uv = FRACT(uv);
     }
     else if (PS_REGION_RECT != FALSE && PS_WMS == 1)
     {
@@ -1318,7 +1427,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
       // wrap negative uv coords to avoid an off by one error that shifted
       // textures. Fixes Xenosaga's hair issue.
       if (PS_FST == FALSE)
-        uv = fract(uv);
+        uv = FRACT(uv);
 
       UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
       uv = FLOAT4((USHORT4(uv * tex_size) & USHORT4(uv_msk_fix.xyxy)) | USHORT4(uv_msk_fix.zwzw)) / tex_size;
@@ -1328,7 +1437,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
   {
     if (PS_REGION_RECT != FALSE && PS_WMS == 0)
     {
-      uv.xz = fract(uv.xz);
+      uv.xz = FRACT(uv.xz);
     }
     else if (PS_REGION_RECT != FALSE && PS_WMS == 1)
     {
@@ -1341,7 +1450,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
     else if (PS_WMS == 3)
     {
       if (PS_FST == FALSE)
-        uv.xz = fract(uv.xz);
+        uv.xz = FRACT(uv.xz);
 
       UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
       uv.xz = FLOAT2((USHORT2(uv.xz * tex_size.xx) & USHORT2(uv_msk_fix.xx)) | USHORT2(uv_msk_fix.zz)) / tex_size.xx;
@@ -1349,7 +1458,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
 
     if (PS_REGION_RECT != FALSE && PS_WMT == 0)
     {
-      uv.yw = fract(uv.yw);
+      uv.yw = FRACT(uv.yw);
     }
     else if (PS_REGION_RECT != FALSE && PS_WMT == 1)
     {
@@ -1362,7 +1471,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
     else if (PS_WMT == 3)
     {
       if (PS_FST == FALSE)
-        uv.yw = fract(uv.yw);
+        uv.yw = FRACT(uv.yw);
 
       UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
       uv.yw = FLOAT2((USHORT2(uv.yw * tex_size.yy) & USHORT2(uv_msk_fix.yy)) | USHORT2(uv_msk_fix.ww)) / tex_size.yy;
@@ -1414,7 +1523,7 @@ UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
   }
   
   if (PS_PAL_FMT == 1)
-    return i & 0xF;
+    return i & 0xFu;
   if (PS_PAL_FMT == 2)
     return i >> 4;
 
@@ -1449,7 +1558,7 @@ FLOAT4 fetch_c(IN_PARAM(PSMain, state), USHORT2 uv)
   if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
   else if (PS_TEX_IS_DEPTH != FALSE)
-    return PS_READ_TEX_DEPTH(state, uv, 0);
+    return FLOAT4(PS_READ_TEX_DEPTH(state, uv, 0), 0.0f, 0.0f, 0.0f);
   else
     return PS_READ_TEX(state, uv, 0);
 }
@@ -1486,7 +1595,7 @@ USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMain, state), USHORT2 uv)
 
 FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 {
-  FLOAT2 uv_f = FLOAT2(clamp_wrap_uv_depth(state, USHORT2(st))) * FLOAT2(state.cb.scale_factor.x);
+  FLOAT2 uv_f = FLOAT2(clamp_wrap_uv_depth(state, USHORT2(st))) * float2_bcast(state.cb.scale_factor.x);
 
   if (PS_REGION_RECT != FALSE)
     uv_f = clamp(uv_f + state.cb.st_range.xy, state.cb.st_range.xy, state.cb.st_range.zw);
@@ -1499,7 +1608,7 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
     // Warning: UV can't be used in channel effect
     USHORT depth = fetch_raw_depth(state);
     // Convert msb based on the palette
-    t = PS_READ_PALETTE(state, USHORT2((depth >> 8) & 0xFF, 0)) * 255.f;
+    t = PS_READ_PALETTE(state, USHORT2((depth >> 8) & 0xFFu, 0)) * 255.f;
   }
   else if (PS_URBAN_CHAOS_HLE != FALSE)
   {
@@ -1513,10 +1622,10 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
     USHORT depth = fetch_raw_depth(state);
 
     // Convert lsb based on the palette
-    t = PS_READ_PALETTE(state, USHORT2(depth & 0xFF, 0)) * 255.f;
+    t = PS_READ_PALETTE(state, USHORT2(depth & 0xFFu, 0)) * 255.f;
 
     // Msb is easier
-    float green = float((depth >> 8) & 0xFF) * 36.f;
+    float green = float((depth >> 8) & 0xFFu) * 36.f;
     green = min(green, 255.0f);
 
     t.g += green;
@@ -1549,19 +1658,19 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
 FLOAT4 fetch_red(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFF) / 255.f : fetch_raw_color(state).r;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFFu) / 255.f : fetch_raw_color(state).r;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_green(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFF) / 255.f : fetch_raw_color(state).g;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFFu) / 255.f : fetch_raw_color(state).g;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_blue(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFF) / 255.f : fetch_raw_color(state).b;
+  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFFu) / 255.f : fetch_raw_color(state).b;
   return sample_p_norm(state, rt) * 255.f;
 }
 
@@ -1581,15 +1690,15 @@ FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
   if (PS_TEX_IS_DEPTH != FALSE)
   {
     uint depth = fetch_raw_depth(state);
-    uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFF;
-    return FLOAT4(bg);
+    uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFFu;
+    return float4_bcast(bg);
   }
   else
   {
     UINT4 rt = UINT4(fetch_raw_color(state) * 255.5f);
     uint green = (rt.g >> state.cb.channel_shuffle_green_shift) & state.cb.channel_shuffle_green_mask;
     uint blue  = (rt.b >> state.cb.channel_shuffle_blue_shift)  & state.cb.channel_shuffle_blue_mask;
-    return FLOAT4(green | blue);
+    return float4_bcast(green | blue);
   }
 }
 
@@ -1612,7 +1721,7 @@ FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
     if (PS_LTF != FALSE)
     {
       uv = st.xyxy + state.cb.half_texel;
-      dd = fract(uv.xy * state.cb.wh.zw);
+      dd = FRACT(uv.xy * state.cb.wh.zw);
       if (PS_FST == FALSE)
       {
         // Background in Shin Megami Tensei Lucifers
@@ -1643,7 +1752,7 @@ FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
   }
 
   if (PS_LTF != FALSE)
-    t = mix(mix(c[0], c[1], dd.x), mix(c[2], c[3], dd.x), dd.y);
+    t = MIX(MIX(c[0], c[1], dd.x), MIX(c[2], c[3], dd.x), dd.y);
   else
     t = c[0];
 
@@ -1712,7 +1821,7 @@ bool atst(IN_PARAM(PSMain, state), FLOAT4 C)
 void fog(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float f)
 {
   if (PS_FOG != FALSE)
-    C.rgb = trunc(mix(state.cb.fog_color, C.rgb, (f * 255.0f) / 256.0f));
+    C.rgb = trunc(MIX(state.cb.fog_color, C.rgb, (f * 255.0f) / 256.0f));
 }
 
 FLOAT4 ps_color(IN_PARAM(PSMain, state))
@@ -1754,17 +1863,17 @@ FLOAT4 ps_color(IN_PARAM(PSMain, state))
     UINT4 denorm_c_before = UINT4(T);
     if ((PS_PROCESS_BA & SHUFFLE_READ) != FALSE)
     {
-      T.r = float((denorm_c_before.b << 3) & 0xF8);
-      T.g = float(((denorm_c_before.b >> 2) & 0x38) | ((denorm_c_before.a << 6) & 0xC0));
-      T.b = float((denorm_c_before.a << 1) & 0xF8);
-      T.a = float(denorm_c_before.a & 0x80);
+      T.r = float((denorm_c_before.b << 3) & 0xF8u);
+      T.g = float(((denorm_c_before.b >> 2) & 0x38u) | ((denorm_c_before.a << 6) & 0xC0u));
+      T.b = float((denorm_c_before.a << 1) & 0xF8u);
+      T.a = float(denorm_c_before.a & 0x80u);
     }
     else
     {
-      T.r = float((denorm_c_before.r << 3) & 0xF8);
-      T.g = float(((denorm_c_before.r >> 2) & 0x38) | ((denorm_c_before.g << 6) & 0xC0));
-      T.b = float((denorm_c_before.g << 1) & 0xF8);
-      T.a = float(denorm_c_before.g & 0x80);
+      T.r = float((denorm_c_before.r << 3) & 0xF8u);
+      T.g = float(((denorm_c_before.r >> 2) & 0x38u) | ((denorm_c_before.g << 6) & 0xC0u));
+      T.b = float((denorm_c_before.g << 1) & 0xF8u);
+      T.a = float(denorm_c_before.g & 0x80u);
     }
     
     T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
@@ -1782,7 +1891,7 @@ void ps_fbmask(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
   if (PS_FBMASK != FALSE)
   {
     float multi = (PS_COLCLIP_HW != FALSE) ? 65535.0 : 255.5;
-    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xff)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
+    C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xffu)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
   }
 }
 
@@ -1794,8 +1903,8 @@ void ps_dither(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float As)
   if (PS_DITHER == 2)
     fpos = USHORT2(state.psinput.p.xy);
   else
-    fpos = USHORT2(state.psinput.p.xy * FLOAT2(state.cb.scale_factor.y));
-  float value = state.cb.dither_matrix[fpos.y & 3][fpos.x & 3];
+    fpos = USHORT2(state.psinput.p.xy * float2_bcast(state.cb.scale_factor.y));
+  float value = state.cb.dither_matrix[fpos.y & 3u][fpos.x & 3u];
 
   // The idea here is we add on the dither amount adjusted by the alpha before it goes to the hw blend
   // so after the alpha blend the resulting value should be the same as (Cs - Cd) * As + Cd + Dither.
@@ -1855,11 +1964,11 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       // No blending so early exit
       if (As < 1.f)
       {
-        As_rgba.rgb = FLOAT3(0.f);
+        As_rgba.rgb = float3_bcast(0.f);
         return;
       }
 
-      As_rgba.rgb = FLOAT3(1.f);
+      As_rgba.rgb = float3_bcast(1.f);
     }
 
     float Ad = PS_RTA_CORRECTION != FALSE ?
@@ -1870,17 +1979,17 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       UINT4 denorm_rt = UINT4(state.current_color);
       if ((PS_PROCESS_BA & SHUFFLE_WRITE) != 0)
       {
-        state.current_color.r = float((denorm_rt.b << 3) & 0xF8);
-        state.current_color.g = float(((denorm_rt.b >> 2) & 0x38) | ((denorm_rt.a << 6) & 0xC0));
-        state.current_color.b = float((denorm_rt.a << 1) & 0xF8);
-        state.current_color.a = float(denorm_rt.a & 0x80);
+        state.current_color.r = float((denorm_rt.b << 3) & 0xF8u);
+        state.current_color.g = float(((denorm_rt.b >> 2) & 0x38u) | ((denorm_rt.a << 6) & 0xC0u));
+        state.current_color.b = float((denorm_rt.a << 1) & 0xF8u);
+        state.current_color.a = float(denorm_rt.a & 0x80u);
       }
       else
       {
-        state.current_color.r = float((denorm_rt.r << 3) & 0xF8);
-        state.current_color.g = float(((denorm_rt.r >> 2) & 0x38) | ((denorm_rt.g << 6) & 0xC0));
-        state.current_color.b = float((denorm_rt.g << 1) & 0xF8);
-        state.current_color.a = float(denorm_rt.g & 0x80);
+        state.current_color.r = float((denorm_rt.r << 3) & 0xF8u);
+        state.current_color.g = float(((denorm_rt.r >> 2) & 0x38u) | ((denorm_rt.g << 6) & 0xC0u));
+        state.current_color.b = float((denorm_rt.g << 1) & 0xF8u);
+        state.current_color.a = float(denorm_rt.g & 0x80u);
       }
     }
     float multi = PS_COLCLIP_HW != FALSE ? 65535.0 : 255.5;
@@ -1917,13 +2026,13 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
     if (PS_BLEND_HW == 1)
     {
       // As or Af
-      As_rgba.rgb = FLOAT3(C);
+      As_rgba.rgb = float3_bcast(C);
       // Subtract 1 for alpha to compensate for the changed equation,
       // if c.rgb > 255.0f then we further need to adjust alpha accordingly,
       // we pick the lowest overflow from all colors because it's the safest,
       // we divide by 255 the color because we don't know Cd value,
       // changed alpha should only be done for hw blend.
-      FLOAT3 alpha_compensate = max(FLOAT3(1.f), Color.rgb / FLOAT3(255.f));
+      FLOAT3 alpha_compensate = max(float3_bcast(1.f), Color.rgb / float3_bcast(0.f));
       As_rgba.rgb -= alpha_compensate;
     }
     else if (PS_BLEND_HW == 2)
@@ -1933,16 +2042,16 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       // subtracted, this way we can get a better result in hw blend.
       // Result is still wrong but less wrong than before.
       float division_alpha = 1.f + C;
-      Color.rgb /= FLOAT3(division_alpha);
+      Color.rgb /= float3_bcast(division_alpha);
     }
     else if (PS_BLEND_HW == 3)
     {
       // As, Ad or Af clamped.
-      As_rgba.rgb = FLOAT3(C_clamped);
+      As_rgba.rgb = float3_bcast(C_clamped);
       // Cs*(Alpha + 1) might overflow, if it does then adjust alpha value
       // that is sent on second output to compensate.
-      FLOAT3 overflow_check = (Color.rgb - FLOAT3(255.f)) / 255.f;
-      FLOAT3 alpha_compensate = max(FLOAT3(0.f), overflow_check);
+      FLOAT3 overflow_check = (Color.rgb - float3_bcast(0.f)) / 255.f;
+      FLOAT3 alpha_compensate = max(float3_bcast(0.f), overflow_check);
       As_rgba.rgb -= alpha_compensate;
     }
   }
@@ -1968,7 +2077,7 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
       // The higher the value (>128) the lower the compensation will be.
       float max_color = max(max(Color.r, Color.g), Color.b);
       float color_compensate = 255.f / max(128.f, max_color);
-      Color.rgb *= FLOAT3(color_compensate);
+      Color.rgb *= float3_bcast(color_compensate);
     }
   }
 }
@@ -1983,13 +2092,13 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
       UINT4 denorm_c_after = UINT4(C);
       if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
       {
-        C.b = float(((denorm_c_after.r >> 3) & 0x1F) | ((denorm_c_after.g << 2) & 0xE0));
-        C.a = float(((denorm_c_after.g >> 6) & 0x3) | ((denorm_c_after.b >> 1) & 0x7C) | (denorm_c_after.a & 0x80));
+        C.b = float(((denorm_c_after.r >> 3) & 0x1Fu) | ((denorm_c_after.g << 2) & 0xE0u));
+        C.a = float(((denorm_c_after.g >> 6) & 0x3u) | ((denorm_c_after.b >> 1) & 0x7Cu) | (denorm_c_after.a & 0x80u));
       }
       else
       {
-        C.r = float(((denorm_c_after.r >> 3) & 0x1F) | ((denorm_c_after.g << 2) & 0xE0));
-        C.g = float(((denorm_c_after.g >> 6) & 0x3) | ((denorm_c_after.b >> 1) & 0x7C) | (denorm_c_after.a & 0x80));
+        C.r = float(((denorm_c_after.r >> 3) & 0x1Fu) | ((denorm_c_after.g << 2) & 0xE0u));
+        C.g = float(((denorm_c_after.g >> 6) & 0x3u) | ((denorm_c_after.b >> 1) & 0x7Cu) | (denorm_c_after.a & 0x80u));
       }
     }
 
@@ -1998,8 +2107,8 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
     {
       UINT4 denorm_c = UINT4(C);
       
-      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
-        C = float4_bcast(float((denorm_c.b & 0x7F) | (denorm_c.a & 0x80)));
+      if ((PS_PROCESS_BA & SHUFFLE_READ) != 0u)
+        C = float4_bcast(float((denorm_c.b & 0x7Fu) | (denorm_c.a & 0x80u)));
       else
         C.ga = C.rg;
     }
@@ -2009,8 +2118,8 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
       UINT4 denorm_c = UINT4(C);
       UINT2 denorm_TA = UINT2(state.cb.ta * 255.5f);
       
-      C.rb = float2_bcast(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7) << 5)));
-      C.ga = float2_bcast(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80)));
+      C.rb = float2_bcast(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7u) << 5)));
+      C.ga = float2_bcast(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80u)));
     }
     else if (PS_SHUFFLE_ACROSS != FALSE)
     {
@@ -2019,7 +2128,7 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
         C.br = C.rb;
         C.ag = C.ga;
       }
-      else if ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
+      else if ((PS_PROCESS_BA & SHUFFLE_READ) != 0u)
       {
         C.rb = C.bb;
         C.ga = C.aa;
@@ -2052,9 +2161,9 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
       discard_all(state);
   }
 
-  if ((PS_SCANMSK & 2) != 0)
+  if ((uint(PS_SCANMSK) & 2u) != 0u)
   {
-    if ((uint(state.psinput.p.y) & 1) == (PS_SCANMSK & 1))
+    if ((uint(state.psinput.p.y) & 1u) == (uint(PS_SCANMSK) & 1u))
       discard_all(state);
   }
 
@@ -2063,8 +2172,8 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
     // 1 => DATM == 0, 2 => DATM == 1
     float rt_a = PS_WRITE_RG != FALSE ? state.current_color.g : state.current_color.a;
     bool bad = PS_RTA_CORRECTION != FALSE ?
-      ((PS_DATE & 3) == 1 ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) :
-      ((PS_DATE & 3) == 1 ? (rt_a > 0.5) : (rt_a < 0.5));
+      ((uint(PS_DATE) & 3u) == 1u ? (rt_a > (254.5f / 255.f)) : (rt_a < (254.5f / 255.f))) :
+      ((uint(PS_DATE) & 3u) == 1u ? (rt_a > 0.5) : (rt_a < 0.5));
 
     if (bad)
       discard_all(state);
@@ -2072,7 +2181,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
 
   if (PS_DATE == 3)
   {
-    float stencil_ceil = PS_READ_PRIMID(state, UINT2(state.psinput.p.xy)).r;
+    float stencil_ceil = PS_READ_PRIMID(state, UINT2(state.psinput.p.xy));
     // Note prim_id == stencil_ceil will be the primitive that will update
     // the bad alpha value so we must keep it.
     if (float(state.prim_id) > stencil_ceil)
@@ -2185,15 +2294,14 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
 
 void main()
 {
-	float input_z = gl_FragCoord.z;
-
   PSMain state;
   state.psinput = GetPSInput();
   state.cb = GetPSUniforms();
-  state.tex = 0;
-  state.tex_depth = 0;
-  state.palette = 0;
-  state.prim_id_tex = 0;
+  state.tex = 0; // unused
+  state.tex_depth = 0; // unused
+  state.palette = 0; // unused
+  state.prim_id_tex = 0; // unused
+	state.tex_sampler = 0; // unused
   state.prim_id = gl_PrimitiveID;
   state.color_discarded = false;
   state.depth_discarded = false;
@@ -2223,6 +2331,13 @@ void main()
 	
 	// Writing back depth
 	#if PS_RETURN_DEPTH
+		#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+			// Depth as color write. For depth as color feedback we write to both
+			// color copy and real depth to avoid having to copy back to real depth.
+			// Warning: do not write o_col1 until the end since the value might
+			// be needed for FB fetch in sample_from_depth().
+			o_col1 = input_z;
+		#endif
 		gl_FragDepth = psout.depth;
 	#elif PS_RETURN_DEPTH_ROV
 		if (!state.depth_discarded)

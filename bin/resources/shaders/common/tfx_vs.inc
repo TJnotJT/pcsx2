@@ -7,7 +7,7 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
   vout.p.y *= VS_Y_FLIP;
 	vout.p.w = 1.0f;
-	vout.p.z = float(z) * EXP2_MIN_32;
+	vout.p.z = VS_SCALE_RAW_Z(z);
 
   FLOAT2 uv = FLOAT2(v.uv) - cb.texture_offset;
 	FLOAT2 st = v.st - cb.texture_offset;
@@ -160,9 +160,9 @@ STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), I
 STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
-  if ((vid & 1) != 0)
+  if ((vid & 1u) != 0u)
     vout.p.x += cb.point_size.x;
-  if ((vid & 2) != 0)
+  if ((vid & 2u) != 0u)
     vout.p.y += cb.point_size.y;
   return vout;
 }
@@ -170,8 +170,8 @@ STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), 
 STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 2;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
   VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
   VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
@@ -201,11 +201,11 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
 STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 1;
-  bool is_bottom = (vid & 2) != 0;
-  bool is_right = (vid & 1) != 0;
+  bool is_bottom = (vid & 2u) != 0u;
+  bool is_right = (vid & 1u) != 0u;
   // Sprite points are always in pairs
-  uint vid_lt = vid_base & ~1;
-  uint vid_rb = vid_base | 1;
+  uint vid_lt = vid_base & ~1u;
+  uint vid_rb = vid_base | 1u;
 
   VSOutputGeneric lt = vs_main_impl(LOAD_VERTEX(vertices, vid_lt), cb);
   VSOutputGeneric rb = vs_main_impl(LOAD_VERTEX(vertices, vid_rb), cb);
@@ -263,7 +263,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     // Note: order of top/bottom, inside/outside is arbitrary,
     // as long as it assembles into two triangles forming a quad.
     bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
-    bool is_outside = (edge_offset & 1) != 0;
+    bool is_outside = (edge_offset & 1u) != 0u;
 
     vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
     VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
