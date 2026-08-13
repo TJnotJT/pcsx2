@@ -803,6 +803,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 #ifdef PIXEL_SHADER
 
 #define PS_PRIM_CHECKING_INIT (PS_DATE == 1 || PS_DATE == 2)
+#define PS_TEX_IS_DEPTH (PS_URBAN_CHAOS_HLE || PS_TALES_OF_ABYSS_HLE || PS_DEPTH_FMT == 1 || PS_DEPTH_FMT == 2)
+
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
@@ -1074,11 +1076,6 @@ void DepthWrite(int2 xy, float d)
 #endif
 }
 
-// Metal needs to distinguish depth texture from color texture, other APIs don't.
-#ifndef __METAL_VERSION__
-	#define PS_TEX_IS_DEPTH 0
-#endif
-
 STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
 {
   if (PS_ROV_COLOR != FALSE || PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
@@ -1105,7 +1102,7 @@ STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth
 
 FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
 {
-  if (PS_TEX_IS_DEPTH != FALSE)
+  if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_SAMPLE_TEX_DEPTH_LOD(state, uv, lod), 0.0f, 0.0f, 0.0f);
   else
     return PS_SAMPLE_TEX_LOD(state, uv, lod);
@@ -1113,7 +1110,7 @@ FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
 
 FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
 {
-  if (PS_TEX_IS_DEPTH != FALSE)
+  if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_SAMPLE_TEX_DEPTH(state, uv), 0.0f, 0.0f, 0.0);
   else
     return PS_SAMPLE_TEX(state, uv);
@@ -1121,7 +1118,7 @@ FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
 
 FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod)
 {
-  if (PS_TEX_IS_DEPTH != FALSE)
+  if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_READ_TEX_DEPTH(state, pos, lod), 0.0f, 0.0f, 0.0f);
   else
     return PS_READ_TEX(state, pos, lod);
@@ -1135,7 +1132,7 @@ FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos)
 UINT2 get_tex_dims(IN_PARAM(PSMain, state))
 {
   UINT2 dims = UINT2(0, 0);
-  if (PS_TEX_IS_DEPTH != FALSE)
+  if (PS_TEX_IS_DEPTH)
     PS_GET_TEX_DEPTH_DIMS(state, dims);
   else
     PS_GET_TEX_DIMS(state, dims);
@@ -1476,7 +1473,7 @@ FLOAT4 fetch_c(IN_PARAM(PSMain, state), USHORT2 uv)
 {
   if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
-  else if (PS_TEX_IS_DEPTH != FALSE)
+  else if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_READ_TEX_DEPTH(state, uv, 0), 0.0f, 0.0f, 0.0f);
   else
     return PS_READ_TEX(state, uv, 0);
@@ -1577,19 +1574,19 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
 FLOAT4 fetch_red(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float(fetch_raw_depth(state) & 0xFFu) / 255.f : fetch_raw_color(state).r;
+  float rt = PS_TEX_IS_DEPTH ? float(fetch_raw_depth(state) & 0xFFu) / 255.f : fetch_raw_color(state).r;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_green(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 8) & 0xFFu) / 255.f : fetch_raw_color(state).g;
+  float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth(state) >> 8) & 0xFFu) / 255.f : fetch_raw_color(state).g;
   return sample_p_norm(state, rt) * 255.f;
 }
 
 FLOAT4 fetch_blue(IN_PARAM(PSMain, state))
 {
-  float rt = PS_TEX_IS_DEPTH != FALSE ? float((fetch_raw_depth(state) >> 16) & 0xFFu) / 255.f : fetch_raw_color(state).b;
+  float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth(state) >> 16) & 0xFFu) / 255.f : fetch_raw_color(state).b;
   return sample_p_norm(state, rt) * 255.f;
 }
 
@@ -1606,7 +1603,7 @@ FLOAT4 fetch_rgb(IN_PARAM(PSMain, state))
 
 FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
 {
-  if (PS_TEX_IS_DEPTH != FALSE)
+  if (PS_TEX_IS_DEPTH)
   {
     uint depth = fetch_raw_depth(state);
     uint bg = (depth >> (8 + state.cb.channel_shuffle_green_shift)) & 0xFFu;

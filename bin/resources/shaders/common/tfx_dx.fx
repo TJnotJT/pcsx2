@@ -301,6 +301,8 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 #ifdef PIXEL_SHADER
 
 #define PS_PRIM_CHECKING_INIT (PS_DATE == 1 || PS_DATE == 2)
+#define PS_TEX_IS_DEPTH (PS_URBAN_CHAOS_HLE || PS_TALES_OF_ABYSS_HLE || PS_DEPTH_FMT == 1 || PS_DEPTH_FMT == 2)
+
 #define SW_BLEND (PS_BLEND_A || PS_BLEND_B || PS_BLEND_D)
 #define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 #define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED)
