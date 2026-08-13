@@ -53,7 +53,7 @@
 #define LEVEL(X) (X)
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
-#define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
+#define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix

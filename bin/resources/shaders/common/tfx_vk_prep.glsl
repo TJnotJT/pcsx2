@@ -53,7 +53,7 @@
 #define LEVEL(X) (X)
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
-#define UINT_BITCAST_FLOAT4(X) FLOAT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
+#define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
@@ -271,13 +271,13 @@ struct PSOutputGeneric
 #ifndef __METAL_VERSION__
 STATIC FLOAT4 convert_depth32_rgba8(float value)
 {
-	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
-	return UINT_BITCAST_FLOAT4(val);
+	uint val = uint(value * EXP2_POS_32);
+	return FLOAT4(UINT_BITCAST_UCHAR4(val));
 }
 
 STATIC FLOAT4 convert_depth16_rgba8(float value)
 {
-	uint val = FLOAT_BITCAST_UINT(value * EXP2_POS_32);
+	uint val = uint(value * EXP2_POS_32);
 	return FLOAT4(UINT4(val << 3, val >> 2, val >> 7, val >> 8) & UINT4(0xf8, 0xf8, 0xf8, 0x80));
 }
 #endif

@@ -43,7 +43,7 @@
 #define LEVEL(X) level(x)
 #define SATURATE(X) saturate(X)
 #define FLOAT_BITCAST_UINT(X) as_type<uint>(X)
-#define UINT_BITCAST_FLOAT4(X) FLOAT4(as_type<uchar4>(X))
+#define UINT_BITCAST_UCHAR4(X) as_type<uchar4>(X)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
