@@ -290,18 +290,32 @@ void WriteVSOutput(VSOutputGeneric v)
   vsOut.c = v.c;
   vsOut.inv_cov = v.inv_cov;
   vsOut.interior = v.interior;
-  gl_PointSize = v.point_size;
+	#if VS_POINT_SIZE
+  	gl_PointSize = v.point_size;
+	#endif
 }
 
 #if VS_EXPAND_TYPE == VS_EXPAND_NONE
 
-layout(location = 0) in vec2 a_st;
-layout(location = 1) in uvec4 a_c;
-layout(location = 2) in float a_q;
-layout(location = 3) in uvec2 a_p;
-layout(location = 4) in uint a_z;
-layout(location = 5) in uvec2 a_uv;
-layout(location = 6) in vec4 a_f;
+// Note: VK and GL have different layouts as GL uses the same layout
+// for convert shaders and TFX shaders, and thus has more attributes.
+#if PCSX2_VULKAN
+	layout(location = 0) in vec2  a_st;
+	layout(location = 1) in uvec4 a_c;
+	layout(location = 2) in float a_q;
+	layout(location = 3) in uvec2 a_p;
+	layout(location = 4) in uint  a_z;
+	layout(location = 5) in uvec2 a_uv;
+	layout(location = 6) in vec4  a_f;
+#elif PCSX2_OPENGL
+	layout(location = 0) in vec2  a_st;
+	layout(location = 2) in vec4  a_c;
+	layout(location = 3) in float a_q;
+	layout(location = 4) in uvec2 a_p;
+	layout(location = 5) in uint  a_z;
+	layout(location = 6) in uvec2 a_uv;
+	layout(location = 7) in vec4  a_f;
+#endif
 
 VSInputGeneric GetVSInput()
 {
@@ -517,53 +531,6 @@ void main()
 	#endif
 #endif
 
-PSUniformsGeneric GetPSUniforms()
-{
-  PSUniformsGeneric cb;
-
-  cb.fog_color = FogColor;
-  cb.aref = AREF;
-	cb.wh = WH;
-	cb.ta = TA;
-	cb.max_depth = MaxDepthPS;
-	cb.alpha_fix = Af;
-	cb.fbmask = FbMask;
-
-	cb.half_texel = HalfTexel;
-  cb.uv_min_max = MinMax;
-	cb.lod_params = LODParams;
-	cb.st_range = STRange;
-  
-  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
-  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
-  cb.channel_shuffle_green_mask = ChannelShuffle.z;
-  cb.channel_shuffle_green_shift = ChannelShuffle.w;
-
-	cb.channel_shuffle_offset = ChannelShuffleOffset;
-	cb.tc_offset = TC_OffsetHack;
-	cb.st_scale = STScale;
-	cb.dither_matrix = DitherMatrix;
-
-	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
-
-	cb.line_cov_scale = LineCovScale;
-
-  return cb;
-}
-
-PSInputGeneric GetPSInput()
-{
-  PSInputGeneric psinput;
-  psinput.p = gl_FragCoord;
-  psinput.t = vsIn.t;
-  psinput.ti = vsIn.ti;
-  psinput.c = vsIn.c;
-  psinput.fc = vsIn.c;
-  psinput.inv_cov = vsIn.inv_cov;
-  psinput.interior = vsIn.interior;
-  return psinput;
-}
-
 #if PCSX2_VULKAN
 	layout(set = 1, binding = 0) uniform sampler2D Texture;
 	layout(set = 1, binding = 1) uniform texture2D Palette;
@@ -649,6 +616,53 @@ float DepthLoad(ivec2 xy)
 		return texelFetch(DepthSampler, xy, 0).r;
 	#endif
 #endif
+}
+
+PSUniformsGeneric GetPSUniforms()
+{
+  PSUniformsGeneric cb;
+
+  cb.fog_color = FogColor;
+  cb.aref = AREF;
+	cb.wh = WH;
+	cb.ta = TA;
+	cb.max_depth = MaxDepthPS;
+	cb.alpha_fix = Af;
+	cb.fbmask = FbMask;
+
+	cb.half_texel = HalfTexel;
+  cb.uv_min_max = MinMax;
+	cb.lod_params = LODParams;
+	cb.st_range = STRange;
+  
+  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
+  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
+  cb.channel_shuffle_green_mask = ChannelShuffle.z;
+  cb.channel_shuffle_green_shift = ChannelShuffle.w;
+
+	cb.channel_shuffle_offset = ChannelShuffleOffset;
+	cb.tc_offset = TC_OffsetHack;
+	cb.st_scale = STScale;
+	cb.dither_matrix = DitherMatrix;
+
+	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
+
+	cb.line_cov_scale = LineCovScale;
+
+  return cb;
+}
+
+PSInputGeneric GetPSInput()
+{
+  PSInputGeneric psinput;
+  psinput.p = gl_FragCoord;
+  psinput.t = vsIn.t;
+  psinput.ti = vsIn.ti;
+  psinput.c = vsIn.c;
+  psinput.fc = vsIn.c;
+  psinput.inv_cov = vsIn.inv_cov;
+  psinput.interior = vsIn.interior;
+  return psinput;
 }
 
 #include "tfx_ps.inc"

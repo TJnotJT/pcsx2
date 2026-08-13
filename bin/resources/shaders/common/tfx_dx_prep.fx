@@ -56,7 +56,7 @@
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
-#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP_MIN_32)
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
 
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
