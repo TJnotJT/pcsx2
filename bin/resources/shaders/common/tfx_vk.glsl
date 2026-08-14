@@ -115,9 +115,9 @@ layout(std140, binding = 4) uniform cb22
 };
 
 #if PCSX2_VULKAN
-	layout(std140, set = 0, binding = 2)
+layout(std140, set = 0, binding = 2)
 #elif PCSX2_OPENGL
-	layout(std140, binding = 2)
+layout(std140, binding = 2)
 #endif
 readonly buffer VertexBuffer
 {
@@ -126,9 +126,9 @@ readonly buffer VertexBuffer
 
 // Warning: use std430 instead of std140 so that the ints are tightly packed.
 #if PCSX2_VULKAN
-	layout(std430, set = 0, binding = 3) 
+layout(std430, set = 0, binding = 3) 
 #elif PCSX2_OPENGL
-	layout(std430, binding = 3)
+layout(std430, binding = 3)
 #endif
 readonly buffer IndexBuffer
 {
@@ -192,9 +192,9 @@ VSUniformsGeneric GetVSUniforms()
 }
 
 #if PCSX2_VULKAN
-	layout(location = 0) out VSOutput
+layout(location = 0) out VSOutput
 #elif PCSX2_OPENGL
-	out SHADER
+out SHADER
 #endif
 {
 	vec4 t;
@@ -386,9 +386,9 @@ layout(std140, binding = 0) uniform cb21
 };
 
 #if PCSX2_VULKAN
-	layout(location = 0) in VSOutput
+layout(location = 0) in VSOutput
 #elif PCSX2_OPENGL
-	in SHADER
+in SHADER
 #endif
 {
 	vec4 t;
