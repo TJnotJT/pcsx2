@@ -2,7 +2,7 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 {
 	VSOutputGeneric vout;
 	// Clamp to max depth, gs doesn't wrap
-	uint z = min(v.z, cb.max_depth);
+	uint z = min(v.z, cb.max_depth_vs);
 	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
 	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
   vout.p.y *= VS_Y_FLIP;

@@ -97,7 +97,7 @@ struct GSMTLMainVSUniform
 	vector_float2 texture_scale;
 	vector_float2 texture_offset;
 	vector_float2 point_size;
-	uint max_depth;
+	uint max_depth_vs;
 	float line_aa1_width;
 };
 
@@ -115,7 +115,7 @@ struct GSMTLMainPSUniform
 	};
 	vector_float4 wh; ///< xy => PS2, zw => actual (upscaled)
 	vector_float2 ta;
-	float max_depth;
+	float max_depth_ps;
 	float alpha_fix;
 	vector_uint4 fbmask;
 

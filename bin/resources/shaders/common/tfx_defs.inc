@@ -4,15 +4,20 @@
   #define FALSE 0
 #endif
 
+#define VS_UNIFORMS(X) \
+	X(FLOAT2, vertex_scale) \
+	X(FLOAT2, vertex_offset) \
+	X(FLOAT2, texture_scale) \
+	X(FLOAT2, texture_offset) \
+	X(FLOAT2, point_size) \
+	X(uint, max_depth_vs) \
+	X(float, line_aa1_width)
+
 struct VSUniformsGeneric
 {
-	FLOAT2 vertex_scale;
-	FLOAT2 vertex_offset;
-	FLOAT2 texture_scale;
-	FLOAT2 texture_offset;
-	FLOAT2 point_size;
-	uint max_depth;
-	float line_aa1_width;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
 };
 
 struct VSInputGeneric
@@ -37,37 +42,37 @@ struct VSOutputGeneric
 	float point_size;
 };
 
+#define PS_UNIFORMS(X) \
+  X(FLOAT3, fog_color) \
+  X(float, aref) \
+	X(FLOAT4, wh)  \
+	X(FLOAT2, ta) \
+	X(float, max_depth_ps) \
+	X(float, alpha_fix) \
+	X(UINT4, fbmask) \
+	X(FLOAT4, half_texel) \
+  X(FLOAT4, uv_min_max) \
+	X(FLOAT4, lod_params) \
+	X(FLOAT4, st_range) \
+  X(uint, channel_shuffle_blue_mask) \
+  X(uint, channel_shuffle_blue_shift) \
+  X(uint, channel_shuffle_green_mask) \
+  X(uint, channel_shuffle_green_shift) \
+	X(FLOAT2, channel_shuffle_offset) \
+	X(FLOAT2, tc_offset) \
+	X(FLOAT2, st_scale) \
+	X(FLOAT4x4, dither_matrix) \
+	X(FLOAT4, scale_factor) \
+	X(float, line_cov_scale) \
+	X(float, _pad0) \
+	X(float, _pad1) \
+	X(float, _pad2)
+
 struct PSUniformsGeneric
 {
-  FLOAT3 fog_color;
-  float aref;
-	FLOAT4 wh; ///< xy => PS2, zw => actual (upscaled)
-	FLOAT2 ta;
-	float max_depth;
-	float alpha_fix;
-	UINT4 fbmask;
-
-	FLOAT4 half_texel;
-  FLOAT4 uv_min_max;
-	FLOAT4 lod_params;
-	FLOAT4 st_range;
-  
-  uint channel_shuffle_blue_mask;
-  uint channel_shuffle_blue_shift;
-  uint channel_shuffle_green_mask;
-  uint channel_shuffle_green_shift;
-
-	FLOAT2 channel_shuffle_offset;
-	FLOAT2 tc_offset;
-	FLOAT2 st_scale;
-	FLOAT4x4 dither_matrix;
-
-	FLOAT4 scale_factor;
-
-	float line_cov_scale;
-	float _pad0;
-	float _pad1;
-	float _pad2;
+  #define X(TYPE, NAME) TYPE NAME;
+		PS_UNIFORMS(X)
+	#undef X
 };
 
 struct PSInputGeneric

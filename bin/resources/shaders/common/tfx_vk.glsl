@@ -238,30 +238,22 @@ VSInputGeneric load_vertex(uint index)
 #include "tfx_vs.inc"
 
 #if PCSX2_VULKAN
-	layout(std140, set = 0, binding = 0) uniform cb0
+layout(std140, set = 0, binding = 0) uniform cb0
 #elif PCSX2_OPENGL
-	layout(std140, binding = 1) uniform cb20
+layout(std140, binding = 1) uniform cb20
 #endif
 {
-	vec2 VertexScale;
-	vec2 VertexOffset;
-	vec2 TextureScale;
-	vec2 TextureOffset;
-	vec2 PointSize;
-	uint MaxDepth;
-	float LineAA1Width;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
 };
 
 VSUniformsGeneric GetVSUniforms()
 {
   VSUniformsGeneric cb;
-  cb.vertex_scale = VertexScale;
-  cb.vertex_offset = VertexOffset;
-  cb.texture_scale = TextureScale;
-  cb.texture_offset = TextureOffset;
-  cb.point_size = PointSize;
-  cb.max_depth = MaxDepth;
-  cb.line_aa1_width = LineAA1Width;
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		VS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 
@@ -449,35 +441,14 @@ void main()
 #define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
 #if PCSX2_VULKAN
-	layout(std140, set = 0, binding = 1) uniform cb1
+layout(std140, set = 0, binding = 1) uniform cb1
 #elif PCSX2_OPENGL
-	layout(std140, binding = 0) uniform cb21
+layout(std140, binding = 0) uniform cb21
 #endif
 {
-	vec3 FogColor;
-	float AREF;
-	vec4 WH;
-	vec2 TA;
-	float MaxDepthPS;
-	float Af;
-	uvec4 FbMask;
-	vec4 HalfTexel;
-	vec4 MinMax;
-	vec4 LODParams;
-	vec4 STRange;
-	ivec4 ChannelShuffle;
-	vec2 ChannelShuffleOffset;
-	vec2 TC_OffsetHack;
-	vec2 STScale;
-	mat4 DitherMatrix;
-	float ScaledScaleFactor;
-	float RcpScaleFactor;
-	float _pad0_cb1;
-	float _pad1_cb1;
-	float LineCovScale;
-	float _pad2_cb1;
-	float _pad3_cb1;
-	float _pad4_cb1;
+  #define X(TYPE, NAME) TYPE NAME;
+		PS_UNIFORMS(X)
+	#undef X
 };
 
 #if PCSX2_VULKAN
@@ -623,34 +594,9 @@ float DepthLoad(ivec2 xy)
 PSUniformsGeneric GetPSUniforms()
 {
   PSUniformsGeneric cb;
-
-  cb.fog_color = FogColor;
-  cb.aref = AREF;
-	cb.wh = WH;
-	cb.ta = TA;
-	cb.max_depth = MaxDepthPS;
-	cb.alpha_fix = Af;
-	cb.fbmask = FbMask;
-
-	cb.half_texel = HalfTexel;
-  cb.uv_min_max = MinMax;
-	cb.lod_params = LODParams;
-	cb.st_range = STRange;
-  
-  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
-  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
-  cb.channel_shuffle_green_mask = ChannelShuffle.z;
-  cb.channel_shuffle_green_shift = ChannelShuffle.w;
-
-	cb.channel_shuffle_offset = ChannelShuffleOffset;
-	cb.tc_offset = TC_OffsetHack;
-	cb.st_scale = STScale;
-	cb.dither_matrix = DitherMatrix;
-
-	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
-
-	cb.line_cov_scale = LineCovScale;
-
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		PS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 

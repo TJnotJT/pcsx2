@@ -182,19 +182,16 @@ struct VS_OUTPUT
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
 };
 
+// VS Constant Buffer
 #ifdef DX12
 cbuffer cb0 : register(b0)
 #else
 cbuffer cb0
 #endif
 {
-	float2 VertexScale;
-	float2 VertexOffset;
-	float2 TextureScale;
-	float2 TextureOffset;
-	float2 PointSize;
-	uint MaxDepth;
-	float LineAA1Width;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
 };
 
 #ifdef DX12
@@ -215,13 +212,9 @@ StructuredBuffer<uint> IndexBuffer : register(t5);
 VSUniformsGeneric GetVSUniforms()
 {
   VSUniformsGeneric cb;
-  cb.vertex_scale = VertexScale;
-  cb.vertex_offset = VertexOffset;
-  cb.texture_scale = TextureScale;
-  cb.texture_offset = TextureOffset;
-  cb.point_size = PointSize;
-  cb.max_depth = MaxDepth;
-  cb.line_aa1_width = LineAA1Width;
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		VS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 
@@ -466,30 +459,9 @@ cbuffer cb1 : register(b1)
 cbuffer cb1
 #endif
 {
-	float3 FogColor;
-	float AREF;
-	float4 WH;
-	float2 TA;
-	float MaxDepthPS;
-	float Af;
-	uint4 FbMask;
-	float4 HalfTexel;
-	float4 MinMax;
-	float4 LODParams;
-	float4 STRange;
-	int4 ChannelShuffle;
-	float2 ChannelShuffleOffset;
-	float2 TC_OffsetHack;
-	float2 STScale;
-	float4x4 DitherMatrix;
-	float ScaledScaleFactor;
-	float RcpScaleFactor;
-	float _pad0_cb1;
-	float _pad1_cb1;
-	float LineCovScale;
-	float _pad2_cb1;
-	float _pad3_cb1;
-	float _pad4_cb1;
+  #define X(TYPE, NAME) TYPE NAME;
+		PS_UNIFORMS(X)
+	#undef X
 };
 
 PSInputGeneric GetPSInput(PS_INPUT psin)
@@ -508,37 +480,9 @@ PSInputGeneric GetPSInput(PS_INPUT psin)
 PSUniformsGeneric GetPSUniforms()
 {
   PSUniformsGeneric cb;
-
-  cb.fog_color = FogColor;
-  cb.aref = AREF;
-	cb.wh = WH;
-	cb.ta = TA;
-	cb.max_depth = MaxDepthPS;
-	cb.alpha_fix = Af;
-	cb.fbmask = FbMask;
-
-	cb.half_texel = HalfTexel;
-  cb.uv_min_max = MinMax;
-	cb.lod_params = LODParams;
-	cb.st_range = STRange;
-  
-  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
-  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
-  cb.channel_shuffle_green_mask = ChannelShuffle.z;
-  cb.channel_shuffle_green_shift = ChannelShuffle.w;
-
-	cb.channel_shuffle_offset = ChannelShuffleOffset;
-	cb.tc_offset = TC_OffsetHack;
-	cb.st_scale = STScale;
-	cb.dither_matrix = DitherMatrix;
-
-	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
-
-	cb.line_cov_scale = LineCovScale;
-	cb._pad0 = 0;
-	cb._pad1 = 0;
-	cb._pad2 = 0;
-
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		PS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 

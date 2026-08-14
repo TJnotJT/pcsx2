@@ -147,15 +147,20 @@
   #define FALSE 0
 #endif
 
+#define VS_UNIFORMS(X) \
+	X(FLOAT2, vertex_scale) \
+	X(FLOAT2, vertex_offset) \
+	X(FLOAT2, texture_scale) \
+	X(FLOAT2, texture_offset) \
+	X(FLOAT2, point_size) \
+	X(uint, max_depth_vs) \
+	X(float, line_aa1_width)
+
 struct VSUniformsGeneric
 {
-	FLOAT2 vertex_scale;
-	FLOAT2 vertex_offset;
-	FLOAT2 texture_scale;
-	FLOAT2 texture_offset;
-	FLOAT2 point_size;
-	uint max_depth;
-	float line_aa1_width;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
 };
 
 struct VSInputGeneric
@@ -180,37 +185,37 @@ struct VSOutputGeneric
 	float point_size;
 };
 
+#define PS_UNIFORMS(X) \
+  X(FLOAT3, fog_color) \
+  X(float, aref) \
+	X(FLOAT4, wh)  \
+	X(FLOAT2, ta) \
+	X(float, max_depth_ps) \
+	X(float, alpha_fix) \
+	X(UINT4, fbmask) \
+	X(FLOAT4, half_texel) \
+  X(FLOAT4, uv_min_max) \
+	X(FLOAT4, lod_params) \
+	X(FLOAT4, st_range) \
+  X(uint, channel_shuffle_blue_mask) \
+  X(uint, channel_shuffle_blue_shift) \
+  X(uint, channel_shuffle_green_mask) \
+  X(uint, channel_shuffle_green_shift) \
+	X(FLOAT2, channel_shuffle_offset) \
+	X(FLOAT2, tc_offset) \
+	X(FLOAT2, st_scale) \
+	X(FLOAT4x4, dither_matrix) \
+	X(FLOAT4, scale_factor) \
+	X(float, line_cov_scale) \
+	X(float, _pad0) \
+	X(float, _pad1) \
+	X(float, _pad2)
+
 struct PSUniformsGeneric
 {
-  FLOAT3 fog_color;
-  float aref;
-	FLOAT4 wh; ///< xy => PS2, zw => actual (upscaled)
-	FLOAT2 ta;
-	float max_depth;
-	float alpha_fix;
-	UINT4 fbmask;
-
-	FLOAT4 half_texel;
-  FLOAT4 uv_min_max;
-	FLOAT4 lod_params;
-	FLOAT4 st_range;
-  
-  uint channel_shuffle_blue_mask;
-  uint channel_shuffle_blue_shift;
-  uint channel_shuffle_green_mask;
-  uint channel_shuffle_green_shift;
-
-	FLOAT2 channel_shuffle_offset;
-	FLOAT2 tc_offset;
-	FLOAT2 st_scale;
-	FLOAT4x4 dither_matrix;
-
-	FLOAT4 scale_factor;
-
-	float line_cov_scale;
-	float _pad0;
-	float _pad1;
-	float _pad2;
+  #define X(TYPE, NAME) TYPE NAME;
+		PS_UNIFORMS(X)
+	#undef X
 };
 
 struct PSInputGeneric
@@ -394,7 +399,7 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 {
 	VSOutputGeneric vout;
 	// Clamp to max depth, gs doesn't wrap
-	uint z = min(v.z, cb.max_depth);
+	uint z = min(v.z, cb.max_depth_vs);
 	vout.p.xy = FLOAT2(v.p) - FLOAT2(0.05f, 0.05f);
 	vout.p.xy = vout.p.xy * cb.vertex_scale - cb.vertex_offset;
   vout.p.y *= VS_Y_FLIP;
@@ -740,30 +745,22 @@ STATIC VSOutputGeneric vs_expand_impl(uint vid, VERTICES_PARAM(vertices), IN_PAR
 
 
 #if PCSX2_VULKAN
-	layout(std140, set = 0, binding = 0) uniform cb0
+layout(std140, set = 0, binding = 0) uniform cb0
 #elif PCSX2_OPENGL
-	layout(std140, binding = 1) uniform cb20
+layout(std140, binding = 1) uniform cb20
 #endif
 {
-	vec2 VertexScale;
-	vec2 VertexOffset;
-	vec2 TextureScale;
-	vec2 TextureOffset;
-	vec2 PointSize;
-	uint MaxDepth;
-	float LineAA1Width;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
 };
 
 VSUniformsGeneric GetVSUniforms()
 {
   VSUniformsGeneric cb;
-  cb.vertex_scale = VertexScale;
-  cb.vertex_offset = VertexOffset;
-  cb.texture_scale = TextureScale;
-  cb.texture_offset = TextureOffset;
-  cb.point_size = PointSize;
-  cb.max_depth = MaxDepth;
-  cb.line_aa1_width = LineAA1Width;
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		VS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 
@@ -951,35 +948,14 @@ void main()
 #define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
 #if PCSX2_VULKAN
-	layout(std140, set = 0, binding = 1) uniform cb1
+layout(std140, set = 0, binding = 1) uniform cb1
 #elif PCSX2_OPENGL
-	layout(std140, binding = 0) uniform cb21
+layout(std140, binding = 0) uniform cb21
 #endif
 {
-	vec3 FogColor;
-	float AREF;
-	vec4 WH;
-	vec2 TA;
-	float MaxDepthPS;
-	float Af;
-	uvec4 FbMask;
-	vec4 HalfTexel;
-	vec4 MinMax;
-	vec4 LODParams;
-	vec4 STRange;
-	ivec4 ChannelShuffle;
-	vec2 ChannelShuffleOffset;
-	vec2 TC_OffsetHack;
-	vec2 STScale;
-	mat4 DitherMatrix;
-	float ScaledScaleFactor;
-	float RcpScaleFactor;
-	float _pad0_cb1;
-	float _pad1_cb1;
-	float LineCovScale;
-	float _pad2_cb1;
-	float _pad3_cb1;
-	float _pad4_cb1;
+  #define X(TYPE, NAME) TYPE NAME;
+		PS_UNIFORMS(X)
+	#undef X
 };
 
 #if PCSX2_VULKAN
@@ -1125,34 +1101,9 @@ float DepthLoad(ivec2 xy)
 PSUniformsGeneric GetPSUniforms()
 {
   PSUniformsGeneric cb;
-
-  cb.fog_color = FogColor;
-  cb.aref = AREF;
-	cb.wh = WH;
-	cb.ta = TA;
-	cb.max_depth = MaxDepthPS;
-	cb.alpha_fix = Af;
-	cb.fbmask = FbMask;
-
-	cb.half_texel = HalfTexel;
-  cb.uv_min_max = MinMax;
-	cb.lod_params = LODParams;
-	cb.st_range = STRange;
-  
-  cb.channel_shuffle_blue_mask = ChannelShuffle.x;
-  cb.channel_shuffle_blue_shift = ChannelShuffle.y;
-  cb.channel_shuffle_green_mask = ChannelShuffle.z;
-  cb.channel_shuffle_green_shift = ChannelShuffle.w;
-
-	cb.channel_shuffle_offset = ChannelShuffleOffset;
-	cb.tc_offset = TC_OffsetHack;
-	cb.st_scale = STScale;
-	cb.dither_matrix = DitherMatrix;
-
-	cb.scale_factor = FLOAT4(ScaledScaleFactor, RcpScaleFactor, 0.0f, 0.0f);
-
-	cb.line_cov_scale = LineCovScale;
-
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		PS_UNIFORMS(X)
+	#undef X
   return cb;
 }
 
@@ -2279,7 +2230,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
     psout.c1 = alpha_blend;
 
   if (PS_ZCLAMP != FALSE)
-    input_z = min(input_z, state.cb.max_depth);
+    input_z = min(input_z, state.cb.max_depth_ps);
 
   if (PS_AA1 == PS_AA1_TRIANGLE_SW_Z && state.psinput.interior == 0)
     discard_depth(state, input_z); // No depth update for triangle edges.

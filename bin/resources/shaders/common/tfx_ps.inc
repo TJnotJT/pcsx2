@@ -1108,7 +1108,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
     psout.c1 = alpha_blend;
 
   if (PS_ZCLAMP != FALSE)
-    input_z = min(input_z, state.cb.max_depth);
+    input_z = min(input_z, state.cb.max_depth_ps);
 
   if (PS_AA1 == PS_AA1_TRIANGLE_SW_Z && state.psinput.interior == 0)
     discard_depth(state, input_z); // No depth update for triangle edges.
