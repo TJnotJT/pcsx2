@@ -26,7 +26,7 @@ VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
 	vert.p = UINT2(raw.XY & 0xFFFFu, raw.XY >> 16);
 	vert.z = raw.Z;
 	vert.uv = UINT2(raw.UV & 0xFFFFu, raw.UV >> 16);
-	vert.f = float4_bcast(float(raw.FOG));
+	vert.f = float4_bcast(float(raw.FOG) / 255.0f);
 	return vert;
 }
 
