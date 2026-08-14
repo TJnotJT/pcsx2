@@ -83,7 +83,7 @@ struct PSInputGeneric
 
 // Main state of the pixel shader invocation.
 #ifdef __METAL_VERSION__
-  struct PSMain
+  struct PSMainState
   {
     texture2d<float> tex;
     depth2d<float> tex_depth;
@@ -98,10 +98,10 @@ struct PSInputGeneric
     const thread MainPSIn& psinput;
     constant GSMTLMainPSUniform& cb;
 
-    PSMain(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
+    PSMainState(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
   };
 #else
-  struct PSMain
+  struct PSMainState
   {
     uint tex; // unused
     uint tex_depth; // unused

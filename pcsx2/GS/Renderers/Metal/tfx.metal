@@ -293,7 +293,7 @@ fragment MainPSOut ps_main(
 	texture2d<uint,  access::read_write> rt_u32 [[texture(GSMTLTextureIndexRenderTarget), raster_order_group(0), function_constant(NEEDS_RT_U32)]],
 	texture2d<float, access::read_write> ds_rov [[texture(GSMTLTextureIndexDepthTarget),  raster_order_group(1), function_constant(NEEDS_DS_ROV)]])
 {
-	PSMain state(in, cb);
+	PSMainState state(in, cb);
 
 	state.tex_sampler = s;
 	if (PS_TEX_IS_COLOR)
@@ -374,7 +374,7 @@ fragment void ps_main_rov_eft(
 	texture2d<float, access::read_write> rt_rov [[texture(GSMTLTextureIndexRenderTarget), raster_order_group(0), function_constant(NEEDS_RT_ROV)]],
 	texture2d<uint,  access::read_write> rt_u32 [[texture(GSMTLTextureIndexRenderTarget), raster_order_group(0), function_constant(NEEDS_RT_U32)]])
 {
-	PSMain main(in, cb);
+	PSMainState main(in, cb);
 	main.tex_sampler = s;
 	if (PS_TEX_IS_COLOR)
 		main.tex = tex;

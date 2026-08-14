@@ -586,7 +586,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 void ps_main(PS_INPUT input)
 #endif
 {
-	PSMain state;
+	PSMainState state;
   state.psinput = GetPSInput(input);
   state.cb = GetPSUniforms();
   state.tex = 0; // unused

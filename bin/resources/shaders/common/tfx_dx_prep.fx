@@ -213,7 +213,7 @@ struct PSInputGeneric
 
 // Main state of the pixel shader invocation.
 #ifdef __METAL_VERSION__
-  struct PSMain
+  struct PSMainState
   {
     texture2d<float> tex;
     depth2d<float> tex_depth;
@@ -228,10 +228,10 @@ struct PSInputGeneric
     const thread MainPSIn& psinput;
     constant GSMTLMainPSUniform& cb;
 
-    PSMain(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
+    PSMainState(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
   };
 #else
-  struct PSMain
+  struct PSMainState
   {
     uint tex; // unused
     uint tex_depth; // unused
@@ -1076,7 +1076,7 @@ void DepthWrite(int2 xy, float d)
 #endif
 }
 
-STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
+STATIC void discard_all(IN_OUT_PARAM(PSMainState, state))
 {
   if (PS_ROV_COLOR != FALSE || PS_ROV_DEPTH != PS_ROV_DEPTH_NONE)
     state.color_discarded = state.depth_discarded = true;
@@ -1084,7 +1084,7 @@ STATIC void discard_all(IN_OUT_PARAM(PSMain, state))
     GPU_DISCARD;
 }
 
-STATIC void discard_color(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, color))
+STATIC void discard_color(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, color))
 {
   if (PS_ROV_COLOR != FALSE)
     state.color_discarded = true;
@@ -1092,7 +1092,7 @@ STATIC void discard_color(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, colo
     color = state.current_color;
 }
 
-STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth))
+STATIC void discard_depth(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(float, depth))
 {
   if (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
     state.depth_discarded = true;
@@ -1100,7 +1100,7 @@ STATIC void discard_depth(IN_OUT_PARAM(PSMain, state), IN_OUT_PARAM(float, depth
     depth = state.current_depth;
 }
 
-FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
+FLOAT4 sample_tex_lod(IN_PARAM(PSMainState, state), FLOAT2 uv, float lod)
 {
   if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_SAMPLE_TEX_DEPTH_LOD(state, uv, lod), 0.0f, 0.0f, 0.0f);
@@ -1108,7 +1108,7 @@ FLOAT4 sample_tex_lod(IN_PARAM(PSMain, state), FLOAT2 uv, float lod)
     return PS_SAMPLE_TEX_LOD(state, uv, lod);
 }
 
-FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
+FLOAT4 sample_tex(IN_PARAM(PSMainState, state), FLOAT2 uv)
 {
   if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_SAMPLE_TEX_DEPTH(state, uv), 0.0f, 0.0f, 0.0);
@@ -1116,7 +1116,7 @@ FLOAT4 sample_tex(IN_PARAM(PSMain, state), FLOAT2 uv)
     return PS_SAMPLE_TEX(state, uv);
 }
 
-FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod)
+FLOAT4 read_tex(IN_PARAM(PSMainState, state), UINT2 pos, uint lod)
 {
   if (PS_TEX_IS_DEPTH)
     return FLOAT4(PS_READ_TEX_DEPTH(state, pos, lod), 0.0f, 0.0f, 0.0f);
@@ -1124,12 +1124,12 @@ FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos, uint lod)
     return PS_READ_TEX(state, pos, lod);
 }
 
-FLOAT4 read_tex(IN_PARAM(PSMain, state), UINT2 pos)
+FLOAT4 read_tex(IN_PARAM(PSMainState, state), UINT2 pos)
 {
   return read_tex(state, pos, 0);
 }
 
-UINT2 get_tex_dims(IN_PARAM(PSMain, state))
+UINT2 get_tex_dims(IN_PARAM(PSMainState, state))
 {
   UINT2 dims = UINT2(0, 0);
   if (PS_TEX_IS_DEPTH)
@@ -1139,7 +1139,7 @@ UINT2 get_tex_dims(IN_PARAM(PSMain, state))
   return dims;
 }
 
-STATIC float manual_lod(IN_PARAM(PSMain, state), float uv_w)
+STATIC float manual_lod(IN_PARAM(PSMainState, state), float uv_w)
 {
   // FIXME add LOD: K - ( LOG2(Q) * (1 << L))
   float K = state.cb.lod_params.x;
@@ -1153,7 +1153,7 @@ STATIC float manual_lod(IN_PARAM(PSMain, state), float uv_w)
   return min(gs_lod, max_lod) - bias;
 }
 
-STATIC FLOAT4 sample_c_af(IN_OUT_PARAM(PSMain, state), FLOAT2 uv, float uv_w)
+STATIC FLOAT4 sample_c_af(IN_OUT_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 {
   // HW sampler will reject bad UVs, match that here.
   uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? FLOAT2(0.0f, 0.0f) : uv;
@@ -1277,7 +1277,7 @@ STATIC FLOAT4 sample_c_af(IN_OUT_PARAM(PSMain, state), FLOAT2 uv, float uv_w)
   return colour;
 }
 
-STATIC FLOAT4 sample_c(IN_PARAM(PSMain, state), FLOAT2 uv)
+STATIC FLOAT4 sample_c(IN_PARAM(PSMainState, state), FLOAT2 uv)
 {
   if (PS_TEX_IS_FB != 0)
     return state.current_color;
@@ -1310,17 +1310,17 @@ STATIC FLOAT4 sample_c(IN_PARAM(PSMain, state), FLOAT2 uv)
     return sample_tex_lod(state, uv, LEVEL(0));
 }
 
-FLOAT4 sample_p(IN_PARAM(PSMain, state), uint idx)
+FLOAT4 sample_p(IN_PARAM(PSMainState, state), uint idx)
 {
   return PS_READ_PALETTE(state, UINT2(idx, 0));
 }
 
-FLOAT4 sample_p_norm(IN_PARAM(PSMain, state), float u)
+FLOAT4 sample_p_norm(IN_PARAM(PSMainState, state), float u)
 {
   return sample_p(state, uint(u * 255.5f));
 }
 
-FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
+FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 {
   FLOAT4 tex_size = state.cb.wh.xyxy;
 
@@ -1403,7 +1403,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMain, state), FLOAT4 uv)
   return uv;
 }
 
-FLOAT4x4 sample_4c(IN_PARAM(PSMain, state), FLOAT4 uv)
+FLOAT4x4 sample_4c(IN_PARAM(PSMainState, state), FLOAT4 uv)
 {
   return FLOAT4x4(
     sample_c(state, uv.xy),
@@ -1413,7 +1413,7 @@ FLOAT4x4 sample_4c(IN_PARAM(PSMain, state), FLOAT4 uv)
   );
 }
 
-UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
+UINT4 sample_4_index(IN_PARAM(PSMainState, state), FLOAT4 uv)
 {
   FLOAT4 c;
 
@@ -1446,7 +1446,7 @@ UINT4 sample_4_index(IN_PARAM(PSMain, state), FLOAT4 uv)
   return i;
 }
 
-FLOAT4x4 sample_4p(IN_PARAM(PSMain, state), UINT4 u)
+FLOAT4x4 sample_4p(IN_PARAM(PSMainState, state), UINT4 u)
 {
   return FLOAT4x4(
     sample_p(state, u.x),
@@ -1456,12 +1456,12 @@ FLOAT4x4 sample_4p(IN_PARAM(PSMain, state), UINT4 u)
   );
 }
 
-uint fetch_raw_depth(IN_PARAM(PSMain, state))
+uint fetch_raw_depth(IN_PARAM(PSMainState, state))
 {
   return uint(PS_READ_TEX_DEPTH(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0) * EXP2_POS_32);
 }
 
-FLOAT4 fetch_raw_color(IN_PARAM(PSMain, state))
+FLOAT4 fetch_raw_color(IN_PARAM(PSMainState, state))
 {
   if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
@@ -1469,7 +1469,7 @@ FLOAT4 fetch_raw_color(IN_PARAM(PSMain, state))
     return PS_READ_TEX(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0);
 }
 
-FLOAT4 fetch_c(IN_PARAM(PSMain, state), USHORT2 uv)
+FLOAT4 fetch_c(IN_PARAM(PSMainState, state), USHORT2 uv)
 {
   if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
@@ -1479,7 +1479,7 @@ FLOAT4 fetch_c(IN_PARAM(PSMain, state), USHORT2 uv)
     return PS_READ_TEX(state, uv, 0);
 }
 
-USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMain, state), USHORT2 uv)
+USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMainState, state), USHORT2 uv)
 {
   USHORT2 uv_out = uv;
   // Keep the full precision
@@ -1509,7 +1509,7 @@ USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMain, state), USHORT2 uv)
   return uv_out;
 }
 
-FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
+FLOAT4 sample_depth(IN_PARAM(PSMainState, state), FLOAT2 st)
 {
   FLOAT2 uv_f = FLOAT2(clamp_wrap_uv_depth(state, USHORT2(st))) * float2_bcast(state.cb.scale_factor.x);
 
@@ -1572,36 +1572,36 @@ FLOAT4 sample_depth(IN_PARAM(PSMain, state), FLOAT2 st)
 
 // MARK: Fetch a Single Channel
 
-FLOAT4 fetch_red(IN_PARAM(PSMain, state))
+FLOAT4 fetch_red(IN_PARAM(PSMainState, state))
 {
   float rt = PS_TEX_IS_DEPTH ? float(fetch_raw_depth(state) & 0xFFu) / 255.f : fetch_raw_color(state).r;
   return sample_p_norm(state, rt) * 255.f;
 }
 
-FLOAT4 fetch_green(IN_PARAM(PSMain, state))
+FLOAT4 fetch_green(IN_PARAM(PSMainState, state))
 {
   float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth(state) >> 8) & 0xFFu) / 255.f : fetch_raw_color(state).g;
   return sample_p_norm(state, rt) * 255.f;
 }
 
-FLOAT4 fetch_blue(IN_PARAM(PSMain, state))
+FLOAT4 fetch_blue(IN_PARAM(PSMainState, state))
 {
   float rt = PS_TEX_IS_DEPTH ? float((fetch_raw_depth(state) >> 16) & 0xFFu) / 255.f : fetch_raw_color(state).b;
   return sample_p_norm(state, rt) * 255.f;
 }
 
-FLOAT4 fetch_alpha(IN_PARAM(PSMain, state))
+FLOAT4 fetch_alpha(IN_PARAM(PSMainState, state))
 {
   return sample_p_norm(state, fetch_raw_color(state).a) * 255.f;
 }
 
-FLOAT4 fetch_rgb(IN_PARAM(PSMain, state))
+FLOAT4 fetch_rgb(IN_PARAM(PSMainState, state))
 {
   FLOAT4 rt = fetch_raw_color(state);
   return FLOAT4(sample_p_norm(state, rt.r).r, sample_p_norm(state, rt.g).g, sample_p_norm(state, rt.b).b, 1) * 255.f;
 }
 
-FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
+FLOAT4 fetch_gXbY(IN_PARAM(PSMainState, state))
 {
   if (PS_TEX_IS_DEPTH)
   {
@@ -1618,7 +1618,7 @@ FLOAT4 fetch_gXbY(IN_PARAM(PSMain, state))
   }
 }
 
-FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
+FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
 {
   if (PS_TCOFFSETHACK != FALSE)
     st += state.cb.tc_offset;
@@ -1682,7 +1682,7 @@ FLOAT4 sample_color(IN_PARAM(PSMain, state), FLOAT2 st)
   return trunc(t * 255.f + 0.05f);
 }
 
-FLOAT4 tfx(IN_PARAM(PSMain, state), FLOAT4 T, FLOAT4 C)
+FLOAT4 tfx(IN_PARAM(PSMainState, state), FLOAT4 T, FLOAT4 C)
 {
   FLOAT4 C_out;
   FLOAT4 FxT = trunc((C * T) / 128.f);
@@ -1707,7 +1707,7 @@ FLOAT4 tfx(IN_PARAM(PSMain, state), FLOAT4 T, FLOAT4 C)
   return C_out;
 }
 
-bool atst(IN_PARAM(PSMain, state), FLOAT4 C)
+bool atst(IN_PARAM(PSMainState, state), FLOAT4 C)
 {
   float a = C.a;
   switch (PS_ATST)
@@ -1734,13 +1734,13 @@ bool atst(IN_PARAM(PSMain, state), FLOAT4 C)
   return true;
 }
 
-void fog(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float f)
+void fog(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C), float f)
 {
   if (PS_FOG != FALSE)
     C.rgb = trunc(MIX(state.cb.fog_color, C.rgb, (f * 255.0f) / 256.0f));
 }
 
-FLOAT4 ps_color(IN_PARAM(PSMain, state))
+FLOAT4 ps_color(IN_PARAM(PSMainState, state))
 {
   FLOAT2 st, st_int;
   if (PS_FST == FALSE)
@@ -1802,7 +1802,7 @@ FLOAT4 ps_color(IN_PARAM(PSMain, state))
   return C;
 }
 
-void ps_fbmask(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
+void ps_fbmask(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 {
   if (PS_FBMASK != FALSE)
   {
@@ -1811,7 +1811,7 @@ void ps_fbmask(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
   }
 }
 
-void ps_dither(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float As)
+void ps_dither(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C), float As)
 {
   if (PS_DITHER == 0 || PS_DITHER == 3)
     return;
@@ -1836,7 +1836,7 @@ void ps_dither(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C), float As)
     C.rgb += value;
 }
 
-void ps_color_clamp_wrap(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
+void ps_color_clamp_wrap(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 {
   // When dithering the bottom 3 bits become meaningless and cause lines in the picture
   // so we need to limit the color depth on dithered items
@@ -1867,7 +1867,7 @@ void ps_color_clamp_wrap(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
 
 #define PICK3(SELECTOR, ZERO, ONE, TWO) ((SELECTOR) == 0 ? (ZERO) : (SELECTOR) == 1 ? (ONE) : (TWO))
 
-void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM(FLOAT4, As_rgba))
+void ps_blend(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM(FLOAT4, As_rgba))
 {
   float As = As_rgba.a;
   
@@ -1998,7 +1998,7 @@ void ps_blend(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, Color), IN_OUT_PARAM
   }
 }
 
-void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
+void ps_shuffle(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 {
   if (PS_SHUFFLE != FALSE)
   {
@@ -2058,7 +2058,7 @@ void ps_shuffle(IN_PARAM(PSMain, state), IN_OUT_PARAM(FLOAT4, C))
   }
 }
 
-PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMain, state))
+PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 {
   PSOutputGeneric psout;
   psout.c0 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -2218,7 +2218,7 @@ PS_OUTPUT ps_main(PS_INPUT input)
 void ps_main(PS_INPUT input)
 #endif
 {
-	PSMain state;
+	PSMainState state;
   state.psinput = GetPSInput(input);
   state.cb = GetPSUniforms();
   state.tex = 0; // unused

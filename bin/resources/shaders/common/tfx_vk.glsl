@@ -671,7 +671,7 @@ PSInputGeneric GetPSInput()
 
 void main()
 {
-  PSMain state;
+  PSMainState state;
   state.psinput = GetPSInput();
   state.cb = GetPSUniforms();
   state.tex = 0; // unused
