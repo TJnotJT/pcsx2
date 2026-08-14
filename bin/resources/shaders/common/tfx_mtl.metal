@@ -81,6 +81,7 @@
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(STATE.tex.get_width(), STATE.tex.get_height()))
 #define PS_GET_TEX_DEPTH_DIMS(STATE) (OUT_VAR = UINT2(STATE.tex_depth.get_width(), STATE.tex_depth.get_height()))
 
+// Enum constants
 #ifndef VS_EXPAND_NONE
 #define VS_EXPAND_NONE VSExpand::None
 #define VS_EXPAND_POINT VSExpand::Point
