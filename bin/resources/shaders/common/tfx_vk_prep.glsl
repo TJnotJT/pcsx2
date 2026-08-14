@@ -150,6 +150,18 @@
 	#endif
 #endif
 
+// Raw vertex layout for vertex expand shaders.
+struct VSRawVertex
+{
+	FLOAT2 ST;
+	uint RGBA;
+	float Q;
+	uint XY;
+	uint Z;
+	uint UV;
+	uint FOG;
+};
+
 /// Vertex shader constant buffer fields. Shared by all shaders except Metal.
 #define VS_UNIFORMS(X) \
 	X(FLOAT2, vertex_scale) \
@@ -345,17 +357,6 @@ layout(std140, binding = 4) uniform cb22
 	#undef X
 };
 
-struct RawVertex
-{
-	vec2 ST;
-	uint RGBA;
-	float Q;
-	uint XY;
-	uint Z;
-	uint UV;
-	uint FOG;
-};
-
 #if PCSX2_VULKAN
 	layout(std140, set = 0, binding = 2)
 #elif PCSX2_OPENGL
@@ -363,7 +364,7 @@ struct RawVertex
 #endif
 readonly buffer VertexBuffer
 {
-	RawVertex vertex_buffer[];
+	VSRawVertex vertex_buffer[];
 };
 
 // Warning: use std430 instead of std140 so that the ints are tightly packed.
@@ -387,7 +388,7 @@ uint load_index(uint _i)
 
 VSInputGeneric load_vertex(uint index)
 {
-	RawVertex rvtx = vertex_buffer[BaseVertex + index];
+	VSRawVertex rvtx = vertex_buffer[BaseVertex + index];
 
 	vec2 a_st = rvtx.ST;
 	uvec4 a_c = uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),

@@ -138,6 +138,18 @@
 	#endif
 #endif
 
+// Raw vertex layout for vertex expand shaders.
+struct VSRawVertex
+{
+	FLOAT2 ST;
+	uint RGBA;
+	float Q;
+	uint XY;
+	uint Z;
+	uint UV;
+	uint FOG;
+};
+
 /// Vertex shader constant buffer fields. Shared by all shaders except Metal.
 #define VS_UNIFORMS(X) \
 	X(FLOAT2, vertex_scale) \
@@ -333,17 +345,6 @@ struct VS_INPUT
 	float4 f : COLOR1;
 };
 
-struct VS_RAW_INPUT
-{
-	float2 ST;
-	uint RGBA;
-	float Q;
-	uint XY;
-	uint Z;
-	uint UV;
-	uint FOG;
-};
-
 struct VS_OUTPUT
 {
 	float4 p : SV_Position;
@@ -383,7 +384,7 @@ cbuffer cb2
 	#undef X
 };
 
-StructuredBuffer<VS_RAW_INPUT> vertices : register(t0);
+StructuredBuffer<VSRawVertex> vertices : register(t0);
 StructuredBuffer<uint> IndexBuffer : register(t5);
 
 VSUniformsGeneric GetVSUniforms()
@@ -430,7 +431,7 @@ uint load_index(uint _i)
 
 VSInputGeneric load_vertex(uint index)
 {
-	VS_RAW_INPUT raw = vertices.Load(BaseVertex + index);
+	VSRawVertex raw = vertices.Load(BaseVertex + index);
 
 	VSInputGeneric vert;
 	vert.st = raw.ST;

@@ -57,6 +57,18 @@
 	#endif
 #endif
 
+// Raw vertex layout for vertex expand shaders.
+struct VSRawVertex
+{
+	FLOAT2 ST;
+	uint RGBA;
+	float Q;
+	uint XY;
+	uint Z;
+	uint UV;
+	uint FOG;
+};
+
 /// Vertex shader constant buffer fields. Shared by all shaders except Metal.
 #define VS_UNIFORMS(X) \
 	X(FLOAT2, vertex_scale) \
