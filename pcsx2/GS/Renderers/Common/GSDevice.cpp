@@ -1149,6 +1149,33 @@ void GSDevice::EndDSAsRT()
 #pragma GCC diagnostic pop
 #endif
 
+void GSDevice::ResolveShaderIncludes(std::string* source, std::span<const ShaderInclude> includes)
+{
+	// String replace includes for shader compilers that don't support includes.
+	for (const ShaderInclude& include : includes)
+	{
+		const std::string include_directive = fmt::format("#include \"{}\"", include.file_name);
+		StringUtil::ReplaceAll(source, include_directive, include.file_source);
+	}
+}
+
+bool GSDevice::GetTFXShaderSource(std::string* source)
+{
+	std::optional<std::string> tfx_defs = ReadShaderSource("shaders/common/tfx_defs.inc");
+	std::optional<std::string> tfx_vs = ReadShaderSource("shaders/common/tfx_vs.inc");
+	std::optional<std::string> tfx_ps = ReadShaderSource("shaders/common/tfx_ps.inc");
+	if (!tfx_defs.has_value() || !tfx_vs.has_value() || !tfx_ps.has_value())
+		return false;
+
+	std::array<ShaderInclude, 3> includes = {
+		ShaderInclude{ "tfx_defs.inc", *tfx_defs},
+		ShaderInclude{ "tfx_vs.inc", *tfx_vs},
+		ShaderInclude{ "tfx_ps.inc", *tfx_ps},
+	};
+	ResolveShaderIncludes(source, includes);
+	return true;
+}
+
 bool GSDevice::GetCASShaderSource(std::string* source)
 {
 	std::optional<std::string> ffx_a_source = ReadShaderSource("shaders/common/ffx_a.h");
@@ -1156,9 +1183,11 @@ bool GSDevice::GetCASShaderSource(std::string* source)
 	if (!ffx_a_source.has_value() || !ffx_cas_source.has_value())
 		return false;
 
-	// Since our shader compilers don't support includes, and OpenGL doesn't at all... we'll do a really cheeky string replace.
-	StringUtil::ReplaceAll(source, "#include \"ffx_a.h\"", ffx_a_source.value());
-	StringUtil::ReplaceAll(source, "#include \"ffx_cas.h\"", ffx_cas_source.value());
+	std::array<ShaderInclude, 2> includes = {
+		ShaderInclude{ "ffx_a.h", *ffx_a_source},
+		ShaderInclude{ "ffx_cas.h", *ffx_cas_source},
+	};
+	ResolveShaderIncludes(source, includes);
 	return true;
 }
 

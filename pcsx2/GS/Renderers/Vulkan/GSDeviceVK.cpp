@@ -2193,10 +2193,16 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	}
 
 	{
-		std::optional<std::string> shader = ReadShaderSource("shaders/common/tfx_vk_prep.glsl");
+		std::optional<std::string> shader = ReadShaderSource("shaders/vulkan_opengl/tfx.glsl");
 		if (!shader.has_value())
 		{
-			Host::ReportErrorAsync("GS", "Failed to read shaders/common/tfx_vk_prep.glsl.");
+			Host::ReportErrorAsync("GS", "Failed to read shaders/vulkan_opengl/tfx.glsl.");
+			return false;
+		}
+
+		if (!GetTFXShaderSource(&*shader))
+		{
+			Host::ReportErrorAsync("GS", "Failed to includes for tfx shader.");
 			return false;
 		}
 

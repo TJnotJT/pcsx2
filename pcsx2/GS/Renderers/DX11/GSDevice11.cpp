@@ -212,9 +212,20 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	SetFeatures(dxgi_adapter.get());
 
-	std::optional<std::string> shader = ReadShaderSource("shaders/common/tfx_dx_prep.fx");
+	// TFX
+	std::optional<std::string> shader = ReadShaderSource("shaders/dx/tfx.fx");
 	if (!shader.has_value())
+	{
+		Host::ReportErrorAsync("GS", "Failed to read shaders/dx/tfx.fx.");
 		return false;
+	}
+
+	if (!GetTFXShaderSource(&*shader))
+	{
+		Host::ReportErrorAsync("GS", "Failed to includes for tfx shader.");
+		return false;
+	}
+
 	m_tfx_source = std::move(*shader);
 
 	// convert
@@ -226,7 +237,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		{"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
 	};
 
-	const std::optional<std::string> convert_hlsl = ReadShaderSource("shaders/dx11/convert.fx");
+	const std::optional<std::string> convert_hlsl = ReadShaderSource("shaders/dx/convert.fx");
 	if (!convert_hlsl.has_value())
 		return false;
 	ShaderMacro sm_vs;
@@ -262,7 +273,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 			return false;
 	}
 
-	shader = ReadShaderSource("shaders/dx11/present.fx");
+	shader = ReadShaderSource("shaders/dx/present.fx");
 	if (!shader.has_value())
 		return false;
 	if (!m_shader_cache.GetVertexShaderAndInputLayout(m_dev.get(), m_present.vs.put(), m_present.il.put(),
@@ -314,7 +325,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	m_dev->CreateBuffer(&bd, nullptr, m_merge.cb.put());
 
-	shader = ReadShaderSource("shaders/dx11/merge.fx");
+	shader = ReadShaderSource("shaders/dx/merge.fx");
 	if (!shader.has_value())
 		return false;
 
@@ -349,7 +360,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	m_dev->CreateBuffer(&bd, nullptr, m_interlace.cb.put());
 
-	shader = ReadShaderSource("shaders/dx11/interlace.fx");
+	shader = ReadShaderSource("shaders/dx/interlace.fx");
 	if (!shader.has_value())
 		return false;
 	for (size_t i = 0; i < std::size(m_interlace.ps); i++)
@@ -369,7 +380,7 @@ bool GSDevice11::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	m_dev->CreateBuffer(&bd, nullptr, m_shadeboost.cb.put());
 
-	shader = ReadShaderSource("shaders/dx11/shadeboost.fx");
+	shader = ReadShaderSource("shaders/dx/shadeboost.fx");
 	if (!shader.has_value())
 		return false;
 	m_shadeboost.ps = m_shader_cache.GetPixelShader(m_dev.get(), *shader, nullptr, "ps_main");
@@ -2251,7 +2262,7 @@ bool GSDevice11::CreateCASShaders()
 	if (FAILED(hr))
 		return false;
 
-	std::optional<std::string> cas_source = ReadShaderSource("shaders/dx11/cas.hlsl");
+	std::optional<std::string> cas_source = ReadShaderSource("shaders/dx/cas.hlsl");
 	if (!cas_source.has_value() || !GetCASShaderSource(&cas_source.value()))
 		return false;
 
@@ -2301,7 +2312,7 @@ bool GSDevice11::CreateImGuiResources()
 {
 	HRESULT hr;
 
-	const std::optional<std::string> hlsl = ReadShaderSource("shaders/dx11/imgui.fx");
+	const std::optional<std::string> hlsl = ReadShaderSource("shaders/dx/imgui.fx");
 	if (!hlsl.has_value())
 	{
 		Console.Error("D3D11: Failed to read imgui.fx");

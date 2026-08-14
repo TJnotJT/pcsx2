@@ -688,14 +688,20 @@ bool GSDeviceOGL::CreateTextureFX()
 {
 	GL_PUSH("GSDeviceOGL::CreateTextureFX");
 
-	std::optional<std::string> tfx_shader = ReadShaderSource("shaders/common/tfx_vk_prep.glsl");
-	if (!tfx_shader.has_value())
+	std::optional<std::string> shader = ReadShaderSource("shaders/vulkan_opengl/tfx.glsl");
+	if (!shader.has_value())
 	{
-		Host::ReportErrorAsync("GS", "Failed to read shaders/common/tfx_vk_prep.glsl.");
+		Host::ReportErrorAsync("GS", "Failed to read shaders/vulkan_opengl/tfx.glsl.");
 		return false;
 	}
 
-	m_shader_tfx = std::move(*tfx_shader);
+	if (!GetTFXShaderSource(&*shader))
+	{
+		Host::ReportErrorAsync("GS", "Failed to includes for tfx shader.");
+		return false;
+	}
+
+	m_shader_tfx = std::move(*shader);
 
 	// warning 1 sampler by image unit. So you cannot reuse m_ps_ss...
 	m_palette_ss = CreateSampler(PSSamplerSelector(0));
