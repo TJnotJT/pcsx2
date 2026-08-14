@@ -168,6 +168,13 @@ struct VSUniformsGeneric
 	#undef X
 };
 
+/// Vertex shader push constant fields for non-Metal backends.
+#define VS_PUSH_CONSTANTS(X) \
+	X(uint, BaseVertex) \
+	X(uint, BaseIndex) \
+	X(uint, pad_cb2_0) \
+	X(uint, pad_cb2_1)
+
 /// Generic VS inputs for passing to shared shader code.
 struct VSInputGeneric
 {
@@ -220,6 +227,7 @@ struct VSOutputGeneric
 	X(float, _pad1) \
 	X(float, _pad2)
 
+/// Generic PS constant buffer for passing to shared shader code.
 struct PSUniformsGeneric
 {
   #define X(TYPE, NAME) TYPE NAME;
@@ -327,15 +335,14 @@ STATIC bool any_nonzero(INT3 val)
 #endif
 
 #if PCSX2_VULKAN
-	layout(push_constant) uniform cb2
+layout(push_constant) uniform cb2
 #elif PCSX2_OPENGL
-	layout(std140, binding = 4) uniform cb22
+layout(std140, binding = 4) uniform cb22
 #endif
 {
-	uint BaseVertex;
-	uint BaseIndex;
-	uint pad_cb2_0;
-	uint pad_cb2_1;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
 };
 
 struct RawVertex

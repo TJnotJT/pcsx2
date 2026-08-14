@@ -147,10 +147,9 @@ cbuffer cb2 : register(b2)
 cbuffer cb2
 #endif
 {
-	uint BaseVertex;
-	uint BaseIndex;
-	uint _cb2_pad0;
-	uint _cb2_pad1;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
 };
 
 StructuredBuffer<VS_RAW_INPUT> vertices : register(t0);

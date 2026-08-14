@@ -156,6 +156,13 @@ struct VSUniformsGeneric
 	#undef X
 };
 
+/// Vertex shader push constant fields for non-Metal backends.
+#define VS_PUSH_CONSTANTS(X) \
+	X(uint, BaseVertex) \
+	X(uint, BaseIndex) \
+	X(uint, pad_cb2_0) \
+	X(uint, pad_cb2_1)
+
 /// Generic VS inputs for passing to shared shader code.
 struct VSInputGeneric
 {
@@ -208,6 +215,7 @@ struct VSOutputGeneric
 	X(float, _pad1) \
 	X(float, _pad2)
 
+/// Generic PS constant buffer for passing to shared shader code.
 struct PSUniformsGeneric
 {
   #define X(TYPE, NAME) TYPE NAME;
@@ -370,10 +378,9 @@ cbuffer cb2 : register(b2)
 cbuffer cb2
 #endif
 {
-	uint BaseVertex;
-	uint BaseIndex;
-	uint _cb2_pad0;
-	uint _cb2_pad1;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
 };
 
 StructuredBuffer<VS_RAW_INPUT> vertices : register(t0);

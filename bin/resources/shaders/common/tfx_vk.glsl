@@ -104,15 +104,14 @@
 #endif
 
 #if PCSX2_VULKAN
-	layout(push_constant) uniform cb2
+layout(push_constant) uniform cb2
 #elif PCSX2_OPENGL
-	layout(std140, binding = 4) uniform cb22
+layout(std140, binding = 4) uniform cb22
 #endif
 {
-	uint BaseVertex;
-	uint BaseIndex;
-	uint pad_cb2_0;
-	uint pad_cb2_1;
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
 };
 
 struct RawVertex

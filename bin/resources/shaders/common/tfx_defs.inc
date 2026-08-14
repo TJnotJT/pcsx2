@@ -75,6 +75,13 @@ struct VSUniformsGeneric
 	#undef X
 };
 
+/// Vertex shader push constant fields for non-Metal backends.
+#define VS_PUSH_CONSTANTS(X) \
+	X(uint, BaseVertex) \
+	X(uint, BaseIndex) \
+	X(uint, pad_cb2_0) \
+	X(uint, pad_cb2_1)
+
 /// Generic VS inputs for passing to shared shader code.
 struct VSInputGeneric
 {
