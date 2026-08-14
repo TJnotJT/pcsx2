@@ -284,94 +284,6 @@ void main()
 
 #ifdef FRAGMENT_SHADER
 
-#ifndef PS_FST
-#define PS_FST 0
-#define PS_WMS 0
-#define PS_WMT 0
-#define PS_ADJS 0
-#define PS_ADJT 0
-#define PS_FMT FMT_32
-#define PS_AEM 0
-#define PS_TFX 0
-#define PS_TCC 1
-#define PS_ATST 1
-#define PS_AFAIL 0
-#define PS_FOG 0
-#define PS_BLEND_HW 0
-#define PS_A_MASKED 0
-#define PS_FBA 0
-#define PS_FBMASK 0
-#define PS_LTF 1
-#define PS_TCOFFSETHACK 0
-#define PS_SHUFFLE 0
-#define PS_SHUFFLE_SAME 0
-#define PS_PROCESS_BA 0
-#define PS_PROCESS_RG 0
-#define PS_SHUFFLE_ACROSS 0
-#define PS_WRITE_RG 0
-#define PS_READ16_SRC 0
-#define PS_DST_FMT 0
-#define PS_DEPTH_FMT 0
-#define PS_PAL_FMT 0
-#define PS_CHANNEL 0
-#define PS_TALES_OF_ABYSS_HLE 0
-#define PS_URBAN_CHAOS_HLE 0
-#define PS_COLCLIP_HW 0
-#define PS_COLCLIP 0
-#define PS_BLEND_A 0
-#define PS_BLEND_B 0
-#define PS_BLEND_C 0
-#define PS_BLEND_D 0
-#define PS_FIXED_ONE_A 0
-#define PS_PABE 0
-#define PS_DITHER 0
-#define PS_DITHER_ADJUST 0
-#define PS_ZCLAMP 0
-#define PS_ZFLOOR 0
-#define PS_SCANMSK 0
-#define PS_AUTOMATIC_LOD 0
-#define PS_MANUAL_LOD 0
-#define PS_TEX_IS_FB 0
-#define PS_NO_COLOR 0
-#define PS_NO_COLOR1 0
-#define PS_DATE 0
-#define PS_ROV_COLOR 0
-#define PS_ROV_DEPTH 0
-#define PS_SW_ANISO 0
-#define PS_REGION_RECT 0
-#define PS_RTA_SRC_CORRECTION 0
-#define PS_AEM_FMT 0
-#define PS_IIP 0
-#define PS_ROUND_INV 0
-#define PS_BLEND_MIX 0
-#define PS_RTA_CORRECTION 0
-#define PS_ZTST 0
-#define PS_AA1 0
-#define PS_ABE 0
-#endif
-
-#define PS_TEX_IS_DEPTH (PS_URBAN_CHAOS_HLE != FALSE || PS_TALES_OF_ABYSS_HLE != FALSE || PS_DEPTH_FMT == 1 || PS_DEPTH_FMT == 2)
-
-#define SW_BLEND (PS_BLEND_A != 0 || PS_BLEND_B != 0 || PS_BLEND_D != 0)
-#define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
-#define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED != FALSE)
-#define AFAIL_NEEDS_RT (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
-#define AFAIL_NEEDS_DEPTH (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
-#define ZTST_NEEDS_DEPTH (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
-#define AA1_NEEDS_DEPTH (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
-
-#define PS_FEEDBACK_LOOP_IS_NEEDED_RT (PS_TEX_IS_FB != FALSE || AFAIL_NEEDS_RT || PS_FBMASK != FALSE || SW_BLEND_NEEDS_RT || SW_AD_TO_HW || (PS_DATE >= 5))
-#define PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH (AFAIL_NEEDS_DEPTH || ZTST_NEEDS_DEPTH || AA1_NEEDS_DEPTH)
-#define ZWRITE (PS_ZCLAMP || PS_ZFLOOR || PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH)
-
-#define PS_RETURN_COLOR_ROV (!PS_NO_COLOR && PS_ROV_COLOR)
-#define PS_RETURN_COLOR (!PS_NO_COLOR && !PS_ROV_COLOR)
-#define PS_RETURN_DEPTH_ROV (PS_ROV_DEPTH == PS_ROV_DEPTH_READ_WRITE)
-#define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
-#define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
-
-#define NEEDS_TEX (PS_TFX != 4)
-#define NEEDS_RT PS_FEEDBACK_LOOP_IS_NEEDED_RT
 #define USE_FEEDBACK_SAMPLER (DISABLE_TEXTURE_BARRIER || HAS_FEEDBACK_LOOP_LAYOUT)
 
 #if PCSX2_VULKAN
@@ -430,7 +342,7 @@ in SHADER
 
 // Depth feedback mode 2 is for depth as color.
 // Use FB fetch for the feedback if it's available.
-#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+#if PCSX2_OPENGL && SW_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
 	#if HAS_FRAMEBUFFER_FETCH
 		layout(location = 1) inout float o_col1;
 	#else
@@ -450,12 +362,12 @@ in SHADER
 		layout(set = 1, binding = 4) uniform texture2D DepthSampler;
 	#else
 		// Must consider each case separately since the input attachment indices must be consecutive.
-		#if (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR) && (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		#if (NEEDS_RT && !PS_ROV_COLOR) && (SW_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
 			layout(input_attachment_index = 1, set = 1, binding = 4) uniform subpassInput DepthSampler;
-		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_RT && !PS_ROV_COLOR)
+		#elif (NEEDS_RT && !PS_ROV_COLOR)
 			layout(input_attachment_index = 0, set = 1, binding = 2) uniform subpassInput RtSampler;
-		#elif (PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && !PS_ROV_DEPTH)
+		#elif (SW_DEPTH && !PS_ROV_DEPTH)
 			layout(input_attachment_index = 0, set = 1, binding = 4) uniform subpassInput DepthSampler;
 		#endif
 	#endif
@@ -467,7 +379,7 @@ in SHADER
 	layout(binding = 4) uniform sampler2D DepthSampler;
 #endif
 
-#if ZWRITE && PS_HAS_CONSERVATIVE_DEPTH && !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+#if ZWRITE && PS_HAS_CONSERVATIVE_DEPTH && !SW_DEPTH
 	layout(depth_less) out float gl_FragDepth;
 #endif
 
@@ -484,15 +396,15 @@ vec4 RtLoad(ivec2 xy)
 #if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(RtImageRov, xy);
-	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT && USE_FEEDBACK_SAMPLER
+	#elif NEEDS_RT && USE_FEEDBACK_SAMPLER
 		return texelFetch(RtSampler, xy, 0);
-	#elif PS_FEEDBACK_LOOP_IS_NEEDED_RT
+	#elif NEEDS_RT
 		return subpassLoad(RtSampler);
 	#else
 		return vec4(0.0f);
 	#endif
 #elif PCSX2_OPENGL
-	#if !PS_FEEDBACK_LOOP_IS_NEEDED_RT
+	#if !NEEDS_RT
 		return vec4(0.0f);
 	#elif HAS_FRAMEBUFFER_FETCH
 		return LAST_FRAG_COLOR;
@@ -507,15 +419,15 @@ float DepthLoad(ivec2 xy)
 #if PCSX2_VULKAN
 	#if PS_ROV_COLOR
 		return imageLoad(DepthImageRov, xy).r;
-	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && USE_FEEDBACK_SAMPLER
+	#elif SW_DEPTH && USE_FEEDBACK_SAMPLER
 		return texelFetch(DepthSampler, xy, 0).r;
-	#elif PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	#elif SW_DEPTH
 		return subpassLoad(DepthSampler).r;
 	#else
 		return 0.0f;
 	#endif
 #elif PCSX2_OPENGL
-	#if !PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH
+	#if !SW_DEPTH
 		return 0.0f;
 	#elif HAS_FRAMEBUFFER_FETCH && (DEPTH_FEEDBACK_SUPPORT == 2)
 		return o_col1;
@@ -589,7 +501,7 @@ void main()
 	// Writing back depth
 	#if PS_RETURN_DEPTH
 		gl_FragDepth = psout.depth;
-		#if PCSX2_OPENGL && PS_FEEDBACK_LOOP_IS_NEEDED_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
+		#if PCSX2_OPENGL && SW_DEPTH && PS_NO_COLOR1 && (DEPTH_FEEDBACK_SUPPORT == 2)
 			// Depth as color write. For depth as color feedback we write to both
 			// color copy and real depth to avoid having to copy back to real depth.
 			// Warning: do not write o_col1 until the end since the value might
