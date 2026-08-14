@@ -125,6 +125,7 @@
 #define PS_ROV_DEPTH_READ_WRITE ROV_DEPTH::READ_WRITE
 #define PS_ROV_DEPTH_READ_ONLY ROV_DEPTH::READ_ONLY
 #endif
+
 /// End helper macros for shared shader code
 
 constant uint FMT_32 = 0;
@@ -382,7 +383,8 @@ static uint load_index(device const ushort* indices [[buffer(GSMTLBufferIndexHWI
 	return indices[idx];
 }
 
-#include "tfx_vs.inc"
+// Note: load_index() must be declared before including common code.
+#include "../../../../bin/resources/shaders/common/tfx_vs.inc"
 
 vertex MainVSOut vs_main_expand(
 	uint vid [[vertex_id]],
@@ -414,6 +416,8 @@ constant bool NEEDS_DS_DEPTH = (SW_DEPTH && DEPTH_FEEDBACK || NEEDS_DS_FBF) && P
 constant bool NEEDS_RT_ROV = PS_ROV_COLOR && !ROV_NEEDS_R32;
 constant bool NEEDS_RT_U32 = PS_ROV_COLOR &&  ROV_NEEDS_R32;
 constant bool NEEDS_DS_ROV = PS_ROV_DEPTH != ROV_DEPTH::NONE;
+
+#include "../../../../bin/resources/shaders/common/tfx_ps.inc"
 
 fragment MainPSOut ps_main(
 	MainPSIn in [[stage_in]],
