@@ -127,6 +127,7 @@ struct VSOutputGeneric
 	X(float, _pad1) \
 	X(float, _pad2)
 
+/// Generic PS constant buffer for passing to shared shader code.
 struct PSUniformsGeneric
 {
   #define X(TYPE, NAME) TYPE NAME;
