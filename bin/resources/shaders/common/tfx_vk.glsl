@@ -13,6 +13,7 @@
 	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
 #endif
 
+/// Start helper macros for shared shader code.
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -88,64 +89,9 @@
 
 #define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
 #define LOAD_INDEX(INDICES, VID) load_index(VID)
-
-#define FMT_32 0
-#define FMT_24 1
-#define FMT_16 2
-
-#define SHUFFLE_READ  1
-#define SHUFFLE_WRITE 2
-#define SHUFFLE_READWRITE 3
-
-#ifndef VS_EXPAND_NONE
-#define VS_EXPAND_NONE 0
-#define VS_EXPAND_POINT 1
-#define VS_EXPAND_LINE 2
-#define VS_EXPAND_SPRITE 3
-#define VS_EXPAND_LINE_AA1 4
-#define VS_EXPAND_TRIANGLE_AA1 5
-#endif
-
-#ifndef ZTST_GEQUAL
-#define ZTST_GEQUAL 2
-#define ZTST_GREATER 3
-#endif
-
-#ifndef AFAIL_KEEP
-#define AFAIL_KEEP 0
-#define AFAIL_FB_ONLY 1
-#define AFAIL_ZB_ONLY 2
-#define AFAIL_RGB_ONLY 3
-#define AFAIL_RGB_ONLY_DSB 4
-#define AFAIL_RGB_ONLY_SW_Z 5
-#endif
-
-#ifndef PS_ATST_NONE
-#define PS_ATST_NONE 0
-#define PS_ATST_LEQUAL 1
-#define PS_ATST_GEQUAL 2
-#define PS_ATST_EQUAL 3
-#define PS_ATST_NOTEQUAL 4
-#endif
-
-#ifndef PS_AA1_NONE
-#define PS_AA1_NONE 0
-#define PS_AA1_LINE 1
-#define PS_AA1_TRIANGLE 2
-#define PS_AA1_TRIANGLE_SW_Z 3
-#endif
-
-#ifndef PS_ROV_DEPTH_NONE
-#define PS_ROV_DEPTH_NONE 0
-#define PS_ROV_DEPTH_READ_WRITE 1
-#define PS_ROV_DEPTH_READ_ONLY 2
-#endif
+/// End helper macros for shared shader code.
 
 #include "tfx_defs.inc"
-
-//////////////////////////////////////////////////////////////////////
-// Vertex Shader
-//////////////////////////////////////////////////////////////////////
 
 #ifdef VERTEX_SHADER
 
