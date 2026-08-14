@@ -4,6 +4,8 @@
   #define FALSE 0
 #endif
 
+
+/// Vertex shader constant buffer fields. Shared by all shaders except Metal.
 #define VS_UNIFORMS(X) \
 	X(FLOAT2, vertex_scale) \
 	X(FLOAT2, vertex_offset) \
@@ -13,6 +15,7 @@
 	X(uint, max_depth_vs) \
 	X(float, line_aa1_width)
 
+/// Generic VS constant buffer for passing to shared shader code.
 struct VSUniformsGeneric
 {
 	#define X(TYPE, NAME) TYPE NAME;
@@ -20,6 +23,7 @@ struct VSUniformsGeneric
 	#undef X
 };
 
+/// Generic VS inputs for passing to shared shader code.
 struct VSInputGeneric
 {
 	FLOAT2 st;
@@ -31,6 +35,7 @@ struct VSInputGeneric
 	FLOAT4 f;
 };
 
+/// Generic VS output for use by shared shader code.
 struct VSOutputGeneric
 {
 	FLOAT4 p;
@@ -42,6 +47,7 @@ struct VSOutputGeneric
 	float point_size;
 };
 
+/// Pixel shader constant buffer fields. Shared by all shaders except Metal.
 #define PS_UNIFORMS(X) \
   X(FLOAT3, fog_color) \
   X(float, aref) \
@@ -75,6 +81,7 @@ struct PSUniformsGeneric
 	#undef X
 };
 
+/// Generic PS inputs for passing to shared shader code.
 struct PSInputGeneric
 {
 	FLOAT4 p;
