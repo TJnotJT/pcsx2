@@ -330,6 +330,24 @@ struct MainPSOut
 	}
 };
 
+struct PSMainState
+{
+	texture2d<float> tex;
+	depth2d<float> tex_depth;
+	texture2d<float> palette;
+	texture2d<float> prim_id_tex;
+	sampler tex_sampler;
+	float4 current_color;
+	float current_depth;
+	uint prim_id;
+	bool color_discarded = false;
+	bool depth_discarded = false;
+	const thread MainPSIn& psin;
+	constant GSMTLMainPSUniform& cb;
+
+	PSMainState(const thread MainPSIn& psin, constant GSMTLMainPSUniform& cb): psin(psin), cb(cb) {}
+};
+
 // MARK: - Vertex functions
 
 vertex MainVSOut vs_main(MainVSIn v [[stage_in]], constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])

@@ -35,7 +35,7 @@ struct VSInputGeneric
 	FLOAT4 f;
 };
 
-/// Generic VS output for use by shared shader code.
+/// Generic VS outputs for use shared shader code to pass values.
 struct VSOutputGeneric
 {
 	FLOAT4 p;
@@ -47,7 +47,8 @@ struct VSOutputGeneric
 	float point_size;
 };
 
-/// Pixel shader constant buffer fields. Shared by all shaders except Metal.
+/// Pixel shader constant buffer fields.
+/// Shared by all shaders except Metal, which defines its own version.
 #define PS_UNIFORMS(X) \
   X(FLOAT3, fog_color) \
   X(float, aref) \
@@ -93,43 +94,30 @@ struct PSInputGeneric
 	uint interior;
 };
 
-// Main state of the pixel shader invocation.
-#ifdef __METAL_VERSION__
-  struct PSMainState
-  {
-    texture2d<float> tex;
-    depth2d<float> tex_depth;
-    texture2d<float> palette;
-    texture2d<float> prim_id_tex;
-    sampler tex_sampler;
-    float4 current_color;
-    float current_depth;
-    uint prim_id;
-    bool color_discarded = false;
-    bool depth_discarded = false;
-    const thread MainPSIn& psin;
-    constant GSMTLMainPSUniform& cb;
+/// Main state of the pixel shader invocation for shared code.
+/// Metal defines it's own version with identically named fields.
+#ifndef __METAL_VERSION__
+struct PSMainState
+{
+	// Fields used by Metal for texture slots. Unused by other backends.
+	uint tex;
+	uint tex_depth;
+	uint palette;
+	uint prim_id_tex;
+	uint tex_sampler;
 
-    PSMainState(const thread MainPSIn& psin, constant GSMTLMainPSUniform& cb): psin(psin), cb(cb) {}
-  };
-#else
-  struct PSMainState
-  {
-    uint tex; // unused
-    uint tex_depth; // unused
-    uint palette; // unused
-    uint prim_id_tex; // unused
-    uint tex_sampler; // unused
-    FLOAT4 current_color;
-    float current_depth;
-    uint prim_id;
-    bool color_discarded;
-    bool depth_discarded;
-    PSInputGeneric psin;
-    PSUniformsGeneric cb;
-  };
+	// Fields used by all backends.
+	FLOAT4 current_color;
+	float current_depth;
+	uint prim_id;
+	bool color_discarded;
+	bool depth_discarded;
+	PSInputGeneric psin;
+	PSUniformsGeneric cb;
+};
 #endif
 
+/// Generic PS outputs for shared shader code to pass values.
 struct PSOutputGeneric
 {
 	FLOAT4 c0;
@@ -137,6 +125,7 @@ struct PSOutputGeneric
 	float depth;
 };
 
+// Metal defines it's own version of these conversion functions.
 #ifndef __METAL_VERSION__
 STATIC FLOAT4 convert_depth32_rgba8(float value)
 {
