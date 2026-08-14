@@ -48,6 +48,8 @@
 #define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
 #define FRACT(X) frac(X)
 #define MIX lerp
+#define IN_PARAM(TYPE, NAME) TYPE NAME
+#define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF

@@ -13,7 +13,9 @@
 	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
 #endif
 
-/// Start helper macros for shared shader code.
+/// Start helper macros for shared shader code
+
+// Types
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -38,10 +40,10 @@
 #define BOOL3 bvec3
 #define BOOL4 bvec4
 
+// Builtin keywords/functions
 #define STATIC
 #define DFDX dFdx
 #define DFDY dFdy
-
 #define SELECT(COND, TRUE_VAL, FALSE_VAL) mix((COND), (FALSE_VAL), (TRUE_VAL))
 #define VEQUAL(X, Y) equal((X), (Y))
 #define VGEQUAL(X, Y) greaterThanEqual((X), (Y))
@@ -61,11 +63,13 @@
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
+// Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
+// Vertex shader helpers
 #if PCSX2_VULKAN
 	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
 #elif PCSX2_OPENGL
@@ -78,6 +82,7 @@
 #define VS_LOAD_VERTEX(VERTICES, IDX) vertex_buffer[IDX]
 #define VS_LOAD_INDEX(INDICES, IDX) index_buffer[IDX]
 
+// Pixel shader helpers
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
@@ -89,8 +94,7 @@
 #define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
-
-/// End helper macros for shared shader code.
+/// End helper macros for shared shader code
 
 #ifdef __METAL_VERSION__
   #define FALSE false
@@ -518,7 +522,7 @@ VSInputGeneric load_vertex(uint index)
   return v;
 }
 
-// Note: load_vertex() and load_index() must be defined before common code is included.
+// Note: vertex/index buffers must be defined before common code is included.
 
 #ifdef __METAL_VERSION__
   // Metal defines the index buffer with u16 elements.
@@ -547,7 +551,7 @@ VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
 	vert.p = UINT2(raw.XY & 0xFFFFu, raw.XY >> 16);
 	vert.z = raw.Z;
 	vert.uv = UINT2(raw.UV & 0xFFFFu, raw.UV >> 16);
-	vert.f = float4_bcast(float(raw.FOG));
+	vert.f = float4_bcast(float(raw.FOG) / 255.0f);
 	return vert;
 }
 

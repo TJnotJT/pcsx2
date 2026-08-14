@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 /// Start helper macros for shared shader code.
+
+// Types
 #define FLOAT2 float2
 #define FLOAT3 float3
 #define FLOAT4 float4
@@ -26,10 +28,10 @@
 #define BOOL3 bool3
 #define BOOL4 bool4
 
+// Builtin keywords/functions
 #define STATIC
 #define DFDX ddx
 #define DFDY ddy
-
 #define SELECT(COND, TRUE_VAL, FALSE_VAL) ((COND) ? (FALSE_VAL) : (TRUE_VAL))
 #define VEQUAL(X, Y) ((X) == (Y))
 #define VGEQUAL(X, Y) ((X) >= (Y))
@@ -46,17 +48,16 @@
 #define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
 #define FRACT(X) frac(X)
 #define MIX lerp
-
-#define VERTICES_PARAM(NAME) uint NAME
-#define INDICES_PARAM(NAME) uint NAME
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
+// Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP -1.0f
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
+// Vertex shader helpers
 #define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
 #define VS_VERTICES_PARAM(NAME) uint NAME
 #define VS_INDICES_PARAM(NAME) uint NAME
@@ -64,7 +65,10 @@
 #define VS_BASE_INDEX BaseIndex
 #define VS_LOAD_VERTEX(VERTICES, IDX) (VertexBuffer.Load(IDX))
 #define VS_LOAD_INDEX(INDICES, IDX) (IndexBuffer.Load(IDX))
+// DX does not use point/line size.
+#define VS_POINT_SIZE 0
 
+// Pixel shader helpers
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
@@ -77,8 +81,6 @@
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (Texture.GetDimensions(OUT_VAR.x, OUT_VAR.y))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
 
-// DX does use point/line size.
-#define VS_POINT_SIZE 0
 
 /// End helper macros for shared shader code.
 
@@ -450,6 +452,7 @@ StructuredBuffer<VSRawVertex> VertexBuffer : register(t0);
 /// Index buffer for rearranging vertices in AA1 expand shader
 StructuredBuffer<uint> IndexBuffer : register(t5);
 
+// Note: vertex/index buffers must be defined before common code is included.
 
 #ifdef __METAL_VERSION__
   // Metal defines the index buffer with u16 elements.
@@ -478,7 +481,7 @@ VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
 	vert.p = UINT2(raw.XY & 0xFFFFu, raw.XY >> 16);
 	vert.z = raw.Z;
 	vert.uv = UINT2(raw.UV & 0xFFFFu, raw.UV >> 16);
-	vert.f = float4_bcast(float(raw.FOG));
+	vert.f = float4_bcast(float(raw.FOG) / 255.0f);
 	return vert;
 }
 
