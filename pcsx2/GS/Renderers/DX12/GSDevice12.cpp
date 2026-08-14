@@ -62,7 +62,7 @@ static D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE GetLoadOpForTexture(GSTexture12* 
 
 GSDevice12::ShaderMacro::ShaderMacro()
 {
-	mlist.emplace_back("DX12", "1");
+	mlist.emplace_back("PCSX2_DX12", "1");
 }
 
 void GSDevice12::ShaderMacro::AddMacro(const char* n, int d)

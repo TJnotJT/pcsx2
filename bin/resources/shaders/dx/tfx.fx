@@ -1,6 +1,18 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#ifndef PCSX2_DX12
+	#define PCSX2_DX12 0
+#endif
+
+#ifndef PCSX2_DX11
+	#define PCSX2_DX11 0
+#endif
+
+#if PCSX2_DX12 == PCSX2_DX11
+	ERROR: Exactly one of PCSX2_DX12 or PCSX2_DX11 should be true.
+#endif
+
 /// Start helper macros for shared shader code.
 
 // Types
@@ -89,10 +101,10 @@
 #ifdef VERTEX_SHADER
 
 /// VS constants for determining base vertex/index in expand shader.
-#ifdef DX12
+#if PCSX2_DX12
 cbuffer cb2 : register(b2)
-#else
-cbuffer cb2
+#elif PCSX2_DX11
+cbuffer cb2 : register(b1)
 #endif
 {
 	#define X(TYPE, NAME) TYPE NAME;
@@ -137,11 +149,7 @@ struct VS_OUTPUT
 };
 
 // VS Constant Buffer
-#ifdef DX12
 cbuffer cb0 : register(b0)
-#else
-cbuffer cb0
-#endif
 {
 	#define X(TYPE, NAME) TYPE NAME;
 		VS_UNIFORMS(X)
@@ -278,10 +286,10 @@ Texture2D<float> PrimMinTexture : register(t3);
 	Texture2D<float> DepthTexture : register(t4);
 #endif
 
-#ifdef DX12
+#if PCSX2_DX12
 cbuffer cb1 : register(b1)
-#else
-cbuffer cb1
+#elif PCSX2_DX11
+cbuffer cb1 : register(b0)
 #endif
 {
   #define X(TYPE, NAME) TYPE NAME;
