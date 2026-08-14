@@ -206,3 +206,18 @@ STATIC FLOAT4 float4_bcast(float val)
 {
   return FLOAT4(val, val, val, val);
 }
+
+STATIC INT3 int3_bcast(int val)
+{
+	return INT3(val, val, val);
+}
+
+STATIC bool any_nonzero(FLOAT3 val)
+{
+	return any(VNOTEQUAL(val, float3_bcast(0.0f)));
+}
+
+STATIC bool any_nonzero(INT3 val)
+{
+	return any(VNOTEQUAL(val, int3_bcast(0)));
+}

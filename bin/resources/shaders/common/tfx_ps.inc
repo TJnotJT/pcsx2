@@ -483,9 +483,9 @@ FLOAT4 sample_depth(IN_PARAM(PSMainState, state), FLOAT2 st)
 
   // macOS 10.15 ICE's on bool3(t.rgb), so use != 0 instead
   if (PS_AEM_FMT == FMT_24)
-    t.a = (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
+    t.a = (PS_AEM == FALSE || any_nonzero(t.rgb)) ? 255.f * state.cb.ta.x : 0.f;
   else if (PS_AEM_FMT == FMT_16)
-    t.a = t.a >= 128.f ? 255.f * state.cb.ta.y : (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
+    t.a = t.a >= 128.f ? 255.f * state.cb.ta.y : (PS_AEM == FALSE || any_nonzero(t.rgb)) ? 255.f * state.cb.ta.x : 0.f;
   else if (PS_PAL_FMT != 0 && PS_TALES_OF_ABYSS_HLE == FALSE && PS_URBAN_CHAOS_HLE == FALSE)
     t = trunc(sample_4p(state, UINT4(t.aaaa))[0] * 255.0f + 0.05f);
   
@@ -584,9 +584,9 @@ FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
   {
     // macOS 10.15 ICE's on bool3(c[i].rgb), so use != 0 instead
     if (PS_AEM_FMT == FMT_24)
-      c[i].a = PS_AEM == FALSE || any(VNOTEQUAL(c[i].rgb, FLOAT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
+      c[i].a = (PS_AEM == FALSE || any_nonzero(c[i].rgb)) ? state.cb.ta.x : 0.f;
     else if (PS_AEM_FMT == FMT_16)
-      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL(INT3(c[i].rgb * 255.0f) & 0xF8, INT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
+      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : PS_AEM == FALSE || any_nonzero(INT3(c[i].rgb * 255.0f) & int(0xF8)) ? state.cb.ta.x : 0.f;
   }
 
   if (PS_LTF != FALSE)
@@ -714,7 +714,7 @@ FLOAT4 ps_color(IN_PARAM(PSMainState, state))
       T.a = float(denorm_c_before.g & 0x80u);
     }
     
-    T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
+    T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any_nonzero(INT3(T.rgb) & int(0xF8)) ? state.cb.ta.x : 0.f) * 255.f;
   }
 
   FLOAT4 C = tfx(state, T, PS_IIP != FALSE ? state.psin.c : state.psin.fc);
@@ -779,12 +779,12 @@ void ps_color_clamp_wrap(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
     // GPU: Color = 1/255, Alpha = 255/255 * 255/128 => output 1.9921875
     // In 16 bits format, only 5 bits of colors are used. It impacts shadows computation of Castlevania
     if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && (PS_BLEND_MIX == 0 || PS_DITHER != FALSE))
-      C.rgb = FLOAT3(SHORT3(C.rgb) & 0xF8);
+      C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
     else if (PS_COLCLIP == 1 || PS_COLCLIP_HW == 1)
       C.rgb = FLOAT3(SHORT3(C.rgb) & 0xFF);
   }
   else if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && PS_BLEND_MIX == 0 && PS_BLEND_HW == 0)
-    C.rgb = FLOAT3(SHORT3(C.rgb) & 0xF8);
+    C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
 }
 
 #define PICK3(SELECTOR, ZERO, ONE, TWO) ((SELECTOR) == 0 ? (ZERO) : (SELECTOR) == 1 ? (ONE) : (TWO))

@@ -300,6 +300,21 @@ STATIC FLOAT4 float4_bcast(float val)
   return FLOAT4(val, val, val, val);
 }
 
+STATIC INT3 int3_bcast(int val)
+{
+	return INT3(val, val, val);
+}
+
+STATIC bool any_nonzero(FLOAT3 val)
+{
+	return any(VNOTEQUAL(val, float3_bcast(0.0f)));
+}
+
+STATIC bool any_nonzero(INT3 val)
+{
+	return any(VNOTEQUAL(val, int3_bcast(0)));
+}
+
 
 #ifdef VERTEX_SHADER
 
@@ -427,6 +442,11 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 
 	if (VS_POINT_SIZE != FALSE)
 		vout.point_size = cb.point_size.x;
+  else
+    vout.point_size = 0.0f;
+
+  vout.inv_cov = 0.0f;
+  vout.interior = 0;
 
 	return vout;
 }
@@ -514,7 +534,7 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Get the position -> barycentric weight matrix
 	FLOAT2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
 
-	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : MAT_MUL(inv_dp_mat, dp);
+	FLOAT2 weights = min_perp_length < 2 ? float2_bcast(0.0f) : MAT_MUL(inv_dp_mat, dp);
 
 	v0.p.xy += dp * cb.point_size; // Extrapolate position
 
@@ -662,7 +682,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
 
     FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
 
-    FLOAT2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vout, other, opposite, cb) : FLOAT2(0.0f, 0.0f);
+    FLOAT2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vout, other, opposite, cb) : float2_bcast(0.0f);
 
     // Do actual extrapolation, or no-op if expand_dir == 0.
     extrapolate_aa1_triangle_edge(vout, other, opposite, pos_deltas, expand_dir, cb);
@@ -700,10 +720,10 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     bool corner_filled = all(VEQUAL(edge_expand_dir_0, edge_expand_dir_1));
 
     // Nothing if corner is filled, otherwise opposite to the bisector of the corner angle.
-    FLOAT2 far_corner_dir = corner_filled ? FLOAT2(0.0f, 0.0f) : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
+    FLOAT2 far_corner_dir = corner_filled ? float2_bcast(0.0f) : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
 
     // Determine the expand direction.
-    FLOAT2 expand_dir = is_near_corner ? FLOAT2(0.0f, 0.0f) : // No extrapolation
+    FLOAT2 expand_dir = is_near_corner ? float2_bcast(0.0f) : // No extrapolation
                         is_far_corner ? far_corner_dir :      // Opposite to the angle bisector of corner
                         edge_expand_dir_0;                    // Standard AA1 edge expansion
 
@@ -1599,9 +1619,9 @@ FLOAT4 sample_depth(IN_PARAM(PSMainState, state), FLOAT2 st)
 
   // macOS 10.15 ICE's on bool3(t.rgb), so use != 0 instead
   if (PS_AEM_FMT == FMT_24)
-    t.a = (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
+    t.a = (PS_AEM == FALSE || any_nonzero(t.rgb)) ? 255.f * state.cb.ta.x : 0.f;
   else if (PS_AEM_FMT == FMT_16)
-    t.a = t.a >= 128.f ? 255.f * state.cb.ta.y : (PS_AEM == FALSE || any(VNOTEQUAL(t.rgb, FLOAT3(0, 0, 0)))) ? 255.f * state.cb.ta.x : 0.f;
+    t.a = t.a >= 128.f ? 255.f * state.cb.ta.y : (PS_AEM == FALSE || any_nonzero(t.rgb)) ? 255.f * state.cb.ta.x : 0.f;
   else if (PS_PAL_FMT != 0 && PS_TALES_OF_ABYSS_HLE == FALSE && PS_URBAN_CHAOS_HLE == FALSE)
     t = trunc(sample_4p(state, UINT4(t.aaaa))[0] * 255.0f + 0.05f);
   
@@ -1700,9 +1720,9 @@ FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
   {
     // macOS 10.15 ICE's on bool3(c[i].rgb), so use != 0 instead
     if (PS_AEM_FMT == FMT_24)
-      c[i].a = PS_AEM == FALSE || any(VNOTEQUAL(c[i].rgb, FLOAT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
+      c[i].a = (PS_AEM == FALSE || any_nonzero(c[i].rgb)) ? state.cb.ta.x : 0.f;
     else if (PS_AEM_FMT == FMT_16)
-      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL(INT3(c[i].rgb * 255.0f) & 0xF8, INT3(0, 0, 0))) ? state.cb.ta.x : 0.f;
+      c[i].a = c[i].a >= 0.5 ? state.cb.ta.y : PS_AEM == FALSE || any_nonzero(INT3(c[i].rgb * 255.0f) & int(0xF8)) ? state.cb.ta.x : 0.f;
   }
 
   if (PS_LTF != FALSE)
@@ -1830,7 +1850,7 @@ FLOAT4 ps_color(IN_PARAM(PSMainState, state))
       T.a = float(denorm_c_before.g & 0x80u);
     }
     
-    T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
+    T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any_nonzero(INT3(T.rgb) & int(0xF8)) ? state.cb.ta.x : 0.f) * 255.f;
   }
 
   FLOAT4 C = tfx(state, T, PS_IIP != FALSE ? state.psin.c : state.psin.fc);
@@ -1895,12 +1915,12 @@ void ps_color_clamp_wrap(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
     // GPU: Color = 1/255, Alpha = 255/255 * 255/128 => output 1.9921875
     // In 16 bits format, only 5 bits of colors are used. It impacts shadows computation of Castlevania
     if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && (PS_BLEND_MIX == 0 || PS_DITHER != FALSE))
-      C.rgb = FLOAT3(SHORT3(C.rgb) & 0xF8);
+      C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
     else if (PS_COLCLIP == 1 || PS_COLCLIP_HW == 1)
       C.rgb = FLOAT3(SHORT3(C.rgb) & 0xFF);
   }
   else if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && PS_BLEND_MIX == 0 && PS_BLEND_HW == 0)
-    C.rgb = FLOAT3(SHORT3(C.rgb) & 0xF8);
+    C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
 }
 
 #define PICK3(SELECTOR, ZERO, ONE, TWO) ((SELECTOR) == 0 ? (ZERO) : (SELECTOR) == 1 ? (ONE) : (TWO))

@@ -36,6 +36,11 @@ STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUnif
 
 	if (VS_POINT_SIZE != FALSE)
 		vout.point_size = cb.point_size.x;
+  else
+    vout.point_size = 0.0f;
+
+  vout.inv_cov = 0.0f;
+  vout.interior = 0;
 
 	return vout;
 }
@@ -123,7 +128,7 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	// Get the position -> barycentric weight matrix
 	FLOAT2x2 inv_dp_mat = get_inverse(dp_mat, dp_det);
 
-	FLOAT2 weights = min_perp_length < 2 ? FLOAT2(0.0f, 0.0f) : MAT_MUL(inv_dp_mat, dp);
+	FLOAT2 weights = min_perp_length < 2 ? float2_bcast(0.0f) : MAT_MUL(inv_dp_mat, dp);
 
 	v0.p.xy += dp * cb.point_size; // Extrapolate position
 
@@ -271,7 +276,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
 
     FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
 
-    FLOAT2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vout, other, opposite, cb) : FLOAT2(0.0f, 0.0f);
+    FLOAT2 expand_dir = is_outside ? get_aa1_triangle_expand_dir(vout, other, opposite, cb) : float2_bcast(0.0f);
 
     // Do actual extrapolation, or no-op if expand_dir == 0.
     extrapolate_aa1_triangle_edge(vout, other, opposite, pos_deltas, expand_dir, cb);
@@ -309,10 +314,10 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     bool corner_filled = all(VEQUAL(edge_expand_dir_0, edge_expand_dir_1));
 
     // Nothing if corner is filled, otherwise opposite to the bisector of the corner angle.
-    FLOAT2 far_corner_dir = corner_filled ? FLOAT2(0.0f, 0.0f) : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
+    FLOAT2 far_corner_dir = corner_filled ? float2_bcast(0.0f) : -normalize((pos_deltas[0] + pos_deltas[1]) / 2);
 
     // Determine the expand direction.
-    FLOAT2 expand_dir = is_near_corner ? FLOAT2(0.0f, 0.0f) : // No extrapolation
+    FLOAT2 expand_dir = is_near_corner ? float2_bcast(0.0f) : // No extrapolation
                         is_far_corner ? far_corner_dir :      // Opposite to the angle bisector of corner
                         edge_expand_dir_0;                    // Standard AA1 edge expansion
 
