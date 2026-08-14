@@ -244,6 +244,13 @@ STATIC bool any_nonzero(INT3 val)
 
 #ifndef __METAL_VERSION__
 	// This is to make sure the selector macros are all defined if we're compiling offline for testing.
+	#ifndef VS_TME
+		#define VS_TME 0
+		#define VS_FST 0
+		#define VS_IIP 0
+		#define VS_POINT_SIZE 0
+		#define VS_EXPAND_TYPE 0
+	#endif
 	#ifndef PS_FST
 		#define PS_FST 0
 		#define PS_WMS 0

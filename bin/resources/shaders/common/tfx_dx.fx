@@ -83,13 +83,33 @@
 
 #ifdef VERTEX_SHADER
 
-#ifndef VS_TME
-#define VS_TME 0
-#define VS_FST 0
-#define VS_IIP 0
-#define VS_POINT_SIZE 0
-#define VS_EXPAND_TYPE 0
-#endif
+StructuredBuffer<VSRawVertex> vertices : register(t0);
+StructuredBuffer<uint> IndexBuffer : register(t5);
+
+uint load_index(uint _i)
+{
+	uint i = _i + BaseIndex;
+	// i is even => load lower 16 bits; i odd => load upper 16 bits.
+	uint shift = (i & 1u) << 4u;
+	return (IndexBuffer.Load(i >> 1u) >> shift) & 0xFFFFu;
+}
+
+VSInputGeneric load_vertex(uint index)
+{
+	VSRawVertex raw = vertices.Load(BaseVertex + index);
+
+	VSInputGeneric vert;
+	vert.st = raw.ST;
+	vert.c = uint4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
+	vert.q = raw.Q;
+	vert.p = uint2(raw.XY & 0xFFFFu, raw.XY >> 16);
+	vert.z = raw.Z;
+	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
+	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
+	return vert;
+}
+
+#include "tfx_vs.inc"
 
 struct VS_INPUT
 {
@@ -141,9 +161,6 @@ cbuffer cb2
 	#undef X
 };
 
-StructuredBuffer<VSRawVertex> vertices : register(t0);
-StructuredBuffer<uint> IndexBuffer : register(t5);
-
 VSUniformsGeneric GetVSUniforms()
 {
   VSUniformsGeneric cb;
@@ -177,31 +194,6 @@ VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
 	vout.interior = vout_gen.interior;
   return vout;
 }
-
-uint load_index(uint _i)
-{
-	uint i = _i + BaseIndex;
-	// i is even => load lower 16 bits; i odd => load upper 16 bits.
-	uint shift = (i & 1u) << 4u;
-	return (IndexBuffer.Load(i >> 1u) >> shift) & 0xFFFFu;
-}
-
-VSInputGeneric load_vertex(uint index)
-{
-	VSRawVertex raw = vertices.Load(BaseVertex + index);
-
-	VSInputGeneric vert;
-	vert.st = raw.ST;
-	vert.c = uint4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
-	vert.q = raw.Q;
-	vert.p = uint2(raw.XY & 0xFFFFu, raw.XY >> 16);
-	vert.z = raw.Z;
-	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
-	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
-	return vert;
-}
-
-#include "tfx_vs.inc"
 
 #if VS_EXPAND_TYPE == VS_EXPAND_NONE
 

@@ -325,6 +325,13 @@ STATIC bool any_nonzero(INT3 val)
 
 #ifndef __METAL_VERSION__
 	// This is to make sure the selector macros are all defined if we're compiling offline for testing.
+	#ifndef VS_TME
+		#define VS_TME 0
+		#define VS_FST 0
+		#define VS_IIP 0
+		#define VS_POINT_SIZE 0
+		#define VS_EXPAND_TYPE 0
+	#endif
 	#ifndef PS_FST
 		#define PS_FST 0
 		#define PS_WMS 0
@@ -404,6 +411,7 @@ STATIC bool any_nonzero(INT3 val)
 	#define NEEDS_RT_EARLY (PS_TEX_IS_FB != FALSE || PS_DATE >= 5)
 	#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 	#define NEEDS_RT (NEEDS_RT_FOR_AFAIL || NEEDS_RT_EARLY || (!PS_PRIM_CHECKING_INIT && (PS_FBMASK != 0 || NEEDS_RT_FOR_BLEND)))
+	
 	#define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 	#define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
@@ -421,100 +429,8 @@ STATIC bool any_nonzero(INT3 val)
 
 #ifdef VERTEX_SHADER
 
-#ifndef VS_TME
-#define VS_TME 0
-#define VS_FST 0
-#define VS_IIP 0
-#define VS_POINT_SIZE 0
-#define VS_EXPAND_TYPE 0
-#endif
-
-struct VS_INPUT
-{
-	float2 st : TEXCOORD0;
-	uint4 c : COLOR0;
-	float q : TEXCOORD1;
-	uint2 p : POSITION0;
-	uint z : POSITION1;
-	uint2 uv : TEXCOORD2;
-	float4 f : COLOR1;
-};
-
-struct VS_OUTPUT
-{
-	float4 p : SV_Position;
-	float4 t : TEXCOORD0;
-	float4 ti : TEXCOORD2;
-
-#if VS_IIP != 0
-	float4 c : COLOR0;
-#else
-	nointerpolation float4 c : COLOR0;
-#endif
-
-	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
-	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-};
-
-// VS Constant Buffer
-#ifdef DX12
-cbuffer cb0 : register(b0)
-#else
-cbuffer cb0
-#endif
-{
-	#define X(TYPE, NAME) TYPE NAME;
-		VS_UNIFORMS(X)
-	#undef X
-};
-
-#ifdef DX12
-cbuffer cb2 : register(b2)
-#else
-cbuffer cb2
-#endif
-{
-	#define X(TYPE, NAME) TYPE NAME;
-		VS_PUSH_CONSTANTS(X)
-	#undef X
-};
-
 StructuredBuffer<VSRawVertex> vertices : register(t0);
 StructuredBuffer<uint> IndexBuffer : register(t5);
-
-VSUniformsGeneric GetVSUniforms()
-{
-  VSUniformsGeneric cb;
-	#define X(TYPE, NAME) cb.NAME = NAME;
-		VS_UNIFORMS(X)
-	#undef X
-  return cb;
-}
-
-VSInputGeneric GetVSInput(VS_INPUT vin)
-{
-  VSInputGeneric vin_gen;
-  vin_gen.st = vin.st;
-  vin_gen.c = FLOAT4(vin.c);
-  vin_gen.q = vin.q;
-  vin_gen.p = vin.p;
-  vin_gen.z = vin.z;
-  vin_gen.uv = vin.uv;
-  vin_gen.f = vin.f;
-  return vin_gen;
-}
-
-VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
-{
-  VS_OUTPUT vout;
-	vout.p = vout_gen.p;
-	vout.t = vout_gen.t;
-	vout.ti = vout_gen.ti;
-	vout.c = vout_gen.c;
-	vout.inv_cov = vout_gen.inv_cov;
-	vout.interior = vout_gen.interior;
-  return vout;
-}
 
 uint load_index(uint _i)
 {
@@ -892,6 +808,90 @@ STATIC VSOutputGeneric vs_expand_impl(uint vid, VERTICES_PARAM(vertices), IN_PAR
 }
 
 
+
+struct VS_INPUT
+{
+	float2 st : TEXCOORD0;
+	uint4 c : COLOR0;
+	float q : TEXCOORD1;
+	uint2 p : POSITION0;
+	uint z : POSITION1;
+	uint2 uv : TEXCOORD2;
+	float4 f : COLOR1;
+};
+
+struct VS_OUTPUT
+{
+	float4 p : SV_Position;
+	float4 t : TEXCOORD0;
+	float4 ti : TEXCOORD2;
+
+#if VS_IIP != 0
+	float4 c : COLOR0;
+#else
+	nointerpolation float4 c : COLOR0;
+#endif
+
+	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
+	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
+};
+
+// VS Constant Buffer
+#ifdef DX12
+cbuffer cb0 : register(b0)
+#else
+cbuffer cb0
+#endif
+{
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_UNIFORMS(X)
+	#undef X
+};
+
+#ifdef DX12
+cbuffer cb2 : register(b2)
+#else
+cbuffer cb2
+#endif
+{
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
+};
+
+VSUniformsGeneric GetVSUniforms()
+{
+  VSUniformsGeneric cb;
+	#define X(TYPE, NAME) cb.NAME = NAME;
+		VS_UNIFORMS(X)
+	#undef X
+  return cb;
+}
+
+VSInputGeneric GetVSInput(VS_INPUT vin)
+{
+  VSInputGeneric vin_gen;
+  vin_gen.st = vin.st;
+  vin_gen.c = FLOAT4(vin.c);
+  vin_gen.q = vin.q;
+  vin_gen.p = vin.p;
+  vin_gen.z = vin.z;
+  vin_gen.uv = vin.uv;
+  vin_gen.f = vin.f;
+  return vin_gen;
+}
+
+VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
+{
+  VS_OUTPUT vout;
+	vout.p = vout_gen.p;
+	vout.t = vout_gen.t;
+	vout.ti = vout_gen.ti;
+	vout.c = vout_gen.c;
+	vout.inv_cov = vout_gen.inv_cov;
+	vout.interior = vout_gen.interior;
+  return vout;
+}
 
 #if VS_EXPAND_TYPE == VS_EXPAND_NONE
 

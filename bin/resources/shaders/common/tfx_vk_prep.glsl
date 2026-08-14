@@ -337,6 +337,13 @@ STATIC bool any_nonzero(INT3 val)
 
 #ifndef __METAL_VERSION__
 	// This is to make sure the selector macros are all defined if we're compiling offline for testing.
+	#ifndef VS_TME
+		#define VS_TME 0
+		#define VS_FST 0
+		#define VS_IIP 0
+		#define VS_POINT_SIZE 0
+		#define VS_EXPAND_TYPE 0
+	#endif
 	#ifndef PS_FST
 		#define PS_FST 0
 		#define PS_WMS 0
@@ -416,6 +423,7 @@ STATIC bool any_nonzero(INT3 val)
 	#define NEEDS_RT_EARLY (PS_TEX_IS_FB != FALSE || PS_DATE >= 5)
 	#define NEEDS_RT_FOR_AFAIL (PS_AFAIL == AFAIL_ZB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 	#define NEEDS_RT (NEEDS_RT_FOR_AFAIL || NEEDS_RT_EARLY || (!PS_PRIM_CHECKING_INIT && (PS_FBMASK != 0 || NEEDS_RT_FOR_BLEND)))
+	
 	#define NEEDS_DEPTH_FOR_AFAIL (PS_AFAIL == AFAIL_FB_ONLY || PS_AFAIL == AFAIL_RGB_ONLY_SW_Z)
 	#define NEEDS_DEPTH_FOR_ZTST (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	#define NEEDS_DEPTH_FOR_AA1 (PS_AA1 == PS_AA1_TRIANGLE_SW_Z)
@@ -441,6 +449,7 @@ STATIC bool any_nonzero(INT3 val)
 #define VS_EXPAND_TYPE VS_EXPAND_NONE
 #endif
 
+/// VS constants for determining base vertex/index in expand shader.
 #if PCSX2_VULKAN
 layout(push_constant) uniform cb2
 #elif PCSX2_OPENGL
@@ -452,6 +461,7 @@ layout(std140, binding = 4) uniform cb22
 	#undef X
 };
 
+/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.).
 #if PCSX2_VULKAN
 layout(std140, set = 0, binding = 2)
 #elif PCSX2_OPENGL
@@ -462,7 +472,8 @@ readonly buffer VertexBuffer
 	VSRawVertex vertex_buffer[];
 };
 
-// Warning: use std430 instead of std140 so that the ints are tightly packed.
+/// Index buffer for rearranging vertices in AA1 expand shader.
+/// Warning: use std430 instead of std140 so that the ints are tightly packed.
 #if PCSX2_VULKAN
 layout(std430, set = 0, binding = 3) 
 #elif PCSX2_OPENGL

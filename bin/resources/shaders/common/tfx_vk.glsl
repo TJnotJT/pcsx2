@@ -103,6 +103,7 @@
 #define VS_EXPAND_TYPE VS_EXPAND_NONE
 #endif
 
+/// VS constants for determining base vertex/index in expand shader.
 #if PCSX2_VULKAN
 layout(push_constant) uniform cb2
 #elif PCSX2_OPENGL
@@ -114,6 +115,7 @@ layout(std140, binding = 4) uniform cb22
 	#undef X
 };
 
+/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.).
 #if PCSX2_VULKAN
 layout(std140, set = 0, binding = 2)
 #elif PCSX2_OPENGL
@@ -124,7 +126,8 @@ readonly buffer VertexBuffer
 	VSRawVertex vertex_buffer[];
 };
 
-// Warning: use std430 instead of std140 so that the ints are tightly packed.
+/// Index buffer for rearranging vertices in AA1 expand shader.
+/// Warning: use std430 instead of std140 so that the ints are tightly packed.
 #if PCSX2_VULKAN
 layout(std430, set = 0, binding = 3) 
 #elif PCSX2_OPENGL
