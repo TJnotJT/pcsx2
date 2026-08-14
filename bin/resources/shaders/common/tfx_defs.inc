@@ -107,10 +107,10 @@ struct PSInputGeneric
     uint prim_id;
     bool color_discarded = false;
     bool depth_discarded = false;
-    const thread MainPSIn& psinput;
+    const thread MainPSIn& psin;
     constant GSMTLMainPSUniform& cb;
 
-    PSMainState(const thread MainPSIn& psinput, constant GSMTLMainPSUniform& cb): psinput(psinput), cb(cb) {}
+    PSMainState(const thread MainPSIn& psin, constant GSMTLMainPSUniform& cb): psin(psin), cb(cb) {}
   };
 #else
   struct PSMainState
@@ -125,7 +125,7 @@ struct PSInputGeneric
     uint prim_id;
     bool color_discarded;
     bool depth_discarded;
-    PSInputGeneric psinput;
+    PSInputGeneric psin;
     PSUniformsGeneric cb;
   };
 #endif

@@ -531,7 +531,7 @@ void ps_main(PS_INPUT input)
 #endif
 {
 	PSMainState state;
-  state.psinput = GetPSInput(input);
+  state.psin = GetPSInput(input);
   state.cb = GetPSUniforms();
   state.tex = 0; // unused
   state.tex_depth = 0; // unused
@@ -546,7 +546,7 @@ void ps_main(PS_INPUT input)
   state.color_discarded = false;
   state.depth_discarded = false;
 
-	int2 coord = int2(state.psinput.p.xy);
+	int2 coord = int2(state.psin.p.xy);
 
 	state.current_depth = DepthLoad(coord);
 
@@ -567,7 +567,7 @@ void ps_main(PS_INPUT input)
 	#elif PS_RETURN_COLOR_ROV
 		psout_gen.c0 = (FbMask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
 		if (!state.color_discarded)
-			RtTextureRov[state.psinput.p.xy] = psout_gen.c0;
+			RtTextureRov[state.psin.p.xy] = psout_gen.c0;
 	#endif
 
 	// Depth write back
@@ -579,7 +579,7 @@ void ps_main(PS_INPUT input)
 		#endif
 	#elif PS_RETURN_DEPTH_ROV
 		if (!state.depth_discarded)
-			DepthTextureRov[state.psinput.p.xy] = psout_gen.depth;
+			DepthTextureRov[state.psin.p.xy] = psout_gen.depth;
 	#endif
 
 	#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)

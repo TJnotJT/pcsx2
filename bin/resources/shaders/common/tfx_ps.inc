@@ -223,11 +223,11 @@ STATIC FLOAT4 sample_c(IN_PARAM(PSMainState, state), FLOAT2 uv)
   }
 
   if (PS_SW_ANISO > 1)
-    return sample_c_af(state, uv, state.psinput.t.w);
+    return sample_c_af(state, uv, state.psin.t.w);
   else if (PS_AUTOMATIC_LOD != FALSE)
     return sample_tex(state, uv);
   else if (PS_MANUAL_LOD != FALSE)
-    return sample_tex_lod(state, uv, LEVEL(manual_lod(state, state.psinput.t.w)));
+    return sample_tex_lod(state, uv, LEVEL(manual_lod(state, state.psin.t.w)));
   else
     return sample_tex_lod(state, uv, LEVEL(0));
 }
@@ -380,7 +380,7 @@ FLOAT4x4 sample_4p(IN_PARAM(PSMainState, state), UINT4 u)
 
 uint fetch_raw_depth(IN_PARAM(PSMainState, state))
 {
-  return uint(PS_READ_TEX_DEPTH(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0) * EXP2_POS_32);
+  return uint(PS_READ_TEX_DEPTH(state, USHORT2(state.psin.p.xy + state.cb.channel_shuffle_offset), 0) * EXP2_POS_32);
 }
 
 FLOAT4 fetch_raw_color(IN_PARAM(PSMainState, state))
@@ -388,7 +388,7 @@ FLOAT4 fetch_raw_color(IN_PARAM(PSMainState, state))
   if (PS_TEX_IS_FB != FALSE)
     return state.current_color;
   else
-    return PS_READ_TEX(state, USHORT2(state.psinput.p.xy + state.cb.channel_shuffle_offset), 0);
+    return PS_READ_TEX(state, USHORT2(state.psin.p.xy + state.cb.channel_shuffle_offset), 0);
 }
 
 FLOAT4 fetch_c(IN_PARAM(PSMainState, state), USHORT2 uv)
@@ -667,14 +667,14 @@ FLOAT4 ps_color(IN_PARAM(PSMainState, state))
   FLOAT2 st, st_int;
   if (PS_FST == FALSE)
   {
-    st = state.psinput.t.xy / state.psinput.t.w;
-    st_int = state.psinput.ti.zw / state.psinput.t.w;
+    st = state.psin.t.xy / state.psin.t.w;
+    st_int = state.psin.ti.zw / state.psin.t.w;
   }
   else
   {
     // Note: xy are normalized coordinates
-    st = state.psinput.ti.xy;
-    st_int = state.psinput.ti.zw;
+    st = state.psin.ti.xy;
+    st_int = state.psin.ti.zw;
   }
 
   FLOAT4 T;
@@ -717,9 +717,9 @@ FLOAT4 ps_color(IN_PARAM(PSMainState, state))
     T.a = (T.a >= 127.5 ? state.cb.ta.y : PS_AEM == FALSE || any(VNOTEQUAL((INT3(T.rgb) & 0xF8), INT3(0, 0, 0))) ? state.cb.ta.x : 0.f) * 255.f;
   }
 
-  FLOAT4 C = tfx(state, T, PS_IIP != FALSE ? state.psinput.c : state.psinput.fc);
+  FLOAT4 C = tfx(state, T, PS_IIP != FALSE ? state.psin.c : state.psin.fc);
 
-  fog(state, C, state.psinput.t.z);
+  fog(state, C, state.psin.t.z);
 
   return C;
 }
@@ -739,9 +739,9 @@ void ps_dither(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C), float As)
     return;
   USHORT2 fpos;
   if (PS_DITHER == 2)
-    fpos = USHORT2(state.psinput.p.xy);
+    fpos = USHORT2(state.psin.p.xy);
   else
-    fpos = USHORT2(state.psinput.p.xy * float2_bcast(state.cb.scale_factor.y));
+    fpos = USHORT2(state.psin.p.xy * float2_bcast(state.cb.scale_factor.y));
   float value = state.cb.dither_matrix[fpos.y & 3u][fpos.x & 3u];
 
   // The idea here is we add on the dither amount adjusted by the alpha before it goes to the hw blend
@@ -987,7 +987,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
   psout.c1 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
   psout.depth = 0.0f;
 
-  float input_z = state.psinput.p.z;
+  float input_z = state.psin.p.z;
   if (PS_ZFLOOR != FALSE)
     input_z = floor(input_z * EXP2_POS_32) * EXP2_MIN_32;
 
@@ -1001,7 +1001,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 
   if ((uint(PS_SCANMSK) & 2u) != 0u)
   {
-    if ((uint(state.psinput.p.y) & 1u) == (uint(PS_SCANMSK) & 1u))
+    if ((uint(state.psin.p.y) & 1u) == (uint(PS_SCANMSK) & 1u))
       discard_all(state);
   }
 
@@ -1019,7 +1019,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 
   if (PS_DATE == 3)
   {
-    float stencil_ceil = PS_READ_PRIMID(state, UINT2(state.psinput.p.xy));
+    float stencil_ceil = PS_READ_PRIMID(state, UINT2(state.psin.p.xy));
     // Note prim_id == stencil_ceil will be the primitive that will update
     // the bad alpha value so we must keep it.
     if (float(state.prim_id) > stencil_ceil)
@@ -1033,8 +1033,8 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
   if (PS_AA1 != PS_AA1_NONE)
   {
     float cov = PS_AA1 == PS_AA1_LINE
-      ? SATURATE(state.cb.line_cov_scale * (1.f - abs(state.psinput.inv_cov))) // Blur only outer part of the line by scaling coverage.
-      : SATURATE(1.f - abs(state.psinput.inv_cov));
+      ? SATURATE(state.cb.line_cov_scale * (1.f - abs(state.psin.inv_cov))) // Blur only outer part of the line by scaling coverage.
+      : SATURATE(1.f - abs(state.psin.inv_cov));
     if (PS_ABE == FALSE || floor(C.a) == 128.f) // The coverage is only used if the fragment alpha is 128.
       C.a = 128.f * cov;
   }
@@ -1110,7 +1110,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
   if (PS_ZCLAMP != FALSE)
     input_z = min(input_z, state.cb.max_depth_ps);
 
-  if (PS_AA1 == PS_AA1_TRIANGLE_SW_Z && state.psinput.interior == 0)
+  if (PS_AA1 == PS_AA1_TRIANGLE_SW_Z && state.psin.interior == 0)
     discard_depth(state, input_z); // No depth update for triangle edges.
 
   if (!atst_pass)

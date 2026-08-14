@@ -602,15 +602,15 @@ PSUniformsGeneric GetPSUniforms()
 
 PSInputGeneric GetPSInput()
 {
-  PSInputGeneric psinput;
-  psinput.p = gl_FragCoord;
-  psinput.t = vsIn.t;
-  psinput.ti = vsIn.ti;
-  psinput.c = vsIn.c;
-  psinput.fc = vsIn.c;
-  psinput.inv_cov = vsIn.inv_cov;
-  psinput.interior = vsIn.interior;
-  return psinput;
+  PSInputGeneric psin;
+  psin.p = gl_FragCoord;
+  psin.t = vsIn.t;
+  psin.ti = vsIn.ti;
+  psin.c = vsIn.c;
+  psin.fc = vsIn.c;
+  psin.inv_cov = vsIn.inv_cov;
+  psin.interior = vsIn.interior;
+  return psin;
 }
 
 #include "tfx_ps.inc"
@@ -618,7 +618,7 @@ PSInputGeneric GetPSInput()
 void main()
 {
   PSMainState state;
-  state.psinput = GetPSInput();
+  state.psin = GetPSInput();
   state.cb = GetPSUniforms();
   state.tex = 0; // unused
   state.tex_depth = 0; // unused
@@ -629,7 +629,7 @@ void main()
   state.color_discarded = false;
   state.depth_discarded = false;
 
-  ivec2 coord = ivec2(state.psinput.p.xy);
+  ivec2 coord = ivec2(state.psin.p.xy);
 
   #if PS_ROV_COLOR || PS_ROV_DEPTH
     beginInvocationInterlockARB();
