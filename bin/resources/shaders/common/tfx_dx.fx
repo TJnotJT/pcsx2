@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 /// Start helper macros for shared shader code.
+
+// Types
 #define FLOAT2 float2
 #define FLOAT3 float3
 #define FLOAT4 float4
@@ -26,10 +28,10 @@
 #define BOOL3 bool3
 #define BOOL4 bool4
 
+// Builtin keywords/functions
 #define STATIC
 #define DFDX ddx
 #define DFDY ddy
-
 #define SELECT(COND, TRUE_VAL, FALSE_VAL) ((COND) ? (FALSE_VAL) : (TRUE_VAL))
 #define VEQUAL(X, Y) ((X) == (Y))
 #define VGEQUAL(X, Y) ((X) >= (Y))
@@ -47,18 +49,24 @@
 #define FRACT(X) frac(X)
 #define MIX lerp
 
-#define VERTICES_PARAM(NAME) uint NAME
-#define INDICES_PARAM(NAME) uint NAME
-#define IN_PARAM(TYPE, NAME) TYPE NAME
-#define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
-
+// Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP -1.0f
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
+// Vertex shader helpers
 #define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#define VS_VERTICES_PARAM(NAME) uint NAME
+#define VS_INDICES_PARAM(NAME) uint NAME
+#define VS_BASE_VERTEX BaseVertex
+#define VS_BASE_INDEX BaseIndex
+#define VS_LOAD_VERTEX(VERTICES, IDX) (VertexBuffer.Load(IDX))
+#define VS_LOAD_INDEX(INDICES, IDX) (IndexBuffer.Load(IDX))
+// DX does not use point/line size.
+#define VS_POINT_SIZE 0
 
+// Pixel shader helpers
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
@@ -71,11 +79,6 @@
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (Texture.GetDimensions(OUT_VAR.x, OUT_VAR.y))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
 
-#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
-#define LOAD_INDEX(INDICES, VID) load_index(VID)
-
-// DX does use point/line size.
-#define VS_POINT_SIZE 0
 
 /// End helper macros for shared shader code.
 
@@ -83,32 +86,25 @@
 
 #ifdef VERTEX_SHADER
 
-StructuredBuffer<VSRawVertex> vertices : register(t0);
+/// VS constants for determining base vertex/index in expand shader.
+#ifdef DX12
+cbuffer cb2 : register(b2)
+#else
+cbuffer cb2
+#endif
+{
+	#define X(TYPE, NAME) TYPE NAME;
+		VS_PUSH_CONSTANTS(X)
+	#undef X
+};
+
+/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.)
+StructuredBuffer<VSRawVertex> VertexBuffer : register(t0);
+
+/// Index buffer for rearranging vertices in AA1 expand shader
 StructuredBuffer<uint> IndexBuffer : register(t5);
 
-uint load_index(uint _i)
-{
-	uint i = _i + BaseIndex;
-	// i is even => load lower 16 bits; i odd => load upper 16 bits.
-	uint shift = (i & 1u) << 4u;
-	return (IndexBuffer.Load(i >> 1u) >> shift) & 0xFFFFu;
-}
-
-VSInputGeneric load_vertex(uint index)
-{
-	VSRawVertex raw = vertices.Load(BaseVertex + index);
-
-	VSInputGeneric vert;
-	vert.st = raw.ST;
-	vert.c = uint4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
-	vert.q = raw.Q;
-	vert.p = uint2(raw.XY & 0xFFFFu, raw.XY >> 16);
-	vert.z = raw.Z;
-	vert.uv = uint2(raw.UV & 0xFFFFu, raw.UV >> 16);
-	vert.f = float4(float(raw.FOG & 0xFFu), float((raw.FOG >> 8) & 0xFFu), float((raw.FOG >> 16) & 0xFFu), float(raw.FOG >> 24)) / 255.0f;
-	return vert;
-}
-
+// Note: vertex/index buffers must be defined before common code is included.
 #include "tfx_vs.inc"
 
 struct VS_INPUT
@@ -147,17 +143,6 @@ cbuffer cb0
 {
 	#define X(TYPE, NAME) TYPE NAME;
 		VS_UNIFORMS(X)
-	#undef X
-};
-
-#ifdef DX12
-cbuffer cb2 : register(b2)
-#else
-cbuffer cb2
-#endif
-{
-	#define X(TYPE, NAME) TYPE NAME;
-		VS_PUSH_CONSTANTS(X)
 	#undef X
 };
 

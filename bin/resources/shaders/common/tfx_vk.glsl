@@ -13,7 +13,9 @@
 	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
 #endif
 
-/// Start helper macros for shared shader code.
+/// Start helper macros for shared shader code
+
+// Types
 #define FLOAT2 vec2
 #define FLOAT3 vec3
 #define FLOAT4 vec4
@@ -38,10 +40,10 @@
 #define BOOL3 bvec3
 #define BOOL4 bvec4
 
+// Builtin keywords/functions
 #define STATIC
 #define DFDX dFdx
 #define DFDY dFdy
-
 #define SELECT(COND, TRUE_VAL, FALSE_VAL) mix((COND), (FALSE_VAL), (TRUE_VAL))
 #define VEQUAL(X, Y) equal((X), (Y))
 #define VGEQUAL(X, Y) greaterThanEqual((X), (Y))
@@ -58,23 +60,29 @@
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
-
-#define VERTICES_PARAM(NAME) uint NAME
-#define INDICES_PARAM(NAME) uint NAME
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 
+// Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
 #define EXP2_MIN_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
+// Vertex shader helpers
 #if PCSX2_VULKAN
 	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
 #elif PCSX2_OPENGL
 	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_MIN_32) : ((float(Z) * EXP2_MIN_32) * 2.0f - 1.0f))
 #endif
+#define VS_VERTICES_PARAM(NAME) uint NAME
+#define VS_INDICES_PARAM(NAME) uint NAME
+#define VS_BASE_VERTEX BaseVertex
+#define VS_BASE_INDEX BaseIndex
+#define VS_LOAD_VERTEX(VERTICES, IDX) vertex_buffer[IDX]
+#define VS_LOAD_INDEX(INDICES, IDX) index_buffer[IDX]
 
+// Pixel shader helpers
 #define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
@@ -86,10 +94,7 @@
 #define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
-
-#define LOAD_VERTEX(VERTICES, VID) load_vertex(VID)
-#define LOAD_INDEX(INDICES, VID) load_index(VID)
-/// End helper macros for shared shader code.
+/// End helper macros for shared shader code
 
 #include "tfx_defs.inc"
 
@@ -115,7 +120,7 @@ layout(std140, binding = 4) uniform cb22
 	#undef X
 };
 
-/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.).
+/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.)
 #if PCSX2_VULKAN
 layout(std140, set = 0, binding = 2)
 #elif PCSX2_OPENGL
@@ -171,7 +176,7 @@ VSInputGeneric load_vertex(uint index)
   return v;
 }
 
-// Include generic functions.
+// Note: vertex/index buffers must be defined before common code is included.
 #include "tfx_vs.inc"
 
 #if PCSX2_VULKAN

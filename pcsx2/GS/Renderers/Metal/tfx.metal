@@ -214,28 +214,23 @@ struct MainPSOut
 
 // MARK: - Vertex functions
 
-vertex MainVSOut vs_main(MainVSIn v [[stage_in]], constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
-{
-	return MainVSOut(vs_main_impl(v, cb.vertex_scale, cb.vertex_offset, cb.texture_offset, cb.texture_scale));
-}
-
-static MainVSIn load_vertex(device const GSMTLMainVertex* vertices, uint idx)
+static VSInputGeneric GetVSInput(device const GSMTLMainVertex* vertices, uint idx)
 {
 	GSMTLMainVertex base = vertices[idx];
-	MainVSIn out;
+	VSInputGeneric out;
 	out.st = base.st;
 	out.c = float4(base.rgba);
 	out.q = base.q;
 	out.p = uint2(base.xy);
 	out.z = base.z;
-	out.uv = uint2(base.uv);
+	out.uv = uint2(base.UV & 0xFFFFu, base.UV >> 16);
 	out.f = float4(static_cast<float>(base.fog) / 255.f);
 	return out;
 }
 
-static uint load_index(device const ushort* indices [[buffer(GSMTLBufferIndexHWIndices)]], uint idx)
+vertex MainVSOut vs_main(MainVSIn v [[stage_in]], constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
 {
-	return indices[idx];
+	return MainVSOut(vs_main_impl(GetVSInput(v), cb.vertex_scale, cb.vertex_offset, cb.texture_offset, cb.texture_scale));
 }
 
 #include "tfx_vs.inc"

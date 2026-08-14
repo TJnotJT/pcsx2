@@ -1,3 +1,35 @@
+
+#ifdef __METAL_VERSION__
+  // Metal defines the index buffer with u16 elements.
+  USHORT load_index(VS_INDICES_PARAM(indices), uint i)
+  {
+    return indices[i];
+  }
+#else
+  // Non-Metal backends can only define buffers with u32 elements.
+  uint load_index(VS_INDICES_PARAM(ignored), uint _i)
+  {
+    uint i = _i + VS_BASE_INDEX;
+    // i is even => load lower 16 bits; i odd => load upper 16 bits.
+    uint shift = (i & 1u) << 4u;
+    return (VS_LOAD_INDEX(ignored, i >> 1u) >> shift) & 0xFFFFu;
+  }
+#endif
+
+VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
+{
+	VSRawVertex raw = VS_LOAD_VERTEX(vertices, VS_BASE_VERTEX + index);
+	VSInputGeneric vert;
+	vert.st = raw.ST;
+	vert.c = UINT4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
+	vert.q = raw.Q;
+	vert.p = UINT2(raw.XY & 0xFFFFu, raw.XY >> 16);
+	vert.z = raw.Z;
+	vert.uv = UINT2(raw.UV & 0xFFFFu, raw.UV >> 16);
+	vert.f = float4_bcast(float(raw.FOG));
+	return vert;
+}
+
 STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))
 {
 	VSOutputGeneric vout;
@@ -157,14 +189,14 @@ STATIC void extrapolate_aa1_triangle_edge(IN_OUT_PARAM(VSOutputGeneric, v0), IN_
 	v0.t.z += dot(df, weights); // Extrapolate fog
 }
 
-STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_expand_none_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
-  return vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+  return vs_main_impl(load_vertex(vertices, vid), cb);
 }
 
-STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
-  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid), cb);
+  VSOutputGeneric vout = vs_main_impl(load_vertex(vertices, vid), cb);
   if ((vid & 1u) != 0u)
     vout.p.x += cb.point_size.x;
   if ((vid & 2u) != 0u)
@@ -172,14 +204,14 @@ STATIC VSOutputGeneric vs_expand_point_impl(uint vid, VERTICES_PARAM(vertices), 
   return vout;
 }
 
-STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 2;
   bool is_bottom = (vid & 2u) != 0u;
   bool is_right = (vid & 1u) != 0u;
   uint vid_other = is_bottom ? vid_base - 1 : vid_base + 1;
-  VSOutputGeneric vout = vs_main_impl(LOAD_VERTEX(vertices, vid_base), cb);
-  VSOutputGeneric other = vs_main_impl(LOAD_VERTEX(vertices, vid_other), cb);
+  VSOutputGeneric vout = vs_main_impl(load_vertex(vertices, vid_base), cb);
+  VSOutputGeneric other = vs_main_impl(load_vertex(vertices, vid_other), cb);
 
   // Use bottom minus top for delta regardless of which vertex we are expanding.
   FLOAT2 line_delta = is_bottom ? vout.p.xy - other.p.xy : other.p.xy - vout.p.xy;
@@ -203,7 +235,7 @@ STATIC VSOutputGeneric vs_expand_line_impl(uint vid, VERTICES_PARAM(vertices), I
   return vout;
 }
 
-STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
+STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb))
 {
   uint vid_base = vid >> 1;
   bool is_bottom = (vid & 2u) != 0u;
@@ -212,8 +244,8 @@ STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices),
   uint vid_lt = vid_base & ~1u;
   uint vid_rb = vid_base | 1u;
 
-  VSOutputGeneric lt = vs_main_impl(LOAD_VERTEX(vertices, vid_lt), cb);
-  VSOutputGeneric rb = vs_main_impl(LOAD_VERTEX(vertices, vid_rb), cb);
+  VSOutputGeneric lt = vs_main_impl(load_vertex(vertices, vid_lt), cb);
+  VSOutputGeneric rb = vs_main_impl(load_vertex(vertices, vid_rb), cb);
   VSOutputGeneric vout = rb;
 
   if (!is_right)
@@ -233,7 +265,8 @@ STATIC VSOutputGeneric vs_expand_sprite_impl(uint vid, VERTICES_PARAM(vertices),
   return vout;
 }
 
-STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb), INDICES_PARAM(indices))
+STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb),
+  VS_INDICES_PARAM(indices))
 {
   // Triangles with AA1 are expanded as follows:
   // - Vertices 0-2: Interior of triangle (1 triangle).
@@ -252,7 +285,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
   VSOutputGeneric vout;
   if (interior)
   {
-    vout = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + prim_offset)), cb);
+    vout = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + prim_offset)), cb);
     vout.inv_cov = 0.f;
     vout.interior = 1;
   }
@@ -270,9 +303,9 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     bool is_bottom = (2 <= edge_offset) && (edge_offset <= 4);
     bool is_outside = (edge_offset & 1u) != 0u;
 
-    vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
-    VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
-    VSOutputGeneric opposite = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + i2)), cb);
+    vout                     = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + (is_bottom ? i1 : i0))), cb);
+    VSOutputGeneric other    = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + (is_bottom ? i0 : i1))), cb);
+    VSOutputGeneric opposite = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + i2)), cb);
 
     FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
 
@@ -298,9 +331,9 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
     bool is_far_corner = cap_offset == 2 || cap_offset == 5;
     bool is_first_tri = cap_offset < 3;
 
-    vout                     = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + i0)), cb);
-    VSOutputGeneric other    = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_first_tri ? i1 : i2))), cb);
-    VSOutputGeneric opposite = vs_main_impl(LOAD_VERTEX(vertices, LOAD_INDEX(indices, 3 * prim_id + (is_first_tri ? i2 : i1))), cb);
+    vout                     = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + i0)), cb);
+    VSOutputGeneric other    = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + (is_first_tri ? i1 : i2))), cb);
+    VSOutputGeneric opposite = vs_main_impl(load_vertex(vertices, load_index(indices, 3 * prim_id + (is_first_tri ? i2 : i1))), cb);
 
     FLOAT2x2 pos_deltas = get_xy_deltas_unscaled(vout, other, opposite, cb);
 
@@ -332,7 +365,7 @@ STATIC VSOutputGeneric vs_expand_triangle_aa1_impl(uint vid, VERTICES_PARAM(vert
   return vout;
 }
 
-STATIC VSOutputGeneric vs_expand_impl(uint vid, VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb), INDICES_PARAM(indices))
+STATIC VSOutputGeneric vs_expand_impl(uint vid, VS_VERTICES_PARAM(vertices), IN_PARAM(VSUniformsGeneric, cb), VS_INDICES_PARAM(indices))
 {
 	switch (VS_EXPAND_TYPE)
 	{

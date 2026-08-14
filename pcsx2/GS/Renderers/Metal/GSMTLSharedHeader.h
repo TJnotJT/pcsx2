@@ -86,7 +86,7 @@ struct GSMTLMainVertex
 	float q;
 	vector_ushort2 xy;
 	uint z;
-	vector_ushort2 uv;
+	uint uv;
 	unsigned char fog;
 };
 

@@ -3,6 +3,9 @@
 
 #include "GSMTLShaderCommon.h"
 
+/// Start helper macros for shared shader code
+
+// Types
 #define FLOAT2 float2
 #define FLOAT3 float3
 #define FLOAT4 float4
@@ -27,10 +30,10 @@
 #define BOOL3 bool3
 #define BOOL4 bool4
 
+// Builtin keywords/functions
 #define STATIC static
 #define DFDX dfdx
 #define DFDY dfdy
-
 #define SELECT(COND, TRUE_VAL, FALSE_VAL) ((COND) ? (TRUE_VAL) : (FALSE_VAL))
 #define VEQUAL(X, Y) ((X) == (Y))
 #define VGEQUAL(X, Y) ((X) >= (Y))
@@ -47,19 +50,25 @@
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
-
-#define VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
-#define INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME
 #define IN_OUT_PARAM(TYPE, NAME) thread TYPE & NAME
 
+// Constants
 #define PRIMID_MAX FLT_MAX
 #define VS_Y_FLIP -1.0f
 #define EXP_MIN_32 0x1p-32f
 #define EXP_POS_32 0x1p+32f
 
+// Vertex shader helpers
 #define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#define VS_VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
+#define VS_INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
+#define VS_BASE_VERTEX 0
+#define VS_BASE_INDEX 0
+#define VS_LOAD_VERTEX(VERTICES, VID) VERTICES[VID]
+#define VS_LOAD_INDEX(INDICES, VID) INDICES[VID]
 
+// Pixel shader helpers
 #define PS_UV_MSK_FIX(CB) (as_type<uint4>(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))
 #define PS_SAMPLE_TEX_LOD(STATE, ...) (STATE.tex.sample(STATE.tex_sampler, __VA_ARGS__))
@@ -115,9 +124,7 @@
 #define PS_ROV_DEPTH_READ_WRITE ROV_DEPTH::READ_WRITE
 #define PS_ROV_DEPTH_READ_ONLY ROV_DEPTH::READ_ONLY
 #endif
-
-#define LOAD_VERTEX(VERTICES, VID) load_vertex(VERTICES[VID])
-#define LOAD_INDEX(INDICES, VID) INDICES[VID]
+/// End helper macros for shared shader code
 
 constant uint FMT_32 = 0;
 constant uint FMT_24 = 1;
