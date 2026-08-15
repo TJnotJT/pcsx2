@@ -648,23 +648,15 @@ bool atst(IN_PARAM(PSMainState, state), FLOAT4 C)
 	switch (PS_ATST)
 	{
 		case PS_ATST_NONE:
-			break; // Nothing to do
+			return true; // Nothing to do
 		case PS_ATST_LEQUAL:
-			if (a > state.cb.aref)
-				return false;
-			break;
+			return a <= state.cb.aref;
 		case PS_ATST_GEQUAL:
-			if (a < state.cb.aref)
-				return false;
-			break;
+			return a >= state.cb.aref;
 		case PS_ATST_EQUAL:
-			if (abs(a - state.cb.aref) > 0.5f)
-				return false;
-			break;
+			return abs(a - state.cb.aref) <= 0.5f;
 		case PS_ATST_NOTEQUAL:
-			if (abs(a - state.cb.aref) < 0.5f)
-				return false;
-			break;
+			return abs(a - state.cb.aref) >= 0.5f;
 	}
 	return true;
 }
