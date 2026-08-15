@@ -577,7 +577,7 @@ FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
 			{
 				// Background in Shin Megami Tensei Lucifers
 				// I suspect that uv isn't a standard number, so fract is outside of the [0;1] range
-				dd = SATURATE(dd);
+				dd = clamp(dd, float2_bcast(0.0f), float2_bcast(0.9999999f));
 			}
 		}
 		else
