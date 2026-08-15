@@ -112,7 +112,6 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		float q = A + C;
 		float t = sqrt(p * p + B * B);
 
-		float signB = sign(B);
 		float denom_plus  = t * (q + t);
 		float denom_minus = t * (q - t);
 
@@ -121,6 +120,8 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 
 		float inv_sqrt_denom_plus  = RSQRT(denom_plus);
 		float inv_sqrt_denom_minus = RSQRT(denom_minus);
+
+		float signB = sign(B);
 
 		FLOAT2 new_dX = FLOAT2(
 			sqrtA * inv_sqrt_denom_plus,
