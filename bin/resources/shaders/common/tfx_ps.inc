@@ -208,6 +208,16 @@ STATIC FLOAT4 sample_c(IN_PARAM(PSMainState, state), FLOAT2 uv)
 		return state.current_color;
 	if (PS_REGION_RECT != 0)
 		return read_tex(state, UINT2(uv));
+	if ((PCSX2_DX11 != FALSE || PCSX2_DX12 != FALSE) && PS_POINT_SAMPLER != FALSE)
+	{
+		// Weird issue with ATI/AMD cards on DX,
+		// it looks like they add 127/128 of a texel to sampling coordinates
+		// occasionally causing point sampling to erroneously round up.
+		// I'm manually adjusting coordinates to the centre of texels here,
+		// though the centre is just paranoia, the top left corner works fine.
+		// As of 2018 this issue is still present.
+		uv = (trunc(uv * state.cb.wh.zw) + FLOAT2(0.5, 0.5)) / state.cb.wh.zw;
+	}
 
 	if (PS_ADJS == FALSE && PS_ADJT == FALSE)
 	{
