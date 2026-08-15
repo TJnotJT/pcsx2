@@ -78,7 +78,7 @@ STATIC float manual_lod(IN_PARAM(PSMainState, state), float uv_w)
 STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 {
 	// HW sampler will reject bad UVs, match that here.
-	uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? FLOAT2(0.0f, 0.0f) : uv;
+	uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? float2_bcast(0.0f) : uv;
 
 	// Large floating point values risk NaN/Inf values.
 	// Above this value floats lose decimal precision, so seems a resonable limit for UVs.
@@ -158,7 +158,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		// Perform isotropic filtering instead.
 		aniso_ratio = 1.0f;
 		length_lod = length_major;
-		aniso_line = FLOAT2(0.0f, 0.0f);
+		aniso_line = float2_bcast(0.0f);
 	}
 	else
 	{
@@ -185,7 +185,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	}
 	else
 	{
-		FLOAT4 num = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+		FLOAT4 num = float4_bcast(0.0f);
 		FLOAT2 segment = (2.0f * aniso_line) / aniso_ratio;
 		for (int i = 0; i < aniso_ratio; i++)
 		{
@@ -440,7 +440,7 @@ FLOAT4 sample_depth(IN_PARAM(PSMainState, state), FLOAT2 st)
 		uv_f = clamp(uv_f + state.cb.st_range.xy, state.cb.st_range.xy, state.cb.st_range.zw);
 
 	USHORT2 uv = USHORT2(uv_f);
-	FLOAT4 t = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	FLOAT4 t = float4_bcast(0.0f);
 
 	if (PS_TALES_OF_ABYSS_HLE != FALSE)
 	{
@@ -835,10 +835,10 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		FLOAT3 Cd = trunc(state.current_color.rgb * multi);
 		FLOAT3 Cs = Color.rgb;
 
-		FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
-		FLOAT3 B = PICK3(PS_BLEND_B, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
+		FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, float3_bcast(0.0f));
+		FLOAT3 B = PICK3(PS_BLEND_B, Cs, Cd, float3_bcast(0.0f));
 		float  C = PICK3(PS_BLEND_C, As, Ad, state.cb.alpha_fix);
-		FLOAT3 D = PICK3(PS_BLEND_D, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
+		FLOAT3 D = PICK3(PS_BLEND_D, Cs, Cd, float3_bcast(0.0f));
 
 		// As/Af clamp alpha for Blend mix
 		// We shouldn't clamp blend mix with blend hw 1 as we want alpha higher
@@ -984,8 +984,8 @@ void ps_shuffle(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 {
 	PSOutputGeneric psout;
-	psout.c0 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-	psout.c1 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	psout.c0 = float4_bcast(0.0f);
+	psout.c1 = float4_bcast(0.0f);
 	psout.depth = 0.0f;
 
 	float input_z = state.psin.p.z;
