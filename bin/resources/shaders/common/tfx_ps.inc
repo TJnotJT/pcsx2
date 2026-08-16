@@ -185,7 +185,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		FLOAT4 num = float4_bcast(0.0f);
 		FLOAT2 segment = (2.0f * aniso_line) / aniso_ratio;
 		
-		int aniso_ratio_i = (int)aniso_ratio;
+		int aniso_ratio_i = int(aniso_ratio);
 		for (int i = 0; i < aniso_ratio_i; i++)
 		{
 			FLOAT2 d = -aniso_line + (0.5f + i) * segment;
