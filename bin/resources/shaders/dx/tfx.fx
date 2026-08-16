@@ -55,6 +55,7 @@
 #define GPU_DISCARD discard
 #define SATURATE(X) saturate(X)
 #define FLOAT_BITCAST_UINT(X) asuint(X)
+#define FLOAT4_BITCAST_UINT4(X) asuint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
 #define FRACT(X) frac(X)
@@ -87,7 +88,6 @@
 #define VS_POINT_SIZE 0
 
 // Pixel shader helpers
-#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)

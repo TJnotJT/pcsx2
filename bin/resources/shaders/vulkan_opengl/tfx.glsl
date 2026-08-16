@@ -55,6 +55,7 @@
 #define GPU_DISCARD discard
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
+#define FLOAT4_BITCAST_UINT4(X) floatBitsToUint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
@@ -83,7 +84,6 @@
 #define VS_LOAD_INDEX(INDICES, IDX) index_buffer[IDX]
 
 // Pixel shader helpers
-#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)

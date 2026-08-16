@@ -277,7 +277,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv = FRACT(uv);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv = FLOAT4((USHORT4(uv * tex_size) & USHORT4(uv_msk_fix.xyxy)) | USHORT4(uv_msk_fix.zwzw)) / tex_size;
 		}
 	}
@@ -300,7 +300,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv.xz = FRACT(uv.xz);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv.xz = FLOAT2((USHORT2(uv.xz * tex_size.xx) & USHORT2(uv_msk_fix.xx)) | USHORT2(uv_msk_fix.zz)) / tex_size.xx;
 		}
 
@@ -321,7 +321,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv.yw = FRACT(uv.yw);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv.yw = FLOAT2((USHORT2(uv.yw * tex_size.yy) & USHORT2(uv_msk_fix.yy)) | USHORT2(uv_msk_fix.ww)) / tex_size.yy;
 		}
 	}
@@ -416,7 +416,8 @@ USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMainState, state), USHORT2 uv)
 	USHORT2 uv_out = uv;
 	// Keep the full precision
 	// It allow to multiply the ScalingFactor before the 1/16 coeff
-	USHORT4 mask = USHORT4(PS_UV_MSK_FIX(state.cb) << 4);
+	UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
+	USHORT4 mask = USHORT4(uv_msk_fix << 4);
 
 	if (PS_WMS == PS_WMT)
 	{
