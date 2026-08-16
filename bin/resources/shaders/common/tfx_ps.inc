@@ -899,6 +899,8 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 	}
 	else
 	{
+		float Alpha = PS_BLEND_C == 2 ? state.cb.alpha_fix : As;
+
 		if (PS_BLEND_HW == 1)
 		{
 			// Needed for Cd * (As/Ad/F + 1) blending modes
@@ -907,7 +909,6 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		else if (PS_BLEND_HW == 2)
 		{
 			// Cd*As,Cd*Ad or Cd*F
-			float Alpha = PS_BLEND_C == 2 ? state.cb.alpha_fix : As;
 			Color.rgb = float3_bcast(SATURATE(Alpha - 1.f) * 255.f);
 		}
 		else if (PS_BLEND_HW == 3 && PS_RTA_CORRECTION == 0)
@@ -920,6 +921,26 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			float max_color = max(max(Color.r, Color.g), Color.b);
 			float color_compensate = 255.f / max(128.f, max_color);
 			Color.rgb *= float3_bcast(color_compensate);
+		}
+		else if (PS_BLEND_HW == 4)
+		{
+			// Needed for Cd * (1 - Ad) and Cd*(1 + Alpha).
+			As_rgba.rgb = float3_bcast(Alpha * (128.0f / 255.0f));
+			Color.rgb = float3_bcast(127.5f);
+		}
+		else if (PS_BLEND_HW == 5)
+		{
+			// Needed for Cs*Alpha + Cd*(1 - Alpha).
+			Alpha *= 128.0f / 255.0f;
+			As_rgba.rgb = float3_bcast(Alpha - 0.5f);
+			Color.rgb = (Color.rgb * Alpha);
+		}
+		else if (PS_BLEND_HW == 6)
+		{
+			// Needed for Cd*Alpha + Cs*(1 - Alpha).
+			Alpha *= 128.0f / 255.0f;
+			As_rgba.rgb = float3_bcast(Alpha);
+			Color.rgb *= (Alpha - 0.5f);
 		}
 	}
 }
