@@ -205,7 +205,7 @@ STATIC FLOAT4 sample_c(IN_PARAM(PSMainState, state), FLOAT2 uv)
 		return state.current_color;
 	if (PS_REGION_RECT != 0)
 		return read_tex(state, UINT2(uv));
-	if ((PCSX2_DX11 != FALSE || PCSX2_DX12 != FALSE) && PS_POINT_SAMPLER != FALSE)
+	if (PS_POINT_SAMPLER != FALSE)
 	{
 		// Weird issue with ATI/AMD cards on DX,
 		// it looks like they add 127/128 of a texel to sampling coordinates

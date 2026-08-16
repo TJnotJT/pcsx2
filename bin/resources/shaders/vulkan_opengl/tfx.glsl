@@ -13,7 +13,7 @@
 	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
 #endif
 
-// Start helper macros for shared shader code
+/// Start helper macros for shared shader code
 
 // Types
 #define FLOAT2 vec2
@@ -94,7 +94,10 @@
 #define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
-// End helper macros for shared shader code
+// Unused in VK/GL
+#define PS_POINT_SAMPLER 0
+
+/// End helper macros for shared shader code
 
 #include "tfx_defs.inc"
 

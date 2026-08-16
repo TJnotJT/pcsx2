@@ -266,6 +266,7 @@ constant bool VS_FST = FST;
 constant bool PS_FST = FST;
 constant bool VS_IIP = IIP;
 constant bool PS_IIP = IIP;
+constant bool PS_POINT_SAMPLER = FALSE;
 constant bool FALSE = false;
 
 #include "../../../../bin/resources/shaders/common/tfx_defs.inc"
