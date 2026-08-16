@@ -65,14 +65,14 @@
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
-#define EXP2_MIN_32 exp2(-32.0f)
+#define EXP2_NEG_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
 // Vertex shader helpers
 #if PCSX2_VULKAN
-	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_NEG_32)
 #elif PCSX2_OPENGL
-	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_MIN_32) : ((float(Z) * EXP2_MIN_32) * 2.0f - 1.0f))
+	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_NEG_32) : ((float(Z) * EXP2_NEG_32) * 2.0f - 1.0f))
 #endif
 #define VS_VERTICES_PARAM(NAME) uint NAME
 #define VS_INDICES_PARAM(NAME) uint NAME

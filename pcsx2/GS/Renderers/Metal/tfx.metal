@@ -55,11 +55,11 @@
 // Constants
 #define PRIMID_MAX FLT_MAX
 #define VS_Y_FLIP -1.0f
-#define EXP2_MIN_32 0x1p-32f
+#define EXP2_NEG_32 0x1p-32f
 #define EXP2_POS_32 0x1p+32f
 
 // Vertex shader helpers
-#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_NEG_32)
 #define VS_VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
 #define VS_INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
 #define VS_BASE_VERTEX 0

@@ -995,7 +995,7 @@ PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 
 	float input_z = state.psin.p.z;
 	if (PS_ZFLOOR != FALSE)
-		input_z = floor(input_z * EXP2_POS_32) * EXP2_MIN_32;
+		input_z = floor(input_z * EXP2_POS_32) * EXP2_NEG_32;
 
 	if (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	{
