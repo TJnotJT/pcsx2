@@ -13,7 +13,7 @@
 	ERROR: Exactly one of PCSX2_VULKAN or PCSX2_OPENGL should be true.
 #endif
 
-// Start helper macros for shared shader code
+/// Start helper macros for shared shader code
 
 // Types
 #define FLOAT2 vec2
@@ -55,24 +55,26 @@
 #define GPU_DISCARD discard
 #define SATURATE(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
+#define FLOAT4_BITCAST_UINT4(X) floatBitsToUint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
+#define IS_NAN_OR_INF(X) BOOL2(INT2(isinf(X)) | INT2(isnan(X)))
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP 1.0f
-#define EXP2_MIN_32 exp2(-32.0f)
+#define EXP2_NEG_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
 // Vertex shader helpers
 #if PCSX2_VULKAN
-	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+	#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_NEG_32)
 #elif PCSX2_OPENGL
-	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_MIN_32) : ((float(Z) * EXP2_MIN_32) * 2.0f - 1.0f))
+	#define VS_SCALE_RAW_Z(Z) ((HAS_CLIP_CONTROL != FALSE) ? (float(Z) * EXP2_NEG_32) : ((float(Z) * EXP2_NEG_32) * 2.0f - 1.0f))
 #endif
 #define VS_VERTICES_PARAM(NAME) uint NAME
 #define VS_INDICES_PARAM(NAME) uint NAME
@@ -82,7 +84,6 @@
 #define VS_LOAD_INDEX(INDICES, IDX) index_buffer[IDX]
 
 // Pixel shader helpers
-#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (textureLod(Texture, FLOAT2(POS), float(LOD)))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)
@@ -93,7 +94,10 @@
 #define PS_READ_PRIMID(STATE, POS) (texelFetch(PrimMinTexture, INT2(POS), 0).r)
 #define PS_GET_TEX_DIMS(STATE, OUT_VAR) (OUT_VAR = UINT2(textureSize(Texture, 0)))
 #define PS_GET_TEX_DEPTH_DIMS(STATE, OUT_VAR) (PS_GET_TEX_DIMS(STATE, OUT_VAR))
-// End helper macros for shared shader code
+// Unused in VK/GL
+#define PS_POINT_SAMPLER 0
+
+/// End helper macros for shared shader code
 
 #include "tfx_defs.inc"
 
@@ -511,7 +515,7 @@ void main()
 			o_col1 = psout.c1;
 		#endif
 	#elif PS_RETURN_COLOR_ROV
-		psout.c0 = mix(psout.c0, state.current_color, equal(FbMask, uvec4(0xFFu))); // channel masking
+		psout.c0 = mix(psout.c0, state.current_color, equal(fbmask, uvec4(0xFFu))); // channel masking
 		if (!state.color_discarded)
 			imageStore(RtImageRov, coord, psout.c0);
 	#endif

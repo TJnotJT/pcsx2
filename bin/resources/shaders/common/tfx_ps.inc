@@ -63,22 +63,18 @@ UINT2 get_tex_dims(IN_PARAM(PSMainState, state))
 
 STATIC float manual_lod(IN_PARAM(PSMainState, state), float uv_w)
 {
-	// FIXME add LOD: K - ( LOG2(Q) * (1 << L))
 	float K = state.cb.lod_params.x;
 	float L = state.cb.lod_params.y;
 	float bias = state.cb.lod_params.z;
 	float max_lod = state.cb.lod_params.w;
-
 	float gs_lod = K - log2(abs(uv_w)) * L;
-	// FIXME max useful ?
-	//return max(min(gs_lod, max_lod) - bias, 0.0f);
 	return min(gs_lod, max_lod) - bias;
 }
 
 STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 {
 	// HW sampler will reject bad UVs, match that here.
-	uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? FLOAT2(0.0f, 0.0f) : uv;
+	uv = any(IS_NAN_OR_INF(uv)) ? float2_bcast(0.0f) : uv;
 
 	// Large floating point values risk NaN/Inf values.
 	// Above this value floats lose decimal precision, so seems a resonable limit for UVs.
@@ -99,7 +95,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	float f = (dX.x * dY.y - dX.y * dY.x);
 	bool d_par = f < 0.001f;
 	bool d_per = dot(dX, dY) < 0.001f;
-	bool d_inf_nan = any(BOOL2(INT2(isinf(dX)) | INT2(isinf(dY)) | INT2(isnan(dX)) | INT2(isnan(dY))));
+	bool d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(dX, dY)));
 
 	if (!(d_zero || d_par || d_per || d_inf_nan))
 	{
@@ -112,27 +108,28 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		float q = A + C;
 		float t = sqrt(p * p + B * B);
 
-		float signB = sign(B);
 		float denom_plus  = t * (q + t);
 		float denom_minus = t * (q - t);
 
-		float sqrtA = sqrt(F * (t + p));
-		float sqrtB = sqrt(F * (t - p));
+		float sqrt_num_plus = sqrt(F * (t + p));
+		float sqrt_num_minus = sqrt(F * (t - p));
 
 		float inv_sqrt_denom_plus  = RSQRT(denom_plus);
 		float inv_sqrt_denom_minus = RSQRT(denom_minus);
 
+		float signB = sign(B);
+
 		FLOAT2 new_dX = FLOAT2(
-			sqrtA * inv_sqrt_denom_plus,
-			sqrtB * inv_sqrt_denom_plus * signB
+			sqrt_num_plus * inv_sqrt_denom_plus,
+			sqrt_num_minus * inv_sqrt_denom_plus * signB
 		);
 
 		FLOAT2 new_dY = FLOAT2(
-			sqrtB * inv_sqrt_denom_minus * -signB,
-			sqrtA * inv_sqrt_denom_minus
+			sqrt_num_minus * inv_sqrt_denom_minus * -signB,
+			sqrt_num_plus * inv_sqrt_denom_minus
 		);
 
-		d_inf_nan = any(BOOL2(INT2(isinf(new_dX)) | INT2(isinf(new_dY)) | INT2(isnan(new_dX)) | INT2(isnan(new_dY))));
+		d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(new_dX, new_dY)));
 		if (!d_inf_nan)
 		{
 			dX = new_dX;
@@ -150,6 +147,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	float aniso_ratio;
 	float length_lod;
 	FLOAT2 aniso_line;
+
 	if (length_major <= 1.0f)
 	{
 		// A zero length_major would result in NaN Lod and break sampling.
@@ -157,7 +155,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		// Perform isotropic filtering instead.
 		aniso_ratio = 1.0f;
 		length_lod = length_major;
-		aniso_line = FLOAT2(0.0f, 0.0f);
+		aniso_line = float2_bcast(0.0f);
 	}
 	else
 	{
@@ -184,9 +182,11 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	}
 	else
 	{
-		FLOAT4 num = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+		FLOAT4 num = float4_bcast(0.0f);
 		FLOAT2 segment = (2.0f * aniso_line) / aniso_ratio;
-		for (int i = 0; i < aniso_ratio; i++)
+		
+		int aniso_ratio_i = int(aniso_ratio);
+		for (int i = 0; i < aniso_ratio_i; i++)
 		{
 			FLOAT2 d = -aniso_line + (0.5f + i) * segment;
 			FLOAT2 uv_sample = uv + d;
@@ -205,6 +205,16 @@ STATIC FLOAT4 sample_c(IN_PARAM(PSMainState, state), FLOAT2 uv)
 		return state.current_color;
 	if (PS_REGION_RECT != 0)
 		return read_tex(state, UINT2(uv));
+	if (PS_POINT_SAMPLER != FALSE)
+	{
+		// Weird issue with ATI/AMD cards on DX,
+		// it looks like they add 127/128 of a texel to sampling coordinates
+		// occasionally causing point sampling to erroneously round up.
+		// I'm manually adjusting coordinates to the centre of texels here,
+		// though the centre is just paranoia, the top left corner works fine.
+		// As of 2018 this issue is still present.
+		uv = (trunc(uv * state.cb.wh.zw) + FLOAT2(0.5, 0.5)) / state.cb.wh.zw;
+	}
 
 	if (PS_ADJS == FALSE && PS_ADJT == FALSE)
 	{
@@ -267,7 +277,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv = FRACT(uv);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv = FLOAT4((USHORT4(uv * tex_size) & USHORT4(uv_msk_fix.xyxy)) | USHORT4(uv_msk_fix.zwzw)) / tex_size;
 		}
 	}
@@ -290,7 +300,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv.xz = FRACT(uv.xz);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv.xz = FLOAT2((USHORT2(uv.xz * tex_size.xx) & USHORT2(uv_msk_fix.xx)) | USHORT2(uv_msk_fix.zz)) / tex_size.xx;
 		}
 
@@ -311,7 +321,7 @@ FLOAT4 clamp_wrap_uv(IN_PARAM(PSMainState, state), FLOAT4 uv)
 			if (PS_FST == FALSE)
 				uv.yw = FRACT(uv.yw);
 
-			UINT4 uv_msk_fix = PS_UV_MSK_FIX(state.cb);
+			UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
 			uv.yw = FLOAT2((USHORT2(uv.yw * tex_size.yy) & USHORT2(uv_msk_fix.yy)) | USHORT2(uv_msk_fix.ww)) / tex_size.yy;
 		}
 	}
@@ -406,7 +416,8 @@ USHORT2 clamp_wrap_uv_depth(IN_PARAM(PSMainState, state), USHORT2 uv)
 	USHORT2 uv_out = uv;
 	// Keep the full precision
 	// It allow to multiply the ScalingFactor before the 1/16 coeff
-	USHORT4 mask = USHORT4(PS_UV_MSK_FIX(state.cb) << 4);
+	UINT4 uv_msk_fix = FLOAT4_BITCAST_UINT4(state.cb.uv_min_max);
+	USHORT4 mask = USHORT4(uv_msk_fix << 4);
 
 	if (PS_WMS == PS_WMT)
 	{
@@ -439,7 +450,7 @@ FLOAT4 sample_depth(IN_PARAM(PSMainState, state), FLOAT2 st)
 		uv_f = clamp(uv_f + state.cb.st_range.xy, state.cb.st_range.xy, state.cb.st_range.zw);
 
 	USHORT2 uv = USHORT2(uv_f);
-	FLOAT4 t = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	FLOAT4 t = float4_bcast(0.0f);
 
 	if (PS_TALES_OF_ABYSS_HLE != FALSE)
 	{
@@ -564,7 +575,7 @@ FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
 			{
 				// Background in Shin Megami Tensei Lucifers
 				// I suspect that uv isn't a standard number, so fract is outside of the [0;1] range
-				dd = SATURATE(dd);
+				dd = clamp(dd, float2_bcast(0.0f), float2_bcast(0.9999999f));
 			}
 		}
 		else
@@ -635,23 +646,15 @@ bool atst(IN_PARAM(PSMainState, state), FLOAT4 C)
 	switch (PS_ATST)
 	{
 		case PS_ATST_NONE:
-			break; // Nothing to do
+			return true; // Nothing to do
 		case PS_ATST_LEQUAL:
-			if (a > state.cb.aref)
-				return false;
-			break;
+			return a <= state.cb.aref;
 		case PS_ATST_GEQUAL:
-			if (a < state.cb.aref)
-				return false;
-			break;
+			return a >= state.cb.aref;
 		case PS_ATST_EQUAL:
-			if (abs(a - state.cb.aref) > 0.5f)
-				return false;
-			break;
+			return abs(a - state.cb.aref) <= 0.5f;
 		case PS_ATST_NOTEQUAL:
-			if (abs(a - state.cb.aref) < 0.5f)
-				return false;
-			break;
+			return abs(a - state.cb.aref) >= 0.5f;
 	}
 	return true;
 }
@@ -729,7 +732,8 @@ void ps_fbmask(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 	if (PS_FBMASK != FALSE)
 	{
 		float multi = (PS_COLCLIP_HW != FALSE) ? 65535.0 : 255.5;
-		C = FLOAT4((UINT4(INT4(C)) & (state.cb.fbmask ^ 0xffu)) | (UINT4(state.current_color * FLOAT4(multi, multi, multi, 255)) & state.cb.fbmask));
+		FLOAT4 RT = state.current_color * FLOAT4(multi, multi, multi, 255.f);
+		C = FLOAT4((UINT4(INT4(C)) & ~state.cb.fbmask) | (UINT4(RT) & state.cb.fbmask));
 	}
 }
 
@@ -781,7 +785,7 @@ void ps_color_clamp_wrap(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 		if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && (PS_BLEND_MIX == 0 || PS_DITHER != FALSE))
 			C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
 		else if (PS_COLCLIP == 1 || PS_COLCLIP_HW == 1)
-			C.rgb = FLOAT3(SHORT3(C.rgb) & 0xFF);
+			C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xFF));
 	}
 	else if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && PS_BLEND_MIX == 0 && PS_BLEND_HW == 0)
 		C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
@@ -834,10 +838,10 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		FLOAT3 Cd = trunc(state.current_color.rgb * multi);
 		FLOAT3 Cs = Color.rgb;
 
-		FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
-		FLOAT3 B = PICK3(PS_BLEND_B, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
+		FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, float3_bcast(0.0f));
+		FLOAT3 B = PICK3(PS_BLEND_B, Cs, Cd, float3_bcast(0.0f));
 		float  C = PICK3(PS_BLEND_C, As, Ad, state.cb.alpha_fix);
-		FLOAT3 D = PICK3(PS_BLEND_D, Cs, Cd, FLOAT3(0.f, 0.f, 0.f));
+		FLOAT3 D = PICK3(PS_BLEND_D, Cs, Cd, float3_bcast(0.0f));
 
 		// As/Af clamp alpha for Blend mix
 		// We shouldn't clamp blend mix with blend hw 1 as we want alpha higher
@@ -855,9 +859,9 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		// Based on the scripts at the above link, the ideal choice for Intel GPUs is 126/256, AMD 120/256.  Nvidia is a lost cause.
 		// 124/256 seems like a reasonable compromise, providing the correct answer 99.3% of the time on Intel (vs 99.6% for 126/256), and 97% of the time on AMD (vs 97.4% for 120/256).
 		else if (PS_BLEND_MIX == 2)
-			Color.rgb = ((A - B) * C_clamped + D) + (124.f/256.f);
+			Color.rgb = ((A - B) * C_clamped + D) + (124.f / 256.f);
 		else if (PS_BLEND_MIX == 1)
-			Color.rgb = ((A - B) * C_clamped + D) - (124.f/256.f);
+			Color.rgb = ((A - B) * C_clamped + D) - (124.f / 256.f);
 		else
 			Color.rgb = trunc((A - B) * C + D);
 
@@ -870,7 +874,7 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			// we pick the lowest overflow from all colors because it's the safest,
 			// we divide by 255 the color because we don't know Cd value,
 			// changed alpha should only be done for hw blend.
-			FLOAT3 alpha_compensate = max(float3_bcast(1.f), Color.rgb / float3_bcast(0.f));
+			FLOAT3 alpha_compensate = max(float3_bcast(1.f), Color.rgb / float3_bcast(255.f));
 			As_rgba.rgb -= alpha_compensate;
 		}
 		else if (PS_BLEND_HW == 2)
@@ -888,13 +892,15 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			As_rgba.rgb = float3_bcast(C_clamped);
 			// Cs*(Alpha + 1) might overflow, if it does then adjust alpha value
 			// that is sent on second output to compensate.
-			FLOAT3 overflow_check = (Color.rgb - float3_bcast(0.f)) / 255.f;
+			FLOAT3 overflow_check = (Color.rgb - float3_bcast(255.f)) / 255.f;
 			FLOAT3 alpha_compensate = max(float3_bcast(0.f), overflow_check);
 			As_rgba.rgb -= alpha_compensate;
 		}
 	}
 	else
 	{
+		float Alpha = PS_BLEND_C == 2 ? state.cb.alpha_fix : As;
+
 		if (PS_BLEND_HW == 1)
 		{
 			// Needed for Cd * (As/Ad/F + 1) blending modes
@@ -903,7 +909,6 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		else if (PS_BLEND_HW == 2)
 		{
 			// Cd*As,Cd*Ad or Cd*F
-			float Alpha = PS_BLEND_C == 2 ? state.cb.alpha_fix : As;
 			Color.rgb = float3_bcast(SATURATE(Alpha - 1.f) * 255.f);
 		}
 		else if (PS_BLEND_HW == 3 && PS_RTA_CORRECTION == 0)
@@ -916,6 +921,26 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			float max_color = max(max(Color.r, Color.g), Color.b);
 			float color_compensate = 255.f / max(128.f, max_color);
 			Color.rgb *= float3_bcast(color_compensate);
+		}
+		else if (PS_BLEND_HW == 4)
+		{
+			// Needed for Cd * (1 - Ad) and Cd*(1 + Alpha).
+			As_rgba.rgb = float3_bcast(Alpha * (128.0f / 255.0f));
+			Color.rgb = float3_bcast(127.5f);
+		}
+		else if (PS_BLEND_HW == 5)
+		{
+			// Needed for Cs*Alpha + Cd*(1 - Alpha).
+			Alpha *= 128.0f / 255.0f;
+			As_rgba.rgb = float3_bcast(Alpha - 0.5f);
+			Color.rgb = (Color.rgb * Alpha);
+		}
+		else if (PS_BLEND_HW == 6)
+		{
+			// Needed for Cd*Alpha + Cs*(1 - Alpha).
+			Alpha *= 128.0f / 255.0f;
+			As_rgba.rgb = float3_bcast(Alpha);
+			Color.rgb *= (Alpha - 0.5f);
 		}
 	}
 }
@@ -983,13 +1008,13 @@ void ps_shuffle(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 {
 	PSOutputGeneric psout;
-	psout.c0 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-	psout.c1 = FLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	psout.c0 = float4_bcast(0.0f);
+	psout.c1 = float4_bcast(0.0f);
 	psout.depth = 0.0f;
 
 	float input_z = state.psin.p.z;
 	if (PS_ZFLOOR != FALSE)
-		input_z = floor(input_z * EXP2_POS_32) * EXP2_MIN_32;
+		input_z = floor(input_z * EXP2_POS_32) * EXP2_NEG_32;
 
 	if (PS_ZTST == ZTST_GEQUAL || PS_ZTST == ZTST_GREATER)
 	{

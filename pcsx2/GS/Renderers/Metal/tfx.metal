@@ -45,21 +45,23 @@
 #define GPU_DISCARD discard_fragment()
 #define SATURATE(X) saturate(X)
 #define FLOAT_BITCAST_UINT(X) as_type<uint>(X)
+#define FLOAT4_BITCAST_UINT4(X) as_type<uint4>(X)
 #define UINT_BITCAST_UCHAR4(X) as_type<uchar4>(X)
 #define MAT_MUL(X, Y) ((X) * (Y))
 #define FRACT(X) fract(X)
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME
 #define IN_OUT_PARAM(TYPE, NAME) thread TYPE & NAME
+#define IS_NAN_OR_INF(X) (isinf(X) | isnan(X))
 
 // Constants
 #define PRIMID_MAX FLT_MAX
 #define VS_Y_FLIP -1.0f
-#define EXP2_MIN_32 0x1p-32f
+#define EXP2_NEG_32 0x1p-32f
 #define EXP2_POS_32 0x1p+32f
 
 // Vertex shader helpers
-#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_NEG_32)
 #define VS_VERTICES_PARAM(NAME) device const GSMTLMainVertex* NAME [[buffer(GSMTLBufferIndexHWVertices)]]
 #define VS_INDICES_PARAM(NAME) device const ushort* NAME [[buffer(GSMTLBufferIndexHWIndices), function_constant(VS_NEEDS_INDEX_BUFFER)]]
 #define VS_BASE_VERTEX 0
@@ -68,7 +70,6 @@
 #define VS_LOAD_INDEX(INDICES, VID) INDICES[VID]
 
 // Pixel shader helpers
-#define PS_UV_MSK_FIX(CB) (as_type<uint4>(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (STATE.tex.sample(STATE.tex_sampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (STATE.tex.sample(STATE.tex_sampler, FLOAT2(POS), level(LOD)))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) (STATE.tex_depth.sample(STATE.tex_sampler, FLOAT2(POS)))
@@ -265,6 +266,7 @@ constant bool VS_FST = FST;
 constant bool PS_FST = FST;
 constant bool VS_IIP = IIP;
 constant bool PS_IIP = IIP;
+constant bool PS_POINT_SAMPLER = false;
 constant bool FALSE = false;
 
 #include "../../../../bin/resources/shaders/common/tfx_defs.inc"

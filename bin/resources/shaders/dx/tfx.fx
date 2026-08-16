@@ -55,21 +55,29 @@
 #define GPU_DISCARD discard
 #define SATURATE(X) saturate(X)
 #define FLOAT_BITCAST_UINT(X) asuint(X)
+#define FLOAT4_BITCAST_UINT4(X) asuint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
 #define FRACT(X) frac(X)
 #define MIX lerp
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
+// FXC (<=SM5.1) may optimise away isnan and isinf.
+// DXC (>=SM6.0) will preserve them.
+#ifdef __hlsl_dx_compiler
+	#define IS_NAN_OR_INF(X) (isinf(X) | isnan(X))
+#else
+	#define IS_NAN_OR_INF(X) ((asuint(X) & 0x7f800000) == 0x7f800000)
+#endif
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF
 #define VS_Y_FLIP -1.0f
-#define EXP2_MIN_32 exp2(-32.0f)
+#define EXP2_NEG_32 exp2(-32.0f)
 #define EXP2_POS_32 exp2(32.0f)
 
 // Vertex shader helpers
-#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_MIN_32)
+#define VS_SCALE_RAW_Z(Z) (float(Z) * EXP2_NEG_32)
 #define VS_VERTICES_PARAM(NAME) uint NAME
 #define VS_INDICES_PARAM(NAME) uint NAME
 #define VS_BASE_VERTEX BaseVertex
@@ -80,7 +88,6 @@
 #define VS_POINT_SIZE 0
 
 // Pixel shader helpers
-#define PS_UV_MSK_FIX(CB) (FLOAT_BITCAST_UINT(CB.uv_min_max))
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
 #define PS_SAMPLE_TEX_LOD(STATE, POS, LOD) (Texture.SampleLevel(TextureSampler, FLOAT2(POS), float(LOD)))
 #define PS_SAMPLE_TEX_DEPTH(STATE, POS) (PS_SAMPLE_TEX(STATE, (POS)).r)
@@ -405,7 +412,7 @@ void ps_main(PS_INPUT input)
 			psout.c1 = psout_gen.c1;
 		#endif
 	#elif PS_RETURN_COLOR_ROV
-		psout_gen.c0 = (FbMask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
+		psout_gen.c0 = (fbmask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
 		if (!state.color_discarded)
 			RtTextureRov[state.psin.p.xy] = psout_gen.c0;
 	#endif
