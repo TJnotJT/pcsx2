@@ -511,7 +511,7 @@ void main()
 			o_col1 = psout.c1;
 		#endif
 	#elif PS_RETURN_COLOR_ROV
-		psout.c0 = mix(psout.c0, state.current_color, equal(FbMask, uvec4(0xFFu))); // channel masking
+		psout.c0 = mix(psout.c0, state.current_color, equal(fbmask, uvec4(0xFFu))); // channel masking
 		if (!state.color_discarded)
 			imageStore(RtImageRov, coord, psout.c0);
 	#endif

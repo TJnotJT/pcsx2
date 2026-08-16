@@ -405,7 +405,7 @@ void ps_main(PS_INPUT input)
 			psout.c1 = psout_gen.c1;
 		#endif
 	#elif PS_RETURN_COLOR_ROV
-		psout_gen.c0 = (FbMask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
+		psout_gen.c0 = (fbmask == 0xFFu) ? state.current_color : psout_gen.c0; // channel masking
 		if (!state.color_discarded)
 			RtTextureRov[state.psin.p.xy] = psout_gen.c0;
 	#endif
