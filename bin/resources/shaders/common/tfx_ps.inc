@@ -63,22 +63,18 @@ UINT2 get_tex_dims(IN_PARAM(PSMainState, state))
 
 STATIC float manual_lod(IN_PARAM(PSMainState, state), float uv_w)
 {
-	// FIXME add LOD: K - ( LOG2(Q) * (1 << L))
 	float K = state.cb.lod_params.x;
 	float L = state.cb.lod_params.y;
 	float bias = state.cb.lod_params.z;
 	float max_lod = state.cb.lod_params.w;
-
 	float gs_lod = K - log2(abs(uv_w)) * L;
-	// FIXME max useful ?
-	//return max(min(gs_lod, max_lod) - bias, 0.0f);
 	return min(gs_lod, max_lod) - bias;
 }
 
 STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 {
 	// HW sampler will reject bad UVs, match that here.
-	uv = any(BOOL2(INT2(isnan(uv)) | INT2(isinf(uv)))) ? float2_bcast(0.0f) : uv;
+	uv = any(IS_NAN_OR_INF(uv)) ? float2_bcast(0.0f) : uv;
 
 	// Large floating point values risk NaN/Inf values.
 	// Above this value floats lose decimal precision, so seems a resonable limit for UVs.
@@ -99,7 +95,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	float f = (dX.x * dY.y - dX.y * dY.x);
 	bool d_par = f < 0.001f;
 	bool d_per = dot(dX, dY) < 0.001f;
-	bool d_inf_nan = any(BOOL2(INT2(isinf(dX)) | INT2(isinf(dY)) | INT2(isnan(dX)) | INT2(isnan(dY))));
+	bool d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(dX, dY)));
 
 	if (!(d_zero || d_par || d_per || d_inf_nan))
 	{
@@ -115,8 +111,8 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		float denom_plus  = t * (q + t);
 		float denom_minus = t * (q - t);
 
-		float sqrtA = sqrt(F * (t + p));
-		float sqrtB = sqrt(F * (t - p));
+		float sqrt_num_plus = sqrt(F * (t + p));
+		float sqrt_num_minus = sqrt(F * (t - p));
 
 		float inv_sqrt_denom_plus  = RSQRT(denom_plus);
 		float inv_sqrt_denom_minus = RSQRT(denom_minus);
@@ -124,16 +120,16 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 		float signB = sign(B);
 
 		FLOAT2 new_dX = FLOAT2(
-			sqrtA * inv_sqrt_denom_plus,
-			sqrtB * inv_sqrt_denom_plus * signB
+			sqrt_num_plus * inv_sqrt_denom_plus,
+			sqrt_num_minus * inv_sqrt_denom_plus * signB
 		);
 
 		FLOAT2 new_dY = FLOAT2(
-			sqrtB * inv_sqrt_denom_minus * -signB,
-			sqrtA * inv_sqrt_denom_minus
+			sqrt_num_minus * inv_sqrt_denom_minus * -signB,
+			sqrt_num_plus * inv_sqrt_denom_minus
 		);
 
-		d_inf_nan = any(BOOL2(INT2(isinf(new_dX)) | INT2(isinf(new_dY)) | INT2(isnan(new_dX)) | INT2(isnan(new_dY))));
+		d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(new_dX, new_dY)));
 		if (!d_inf_nan)
 		{
 			dX = new_dX;
@@ -151,6 +147,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	float aniso_ratio;
 	float length_lod;
 	FLOAT2 aniso_line;
+
 	if (length_major <= 1.0f)
 	{
 		// A zero length_major would result in NaN Lod and break sampling.
