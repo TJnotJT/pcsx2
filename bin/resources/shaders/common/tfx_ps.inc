@@ -785,7 +785,7 @@ void ps_color_clamp_wrap(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 		if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && (PS_BLEND_MIX == 0 || PS_DITHER != FALSE))
 			C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
 		else if (PS_COLCLIP == 1 || PS_COLCLIP_HW == 1)
-			C.rgb = FLOAT3(SHORT3(C.rgb) & 0xFF);
+			C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xFF));
 	}
 	else if (PS_DST_FMT == FMT_16 && PS_DITHER != 3 && PS_BLEND_MIX == 0 && PS_BLEND_HW == 0)
 		C.rgb = FLOAT3(SHORT3(C.rgb) & SHORT(0xF8));
@@ -859,9 +859,9 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 		// Based on the scripts at the above link, the ideal choice for Intel GPUs is 126/256, AMD 120/256.  Nvidia is a lost cause.
 		// 124/256 seems like a reasonable compromise, providing the correct answer 99.3% of the time on Intel (vs 99.6% for 126/256), and 97% of the time on AMD (vs 97.4% for 120/256).
 		else if (PS_BLEND_MIX == 2)
-			Color.rgb = ((A - B) * C_clamped + D) + (124.f/256.f);
+			Color.rgb = ((A - B) * C_clamped + D) + (124.f / 256.f);
 		else if (PS_BLEND_MIX == 1)
-			Color.rgb = ((A - B) * C_clamped + D) - (124.f/256.f);
+			Color.rgb = ((A - B) * C_clamped + D) - (124.f / 256.f);
 		else
 			Color.rgb = trunc((A - B) * C + D);
 
