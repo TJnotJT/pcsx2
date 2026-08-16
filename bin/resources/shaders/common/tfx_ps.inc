@@ -876,7 +876,7 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			// we pick the lowest overflow from all colors because it's the safest,
 			// we divide by 255 the color because we don't know Cd value,
 			// changed alpha should only be done for hw blend.
-			FLOAT3 alpha_compensate = max(float3_bcast(1.f), Color.rgb / float3_bcast(0.f));
+			FLOAT3 alpha_compensate = max(float3_bcast(1.f), Color.rgb / float3_bcast(255.f));
 			As_rgba.rgb -= alpha_compensate;
 		}
 		else if (PS_BLEND_HW == 2)
@@ -894,7 +894,7 @@ void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Color), IN_
 			As_rgba.rgb = float3_bcast(C_clamped);
 			// Cs*(Alpha + 1) might overflow, if it does then adjust alpha value
 			// that is sent on second output to compensate.
-			FLOAT3 overflow_check = (Color.rgb - float3_bcast(0.f)) / 255.f;
+			FLOAT3 overflow_check = (Color.rgb - float3_bcast(255.f)) / 255.f;
 			FLOAT3 alpha_compensate = max(float3_bcast(0.f), overflow_check);
 			As_rgba.rgb -= alpha_compensate;
 		}
