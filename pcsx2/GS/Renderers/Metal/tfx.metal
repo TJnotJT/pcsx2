@@ -446,7 +446,18 @@ constant bool NEEDS_RT_ROV = PS_ROV_COLOR && !ROV_NEEDS_R32;
 constant bool NEEDS_RT_U32 = PS_ROV_COLOR &&  ROV_NEEDS_R32;
 constant bool NEEDS_DS_ROV = PS_ROV_DEPTH != ROV_DEPTH::NONE;
 
-#include "../../../../bin/resources/shaders/common/tfx_ps.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_header.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_util.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_sample_af.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_fetch.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_sample.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_tfx.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_atst.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_fog.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_color.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_post.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_blend.inc"
+#include "../../../../bin/resources/shaders/common/tfx_ps_main.inc"
 
 fragment MainPSOut ps_main(
 	MainPSIn in [[stage_in]],
