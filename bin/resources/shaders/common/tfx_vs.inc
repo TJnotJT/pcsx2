@@ -1,18 +1,23 @@
-
 #ifndef __METAL_VERSION__
-	// Non-Metal backends can only define buffers with u32 elements, but our indices are u16.
-	uint load_index(VS_INDICES_PARAM(ignored), uint _i)
-	{
+// Non-Metal backends can only define buffers with u32 elements, but PCSX2 indices are u16.
+uint load_index(VS_INDICES_PARAM(ignored), uint _i)
+{
+	#if VS_NEEDS_EXPAND
 		uint i = _i + VS_BASE_INDEX;
 		// i is even => load lower 16 bits; i odd => load upper 16 bits.
 		uint shift = (i & 1u) << 4u;
 		return (VS_LOAD_INDEX(ignored, i >> 1u) >> shift) & 0xFFFFu;
-	}
+	#else
+		// Don't reference the index buffer unless we really need to.
+		return 0;
+	#endif
+}
 
-	VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
-	{
+VSInputGeneric load_vertex(VS_VERTICES_PARAM(vertices), uint index)
+{
+	VSInputGeneric vert;
+	#if VS_NEEDS_EXPAND
 		VSRawVertex raw = VS_LOAD_VERTEX(vertices, VS_BASE_VERTEX + index);
-		VSInputGeneric vert;
 		vert.st = raw.ST;
 		vert.c = UINT4(raw.RGBA & 0xFFu, (raw.RGBA >> 8) & 0xFFu, (raw.RGBA >> 16) & 0xFFu, raw.RGBA >> 24);
 		vert.q = raw.Q;
@@ -20,8 +25,18 @@
 		vert.z = raw.Z;
 		vert.uv = UINT2(raw.UV & 0xFFFFu, raw.UV >> 16);
 		vert.f = float4_bcast(float(raw.FOG) / 255.0f);
-		return vert;
-	}
+	#else
+		// Don't reference the vertex buffer unless we really need to.
+		vert.st = float2_bcast(0.0f);
+		vert.c = uint4_bcast(0);
+		vert.q = 0.0f;
+		vert.p = uint2_bcast(0);
+		vert.z = 0;
+		vert.uv = uint2_bcast(0);
+		vert.f = float4_bcast(0.0f);
+	#endif
+	return vert;
+}
 #endif
 
 STATIC VSOutputGeneric vs_main_impl(IN_PARAM(VSInputGeneric, v), IN_PARAM(VSUniformsGeneric, cb))

@@ -86,6 +86,7 @@
 #define VS_LOAD_INDEX(INDICES, IDX) (IndexBuffer.Load(IDX))
 // DX does not use point/line size.
 #define VS_POINT_SIZE 0
+#define VS_NEEDS_EXPAND (VS_EXPAND_TYPE != VS_EXPAND_NONE)
 
 // Pixel shader helpers
 #define PS_SAMPLE_TEX(STATE, POS) (Texture.Sample(TextureSampler, FLOAT2(POS)))
@@ -117,11 +118,13 @@ cbuffer cb2 : register(b1)
 	#undef X
 };
 
-/// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.)
+#if VS_EXPAND_TYPE != VS_EXPAND_NONE
+// Vertex buffer for expand shaders (sprites, upscaled lines, AA1 edges, etc.)
 StructuredBuffer<VSRawVertex> VertexBuffer : register(t0);
 
-/// Index buffer for rearranging vertices in AA1 expand shader
+// Index buffer for rearranging vertices in AA1 expand shader
 StructuredBuffer<uint> IndexBuffer : register(t5);
+#endif // VS_EXPAND_TYPE
 
 // Note: vertex/index buffers must be defined before common code is included.
 #include "tfx_vs.inc"
@@ -217,7 +220,7 @@ VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
   return GetVSOutput(vout_gen);
 }
 
-#endif // VS_EXPAND
+#endif // VS_EXPAND_TYPE
 
 #endif // VERTEX_SHADER
 

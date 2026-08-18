@@ -55,7 +55,7 @@
 	#define PS_ROV_DEPTH_READ_WRITE 1
 	#define PS_ROV_DEPTH_READ_ONLY 2
 	#endif
-#endif
+#endif // __METAL_VERSION__
 
 // Raw vertex layout for vertex expand shaders.
 struct VSRawVertex
@@ -225,6 +225,16 @@ STATIC FLOAT3 float3_bcast(float val)
 STATIC FLOAT4 float4_bcast(float val)
 {
 	return FLOAT4(val, val, val, val);
+}
+
+STATIC UINT4 uint4_bcast(uint val)
+{
+	return UINT4(val, val, val, val);
+}
+
+STATIC UINT2 uint2_bcast(uint val)
+{
+	return UINT2(val, val);
 }
 
 STATIC INT3 int3_bcast(int val)

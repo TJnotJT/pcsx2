@@ -82,6 +82,7 @@
 #define VS_BASE_INDEX BaseIndex
 #define VS_LOAD_VERTEX(VERTICES, IDX) vertex_buffer[IDX]
 #define VS_LOAD_INDEX(INDICES, IDX) index_buffer[IDX]
+#define VS_NEEDS_EXPAND (VS_EXPAND_TYPE != VS_EXPAND_NONE)
 
 // Pixel shader helpers
 #define PS_SAMPLE_TEX(STATE, POS) (texture(Texture, FLOAT2(POS)))
@@ -103,13 +104,7 @@
 
 #ifdef VERTEX_SHADER
 
-#ifndef VS_TME
-#define VS_TME 0
-#define VS_FST 0
-#define VS_IIP 0
-#define VS_POINT_SIZE 0
-#define VS_EXPAND_TYPE VS_EXPAND_NONE
-#endif
+#if VS_EXPAND_TYPE != VS_EXPAND_NONE
 
 // VS constants for determining base vertex/index in expand shader.
 #if PCSX2_VULKAN
@@ -178,6 +173,8 @@ VSInputGeneric load_vertex(uint index)
 
   return v;
 }
+
+#endif // VS_EXPAND_TYPE
 
 // Note: vertex/index buffers must be defined before common code is included.
 #include "tfx_vs.inc"
