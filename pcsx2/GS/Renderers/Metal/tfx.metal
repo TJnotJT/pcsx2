@@ -48,6 +48,7 @@
 #define FLOAT4_BITCAST_UINT4(X) as_type<uint4>(X)
 #define UINT_BITCAST_UCHAR4(X) as_type<uchar4>(X)
 #define MAT_MUL(X, Y) ((X) * (Y))
+#define MAT_GET(MAT, X, Y) MAT[Y][X]
 #define FRACT(X) fract(X)
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME

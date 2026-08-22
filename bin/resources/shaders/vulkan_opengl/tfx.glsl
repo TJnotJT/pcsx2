@@ -58,6 +58,7 @@
 #define FLOAT4_BITCAST_UINT4(X) floatBitsToUint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
 #define MAT_MUL(X, Y) ((X) * (Y))
+#define MAT_GET(MAT, X, Y) MAT[Y][X]
 #define FRACT(X) fract(X)
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) TYPE NAME
@@ -155,7 +156,7 @@ VSInputGeneric load_vertex(uint index)
 
 	vec2 a_st = rvtx.ST;
 	uvec4 a_c = uvec4(bitfieldExtract(rvtx.RGBA, 0, 8), bitfieldExtract(rvtx.RGBA, 8, 8),
-	                  bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8));
+										bitfieldExtract(rvtx.RGBA, 16, 8), bitfieldExtract(rvtx.RGBA, 24, 8));
 	float a_q = rvtx.Q;
 	uvec2 a_p = uvec2(bitfieldExtract(rvtx.XY, 0, 16), bitfieldExtract(rvtx.XY, 16, 16));
 	uint a_z = rvtx.Z;
@@ -163,15 +164,15 @@ VSInputGeneric load_vertex(uint index)
 	vec4 a_f = unpackUnorm4x8(rvtx.FOG);
 
 	VSInputGeneric v;
-  v.st = a_st;
-  v.c = FLOAT4(a_c);
-  v.q = a_q;
-  v.p = a_p;
-  v.z = a_z;
-  v.uv = a_uv;
-  v.f = a_f;
+	v.st = a_st;
+	v.c = FLOAT4(a_c);
+	v.q = a_q;
+	v.p = a_p;
+	v.z = a_z;
+	v.uv = a_uv;
+	v.f = a_f;
 
-  return v;
+	return v;
 }
 
 #endif // VS_EXPAND_TYPE
@@ -194,11 +195,11 @@ layout(std140, binding = 1) uniform cb20
 // Get VS constants for shared code.
 VSUniformsGeneric GetVSUniforms()
 {
-  VSUniformsGeneric cb;
+	VSUniformsGeneric cb;
 	#define X(TYPE, NAME) cb.NAME = NAME;
 		VS_UNIFORMS(X)
 	#undef X
-  return cb;
+	return cb;
 }
 
 // Vertex shader outputs
@@ -222,14 +223,14 @@ out SHADER
 // Write real VS outputs from shared code ouput.
 void WriteVSOutput(VSOutputGeneric v)
 {
-  gl_Position = v.p;
-  vsOut.t = v.t;
-  vsOut.ti = v.ti;
-  vsOut.c = v.c;
-  vsOut.inv_cov = v.inv_cov;
-  vsOut.interior = v.interior;
+	gl_Position = v.p;
+	vsOut.t = v.t;
+	vsOut.ti = v.ti;
+	vsOut.c = v.c;
+	vsOut.inv_cov = v.inv_cov;
+	vsOut.interior = v.interior;
 	#if VS_POINT_SIZE
-  	gl_PointSize = v.point_size;
+		gl_PointSize = v.point_size;
 	#endif
 }
 
@@ -258,23 +259,23 @@ void WriteVSOutput(VSOutputGeneric v)
 // Get VS inputs for shared code.
 VSInputGeneric GetVSInput()
 {
-  VSInputGeneric vin;
-  vin.st = a_st;
-  vin.c = FLOAT4(a_c);
-  vin.q = a_q;
-  vin.p = a_p;
-  vin.z = a_z;
-  vin.uv = a_uv;
-  vin.f = a_f;
-  return vin;
+	VSInputGeneric vin;
+	vin.st = a_st;
+	vin.c = FLOAT4(a_c);
+	vin.q = a_q;
+	vin.p = a_p;
+	vin.z = a_z;
+	vin.uv = a_uv;
+	vin.f = a_f;
+	return vin;
 }
 
 void main()
 {
-  VSInputGeneric vin = GetVSInput();
-  VSUniformsGeneric cb = GetVSUniforms();
+	VSInputGeneric vin = GetVSInput();
+	VSUniformsGeneric cb = GetVSUniforms();
 	VSOutputGeneric vout = vs_main_impl(vin, cb);
-  WriteVSOutput(vout);
+	WriteVSOutput(vout);
 }
 
 #else // VS_EXPAND_TYPE
@@ -286,9 +287,9 @@ void main()
 	#elif PCSX2_OPENGL
 		uint vid = uint(gl_VertexID);
 	#endif
-  VSUniformsGeneric cb = GetVSUniforms();
-  VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
-  WriteVSOutput(vout);
+	VSUniformsGeneric cb = GetVSUniforms();
+	VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
+	WriteVSOutput(vout);
 }
 
 #endif // VS_EXPAND_TYPE
@@ -306,7 +307,7 @@ layout(std140, set = 0, binding = 1) uniform cb1
 layout(std140, binding = 0) uniform cb21
 #endif
 {
-  #define X(TYPE, NAME) TYPE NAME;
+	#define X(TYPE, NAME) TYPE NAME;
 		PS_UNIFORMS(X)
 	#undef X
 };
@@ -457,25 +458,25 @@ float DepthLoad(ivec2 xy)
 // Get pixel shader constants for shared code.
 PSUniformsGeneric GetPSUniforms()
 {
-  PSUniformsGeneric cb;
+	PSUniformsGeneric cb;
 	#define X(TYPE, NAME) cb.NAME = NAME;
 		PS_UNIFORMS(X)
 	#undef X
-  return cb;
+	return cb;
 }
 
 // Get pixel shader inputs for shared code.
 PSInputGeneric GetPSInput()
 {
-  PSInputGeneric psin;
-  psin.p = gl_FragCoord;
-  psin.t = vsIn.t;
-  psin.ti = vsIn.ti;
-  psin.c = vsIn.c;
-  psin.fc = vsIn.c;
-  psin.inv_cov = vsIn.inv_cov;
-  psin.interior = vsIn.interior;
-  return psin;
+	PSInputGeneric psin;
+	psin.p = gl_FragCoord;
+	psin.t = vsIn.t;
+	psin.ti = vsIn.ti;
+	psin.c = vsIn.c;
+	psin.fc = vsIn.c;
+	psin.inv_cov = vsIn.inv_cov;
+	psin.interior = vsIn.interior;
+	return psin;
 }
 
 #include "tfx_ps_header.inc"
@@ -493,29 +494,29 @@ PSInputGeneric GetPSInput()
 
 void main()
 {
-  PSMainState state;
-  state.psin = GetPSInput();
-  state.cb = GetPSUniforms();
-  state.tex = 0; // unused
-  state.tex_depth = 0; // unused
-  state.palette = 0; // unused
-  state.prim_id_tex = 0; // unused
+	PSMainState state;
+	state.psin = GetPSInput();
+	state.cb = GetPSUniforms();
+	state.tex = 0; // unused
+	state.tex_depth = 0; // unused
+	state.palette = 0; // unused
+	state.prim_id_tex = 0; // unused
 	state.tex_sampler = 0; // unused
-  state.prim_id = gl_PrimitiveID;
-  state.color_discarded = false;
-  state.depth_discarded = false;
+	state.prim_id = gl_PrimitiveID;
+	state.color_discarded = false;
+	state.depth_discarded = false;
 
-  ivec2 coord = ivec2(state.psin.p.xy);
+	ivec2 coord = ivec2(state.psin.p.xy);
 
-  #if PS_ROV_COLOR || PS_ROV_DEPTH
-    beginInvocationInterlockARB();
-  #endif
+	#if PS_ROV_COLOR || PS_ROV_DEPTH
+		beginInvocationInterlockARB();
+	#endif
 
 	state.current_depth = DepthLoad(coord);
 
 	state.current_color = RtLoad(coord);
 
-  PSOutputGeneric psout = ps_main_impl(state);
+	PSOutputGeneric psout = ps_main_impl(state);
 
 	#if PS_RETURN_COLOR
 		o_col0 = psout.c0;

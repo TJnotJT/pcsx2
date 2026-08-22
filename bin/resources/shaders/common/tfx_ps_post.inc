@@ -17,7 +17,7 @@ STATIC void ps_dither(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C), flo
 		fpos = USHORT2(state.psin.p.xy);
 	else
 		fpos = USHORT2(state.psin.p.xy * float2_bcast(state.cb.scale_factor.y));
-	float value = state.cb.dither_matrix[fpos.y & 3u][fpos.x & 3u];
+	float value = MAT_GET(state.cb.dither_matrix, fpos.x & 3u, fpos.y & 3u);
 
 	// The idea here is we add on the dither amount adjusted by the alpha before it goes to the hw blend
 	// so after the alpha blend the resulting value should be the same as (Cs - Cd) * As + Cd + Dither.

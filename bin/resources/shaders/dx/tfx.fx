@@ -57,7 +57,10 @@
 #define FLOAT_BITCAST_UINT(X) asuint(X)
 #define FLOAT4_BITCAST_UINT4(X) asuint(X)
 #define UINT_BITCAST_UCHAR4(X) UINT4((X) & 0xFFu, ((X) >> 8) & 0xFFu, ((X) >> 16) & 0xFFu, ((X) >> 24) & 0xFFu)
-#define MAT_MUL(X, Y) mul((Y), (X)) // Warning: operands opposite order of GLSL and MSL!
+// Warning: X, Y opposite order of GLSL and MSL!
+#define MAT_MUL(X, Y) mul((Y), (X))
+// Warning: X, Y opposite order of GLSL and MSL!
+#define MAT_GET(MAT, X, Y) MAT[X][Y]
 #define FRACT(X) frac(X)
 #define MIX lerp
 #define IN_PARAM(TYPE, NAME) TYPE NAME
@@ -167,38 +170,38 @@ cbuffer cb0 : register(b0)
 // Convert VS constants for shared code.
 VSUniformsGeneric GetVSUniforms()
 {
-  VSUniformsGeneric cb;
+	VSUniformsGeneric cb;
 	#define X(TYPE, NAME) cb.NAME = NAME;
 		VS_UNIFORMS(X)
 	#undef X
-  return cb;
+	return cb;
 }
 
 // Convert VS inputs for shared code.
 VSInputGeneric GetVSInput(VS_INPUT vin)
 {
-  VSInputGeneric vin_gen;
-  vin_gen.st = vin.st;
-  vin_gen.c = FLOAT4(vin.c);
-  vin_gen.q = vin.q;
-  vin_gen.p = vin.p;
-  vin_gen.z = vin.z;
-  vin_gen.uv = vin.uv;
-  vin_gen.f = vin.f;
-  return vin_gen;
+	VSInputGeneric vin_gen;
+	vin_gen.st = vin.st;
+	vin_gen.c = FLOAT4(vin.c);
+	vin_gen.q = vin.q;
+	vin_gen.p = vin.p;
+	vin_gen.z = vin.z;
+	vin_gen.uv = vin.uv;
+	vin_gen.f = vin.f;
+	return vin_gen;
 }
 
 // Convert VS outputs from generic outputs to real outputs.
 VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
 {
-  VS_OUTPUT vout;
+	VS_OUTPUT vout;
 	vout.p = vout_gen.p;
 	vout.t = vout_gen.t;
 	vout.ti = vout_gen.ti;
 	vout.c = vout_gen.c;
 	vout.inv_cov = vout_gen.inv_cov;
 	vout.interior = vout_gen.interior;
-  return vout;
+	return vout;
 }
 
 #if VS_EXPAND_TYPE == VS_EXPAND_NONE
@@ -206,7 +209,7 @@ VS_OUTPUT GetVSOutput(VSOutputGeneric vout_gen)
 VS_OUTPUT vs_main(VS_INPUT vin)
 {
 	VSInputGeneric vin_gen = GetVSInput(vin);
-  VSUniformsGeneric cb = GetVSUniforms();
+	VSUniformsGeneric cb = GetVSUniforms();
 	VSOutputGeneric vout_gen = vs_main_impl(vin_gen, cb);
 	return GetVSOutput(vout_gen);
 }
@@ -215,9 +218,9 @@ VS_OUTPUT vs_main(VS_INPUT vin)
 
 VS_OUTPUT vs_main_expand(uint vid : SV_VertexID)
 {
-  VSUniformsGeneric cb = GetVSUniforms();
-  VSOutputGeneric vout_gen = vs_expand_impl(vid, 0, cb, 0);
-  return GetVSOutput(vout_gen);
+	VSUniformsGeneric cb = GetVSUniforms();
+	VSOutputGeneric vout_gen = vs_expand_impl(vid, 0, cb, 0);
+	return GetVSOutput(vout_gen);
 }
 
 #endif // VS_EXPAND_TYPE
@@ -307,7 +310,7 @@ cbuffer cb1 : register(b1)
 cbuffer cb1 : register(b0)
 #endif
 {
-  #define X(TYPE, NAME) TYPE NAME;
+	#define X(TYPE, NAME) TYPE NAME;
 		PS_UNIFORMS(X)
 	#undef X
 };
@@ -315,25 +318,25 @@ cbuffer cb1 : register(b0)
 // Get pixel shader input for passing to shared code.
 PSInputGeneric GetPSInput(PS_INPUT psin)
 {
-  PSInputGeneric psin_gen;
-  psin_gen.p = psin.p;
-  psin_gen.t = psin.t;
-  psin_gen.ti = psin.ti;
-  psin_gen.c = psin.c;
-  psin_gen.fc = psin.c;
-  psin_gen.inv_cov = psin.inv_cov;
-  psin_gen.interior = psin.interior;
-  return psin_gen;
+	PSInputGeneric psin_gen;
+	psin_gen.p = psin.p;
+	psin_gen.t = psin.t;
+	psin_gen.ti = psin.ti;
+	psin_gen.c = psin.c;
+	psin_gen.fc = psin.c;
+	psin_gen.inv_cov = psin.inv_cov;
+	psin_gen.interior = psin.interior;
+	return psin_gen;
 }
 
 // Get pixel shader constants for passing to shared code.
 PSUniformsGeneric GetPSUniforms()
 {
-  PSUniformsGeneric cb;
+	PSUniformsGeneric cb;
 	#define X(TYPE, NAME) cb.NAME = NAME;
 		PS_UNIFORMS(X)
 	#undef X
-  return cb;
+	return cb;
 }
 
 float4 RtLoad(int2 xy)
@@ -392,20 +395,20 @@ void ps_main(PS_INPUT input)
 #endif
 {
 	PSMainState state;
-  state.psin = GetPSInput(input);
-  state.cb = GetPSUniforms();
-  state.tex = 0; // unused
-  state.tex_depth = 0; // unused
-  state.palette = 0; // unused
-  state.prim_id_tex = 0; // unused
-  state.tex_sampler = 0; // unused
+	state.psin = GetPSInput(input);
+	state.cb = GetPSUniforms();
+	state.tex = 0; // unused
+	state.tex_depth = 0; // unused
+	state.palette = 0; // unused
+	state.prim_id_tex = 0; // unused
+	state.tex_sampler = 0; // unused
 	#if NEED_PRIMID
-  	state.prim_id = input.prim_id;
+		state.prim_id = input.prim_id;
 	#else
 		state.prim_id = 0;
 	#endif
-  state.color_discarded = false;
-  state.depth_discarded = false;
+	state.color_discarded = false;
+	state.depth_discarded = false;
 
 	int2 coord = int2(state.psin.p.xy);
 
