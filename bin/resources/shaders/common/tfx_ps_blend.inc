@@ -21,7 +21,7 @@ STATIC void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Colo
 		}
 
 		float Ad = PS_RTA_CORRECTION != FALSE ?
-			trunc(state.current_color.a * 128.1f) / 128.f : trunc(state.current_color.a * 255.1f) / 128.f;
+			trunc(state.current_color.a * 128.0f + 0.1f) / 128.f : trunc(state.current_color.a * 255.0f + 0.1f) / 128.f;
 
 		if (PS_SHUFFLE != FALSE && NEEDS_RT)
 		{

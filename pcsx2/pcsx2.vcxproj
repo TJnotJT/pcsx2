@@ -77,7 +77,6 @@
     <None Include="..\bin\resources\shaders\common\tfx_ps_fetch.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_fog.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_header.inc" />
-    <None Include="..\bin\resources\shaders\common\tfx_ps_include_all.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_main.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_post.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_sample.inc" />
