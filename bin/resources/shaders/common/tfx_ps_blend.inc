@@ -41,8 +41,8 @@ STATIC void ps_blend(IN_OUT_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, Colo
 				state.current_color.a = float(denorm_rt.g & 0x80u);
 			}
 		}
-		float multi = PS_COLCLIP_HW != FALSE ? 65535.0 : 255.5;
-		FLOAT3 Cd = trunc(state.current_color.rgb * multi);
+		float multi = PS_COLCLIP_HW != FALSE ? 65535.f : 255.f;
+		FLOAT3 Cd = trunc(state.current_color.rgb * multi + float3_bcast(0.1f));
 		FLOAT3 Cs = Color.rgb;
 
 		FLOAT3 A = PICK3(PS_BLEND_A, Cs, Cd, float3_bcast(0.0f));

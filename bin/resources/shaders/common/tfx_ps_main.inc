@@ -129,8 +129,8 @@ STATIC PSOutputGeneric ps_main_impl(IN_OUT_PARAM(PSMainState, state))
 	FLOAT4 alpha_blend = float4_bcast(0.f);
 	if (SW_AD_TO_HW)
 	{
-		alpha_blend = float4_bcast(PS_RTA_CORRECTION != FALSE ?
-			trunc(state.current_color.a * 128.f) / 128.f : trunc(state.current_color.a * 255.5f) / 128.f);
+		float RT_a = trunc(state.current_color.a * (PS_RTA_CORRECTION != FALSE ? 128.f : 255.f) + 0.1f);
+		alpha_blend = float4_bcast(RT_a / 128.f);
 	}
 	else
 	{

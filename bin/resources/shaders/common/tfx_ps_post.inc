@@ -2,8 +2,8 @@ STATIC void ps_fbmask(IN_PARAM(PSMainState, state), IN_OUT_PARAM(FLOAT4, C))
 {
 	if (PS_FBMASK != FALSE)
 	{
-		float multi = (PS_COLCLIP_HW != FALSE) ? 65535.0 : 255.5;
-		FLOAT4 RT = state.current_color * FLOAT4(multi, multi, multi, 255.f);
+		float multi = (PS_COLCLIP_HW != FALSE) ? 65535.f : 255.f;
+		FLOAT4 RT = trunc(state.current_color * FLOAT4(multi, multi, multi, 255.f) + float4_bcast(0.1f));
 		C = FLOAT4((UINT4(INT4(C)) & ~state.cb.fbmask) | (UINT4(RT) & state.cb.fbmask));
 	}
 }
