@@ -68,9 +68,9 @@
 // FXC (<=SM5.1) may optimise away isnan and isinf.
 // DXC (>=SM6.0) will preserve them.
 #ifdef __hlsl_dx_compiler
-	#define IS_NAN_OR_INF(X) (isinf(X) | isnan(X))
+	#define IS_NAN_OR_INF_4(X) (isinf(X) | isnan(X))
 #else
-	#define IS_NAN_OR_INF(X) ((asuint(X) & 0x7f800000) == 0x7f800000)
+	#define IS_NAN_OR_INF_4(X) ((asuint(X) & 0x7f800000) == 0x7f800000)
 #endif
 
 // Constants

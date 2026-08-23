@@ -1,7 +1,7 @@
 STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 {
 	// HW sampler will reject bad UVs, match that here.
-	uv = any(IS_NAN_OR_INF(uv)) ? float2_bcast(0.0f) : uv;
+	uv = any(IS_NAN_OR_INF_4(FLOAT4(uv, 0, 0))) ? float2_bcast(0.0f) : uv;
 
 	// Large floating point values risk NaN/Inf values.
 	// Above this value floats lose decimal precision, so seems a resonable limit for UVs.
@@ -22,7 +22,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 	float f = (dX.x * dY.y - dX.y * dY.x);
 	bool d_par = f < 0.001f;
 	bool d_per = dot(dX, dY) < 0.001f;
-	bool d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(dX, dY)));
+	bool d_inf_nan = any(IS_NAN_OR_INF_4(FLOAT4(dX, dY)));
 
 	if (!(d_zero || d_par || d_per || d_inf_nan))
 	{
@@ -56,7 +56,7 @@ STATIC FLOAT4 sample_c_af(IN_PARAM(PSMainState, state), FLOAT2 uv, float uv_w)
 			sqrt_num_plus * inv_sqrt_denom_minus
 		);
 
-		d_inf_nan = any(IS_NAN_OR_INF(FLOAT4(new_dX, new_dY)));
+		d_inf_nan = any(IS_NAN_OR_INF_4(FLOAT4(new_dX, new_dY)));
 		if (!d_inf_nan)
 		{
 			dX = new_dX;

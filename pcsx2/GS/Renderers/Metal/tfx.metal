@@ -53,7 +53,7 @@
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) thread const TYPE & NAME
 #define IN_OUT_PARAM(TYPE, NAME) thread TYPE & NAME
-#define IS_NAN_OR_INF(X) (isinf(X) | isnan(X))
+#define IS_NAN_OR_INF_4(X) (isinf(X) | isnan(X))
 
 // Constants
 #define PRIMID_MAX FLT_MAX

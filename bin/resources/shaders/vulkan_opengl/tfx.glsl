@@ -63,7 +63,7 @@
 #define MIX mix
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
-#define IS_NAN_OR_INF(X) BOOL2(INT2(isinf(X)) | INT2(isnan(X)))
+#define IS_NAN_OR_INF_4(X) BOOL4(INT4(isinf(X)) | INT4(isnan(X)))
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF
