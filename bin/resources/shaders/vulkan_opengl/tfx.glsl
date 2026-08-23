@@ -64,6 +64,7 @@
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 #define IS_NAN_OR_INF_4(X) BOOL4(INT4(isinf(X)) | INT4(isnan(X)))
+#define UNROLL
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF

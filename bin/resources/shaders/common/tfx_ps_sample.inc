@@ -237,6 +237,7 @@ STATIC FLOAT4 sample_color(IN_PARAM(PSMainState, state), FLOAT2 st)
 			c = sample_4c(state, uv);
 	}
 
+	UNROLL
 	for (int i = 0; i < 4; i++)
 	{
 		// macOS 10.15 ICE's on bool3(c[i].rgb), so use != 0 instead

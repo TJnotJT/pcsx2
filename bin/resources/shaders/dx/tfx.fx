@@ -72,6 +72,7 @@
 #else
 	#define IS_NAN_OR_INF_4(X) ((asuint(X) & 0x7f800000) == 0x7f800000)
 #endif
+#define UNROLL [unroll]
 
 // Constants
 #define PRIMID_MAX 0x7FFFFFFF
