@@ -542,9 +542,32 @@ public:
 	bool SpriteDrawWithoutGaps();
 	void CalculatePrimitiveCoversWithoutGaps();
 	GIFRegTEX0 GetTex0Layer(u32 lod);
+
+	struct VertexUVRoundingInfo
+	{
+		bool one_to_one_XU_YV;
+		bool half_offset_XU;
+		bool half_offset_YV;
+		bool same_dir_XU;
+		bool same_dir_YV;
+		bool reverse_dir_XU;
+		bool reverse_dir_YV;
+
+		VertexUVRoundingInfo()
+			: one_to_one_XU_YV(true)
+			, half_offset_XU(true)
+			, half_offset_YV(true)
+			, same_dir_XU(true)
+			, same_dir_YV(true)
+			, reverse_dir_XU(true)
+			, reverse_dir_YV(true)
+		{
+		}
+	};
+
 	template<u32 primclass, bool tme, bool fst>
-	bool GetVertexUVRoundingInfoImpl(const bool upscaling, bool* pixel_centers_aligned);
-	bool GetVertexUVRoundingInfo(const bool tex, const bool upscaling = false, bool* pixel_centers_aligned = nullptr);
+	bool GetVertexUVRoundingInfoImpl(const bool upscaling, VertexUVRoundingInfo* info);
+	bool GetVertexUVRoundingInfo(const bool tex, const bool upscaling = false, VertexUVRoundingInfo* info = nullptr);
 };
 
 // We put this in the header because of Multi-ISA.
