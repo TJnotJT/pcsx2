@@ -146,6 +146,32 @@
 #define PS_RETURN_DEPTH (ZWRITE && !PS_ROV_DEPTH)
 #define PS_ROV_EARLYDEPTHSTENCIL (PS_ROV_COLOR && !PS_ROV_DEPTH && !ZWRITE)
 
+#define BINDLESS 1
+
+// Root constants buffer
+#ifdef DX12
+cbuffer cb2 : register(b2)
+#else
+cbuffer cb2
+#endif
+{
+	uint BaseVertex;
+	uint BaseIndex;
+#if BINDLESS
+	uint tex_index;
+	uint pal_index;
+	uint rt_index;
+	uint primid_index;
+	uint depth_index;
+	uint rt_uav_index;
+	uint depth_uav_index;
+	uint sampler_index;
+#else
+	uint _cb2_pad0;
+	uint _cb2_pad1;
+#endif
+};
+
 struct VS_INPUT
 {
 	float2 st : TEXCOORD0;
@@ -231,24 +257,44 @@ struct PS_OUTPUT
 #undef NUM_RTS
 };
 
-Texture2D<float4> Texture : register(t0);
-Texture2D<float4> Palette : register(t1);
-#if !PS_ROV_COLOR
-Texture2D<float4> RtTexture : register(t2);
+#ifndef BINDLESS
+	Texture2D<float4> Texture : register(t0);
+	Texture2D<float4> Palette : register(t1);
+	#if !PS_ROV_COLOR
+	Texture2D<float4> RtTexture : register(t2);
+	#endif
+	Texture2D<float4> PrimMinTexture : register(t3);
+	#if !PS_ROV_DEPTH
+	Texture2D<float> DepthTexture : register(t4);
+	#endif
+	SamplerState TextureSampler : register(s0);
+
+	#define TEXTURE Texture
+	#define PALETTE Palette
+	#define RT_TEXTURE RtTexture
+	#define PRIMID_TEXTURE PrimMinTexture
+	#define DEPTH_TEXTURE DepthTexture
+	#define TEXTURE_SAMPLER TextureSampler
+#else
+	Texture2D<float4> Texture[] : register(t0);
+	SamplerState TextureSampler[] : register(s0);
+
+	#define TEXTURE Texture[tex_index]
+	#define PALETTE Texture[pal_index]
+	#define RT_TEXTURE Texture[rt_index]
+	#define PRIMID_TEXTURE Texture[primid_index]
+	#define DEPTH_TEXTURE Texture[depth_index]
+	#define TEXTURE_SAMPLER TextureSampler[sampler_index]
 #endif
-Texture2D<float> PrimMinTexture : register(t3);
-#if !PS_ROV_DEPTH
-Texture2D<float> DepthTexture : register(t4);
-#endif
-SamplerState TextureSampler : register(s0);
+
 
 #if PS_ROV_COLOR
-RasterizerOrderedTexture2D<unorm float4> RtTextureRov : register(u0);
+RasterizerOrderedTexture2D<unorm float4> RtTextureRov[] : register(u0);
 static float4 rov_rt_value;
 #endif
 
 #if PS_ROV_DEPTH
-RasterizerOrderedTexture2D<float> DepthTextureRov : register(u1);
+RasterizerOrderedTexture2D<float> DepthTextureRov[] : register(u1);
 static float rov_depth_value;
 #endif
 
@@ -289,7 +335,7 @@ float4 RtLoad(int2 xy)
 #if PS_ROV_COLOR
 	return rov_rt_value;
 #else
-	return RtTexture.Load(int3(int2(xy), 0));
+	return RT_TEXTURE.Load(int3(int2(xy), 0));
 #endif
 }
 
@@ -298,7 +344,7 @@ float DepthLoad(int2 xy)
 #if PS_ROV_DEPTH
 	return rov_depth_value;
 #else
-	return DepthTexture.Load(int3(int2(xy), 0));
+	return DEPTH_TEXTURE.Load(int3(int2(xy), 0));
 #endif
 }
 
@@ -357,7 +403,7 @@ float4 sample_c_af(float2 uv, float uv_w)
 	// And https://registry.khronos.org/OpenGL/extensions/EXT/EXT_texture_filter_anisotropic.txt
 	// With guidance from https://pema.dev/2025/05/09/mipmaps-too-much-detail/ 
 	float2 sz;
-	Texture.GetDimensions(sz.x, sz.y);
+	TEXTURE.GetDimensions(sz.x, sz.y);
 	float2 dX = ddx(uv) * sz;
 	float2 dY = ddy(uv) * sz;
 
@@ -454,7 +500,7 @@ float4 sample_c_af(float2 uv, float uv_w)
 
 	float4 colour;
 	if (aniso_ratio == 1.0f)
-		colour = Texture.SampleLevel(TextureSampler, uv, lod);
+		colour = TEXTURE.SampleLevel(TEXTURE_SAMPLER, uv, lod);
 	else
 	{
 		float4 num = float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -465,7 +511,7 @@ float4 sample_c_af(float2 uv, float uv_w)
 		{
 			float2 d = -aniso_line + (0.5f + i) * segment;	
 			float2 uv_sample = uv + d;
-			float4 sample_colour = Texture.SampleLevel(TextureSampler, uv_sample, lod);
+			float4 sample_colour = TEXTURE.SampleLevel(TEXTURE_SAMPLER, uv_sample, lod);
 			num += sample_colour;
 		}
 
@@ -480,7 +526,7 @@ float4 sample_c(float2 uv, float uv_w, int2 xy)
 #if PS_TEX_IS_FB == 1
 	return RtLoad(xy);
 #elif PS_REGION_RECT == 1
-	return Texture.Load(int3(int2(uv), 0));
+	return TEXTURE.Load(int3(int2(uv), 0));
 #else
 	if (PS_POINT_SAMPLER)
 	{
@@ -510,18 +556,18 @@ float4 sample_c(float2 uv, float uv_w, int2 xy)
 #if PS_ANISOTROPIC_FILTERING > 1
 	return sample_c_af(uv, uv_w);
 #elif PS_AUTOMATIC_LOD == 1
-	return Texture.Sample(TextureSampler, uv);
+	return TEXTURE.Sample(TEXTURE_SAMPLER, uv);
 #elif PS_MANUAL_LOD == 1
-	return Texture.SampleLevel(TextureSampler, uv, manual_lod(uv_w));
+	return TEXTURE.SampleLevel(TEXTURE_SAMPLER, uv, manual_lod(uv_w));
 #else
-	return Texture.SampleLevel(TextureSampler, uv, 0); // No lod
+	return TEXTURE.SampleLevel(TEXTURE_SAMPLER, uv, 0); // No lod
 #endif
 #endif
 }
 
 float4 sample_p(uint u)
 {
-	return Palette.Load(int3(int(u), 0, 0));
+	return PALETTE.Load(int3(int(u), 0, 0));
 }
 
 float4 sample_p_norm(float u)
@@ -675,7 +721,7 @@ uint fetch_raw_depth(int2 xy)
 #if PS_TEX_IS_FB == 1
 	float4 col = RtLoad(xy);
 #else
-	float4 col = Texture.Load(int3(xy, 0));
+	float4 col = TEXTURE.Load(int3(xy, 0));
 #endif
 	return (uint)(col.r * exp2(32.0f));
 }
@@ -685,7 +731,7 @@ float4 fetch_raw_color(int2 xy)
 #if PS_TEX_IS_FB == 1
 	return RtLoad(xy);
 #else
-	return Texture.Load(int3(xy, 0));
+	return TEXTURE.Load(int3(xy, 0));
 #endif
 }
 
@@ -694,7 +740,7 @@ float4 fetch_c(int2 uv)
 #if PS_TEX_IS_FB == 1
 	return RtLoad(uv);
 #else
-	return Texture.Load(int3(uv, 0));
+	return TEXTURE.Load(int3(uv, 0));
 #endif
 }
 
@@ -755,7 +801,7 @@ float4 sample_depth(float2 st, float2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert msb based on the palette
-		t = Palette.Load(int3((depth >> 8u) & 0xFFu, 0, 0)) * 255.0f;
+		t = PALETTE.Load(int3((depth >> 8u) & 0xFFu, 0, 0)) * 255.0f;
 	}
 	else if (PS_URBAN_CHAOS_HLE == 1)
 	{
@@ -769,7 +815,7 @@ float4 sample_depth(float2 st, float2 pos)
 		uint depth = fetch_raw_depth(pos);
 
 		// Convert lsb based on the palette
-		t = Palette.Load(int3(depth & 0xFFu, 0, 0)) * 255.0f;
+		t = PALETTE.Load(int3(depth & 0xFFu, 0, 0)) * 255.0f;
 
 		// Msb is easier
 		float green = (float)((depth >> 8u) & 0xFFu) * 36.0f;
@@ -1639,18 +1685,6 @@ cbuffer cb0
 	float2 PointSize;
 	uint MaxDepth;
 	float LineAA1Width;
-};
-
-#ifdef DX12
-cbuffer cb2 : register(b2)
-#else
-cbuffer cb2
-#endif
-{
-	uint BaseVertex;
-	uint BaseIndex;
-	uint _cb2_pad0;
-	uint _cb2_pad1;
 };
 
 VS_OUTPUT vs_main(VS_INPUT input)

@@ -125,7 +125,9 @@ bool D3D12DescriptorAllocator::Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEA
 	pxAssertRel(SUCCEEDED(hr), "Creating descriptor heap for linear allocator");
 	if (FAILED(hr))
 		return false;
-
+	
+	m_device = device;
+	m_type = type;
 	m_num_descriptors = num_descriptors;
 	m_descriptor_increment_size = device->GetDescriptorHandleIncrementSize(type);
 	m_heap_base_cpu = m_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
@@ -158,4 +160,34 @@ bool D3D12DescriptorAllocator::Allocate(u32 num_handles, D3D12DescriptorHandle* 
 void D3D12DescriptorAllocator::Reset()
 {
 	m_current_offset = 0;
+}
+
+bool D3D12BindlessDescriptorAllocator::AllocateBindless(BindlessIndex* index_out, const D3D12DescriptorHandle& cpu_handle)
+{
+	auto it = m_handles.find(cpu_handle.index);
+	if (it != m_handles.end())
+	{
+		*index_out = it->second;
+		return true;
+	}
+
+	D3D12DescriptorHandle gpu_handle;
+	if (!Allocate(1, &gpu_handle))
+		return false;
+
+	pxAssert(gpu_handle.index <= static_cast<u32>(std::numeric_limits<BindlessIndex>::max()));
+
+	D3D12_CPU_DESCRIPTOR_HANDLE dst_handle = gpu_handle;
+	m_device->CopyDescriptorsSimple(1, dst_handle, cpu_handle, m_type);
+
+	*index_out = static_cast<BindlessIndex>(gpu_handle.index);
+
+	m_handles.emplace(cpu_handle.index, *index_out);
+
+	return true;
+}
+
+bool D3D12BindlessDescriptorAllocator::ShouldReset() const
+{
+	return m_current_offset >= m_num_descriptors / 2;
 }

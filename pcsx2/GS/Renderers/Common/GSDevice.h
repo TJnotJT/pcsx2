@@ -1080,12 +1080,10 @@ struct alignas(16) GSHWDrawConfig
 		}
 	};
 
-	struct alignas(16) VSPushConstants
+	struct VSPushConstants
 	{
 		u32 base_vertex;
 		u32 base_index;
-		u32 _pad0;
-		u32 _pad1;
 
 		__fi VSPushConstants()
 		{
@@ -1117,7 +1115,7 @@ struct alignas(16) GSHWDrawConfig
 			return true;
 		}
 	};
-	static_assert(sizeof(VSPushConstants) == 16, "VSPushConstants wrong size");
+	static_assert(sizeof(VSPushConstants) == 8, "VSPushConstants wrong size");
 
 	struct alignas(16) PSConstantBuffer
 	{

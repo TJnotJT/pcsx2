@@ -34,6 +34,11 @@
 static u32 s_debug_scope_depth = 0;
 #endif
 
+static constexpr size_t MAX_SRVS = 32768;
+static constexpr size_t MAX_RTVS = 16384;
+static constexpr size_t MAX_DSVS = 16384;
+static constexpr size_t MAX_CPU_SAMPLERS = 1024;
+
 static bool IsDATEModePrimIDInit(u32 flag)
 {
 	return flag == 1 || flag == 2;
@@ -393,11 +398,6 @@ bool GSDevice12::CreateDevice(u32& vendor_id)
 
 bool GSDevice12::CreateDescriptorHeaps()
 {
-	static constexpr size_t MAX_SRVS = 32768;
-	static constexpr size_t MAX_RTVS = 16384;
-	static constexpr size_t MAX_DSVS = 16384;
-	static constexpr size_t MAX_CPU_SAMPLERS = 1024;
-
 	if (!m_descriptor_heap_manager.Create(m_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, MAX_SRVS, false) ||
 		!m_rtv_heap_manager.Create(m_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_RTVS, false) ||
 		!m_dsv_heap_manager.Create(m_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_DSVS, false) ||
@@ -484,7 +484,14 @@ void GSDevice12::MoveToNextCommandList()
 	// Begin command list.
 	res.command_allocators[1]->Reset();
 	res.command_lists[1].list4->Reset(res.command_allocators[1].get(), nullptr);
-	res.descriptor_allocator.Reset();
+	if (!UseBindless())
+	{
+		res.descriptor_allocator.Reset();
+	}
+	else if (UseBindless() && res.descriptor_allocator.ShouldReset())
+	{
+		res.descriptor_allocator.Reset();
+	}
 	if (res.sampler_allocator.ShouldReset())
 		res.sampler_allocator.Reset();
 
@@ -650,8 +657,8 @@ bool GSDevice12::ExecuteCommandList(WaitType wait_for_completion)
 	if (wait_for_completion != WaitType::None)
 		WaitForFence(res.ready_fence_value, wait_for_completion == WaitType::Spin);
 
-	// Push constants need to be refreshed each command list.
-	m_dirty_flags |= DIRTY_FLAG_VS_PUSH_CONSTANTS;
+	// Root constants need to be refreshed each command list.
+	m_dirty_flags |= DIRTY_FLAG_TFX_ROOT_CONSTANTS;
 
 	return true;
 }
@@ -2696,6 +2703,43 @@ bool GSDevice12::GetTextureGroupDescriptors(
 	return true;
 }
 
+bool GSDevice12::GetTFXBindlessIndices(bool force_update)
+{
+	TFXBindlessIndices indices = {};
+
+	D3D12BindlessDescriptorAllocator& allocator = GetDescriptorAllocator();
+
+	if (!allocator.AllocateBindless(&indices.tex_index, m_tfx_textures[TEXTURE_TEXTURE]))
+		return false;
+	if (!allocator.AllocateBindless(&indices.pal_index, m_tfx_textures[TEXTURE_PALETTE]))
+		return false;
+	if (!allocator.AllocateBindless(&indices.rt_index, m_tfx_textures[TEXTURE_RT]))
+		return false;
+	if (!allocator.AllocateBindless(&indices.primid_index, m_tfx_textures[TEXTURE_PRIMID]))
+		return false;
+	if (!allocator.AllocateBindless(&indices.depth_index, m_tfx_textures[TEXTURE_DEPTH]))
+		return false;
+	if (0)
+	{
+		if (!allocator.AllocateBindless(&indices.rt_uav_index, m_tfx_textures[TEXTURE_RT_UAV]))
+			return false;
+		if (!allocator.AllocateBindless(&indices.depth_uav_index, m_tfx_textures[TEXTURE_DEPTH_UAV]))
+			return false;
+	}
+	indices.sampler_index = static_cast<BindlessIndex>(m_tfx_samplers_handle_gpu.index);
+
+	if (m_tfx_bindless_indices_cache.Update(indices) || force_update)
+	{
+		GetCommandList().list4->SetGraphicsRoot32BitConstants(
+			TFX_ROOT_SIGNATURE_BINDLESS_PARAM_ROOT_CONSTANTS,
+			TFX_ROOT_CONSTANTS_BINDLESS_INDICES_NUM_CONSTANTS,
+			&m_tfx_bindless_indices_cache,
+			TFX_ROOT_CONSTANTS_BINDLESS_INDICES_OFFSET);
+	}
+
+	return true;
+}
+
 static void AddUtilityVertexAttributes(D3D12::GraphicsPipelineBuilder& gpb)
 {
 	gpb.AddVertexAttribute("POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0);
@@ -2797,21 +2841,37 @@ bool GSDevice12::CreateRootSignatures()
 	// Draw/TFX Pipeline Layout
 	//////////////////////////////////////////////////////////////////////////
 	rsb.SetInputAssemblerFlag();
-	rsb.AddCBVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
-	rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.AddSRVParameter(0, D3D12_SHADER_VISIBILITY_VERTEX);
-	rsb.AddSRVParameter(5, D3D12_SHADER_VISIBILITY_VERTEX);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL); // Source (t0) / Palette (t2)
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
-	// RT (t2) / PrimID (t3) / Depth (t4) / RT UAV (u0) / Depth UAV (u1)
-	D3D12_DESCRIPTOR_RANGE_TYPE rt_types[2] = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, D3D12_DESCRIPTOR_RANGE_TYPE_UAV };
-	u32 rt_start_regs[2] = { 2, 0 };
-	u32 rt_num_regs[2] = { 3, 2 };
-	rsb.AddDescriptorTableMultiRange(2, rt_types, rt_start_regs, rt_num_regs, D3D12_SHADER_VISIBILITY_PIXEL);
-	rsb.Add32BitConstants(2, sizeof(m_vs_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_VERTEX);
-	if (!(m_tfx_root_signature = rsb.Create()))
-		return false;
-	D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
+	if (UseBindless())
+	{
+		rsb.AddCBVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
+		rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_PIXEL);
+		rsb.AddSRVParameter(0, D3D12_SHADER_VISIBILITY_VERTEX);
+		rsb.AddSRVParameter(5, D3D12_SHADER_VISIBILITY_VERTEX);
+		rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, MAX_SRVS, D3D12_SHADER_VISIBILITY_PIXEL);
+		rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, MAX_CPU_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
+		rsb.Add32BitConstants(2, TFX_ROOT_CONSTANTS_TOTAL_NUM_CONSTANTS, D3D12_SHADER_VISIBILITY_ALL);
+		if (!(m_tfx_root_signature = rsb.Create()))
+			return false;
+		D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
+	}
+	else
+	{
+		rsb.AddCBVParameter(0, D3D12_SHADER_VISIBILITY_ALL);
+		rsb.AddCBVParameter(1, D3D12_SHADER_VISIBILITY_PIXEL);
+		rsb.AddSRVParameter(0, D3D12_SHADER_VISIBILITY_VERTEX);
+		rsb.AddSRVParameter(5, D3D12_SHADER_VISIBILITY_VERTEX);
+		rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2, D3D12_SHADER_VISIBILITY_PIXEL); // Source (t0) / Palette (t2)
+		rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 0, NUM_TFX_SAMPLERS, D3D12_SHADER_VISIBILITY_PIXEL);
+		// RT (t2) / PrimID (t3) / Depth (t4) / RT UAV (u0) / Depth UAV (u1)
+		D3D12_DESCRIPTOR_RANGE_TYPE rt_types[2] = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, D3D12_DESCRIPTOR_RANGE_TYPE_UAV };
+		u32 rt_start_regs[2] = { 2, 0 };
+		u32 rt_num_regs[2] = { 3, 2 };
+		rsb.AddDescriptorTableMultiRange(2, rt_types, rt_start_regs, rt_num_regs, D3D12_SHADER_VISIBILITY_PIXEL);
+		rsb.Add32BitConstants(2, sizeof(m_vs_pc_cache) / sizeof(u32), D3D12_SHADER_VISIBILITY_VERTEX);
+		if (!(m_tfx_root_signature = rsb.Create()))
+			return false;
+		D3D12::SetObjectName(m_tfx_root_signature.get(), "TFX root signature");
+	}
 	return true;
 }
 
@@ -4124,29 +4184,38 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 			return ApplyTFXState(true);
 		}
 
-		flags |= DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE;
+		if (!UseBindless())
+		{
+			flags |= DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE;
+		}
 	}
 
 	if (flags & DIRTY_FLAG_TFX_TEXTURES)
 	{
-		if (!GetTextureGroupDescriptors(&m_tfx_textures_handle_gpu, m_tfx_textures.data(), 2))
+		if (!UseBindless())
 		{
-			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX texture descriptor groups");
-			return ApplyTFXState(true);
+			if (!GetTextureGroupDescriptors(&m_tfx_textures_handle_gpu, m_tfx_textures.data(), 2))
+			{
+				ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX texture descriptor groups");
+				return ApplyTFXState(true);
+			}
+			
+			flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE;
 		}
-
-		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE;
 	}
 
 	if (flags & DIRTY_FLAG_TFX_RT_TEXTURES)
 	{
-		if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, NUM_TFX_RT_TEXTURES + NUM_TFX_UAV_TEXTURES))
+		if (!UseBindless())
 		{
-			ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX RT descriptor descriptor groups");
-			return ApplyTFXState(true);
-		}
+			if (!GetTextureGroupDescriptors(&m_tfx_rt_textures_handle_gpu, m_tfx_textures.data() + 2, NUM_TFX_RT_TEXTURES + NUM_TFX_UAV_TEXTURES))
+			{
+				ExecuteCommandListAndRestartRenderPass(false, "Ran out of TFX RT descriptor descriptor groups");
+				return ApplyTFXState(true);
+			}
 
-		flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2;
+			flags |= DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2;
+		}
 	}
 
 	ID3D12GraphicsCommandList* cmdlist = GetCommandList().list4.get();
@@ -4162,7 +4231,7 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_VS_CBV, m_tfx_constant_buffers[0]);
 	if (flags & DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING)
 		cmdlist->SetGraphicsRootConstantBufferView(TFX_ROOT_SIGNATURE_PARAM_PS_CBV, m_tfx_constant_buffers[1]);
-	if (m_features.vs_expand && (flags & DIRTY_FLAG_VS_PUSH_CONSTANTS))
+	if (m_features.vs_expand && (flags & DIRTY_FLAG_TFX_ROOT_CONSTANTS))
 		SetVSPushConstants(m_vs_pc_cache.base_vertex, m_vs_pc_cache.base_index, true);
 	if (flags & DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING)
 	{
@@ -4174,12 +4243,27 @@ bool GSDevice12::ApplyTFXState(bool already_execed)
 		cmdlist->SetGraphicsRootShaderResourceView(TFX_ROOT_SIGNATURE_PARAM_VS_IB_SRV,
 			m_expand_index_stream_buffer.GetGPUPointer());
 	}
-	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE)
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_TEXTURES, m_tfx_textures_handle_gpu);
-	if (flags & DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE)
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_SAMPLERS, m_tfx_samplers_handle_gpu);
-	if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2)
-		cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES, m_tfx_rt_textures_handle_gpu);
+	if (!UseBindless())
+	{
+		if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE)
+			cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_TEXTURES, m_tfx_textures_handle_gpu);
+		if (flags & DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE)
+			cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_SAMPLERS, m_tfx_samplers_handle_gpu);
+		if (flags & DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2)
+			cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES, m_tfx_rt_textures_handle_gpu);
+	}
+	else
+	{
+		GetTFXBindlessIndices(flags & DIRTY_FLAG_TFX_ROOT_CONSTANTS);
+
+		if (DIRTY_FLAG_TFX_BINDLESS_TABLES)
+		{
+			cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_BINDLESS_PARAM_PS_SRVS,
+				GetDescriptorAllocator().GetBaseGPUHandle());
+			cmdlist->SetGraphicsRootDescriptorTable(TFX_ROOT_SIGNATURE_BINDLESS_PARAM_PS_SAMPLERS,
+				GetSamplerAllocator().GetBaseGPUHandle());
+		}
+	}
 
 	ApplyBaseState(flags, cmdlist);
 	return true;
@@ -4230,9 +4314,22 @@ void GSDevice12::SetVSPushConstants(u32 base_vertex, u32 base_index, bool force_
 	pc.base_index = base_index;
 	if (m_vs_pc_cache.Update(pc) || force_update)
 	{
-		GetCommandList().list4->SetGraphicsRoot32BitConstants(
-			TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS, sizeof(m_vs_pc_cache) / sizeof(u32),
-			&m_vs_pc_cache, 0);
+		if (UseBindless())
+		{
+			GetCommandList().list4->SetGraphicsRoot32BitConstants(
+				TFX_ROOT_SIGNATURE_BINDLESS_PARAM_ROOT_CONSTANTS,
+				TFX_ROOT_CONSTANTS_VS_NUM_CONSTANTS,
+				&m_vs_pc_cache,
+				TFX_ROOT_CONSTANTS_VS_OFFSET);
+		}
+		else
+		{
+			GetCommandList().list4->SetGraphicsRoot32BitConstants(
+				TFX_ROOT_SIGNATURE_PARAM_ROOT_CONSTANTS,
+				TFX_ROOT_CONSTANTS_VS_NUM_CONSTANTS,
+				&m_vs_pc_cache,
+				TFX_ROOT_CONSTANTS_VS_OFFSET);
+		}
 	}
 }
 

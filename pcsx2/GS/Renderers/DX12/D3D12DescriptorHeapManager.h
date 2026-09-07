@@ -7,12 +7,14 @@
 #include "common/HashCombine.h"
 #include "common/RedtapeWindows.h"
 #include "common/RedtapeWilCom.h"
+#include "common/Assertions.h"
 
 #include <bitset>
 #include <cstring>
 #include <directx/d3d12.h>
 #include <unordered_map>
 #include <vector>
+#include <limits>
 
 // This class provides an abstraction for D3D12 descriptor heaps.
 struct D3D12DescriptorHandle final
@@ -94,8 +96,10 @@ public:
 	bool Allocate(u32 num_handles, D3D12DescriptorHandle* out_base_handle);
 	void Reset();
 
-private:
+protected:
+	wil::com_ptr_nothrow<ID3D12Device> m_device;
 	wil::com_ptr_nothrow<ID3D12DescriptorHeap> m_descriptor_heap;
+	D3D12_DESCRIPTOR_HEAP_TYPE m_type = static_cast<D3D12_DESCRIPTOR_HEAP_TYPE>(-1);
 	u32 m_descriptor_increment_size = 0;
 	u32 m_num_descriptors = 0;
 	u32 m_current_offset = 0;
@@ -126,7 +130,6 @@ class D3D12GroupedSamplerAllocator : private D3D12DescriptorAllocator
 		}
 	};
 
-
 public:
 	D3D12GroupedSamplerAllocator();
 	~D3D12GroupedSamplerAllocator();
@@ -140,6 +143,11 @@ public:
 	bool LookupSingle(D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle& cpu_handle);
 	bool LookupGroup(D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles);
 
+	u16 GetIndexSingle(const D3D12DescriptorHandle& cpu_handle);
+	u16 GetIndexGroup(const D3D12DescriptorHandle* cpu_handles);
+
+	D3D12_GPU_DESCRIPTOR_HANDLE GetBaseGPUHandle() { return m_heap_base_gpu; }
+
 	// Clears cache but doesn't reset allocator.
 	void InvalidateCache();
 
@@ -147,7 +155,6 @@ public:
 	bool ShouldReset() const;
 
 private:
-	wil::com_ptr_nothrow<ID3D12Device> m_device;
 	std::unordered_map<Key, D3D12DescriptorHandle, KeyHash> m_groups;
 };
 
@@ -160,11 +167,7 @@ D3D12GroupedSamplerAllocator<NumSamplers>::~D3D12GroupedSamplerAllocator() = def
 template <u32 NumSamplers>
 bool D3D12GroupedSamplerAllocator<NumSamplers>::Create(ID3D12Device* device, u32 num_descriptors)
 {
-	if (!D3D12DescriptorAllocator::Create(device, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, num_descriptors))
-		return false;
-
-	m_device = device;
-	return true;
+	return D3D12DescriptorAllocator::Create(device, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, num_descriptors);
 }
 
 template <u32 NumSamplers>
@@ -211,6 +214,24 @@ bool D3D12GroupedSamplerAllocator<NumSamplers>::LookupSingle(
 	return true;
 }
 
+template<u32 NumSamplers>
+u16 D3D12GroupedSamplerAllocator<NumSamplers>::GetIndexSingle(const D3D12DescriptorHandle& cpu_handle)
+{
+	D3D12DescriptorHandle gpu_handle;
+	LookupSingle(&gpu_handle, cpu_handle);
+	pxAssert(gpu_handle.index <= static_cast<u32>(UINT16_MAX));
+	return static_cast<u16>(gpu_handle.index);
+}
+
+template<u32 NumSamplers>
+u16 D3D12GroupedSamplerAllocator<NumSamplers>::GetIndexGroup(const D3D12DescriptorHandle* cpu_handle)
+{
+	D3D12DescriptorHandle gpu_handle;
+	LookupGroup(&gpu_handle, cpu_handle);
+	pxAssert(gpu_handle.index <= static_cast<u32>(UINT16_MAX));
+	return static_cast<u16>(gpu_handle.index);
+}
+
 template <u32 NumSamplers>
 bool D3D12GroupedSamplerAllocator<NumSamplers>::LookupGroup(
 	D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles)
@@ -252,3 +273,15 @@ bool D3D12GroupedSamplerAllocator<NumSamplers>::ShouldReset() const
 	// This saves descriptor copying when there isn't a large number of sampler configs per frame.
 	return m_groups.size() >= (D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE / 2);
 }
+
+using BindlessIndex = u32;
+
+class D3D12BindlessDescriptorAllocator : public D3D12DescriptorAllocator
+{
+public:
+	bool AllocateBindless(BindlessIndex* index_out, const D3D12DescriptorHandle& cpu_handle);
+	bool ShouldReset() const;
+	D3D12_GPU_DESCRIPTOR_HANDLE GetBaseGPUHandle() { return m_heap_base_gpu; }
+private:
+	std::unordered_map<u32, BindlessIndex> m_handles;
+};

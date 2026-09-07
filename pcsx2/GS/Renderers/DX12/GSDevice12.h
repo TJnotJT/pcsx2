@@ -35,6 +35,8 @@ public:
 	template <typename T>
 	using ComPtr = wil::com_ptr_nothrow<T>;
 
+	using BindlessIndex = u32;
+
 	enum : u32
 	{
 		/// Number of command lists. One is being built while the other(s) are executed.
@@ -104,6 +106,8 @@ public:
 
 	bool UseEnhancedBarriers() const { return m_enhanced_barriers; }
 
+	bool UseBindless() const { return true; }
+
 	/// Returns the current command list, commands can be recorded directly.
 	const D3D12CommandList& GetCommandList() const
 	{
@@ -114,7 +118,7 @@ public:
 	const D3D12CommandList& GetInitCommandList();
 
 	/// Returns the per-frame SRV/CBV/UAV allocator.
-	D3D12DescriptorAllocator& GetDescriptorAllocator()
+	D3D12BindlessDescriptorAllocator& GetDescriptorAllocator()
 	{
 		return m_command_lists[m_current_command_list].descriptor_allocator;
 	}
@@ -199,11 +203,20 @@ private:
 		Ready,
 	};
 
+	struct D3D12CpuDescriptorHandleHasher
+	{
+		std::size_t operator()(const D3D12_CPU_DESCRIPTOR_HANDLE& x) const
+		{
+			return x.ptr;
+		}
+	};
+
 	struct CommandListResources
 	{
 		std::array<ComPtr<ID3D12CommandAllocator>, 2> command_allocators;
 		std::array<D3D12CommandList, 2> command_lists;
-		D3D12DescriptorAllocator descriptor_allocator;
+		D3D12BindlessDescriptorAllocator descriptor_allocator;
+
 		D3D12GroupedSamplerAllocator<SAMPLER_GROUP_SIZE> sampler_allocator;
 		std::vector<std::pair<D3D12MA::Allocation*, ID3D12DeviceChild*>> pending_resources;
 		std::vector<std::pair<D3D12DescriptorHeapManager&, u32>> pending_descriptors;
@@ -361,7 +374,15 @@ public:
 		TFX_ROOT_SIGNATURE_PARAM_PS_TEXTURES = 4,
 		TFX_ROOT_SIGNATURE_PARAM_PS_SAMPLERS = 5,
 		TFX_ROOT_SIGNATURE_PARAM_PS_RT_TEXTURES = 6,
-		TFX_ROOT_SIGNATURE_PARAM_VS_PUSH_CONSTANTS = 7,
+		TFX_ROOT_SIGNATURE_PARAM_ROOT_CONSTANTS = 7,
+
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_VS_CBV = 0,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_PS_CBV = 1,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_VS_VB_SRV = 2,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_VS_IB_SRV = 3,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_PS_SRVS = 4,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_PS_SAMPLERS = 5,
+		TFX_ROOT_SIGNATURE_BINDLESS_PARAM_ROOT_CONSTANTS = 6,
 
 		UTILITY_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS = 0,
 		UTILITY_ROOT_SIGNATURE_PARAM_PS_TEXTURES = 1,
@@ -433,9 +454,61 @@ private:
 	ComPtr<ID3D12PipelineState> m_cas_upscale_pipeline;
 	ComPtr<ID3D12PipelineState> m_cas_sharpen_pipeline;
 
+	struct TFXBindlessIndices
+	{
+		BindlessIndex tex_index;
+		BindlessIndex pal_index;
+		BindlessIndex rt_index;
+		BindlessIndex primid_index;
+		BindlessIndex depth_index;
+		BindlessIndex rt_uav_index;
+		BindlessIndex depth_uav_index;
+		BindlessIndex sampler_index;
+
+		__fi TFXBindlessIndices()
+		{
+			memset(static_cast<void*>(this), 0, sizeof(*this));
+		}
+		__fi TFXBindlessIndices(const TFXBindlessIndices& other)
+		{
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+		}
+		__fi TFXBindlessIndices& operator=(const TFXBindlessIndices& other)
+		{
+			new (this) TFXBindlessIndices(other);
+			return *this;
+		}
+		__fi bool operator==(const TFXBindlessIndices& other) const
+		{
+			return BitEqual(*this, other);
+		}
+		__fi bool operator!=(const TFXBindlessIndices& other) const
+		{
+			return !(*this == other);
+		}
+		__fi bool Update(const TFXBindlessIndices& other)
+		{
+			if (*this == other)
+				return false;
+
+			memcpy(static_cast<void*>(this), static_cast<const void*>(&other), sizeof(*this));
+			return true;
+		}
+	};
+	static_assert(sizeof(TFXBindlessIndices) == 32);
+
 	GSHWDrawConfig::VSConstantBuffer m_vs_cb_cache;
 	GSHWDrawConfig::PSConstantBuffer m_ps_cb_cache;
+
+	// Root constants.
 	GSHWDrawConfig::VSPushConstants m_vs_pc_cache;
+	TFXBindlessIndices m_tfx_bindless_indices_cache;
+	static constexpr u32 TFX_ROOT_CONSTANTS_VS_OFFSET = 0;
+	static constexpr u32 TFX_ROOT_CONSTANTS_VS_NUM_CONSTANTS = sizeof(m_vs_pc_cache) / sizeof(u32);
+	static constexpr u32 TFX_ROOT_CONSTANTS_BINDLESS_INDICES_OFFSET = TFX_ROOT_CONSTANTS_VS_NUM_CONSTANTS;
+	static constexpr u32 TFX_ROOT_CONSTANTS_BINDLESS_INDICES_NUM_CONSTANTS = sizeof(m_tfx_bindless_indices_cache) / sizeof(u32);
+	static constexpr u32 TFX_ROOT_CONSTANTS_TOTAL_NUM_CONSTANTS =
+		TFX_ROOT_CONSTANTS_VS_NUM_CONSTANTS + TFX_ROOT_CONSTANTS_BINDLESS_INDICES_NUM_CONSTANTS;
 
 	D3D12ShaderCache m_shader_cache;
 	ComPtr<ID3DBlob> m_convert_vs;
@@ -466,6 +539,7 @@ private:
 	void ClearSamplerCache() final;
 	bool GetTextureGroupDescriptors(
 		D3D12DescriptorHandle* gpu_handle, const D3D12DescriptorHandle* cpu_handles, u32 count);
+	bool GetTFXBindlessIndices(bool force_update = false);
 
 	const ID3DBlob* GetTFXVertexShader(GSHWDrawConfig::VSSelector sel);
 	const ID3DBlob* GetTFXPixelShader(const GSHWDrawConfig::PSSelector& sel);
@@ -656,7 +730,7 @@ private:
 		DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE = (1 << 9),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE = (1 << 10),
 		DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 = (1 << 11),
-		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 12),
+		DIRTY_FLAG_TFX_ROOT_CONSTANTS = (1 << 12),
 
 		DIRTY_FLAG_VERTEX_BUFFER = (1 << 13),
 		DIRTY_FLAG_INDEX_BUFFER = (1 << 14),
@@ -668,10 +742,13 @@ private:
 		DIRTY_FLAG_BLEND_CONSTANTS = (1 << 20),
 		DIRTY_FLAG_STENCIL_REF = (1 << 21),
 
+		DIRTY_FLAG_TFX_BINDLESS_TABLES = (1 << 22),
+
 		DIRTY_ROOT_PARAMS = DIRTY_FLAG_VS_CONSTANT_BUFFER_BINDING | DIRTY_FLAG_PS_CONSTANT_BUFFER_BINDING |
 		                    DIRTY_FLAG_VS_VERTEX_BUFFER_BINDING | DIRTY_FLAG_VS_INDEX_BUFFER_BINDING |
 		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE | DIRTY_FLAG_SAMPLERS_DESCRIPTOR_TABLE |
-		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_VS_PUSH_CONSTANTS,
+		                    DIRTY_FLAG_TEXTURES_DESCRIPTOR_TABLE_2 | DIRTY_FLAG_TFX_ROOT_CONSTANTS |
+		                    DIRTY_FLAG_TFX_BINDLESS_TABLES,
 
 		DIRTY_BASE_STATE = DIRTY_FLAG_VERTEX_BUFFER | DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PRIMITIVE_TOPOLOGY |
 		                   DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR | DIRTY_FLAG_RENDER_TARGET | DIRTY_FLAG_PIPELINE |

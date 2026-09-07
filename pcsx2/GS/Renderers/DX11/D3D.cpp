@@ -523,8 +523,9 @@ wil::com_ptr_nothrow<ID3DBlob> D3D::CompileShader(D3D::ShaderType type, D3D::Sha
 		break;
 	}
 
-	static constexpr UINT flags_non_debug = D3DCOMPILE_OPTIMIZATION_LEVEL3;
-	static constexpr UINT flags_debug = D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_SOURCE;
+	static constexpr UINT flags_non_debug = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
+	static constexpr UINT flags_debug = D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_SOURCE |
+		D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
 
 	wil::com_ptr_nothrow<ID3DBlob> blob;
 	wil::com_ptr_nothrow<ID3DBlob> error_blob;
