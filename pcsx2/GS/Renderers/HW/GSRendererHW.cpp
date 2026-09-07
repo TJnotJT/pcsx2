@@ -11205,6 +11205,22 @@ void GSRendererHW::SetupSpriteRoundClampAlign(GSTextureCache::Target* rt, GSText
 
 		// PS align UV flag must be set in all cases because it's responsible for swapping UVs for rotated textures.
 		m_conf.ps.align_uv = true;
+
+		// Invariants so that VS/PS outputs/inputs match.
+		{
+			const bool vs_round_uv_out =
+				(m_conf.vs.round_uv || m_conf.vs.clamp_uv != GSHWDrawConfig::VS_CLAMP_UV::NONE ||
+					m_conf.vs.align_uv != GSHWDrawConfig::VS_ALIGN_UV::NONE);
+			const bool ps_round_uv_in =
+				(m_conf.ps.round_uv != GSHWDrawConfig::PS_ROUND_UV::NONE || m_conf.ps.clamp_uv || m_conf.ps.align_uv);
+			const bool vs_scale_uv_out = (m_conf.vs.round_uv != 0);
+			const bool ps_scale_uv_in = (m_conf.ps.round_uv != GSHWDrawConfig::PS_ROUND_UV::NONE);
+			const bool vs_clamp_uv_out = (m_conf.vs.clamp_uv != GSHWDrawConfig::VS_CLAMP_UV::NONE);
+			const bool ps_clamp_uv_in = (m_conf.ps.clamp_uv != 0);
+			pxAssert(vs_round_uv_out == ps_round_uv_in);
+			pxAssert(vs_scale_uv_out == ps_scale_uv_in);
+			pxAssert(vs_clamp_uv_out == ps_clamp_uv_in);
+		}
 	}
 }
 
