@@ -189,6 +189,7 @@ struct MainPSIn
 	uint4 rounduv [[flat, function_constant(PS_SHADER_ALIGN)]];
 	float4 scaleuv [[flat, function_constant(PS_ROUND_UV_ENABLED)]];
 	float4 clampuv [[flat, function_constant(PS_CLAMP_UV)]];
+	float2 window_pos [[flat, function_constant(PS_SHADER_ALIGN)]]; // unused in PS
 };
 
 struct MainResult
@@ -233,14 +234,14 @@ static uint4 extract_round_uv_bits(float q)
 	);
 }
 
-float2 raw_coords_to_ndc(uint2 raw_pos, float2 vertex_scale, float2 vertex_offset)
+static float2 raw_coords_to_ndc(uint2 raw_pos, float2 vertex_scale, float2 vertex_offset)
 {
 	float2 ndc_pos = (float2(raw_pos) - 0.05f) * vertex_scale - vertex_offset;
 	ndc_pos.y = -ndc_pos.y; // Y axis is flipped in Metal
 	return ndc_pos;
 }
 
-float2 window_coords_to_ndc(float2 window_pos, float2 vertex_scale)
+static float2 window_coords_to_ndc(float2 window_pos, float2 vertex_scale)
 {
 	// This function is only used by shader sprite align and always uses a native HPO.
 	float2 ndc_pos = (window_pos + 8.0f - 0.05f) * float2(vertex_scale) - 1.0f;
@@ -248,7 +249,7 @@ float2 window_coords_to_ndc(float2 window_pos, float2 vertex_scale)
 	return ndc_pos;
 }
 
-float raw_z_to_ndc(uint z)
+static float raw_z_to_ndc(uint z)
 {
 	return float(z) * 0x1p-32;
 }
@@ -458,7 +459,7 @@ static float2x2 get_xy_deltas_unscaled(thread const MainVSOut& v0, thread const 
 // This is up or down for shallow (X dominant) edges, and right or left for steep (Y dominant) edges.
 // Similar expansion to line AA1 except instead of expanding on both sides of the line,
 // expand on on the side towards the outside of the triangle.
-float2 get_aa1_triangle_expand_dir(thread const MainVSOut& v0, thread const MainVSOut& v1, thread const MainVSOut& v2,
+static float2 get_aa1_triangle_expand_dir(thread const MainVSOut& v0, thread const MainVSOut& v1, thread const MainVSOut& v2,
 	constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
 {
 	float2x2 xy_deltas = get_xy_deltas_unscaled(v0, v1, v2, cb);
@@ -477,14 +478,14 @@ float2 get_aa1_triangle_expand_dir(thread const MainVSOut& v0, thread const Main
 	return line_expand;
 }
 
-float2x2 get_inverse(const thread float2x2& mat, float det)
+static float2x2 get_inverse(const thread float2x2& mat, float det)
 {
 	return float2x2(mat[1][1], -mat[0][1], -mat[1][0], mat[0][0]) * (1 / det);
 }
 
 // Extrapolate triangle attributes from the first vertex along the given direction.
 // dp_mat is derived from the input vertices, it is passed in to avoid recomputing.
-void extrapolate_aa1_triangle_edge(thread MainVSOut& v0, thread const MainVSOut& v1, thread const MainVSOut& v2,
+static void extrapolate_aa1_triangle_edge(thread MainVSOut& v0, thread const MainVSOut& v1, thread const MainVSOut& v2,
 	thread const float2x2& dp_mat, float2 dp, constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
 {
 	// Get texture deltas
@@ -804,7 +805,7 @@ vertex MainVSOut vs_main_expand(
 					v2.ti.zw = tex.xw;
 
 					// Swapping for rotated textures.
-					float2 texscale = select(cb.texture_scale, cb.texture_scale.yx, bool2(v0.rounduv.zw & ROUND_UV_SWAP));
+					float2 texscale = select(cb.texture_scale, cb.texture_scale.yx, (v0.rounduv.zw & ROUND_UV_SWAP) != 0);
 					v0.ti.xy = v0.ti.zw * texscale;
 					v1.ti.xy = v1.ti.zw * texscale;
 					v2.ti.xy = v2.ti.zw * texscale;
@@ -1183,12 +1184,12 @@ struct PSMain
 			// Extract flags for whether to round U, V.
 			int2 round_per_pixel = int2(in.rounduv.zw) & ROUND_UV_PER_PIXEL;
 			int2 round_flags = int2(in.rounduv.zw) & (ROUND_UV_UP | ROUND_UV_DOWN);
-			round_flags = select(int2(0), round_flags, bool2(round_per_pixel));
+			round_flags = select(int2(0, 0), round_flags, round_per_pixel != 0);
 
 			// Being on the top or left pixels converts round down to round up.
-			round_down = int2(bool2(round_flags & ROUND_UV_DOWN)) & ~topleft;
-			round_down_tl = int2(bool2(round_flags & ROUND_UV_DOWN)) & topleft;
-			round_up = int2(bool2(round_flags & ROUND_UV_UP));
+			round_down = int2((round_flags & ROUND_UV_DOWN) != 0) & ~topleft;
+			round_down_tl = int2((round_flags & ROUND_UV_DOWN) != 0) & topleft;
+			round_up = int2((round_flags & ROUND_UV_UP) != 0);
 		}
 
 		float2 uv = in.ti.zw; // Unnormalized UVs.
@@ -1221,20 +1222,20 @@ struct PSMain
 		if (PS_ROUND_UV == GSShader::PS_ROUND_UV::LINEAR)
 		{
 			// Bilinear: round to 1/16 texel.
-			uv = select(uv, uv - ROUND_UV_THRESHOLD, bool2(round_down));
-			uv = select(uv, uv + ROUND_UV_THRESHOLD, bool2(round_up));
+			uv = select(uv, uv - ROUND_UV_THRESHOLD, round_down != 0);
+			uv = select(uv, uv + ROUND_UV_THRESHOLD, round_up != 0);
 			uv = floor(uv);
 		}
 		else if (PS_ROUND_UV == GSShader::PS_ROUND_UV::NEAREST)
 		{
 			// Nearest: get the center of the texel we would sample from at native.
-			uv = select(uv, uvi - 8.0f, bool2(round_down));
-			uv = select(uv, uvi + 8.0f, bool2(round_up));
-			uv = select(uv, floor(uv / 16.0f) * 16.0f + 8.0f, bool2(1 & ~(round_down | round_up)));
+			uv = select(uv, uvi - 8.0f, round_down != 0);
+			uv = select(uv, uvi + 8.0f, round_up != 0);
+			uv = select(uv, floor(uv / 16.0f) * 16.0f + 8.0f, (1 & ~(round_down | round_up)) != 0);
 
 			// Then offset UV based on the XY offset from native texel center.
 			uv += 16.0f * sign(in.scaleuv.xy) * upscale_offset;
-			uv = select(uv, uvi + 8.0f / scale_tex, bool2(round_down_tl));
+			uv = select(uv, uvi + 8.0f / scale_tex, round_down_tl != 0);
 		}
 
 		if (PS_ROUND_UV_ENABLED)
@@ -1244,7 +1245,7 @@ struct PSMain
 			uv = clamp(uv, in.clampuv.xy, in.clampuv.zw);
 
 		if (PS_SHADER_ALIGN)
-			uv = select(uv, uv.yx, bool2(in.rounduv.zw & ROUND_UV_SWAP));
+			uv = select(uv, uv.yx, (in.rounduv.zw & ROUND_UV_SWAP) != 0);
 
 		return float4(uv / 16.0f / cb.wh.xy, uv); // Return normalized and unnormalized coords.
 	}

@@ -1998,7 +1998,7 @@ void GSDeviceMTL::MRESetHWPipelineState(GSHWDrawConfig::VSSelector vssel, GSHWDr
 		setFnConstantI(m_fn_constants, vssel_mtl.expand,     GSMTLConstantIndex_VS_EXPAND_TYPE);
 		auto newvs = LoadShader(vssel_mtl.expand == GSShader::VSExpand::None ? @"vs_main" : @"vs_main_expand");
 		vs = newvs;
-		m_hw_vs.insert(std::make_pair(vssel.key, std::move(newvs)));
+		m_hw_vs.insert(std::make_pair(vssel_mtl.key, std::move(newvs)));
 	}
 
 	id<MTLFunction> ps;
