@@ -9102,7 +9102,8 @@ void GSRendererHW::EmulateAlphaTestSecondPass()
 
 		m_conf.depth.zwe = false; // Disable Z write on first pass
 
-		m_conf.alpha_second_pass.colormask.wrgba = false; // Disable color write on second pass
+		m_conf.alpha_second_pass.colormask.wrgba = 0; // Disable color write on second pass
+		m_conf.alpha_second_pass.ps.no_color1 = true; // Disable dual source blend on second pass
 
 		// Only need a second pass if Z is written.
 		if (m_conf.alpha_second_pass.depth.zwe)
