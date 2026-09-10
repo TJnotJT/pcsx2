@@ -3881,6 +3881,9 @@ static void AddShaderHeader(std::stringstream& ss)
 		ss << "#extension GL_ARB_fragment_shader_interlock : require\n";
 		ss << "#extension GL_ARB_shader_image_load_store : require\n";
 	}
+#ifdef SHADER_DEBUG_IMAGES
+	ss << "#define SHADER_DEBUG_IMAGES 1\n";
+#endif
 }
 
 static void AddShaderStageMacro(std::stringstream& ss, bool vs, bool gs, bool fs)
@@ -4057,6 +4060,10 @@ bool GSDeviceVK::CreatePipelineLayouts()
 		1, VK_SHADER_STAGE_FRAGMENT_BIT);
 	dslb.AddBinding(TFX_TEXTURE_RT_ROV, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 	dslb.AddBinding(TFX_TEXTURE_DEPTH_ROV, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+#ifdef SHADER_DEBUG_IMAGES
+	dslb.AddBinding(TFX_TEXTURE_DEBUG_0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+	dslb.AddBinding(TFX_TEXTURE_DEBUG_1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+#endif
 	if ((m_tfx_texture_ds_layout = dslb.Create(dev)) == VK_NULL_HANDLE)
 		return false;
 	Vulkan::SetObjectName(dev, m_tfx_texture_ds_layout, "TFX texture descriptor layout");
@@ -4924,6 +4931,17 @@ void GSDeviceVK::DestroyResources()
 		m_null_texture.reset();
 	}
 
+#ifdef SHADER_DEBUG_IMAGES
+	for (std::unique_ptr<GSTextureVK>& debug_image : m_debug_images)
+	{
+		if (debug_image)
+		{
+			debug_image->Destroy(false);
+			debug_image.reset();
+		}
+	}
+#endif
+
 	for (FrameResources& resources : m_frame_resources)
 	{
 		for (auto& it : resources.cleanup_resources)
@@ -5555,6 +5573,47 @@ void GSDeviceVK::PSSetShaderResource(int i, GSTexture* sr, bool check_state, Res
 	m_dirty_flags |= (DIRTY_FLAG_TFX_TEXTURE_0 << i);
 }
 
+#ifdef SHADER_DEBUG_IMAGES
+void GSDeviceVK::PSSetDebugImages(const GSVector2i& size, bool clear)
+{
+	int i = 0;
+	for (std::unique_ptr<GSTextureVK>& image : m_debug_images)
+	{
+		if (!image || image->GetSize() != size)
+			image.reset(static_cast<GSTextureVK*>(CreateShaderWriteTarget(size, GSTexture::Format::Color)));
+
+		if (image.get() != m_tfx_textures[TFX_TEXTURE_DEBUG_0 + i])
+		{
+			if (image->GetLayout() != GSTextureVK::Layout::ReadWriteImage)
+			{
+				if (InRenderPass())
+				{
+					GL_INS("VK: End render pass to transition resource");
+					EndRenderPass();
+				}
+				image->TransitionToLayout(GSTextureVK::Layout::ReadWriteImage);
+			}
+			m_tfx_textures[TFX_TEXTURE_DEBUG_0 + i] = image.get();
+			m_dirty_flags |= DIRTY_FLAG_TFX_TEXTURE_DEBUG_0 << i;
+		}
+
+		if (clear)
+		{
+			if (InRenderPass())
+			{
+				GL_INS("VK: End render pass to clear debug image");
+				EndRenderPass();
+			}
+			image->SetClearColor(0);
+			image->CommitClear();
+		}
+
+		i++;
+	}
+
+}
+#endif
+
 void GSDeviceVK::PSSetSampler(GSHWDrawConfig::SamplerSelector sel)
 {
 	if (m_tfx_sampler_sel == sel.key)
@@ -5877,7 +5936,18 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 			dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, TFX_TEXTURE_DEPTH_ROV, m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetView(),
 				m_tfx_textures[TFX_TEXTURE_DEPTH_ROV]->GetVkLayout(), true);
 		}
-
+#ifdef SHADER_DEBUG_IMAGES
+		if (flags & DIRTY_FLAG_TFX_TEXTURE_DEBUG_0)
+		{
+			dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, TFX_TEXTURE_DEBUG_0, m_tfx_textures[TFX_TEXTURE_DEBUG_0]->GetView(),
+				m_tfx_textures[TFX_TEXTURE_DEBUG_0]->GetVkLayout(), true);
+		}
+		if (flags & DIRTY_FLAG_TFX_TEXTURE_DEBUG_1)
+		{
+			dsub.AddImageDescriptorWrite(VK_NULL_HANDLE, TFX_TEXTURE_DEBUG_1, m_tfx_textures[TFX_TEXTURE_DEBUG_1]->GetView(),
+				m_tfx_textures[TFX_TEXTURE_DEBUG_1]->GetVkLayout(), true);
+		}
+#endif
 		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_tfx_pipeline_layout, TFX_DESCRIPTOR_SET_TEXTURES);
 	}
 
@@ -6071,6 +6141,10 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	// stream buffer in first, in case we need to exec
 	SetVSConstantBuffer(config.cb_vs);
 	SetPSConstantBuffer(config.cb_ps);
+
+#ifdef SHADER_DEBUG_IMAGES
+	PSSetDebugImages(rtsize, config.use_debug_images);
+#endif
 
 	// bind textures before checking the render pass, in case we need to transition them
 	if (config.tex)

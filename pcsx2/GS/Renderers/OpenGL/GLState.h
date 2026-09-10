@@ -4,6 +4,7 @@
 #pragma once
 
 #include "GS/GSVector.h"
+#include "GS/Renderers/Common/GSDevice.h"
 
 #include "glad/gl.h"
 
@@ -51,6 +52,10 @@ namespace GLState
 	extern bool ds_written; // Depth Stencil written
 
 	extern GLuint tex_unit[8]; // shader input texture
+
+#ifdef SHADER_DEBUG_IMAGES
+	extern GLuint image_unit[8];
+#endif
 
 	extern u32 UpdateDrawBuffers();
 	extern void Clear();

@@ -271,6 +271,12 @@ private:
 	std::string m_shader_tfx_vgs;
 	std::string m_shader_tfx_fs;
 
+#ifdef SHADER_DEBUG_IMAGES
+	std::array<std::unique_ptr<GSTextureOGL>, 2> m_debug_images;
+#endif
+
+	GSTexture* GetDebugImage(int i) override { return m_debug_images[i].get(); }
+
 	bool CheckFeatures();
 
 	void SetSwapInterval();
@@ -420,6 +426,9 @@ public:
 	void PSSetShaderResource(int i, GSTexture* sr);
 	void PSSetSamplerState(GLuint ss);
 	void ClearSamplerCache() override;
+#ifdef SHADER_DEBUG_IMAGES
+	void PSSetDebugImages(const GSVector2i& size, bool clear);
+#endif
 
 	void OMSetDepthStencilState(GSDepthStencilOGL* dss);
 	void OMSetBlendState(bool enable = false, GLenum src_factor = GL_ONE, GLenum dst_factor = GL_ZERO, GLenum op = GL_FUNC_ADD,

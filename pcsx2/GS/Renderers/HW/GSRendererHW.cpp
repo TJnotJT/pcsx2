@@ -9608,10 +9608,28 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 		GSHWDrawConfig::DumpConfig(GetDrawDumpPath("%05d_hwconfig.txt", s_n), m_conf);
 	}
 
+	const int debug_draw = 193;
+
+#ifdef SHADER_DEBUG_IMAGES
+	if (s_n == debug_draw)
+	{
+		m_conf.use_debug_images = true;
+		m_conf.cb_ps.debug0 = 1;
+	}
+#endif
+
 	if (!m_channel_shuffle_width)
 		g_gs_device->RenderHW(m_conf);
 	else
 		m_last_rt = rt;
+
+#ifdef SHADER_DEBUG_IMAGES
+	if (s_n == debug_draw)
+	{
+		g_gs_device->GetDebugImage(0)->Save("C:\\Users\\tchan\\Desktop\\debug0.png");
+		g_gs_device->GetDebugImage(1)->Save("C:\\Users\\tchan\\Desktop\\debug1.png");
+	}
+#endif
 
 	if (g_gs_device->IsDSInRTActive())
 		g_gs_device->EndDSAsRT();

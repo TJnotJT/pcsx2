@@ -120,6 +120,13 @@ layout(std140, binding = 0) uniform cb21
 	float _pad2_cb1;
 	float _pad3_cb1;
 	float _pad4_cb1;
+
+#ifdef SHADER_DEBUG_IMAGES
+	uint debug0;
+	uint debug1;
+	uint debug2;
+	uint debug3;
+#endif
 };
 
 in SHADER
@@ -213,6 +220,22 @@ layout(binding = 4) uniform DEPTH_SAMPLER DepthSampler;
 
 #if ZWRITE && PS_HAS_CONSERVATIVE_DEPTH && !SW_DEPTH
 layout(depth_less) out float gl_FragDepth;
+#endif
+
+#ifdef SHADER_DEBUG_IMAGES
+layout(binding = 0, rgba8) uniform restrict coherent image2D DebugImage0;
+layout(binding = 1, rgba8) uniform restrict coherent image2D DebugImage1;
+void WriteToDebugImage(int i, ivec2 xy, vec4 val)
+{
+	if (i == 0)
+	{
+		imageStore(DebugImage0, xy, val);
+	}
+	else
+	{
+		imageStore(DebugImage1, xy, val);
+	}
+}
 #endif
 
 vec4 sample_from_rt()

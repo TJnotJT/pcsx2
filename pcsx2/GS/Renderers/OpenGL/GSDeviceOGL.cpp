@@ -955,6 +955,11 @@ void GSDeviceOGL::SetSwapInterval()
 
 void GSDeviceOGL::DestroyResources()
 {
+#ifdef SHADER_DEBUG_IMAGES
+	for (std::unique_ptr<GSTextureOGL>& debug_image : m_debug_images)
+		debug_image.reset();
+#endif
+
 	m_shader_cache.Close();
 
 	if (m_palette_ss != 0)
@@ -1639,6 +1644,10 @@ std::string GSDeviceOGL::GenGlslHeader(const std::string_view entry, GLenum type
 		default:
 			pxAssert(0);
 	}
+
+#ifdef SHADER_DEBUG_IMAGES
+	header += "#define SHADER_DEBUG_IMAGES 1\n";
+#endif
 
 	// Don't remove this, the recursive macro breaks some Intel drivers.
 	if (entry != "main")
@@ -2414,6 +2423,34 @@ void GSDeviceOGL::PSSetShaderResource(int i, GSTexture* sr)
 	}
 }
 
+#ifdef SHADER_DEBUG_IMAGES
+void GSDeviceOGL::PSSetDebugImages(const GSVector2i& size, bool clear)
+{
+	int i = 0;
+	for (std::unique_ptr<GSTextureOGL>& image : m_debug_images)
+	{
+		if (!image || image->GetSize() != size)
+			image.reset(static_cast<GSTextureOGL*>(CreateShaderWriteTarget(size, GSTexture::Format::Color)));
+
+		if (clear)
+		{
+			image->SetClearValue(0);
+			CommitClear(image.get(), true);
+		}
+
+		const GLuint id = image->GetID();
+		if (GLState::image_unit[i] != id)
+		{
+			GLState::image_unit[i] = id;
+			glBindImageTexture(i, id, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8);
+		}
+
+		i++;
+	}
+
+}
+#endif
+
 void GSDeviceOGL::PSSetSamplerState(GLuint ss)
 {
 	if (GLState::ps_ss != ss)
@@ -2899,6 +2936,10 @@ void GSDeviceOGL::RenderHW(GSHWDrawConfig& config)
 		if (primid_texture)
 			Recycle(primid_texture);
 	});
+
+#ifdef SHADER_DEBUG_IMAGES
+	PSSetDebugImages(rtsize, config.use_debug_images);
+#endif
 
 	if (colclip_rt)
 	{

@@ -15,6 +15,8 @@
 #include <array>
 #include <span>
 
+#define SHADER_DEBUG_IMAGES 1
+
 enum class Filter
 {
 	Nearest = 0,
@@ -1291,6 +1293,13 @@ struct alignas(16) GSHWDrawConfig
 		float _pad1;
 		float _pad2;
 
+#ifdef SHADER_DEBUG_IMAGES
+		uint debug0;
+		uint debug1;
+		uint debug2;
+		uint debug3;
+#endif
+
 		__fi PSConstantBuffer()
 		{
 			memset(static_cast<void*>(this), 0, sizeof(*this));
@@ -1468,6 +1477,10 @@ struct alignas(16) GSHWDrawConfig
 
 	VSConstantBuffer cb_vs;
 	PSConstantBuffer cb_ps;
+
+#ifdef SHADER_DEBUG_IMAGES
+	bool use_debug_images;
+#endif
 	
 	// These are here as they need to be preserved between draws, and the state clear only does up to the constant buffers.
 	ColClipMode colclip_mode;
@@ -1889,6 +1902,8 @@ public:
 	// Index is computed as ((((A * 3 + B) * 3) + C) * 3) + D. A, B, C, D taken from ALPHA register.
 	__ri static HWBlend GetBlend(u32 index) { return m_blendMap[index]; }
 	__ri static u16 GetBlendFlags(u32 index) { return m_blendMap[index].flags; }
+
+	virtual GSTexture* GetDebugImage(int i) { return nullptr; }
 };
 
 template <>
