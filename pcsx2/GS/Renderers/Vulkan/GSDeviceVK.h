@@ -406,7 +406,10 @@ public:
 		TFX_TEXTURE_DEPTH,
 		TFX_TEXTURE_RT_ROV,
 		TFX_TEXTURE_DEPTH_ROV,
-
+#ifdef SHADER_DEBUG_IMAGES
+		TFX_TEXTURE_DEBUG_0,
+		TFX_TEXTURE_DEBUG_1,
+#endif
 		NUM_TFX_TEXTURES
 	};
 
@@ -629,6 +632,9 @@ public:
 	void PSSetROVs(GSTexture* rt, GSTexture* ds, bool write_rt, bool write_ds);
 	void PSSetShaderResource(int i, GSTexture* sr, bool check_state, ResourceType type = ResourceType::SRV);
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
+#ifdef SHADER_DEBUG_IMAGES
+	void PSSetDebugImages(const GSVector2i& size, bool clear);
+#endif
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
 		FeedbackLoopFlag feedback_loop = FeedbackLoopFlag_None, const GSVector2i& viewport_size = {});
@@ -708,6 +714,11 @@ private:
 		DIRTY_FLAG_PS_CONSTANT_BUFFER = (1 << 16),
 		DIRTY_FLAG_VS_PUSH_CONSTANTS = (1 << 17),
 
+#ifdef SHADER_DEBUG_IMAGES
+		DIRTY_FLAG_TFX_TEXTURE_DEBUG_0 = (1 << 22),
+		DIRTY_FLAG_TFX_TEXTURE_DEBUG_1 = (1 << 23),
+#endif
+
 		DIRTY_FLAG_TFX_TEXTURE_TEX = (DIRTY_FLAG_TFX_TEXTURE_0 << 0),
 		DIRTY_FLAG_TFX_TEXTURE_PALETTE = (DIRTY_FLAG_TFX_TEXTURE_0 << 1),
 		DIRTY_FLAG_TFX_TEXTURE_RT = (DIRTY_FLAG_TFX_TEXTURE_0 << 2),
@@ -716,11 +727,19 @@ private:
 		DIRTY_FLAG_TFX_TEXTURE_RT_ROV = (DIRTY_FLAG_TFX_TEXTURE_0 << 5),
 		DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV = (DIRTY_FLAG_TFX_TEXTURE_0 << 6),
 
+#ifdef SHADER_DEBUG_IMAGES
+		DIRTY_FLAG_TFX_TEXTURES = DIRTY_FLAG_TFX_TEXTURE_TEX | DIRTY_FLAG_TFX_TEXTURE_PALETTE |
+		                          DIRTY_FLAG_TFX_TEXTURE_RT | DIRTY_FLAG_TFX_TEXTURE_PRIMID |
+		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH | DIRTY_FLAG_TFX_TEXTURE_RT_ROV |
+		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV | DIRTY_FLAG_TFX_TEXTURE_DEBUG_0 |
+		                          DIRTY_FLAG_TFX_TEXTURE_DEBUG_1,
+#else
+
 		DIRTY_FLAG_TFX_TEXTURES = DIRTY_FLAG_TFX_TEXTURE_TEX | DIRTY_FLAG_TFX_TEXTURE_PALETTE |
 		                          DIRTY_FLAG_TFX_TEXTURE_RT | DIRTY_FLAG_TFX_TEXTURE_PRIMID |
 		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH | DIRTY_FLAG_TFX_TEXTURE_RT_ROV |
 		                          DIRTY_FLAG_TFX_TEXTURE_DEPTH_ROV,
-
+#endif
 		DIRTY_BASE_STATE = DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PIPELINE | DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR |
 		                   DIRTY_FLAG_BLEND_CONSTANTS | DIRTY_FLAG_LINE_WIDTH,
 		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES,
@@ -780,4 +799,10 @@ private:
 
 	// current pipeline selector - we save this in the struct to avoid re-zeroing it every draw
 	PipelineSelector m_pipeline_selector = {};
+
+#ifdef SHADER_DEBUG_IMAGES
+	std::array<std::unique_ptr<GSTextureVK>, 2> m_debug_images;
+#endif
+
+	GSTexture* GetDebugImage(int i) override { return m_debug_images[i].get(); }
 };

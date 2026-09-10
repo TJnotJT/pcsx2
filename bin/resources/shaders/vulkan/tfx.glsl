@@ -623,6 +623,12 @@ layout(std140, set = 0, binding = 1) uniform cb1
 	float _pad2_cb1;
 	float _pad3_cb1;
 	float _pad4_cb1;
+#ifdef SHADER_DEBUG_IMAGES
+	uint debug0;
+	uint debug1;
+	uint debug2;
+	uint debug3;
+#endif
 };
 
 layout(location = 0) in VSOutput
@@ -659,6 +665,22 @@ layout(location = 0) in VSOutput
 	layout(set = 1, binding = 6, r32f) uniform restrict coherent image2D DepthImageRov;
 	float rov_depth_value;
 	float sample_from_depth() { return rov_depth_value; }
+#endif
+
+#ifdef SHADER_DEBUG_IMAGES
+layout(set = 1, binding = 7, rgba8) uniform restrict coherent image2D DebugImage0;
+layout(set = 1, binding = 8, rgba8) uniform restrict coherent image2D DebugImage1;
+void WriteToDebugImage(int i, ivec2 xy, vec4 val)
+{
+	if (i == 0)
+	{
+		imageStore(DebugImage0, xy, val);
+	}
+	else
+	{
+		imageStore(DebugImage1, xy, val);
+	}
+}
 #endif
 
 #if NEEDS_TEX
@@ -1866,7 +1888,20 @@ void main()
 	o_col0 = (C.a < 127.5f) ? vec4(gl_PrimitiveID) : vec4(0x7FFFFFFF);
 
 #else
+
+#ifdef SHADER_DEBUG_IMAGES
+	if (debug0 != 0)
+	{
+		WriteToDebugImage(0, ivec2(gl_FragCoord.xy), trunc(C) / 255.0f);
+	}
+#endif
 	ps_blend(C, alpha_blend);
+#ifdef SHADER_DEBUG_IMAGES
+	if (debug0 != 0)
+	{
+		WriteToDebugImage(1, ivec2(gl_FragCoord.xy), trunc(C) / 255.0f);
+	}
+#endif
 
 	#if PS_SHUFFLE
 		#if !PS_READ16_SRC && !PS_SHUFFLE_SAME && !(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE)
