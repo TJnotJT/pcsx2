@@ -322,7 +322,7 @@ in SHADER
 		layout(location = 0, index = 0) TARGET_0_QUALIFIER vec4 o_col0;
 		layout(location = 0, index = 1) out vec4 o_col1;
 	#elif !PS_NO_COLOR
-		layout(location = 0) out vec4 o_col0;
+		layout(location = 0) TARGET_0_QUALIFIER vec4 o_col0;
 	#endif
 #endif
 
