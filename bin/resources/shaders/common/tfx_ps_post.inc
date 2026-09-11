@@ -2,12 +2,12 @@ PS_STATIC void ps_fbmask(IN_OUT_PARAM(float4, C))
 {
 	if (PS_FBMASK != FALSE)
 	{
-		float multi = (PS_COLCLIP_HW != FALSE) ? 65535.f : 255.f;
+		float multi_rgb = (PS_COLCLIP_HW != FALSE) ? 65535.f : 255.f;
 		float multi_a = (PS_RTA_CORRECTION != FALSE) ? 128.0f : 255.0f;
 		float4 RT = ps_current_color;
-		RT.rgb = trunc(RT.rgb * multi_rgb + float4_bcast(0.1f));
+		RT.rgb = trunc(RT.rgb * multi_rgb + float3_bcast(0.1f));
 		RT.a = round(RT.a * multi_a);
-		C = FLOAT4((UINT4(INT4(C)) & ~ps_cb.cb.fbmask) | (UINT4(RT) & ps_cb.cb.fbmask));
+		C = float4((uint4(int4(C)) & ~ps_cb.fbmask) | (uint4(RT) & ps_cb.fbmask));
 	}
 }
 
