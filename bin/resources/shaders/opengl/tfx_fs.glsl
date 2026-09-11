@@ -175,9 +175,8 @@ in SHADER
 
 // Use FB fetch for depth feedback if it's available.
 #if SW_DEPTH && PS_NO_COLOR1
-	#if PS_Z_INTEGER
-		// Z integer always uses a color target for depth, 
-		// regardless of depth feedback setting.
+	#if PS_Z_INTEGER && !HAS_Z_INTEGER_SHADER_WRITE
+		// Z integer using the second framebuffer attachment.
 		#if HAS_FRAMEBUFFER_FETCH
 			layout(location = 1) inout DEPTH_TYPE o_col1;
 		#elif ZWRITE_FOR_ZINT
@@ -222,6 +221,10 @@ layout(binding = 4) uniform DEPTH_SAMPLER DepthSampler;
 layout(depth_less) out float gl_FragDepth;
 #endif
 
+#if PS_Z_INTEGER && HAS_Z_INTEGER_SHADER_WRITE
+layout(binding = 0, r32ui) uniform restrict coherent uimage2D DepthIntegerImage;
+#endif
+
 #ifdef SHADER_DEBUG_IMAGES
 layout(binding = 0, rgba8) uniform restrict coherent image2D DebugImage0;
 layout(binding = 1, rgba8) uniform restrict coherent image2D DebugImage1;
@@ -253,6 +256,8 @@ DEPTH_TYPE sample_from_depth()
 {
 #if !SW_DEPTH
 	return DEPTH_TYPE(0);
+#elif PS_Z_INTEGER && HAS_Z_INTEGER_SHADER_WRITE
+	return imageLoad(DepthIntegerImage, ivec2(gl_FragCoord.xy)).r;
 #elif HAS_FRAMEBUFFER_FETCH && ((DEPTH_FEEDBACK_SUPPORT == 2) || PS_Z_INTEGER)
 	return o_col1;
 #else
@@ -1495,7 +1500,11 @@ void ps_main()
 #if ZWRITE
 	#if PS_Z_INTEGER
 		#if ZWRITE_FOR_ZINT
-			o_col1 = input_z;
+			#if HAS_Z_INTEGER_SHADER_WRITE
+				imageStore(DepthIntegerImage, ivec2(gl_FragCoord.xy), uvec4(input_z, 0, 0, 0));
+			#else
+				o_col1 = input_z;
+			#endif
 		#endif
 	#else
 		gl_FragDepth = input_z;
