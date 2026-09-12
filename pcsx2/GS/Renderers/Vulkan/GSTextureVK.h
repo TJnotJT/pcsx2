@@ -34,6 +34,16 @@ public:
 		Count
 	};
 
+	static VkImageLayout GetVkImageLayout(GSTextureVK::Layout layout);
+
+	static VkAccessFlagBits2 GetFeedbackLoopInputAccessBits();
+	static VkDependencyFlags GetFeedbackLoopDependencyFlags();
+
+	static VkMemoryBarrier2 GetBarrierFlags(Layout old_layout, Layout new_layout, bool color);
+	static VkMemoryBarrier2 GetFeedbackBarrierFlags(bool color);
+
+	static VkImageAspectFlags GetBarrierImageAspectFlags(bool color);
+
 	~GSTextureVK() override;
 
 	static std::unique_ptr<GSTextureVK> Create(Usage usage, Format format, int width, int height, int levels);
