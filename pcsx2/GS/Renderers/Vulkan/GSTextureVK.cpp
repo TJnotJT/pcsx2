@@ -173,18 +173,29 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Create(Usage usage, Format format, int
 
 	const VkFormat vk_format = GSDeviceVK::GetInstance()->LookupNativeFormat(format);
 
-	VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, nullptr, 0, VK_IMAGE_TYPE_2D, vk_format,
-		{static_cast<u32>(width), static_cast<u32>(height), 1}, static_cast<u32>(levels), 1, VK_SAMPLE_COUNT_1_BIT,
-		VK_IMAGE_TILING_OPTIMAL};
+	VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.format = vk_format;
+	ici.extent = {.width = static_cast<u32>(width), .height = static_cast<u32>(height), .depth = 1};
+	ici.mipLevels = static_cast<u32>(levels);
+	ici.arrayLayers = 1;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
 
 	VmaAllocationCreateInfo aci = {};
 	aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 	aci.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
 	aci.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-	VkImageViewCreateInfo vci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, nullptr, 0, VK_NULL_HANDLE,
-		VK_IMAGE_VIEW_TYPE_2D, vk_format, s_identity_swizzle,
-		{VK_IMAGE_ASPECT_COLOR_BIT, 0, static_cast<u32>(levels), 0, 1}};
+	VkImageViewCreateInfo vci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+	vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	vci.format = vk_format;
+	vci.components = s_identity_swizzle;
+	vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vci.subresourceRange.baseMipLevel = 0;
+	vci.subresourceRange.levelCount = static_cast<u32>(levels);
+	vci.subresourceRange.baseArrayLayer = 0;
+	vci.subresourceRange.layerCount = 1;
 
 	ici.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
@@ -262,12 +273,18 @@ std::unique_ptr<GSTextureVK> GSTextureVK::Adopt(
 	VkImage image, Usage usage, Format format, int width, int height, int levels, VkFormat vk_format)
 {
 	// Only need to create the image view, this is mainly for swap chains.
-	const VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, nullptr, 0, image,
-		VK_IMAGE_VIEW_TYPE_2D, vk_format, s_identity_swizzle,
-		{IsDepthStencil(usage) ?
-				static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT) :
-				static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT),
-			0u, static_cast<u32>(levels), 0u, 1u}};
+	VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+	view_info.image = image;
+	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view_info.format = vk_format;
+	view_info.components = s_identity_swizzle;
+	view_info.subresourceRange.aspectMask =  IsDepthStencil(usage) ?
+		static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT) :
+		static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_COLOR_BIT);
+	view_info.subresourceRange.baseMipLevel = 0;
+	view_info.subresourceRange.levelCount = static_cast<u32>(levels);
+	view_info.subresourceRange.baseArrayLayer = 0u;
+	view_info.subresourceRange.layerCount = 1u;
 
 	// Memory is managed by the owner of the image.
 	VkImageView view = VK_NULL_HANDLE;
@@ -367,8 +384,10 @@ void GSTextureVK::CopyTextureDataForUpload(void* dst, const void* src, u32 pitch
 VkBuffer GSTextureVK::AllocateUploadStagingBuffer(const void* data, u32 pitch, u32 upload_pitch, u32 height) const
 {
 	const u32 size = upload_pitch * height;
-	const VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, static_cast<VkDeviceSize>(size),
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, nullptr};
+	VkBufferCreateInfo bci = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = static_cast<VkDeviceSize>(size);
+	bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 	// Don't worry about setting the coherent bit for this upload, the main reason we had
 	// that set in StreamBuffer was for MoltenVK, which would upload the whole buffer on
@@ -405,9 +424,16 @@ void GSTextureVK::UpdateFromBuffer(VkCommandBuffer cmdbuf, int level, u32 x, u32
 	else if (old_layout != Layout::CopyDst)
 		TransitionSubresourcesToLayout(cmdbuf, level, 1, old_layout, Layout::CopyDst);
 
-	const VkBufferImageCopy bic = {static_cast<VkDeviceSize>(buffer_offset), row_length, buffer_height,
-		{VK_IMAGE_ASPECT_COLOR_BIT, static_cast<u32>(level), 0u, 1u}, {static_cast<s32>(x), static_cast<s32>(y), 0},
-		{width, height, 1u}};
+	VkBufferImageCopy bic;
+	bic.bufferOffset = static_cast<VkDeviceSize>(buffer_offset),
+	bic.bufferRowLength = row_length,
+	bic.bufferImageHeight = buffer_height,
+	bic.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	bic.imageSubresource.mipLevel = static_cast<u32>(level);
+	bic.imageSubresource.baseArrayLayer = 0u;
+	bic.imageSubresource.layerCount = 1u;
+	bic.imageOffset = {.x = static_cast<s32>(x), .y = static_cast<s32>(y), .z = 0};
+	bic.imageExtent = {.width = width, .height = height, .depth = 1u};
 
 	vkCmdCopyBufferToImage(cmdbuf, buffer, m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic);
 
@@ -593,12 +619,19 @@ void GSTextureVK::GenerateMipmap()
 		TransitionSubresourcesToLayout(cmdbuf, src_level, 1, m_layout, Layout::BlitSrc);
 		TransitionSubresourcesToLayout(cmdbuf, dst_level, 1, m_layout, Layout::BlitDst);
 
-		const VkImageBlit blit = {
-			{VK_IMAGE_ASPECT_COLOR_BIT, static_cast<u32>(src_level), 0u, 1u}, // srcSubresource
-			{{0, 0, 0}, {src_width, src_height, 1}}, // srcOffsets
-			{VK_IMAGE_ASPECT_COLOR_BIT, static_cast<u32>(dst_level), 0u, 1u}, // dstSubresource
-			{{0, 0, 0}, {dst_width, dst_height, 1}} // dstOffsets
-		};
+		VkImageBlit blit = {};
+		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.srcSubresource.mipLevel = static_cast<u32>(src_level);
+		blit.srcSubresource.baseArrayLayer = 0u;
+		blit.srcSubresource.layerCount = 1u;
+		blit.srcOffsets[0] = {.x = 0, .y = 0, .z = 0};
+		blit.srcOffsets[1] = {.x = src_width, .y = src_height, .z = 1};
+		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.dstSubresource.mipLevel = static_cast<u32>(dst_level);
+		blit.dstSubresource.baseArrayLayer = 0u;
+		blit.dstSubresource.layerCount = 1u;
+		blit.dstOffsets[0] = {.x = 0, .y = 0, .z = 0};
+		blit.dstOffsets[1] = {.x = dst_width, .y = dst_height, .z = 1};
 
 		vkCmdBlitImage(cmdbuf, m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_image,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
@@ -788,8 +821,10 @@ std::unique_ptr<GSDownloadTextureVK> GSDownloadTextureVK::Create(u32 width, u32 
 	const u32 buffer_size =
 		GetBufferSize(width, height, format, GSDeviceVK::GetInstance()->GetBufferCopyRowPitchAlignment());
 
-	const VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0u, buffer_size,
-		VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0u, nullptr};
+	VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+	bci.size = buffer_size;
+	bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 	VmaAllocationCreateInfo aci = {};
 	aci.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
@@ -850,9 +885,12 @@ void GSDownloadTextureVK::CopyFromTexture(
 	image_copy.bufferOffset = copy_offset;
 	image_copy.bufferRowLength = GSTexture::CalcUploadRowLengthFromPitch(m_format, m_current_pitch);
 	image_copy.bufferImageHeight = 0;
-	image_copy.imageSubresource = {aspect, src_level, 0u, 1u};
-	image_copy.imageOffset = {src.left, src.top, 0};
-	image_copy.imageExtent = {static_cast<u32>(src.width()), static_cast<u32>(src.height()), 1u};
+	image_copy.imageSubresource.aspectMask = aspect;
+	image_copy.imageSubresource.mipLevel = src_level;
+	image_copy.imageSubresource.baseArrayLayer = 0u;
+	image_copy.imageSubresource.layerCount = 1u;
+	image_copy.imageOffset = {.x = src.left, .y = src.top, .z = 0};
+	image_copy.imageExtent = {.width = static_cast<u32>(src.width()), .height = static_cast<u32>(src.height()), .depth = 1u};
 
 	// do the copy
 	vkCmdCopyImageToBuffer(cmdbuf, vkTex->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_buffer, 1, &image_copy);
