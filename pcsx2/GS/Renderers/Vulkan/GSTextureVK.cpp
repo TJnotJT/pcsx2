@@ -13,18 +13,18 @@
 
 VkFramebuffer GSTextureVK::CreateNullFramebuffer(u32 w, u32 h)
 {
-	const VkRenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
+	const GSDeviceVK::RenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
 		VK_FORMAT_UNDEFINED,
 		VK_FORMAT_UNDEFINED,
 		VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 		VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, false, false);
 
-	if (!rp)
+	if (rp.IsNull())
 		return VK_NULL_HANDLE;
 	
 	Vulkan::FramebufferBuilder fbb;
 	fbb.SetSize(w, h, 1);
-	fbb.SetRenderPass(rp);
+	fbb.SetRenderPass(GSDeviceVK::GetInstance()->GetVkRenderPass(rp));
 
 	return fbb.Create(GSDeviceVK::GetInstance()->GetDevice());
 }
@@ -32,7 +32,7 @@ VkFramebuffer GSTextureVK::CreateNullFramebuffer(u32 w, u32 h)
 static constexpr const VkComponentMapping s_identity_swizzle{VK_COMPONENT_SWIZZLE_IDENTITY,
 	VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
 
-static VkImageLayout GetVkImageLayout(GSTextureVK::Layout layout)
+VkImageLayout GSTextureVK::GetVkImageLayout(GSTextureVK::Layout layout)
 {
 	static constexpr VkImageLayout s_vk_layout_mapping[] = {
 		VK_IMAGE_LAYOUT_UNDEFINED, // Undefined
@@ -40,13 +40,13 @@ static VkImageLayout GetVkImageLayout(GSTextureVK::Layout layout)
 		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, // ColorAttachment
 		VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, // DepthStencilAttachment
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // ShaderReadOnly
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // ClearDst
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, // CopySrc
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // CopyDst
 		VK_IMAGE_LAYOUT_GENERAL, // CopySelf
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, // BlitSrc
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // BlitDst
 		VK_IMAGE_LAYOUT_GENERAL, // BlitSelf
-		VK_IMAGE_LAYOUT_GENERAL, // TransferSelf
 		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // PresentSrc
 		VK_IMAGE_LAYOUT_GENERAL, // FeedbackLoop
 		VK_IMAGE_LAYOUT_GENERAL, // ReadWriteImage
@@ -129,6 +129,18 @@ static VkAccessFlags2 GetAccessFlags(GSTextureVK::Layout layout, bool color)
 	else
 	{
 		return s_vk_access_mapping[static_cast<u32>(layout)];
+	}
+}
+
+static VkImageAspectFlags GetImageAspectFlags(bool color)
+{
+	if (color)
+	{
+		return VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+	else
+	{
+		return VK_IMAGE_ASPECT_DEPTH_BIT | (GSDeviceVK::GetInstance()->Features().stencil_buffer ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
 	}
 }
 
@@ -680,16 +692,7 @@ void GSTextureVK::TransitionSubresourcesToLayout(
 		old_layout = Layout::ColorAttachment;
 	}
 
-	VkImageAspectFlags aspect;
-	if (IsDepthStencil())
-	{
-		aspect = g_gs_device->Features().stencil_buffer ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
-		                                                  VK_IMAGE_ASPECT_DEPTH_BIT;
-	}
-	else
-	{
-		aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-	}
+	const VkImageAspectFlags aspect = GetImageAspectFlags(!IsDepthStencil());
 
 	VkImageMemoryBarrier2 barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
 	barrier.srcStageMask = GetPipelineStageFlags(old_layout, !IsDepthStencil());
@@ -734,12 +737,13 @@ VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool
 			return fb;
 	}
 
-	const VkRenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
+	GSDeviceVK::RenderPass rp = GSDeviceVK::GetInstance()->GetRenderPass(
 		!IsDepthStencil() ? m_vk_format : VK_FORMAT_UNDEFINED,
 		!IsDepthStencil() ? (depth_texture ? depth_texture->m_vk_format : VK_FORMAT_UNDEFINED) : m_vk_format,
 		VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_LOAD,
-		VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, feedback_loop_color, feedback_loop_depth);
-	if (!rp)
+		VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+		feedback_loop_color, feedback_loop_depth);
+	if (rp.IsNull())
 		return VK_NULL_HANDLE;
 
 	Vulkan::FramebufferBuilder fbb;
@@ -747,7 +751,7 @@ VkFramebuffer GSTextureVK::GetLinkedFramebuffer(GSTextureVK* depth_texture, bool
 	if (depth_texture)
 		fbb.AddAttachment(depth_texture->m_view);
 	fbb.SetSize(m_size.x, m_size.y, 1);
-	fbb.SetRenderPass(rp);
+	fbb.SetRenderPass(GSDeviceVK::GetInstance()->GetVkRenderPass(rp));
 
 	VkFramebuffer fb = fbb.Create(GSDeviceVK::GetInstance()->GetDevice());
 	if (!fb)
