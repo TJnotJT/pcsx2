@@ -926,8 +926,8 @@ bool GSDeviceVK::CreateCommandBuffers()
 	{
 		resources.needs_fence_wait = false;
 
-		VkCommandPoolCreateInfo pool_info = {
-			VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, 0, m_graphics_queue_family_index};
+		VkCommandPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+		pool_info.queueFamilyIndex = m_graphics_queue_family_index;
 		res = vkCreateCommandPool(m_device, &pool_info, nullptr, &resources.command_pool);
 		if (res != VK_SUCCESS)
 		{
@@ -936,9 +936,10 @@ bool GSDeviceVK::CreateCommandBuffers()
 		}
 		Vulkan::SetObjectName(m_device, resources.command_pool, "Frame Command Pool %u", frame_index);
 
-		VkCommandBufferAllocateInfo buffer_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr,
-			resources.command_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-			static_cast<u32>(resources.command_buffers.size())};
+		VkCommandBufferAllocateInfo buffer_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+		buffer_info.commandPool = resources.command_pool;
+		buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		buffer_info.commandBufferCount = static_cast<u32>(resources.command_buffers.size());
 
 		res = vkAllocateCommandBuffers(m_device, &buffer_info, resources.command_buffers.data());
 		if (res != VK_SUCCESS)
@@ -952,7 +953,8 @@ bool GSDeviceVK::CreateCommandBuffers()
 				(i == 0) ? "Init" : "");
 		}
 
-		VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, VK_FENCE_CREATE_SIGNALED_BIT};
+		VkFenceCreateInfo fence_info = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
 		res = vkCreateFence(m_device, &fence_info, nullptr, &resources.fence);
 		if (res != VK_SUCCESS)
@@ -975,10 +977,11 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 		{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
 	};
 
-	VkDescriptorPoolCreateInfo pool_create_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr,
-		VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-		1024, // TODO: tweak this
-		static_cast<u32>(std::size(pool_sizes)), pool_sizes};
+	VkDescriptorPoolCreateInfo pool_create_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+	pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_create_info.maxSets = 1024, // TODO: tweak this
+	pool_create_info.poolSizeCount = static_cast<u32>(std::size(pool_sizes));
+	pool_create_info.pPoolSizes = pool_sizes;
 
 	VkResult res = vkCreateDescriptorPool(m_device, &pool_create_info, nullptr, &m_global_descriptor_pool);
 	if (res != VK_SUCCESS)
@@ -990,8 +993,9 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 
 	if (m_gpu_timing_supported)
 	{
-		const VkQueryPoolCreateInfo query_create_info = {
-			VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, nullptr, 0, VK_QUERY_TYPE_TIMESTAMP, NUM_COMMAND_BUFFERS * 4, 0};
+		VkQueryPoolCreateInfo query_create_info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+		query_create_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    query_create_info.queryCount = VK_QUERY_TYPE_TIMESTAMP, NUM_COMMAND_BUFFERS * 4;
 		res = vkCreateQueryPool(m_device, &query_create_info, nullptr, &m_timestamp_query_pool);
 		if (res != VK_SUCCESS)
 		{
@@ -1003,9 +1007,12 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 
 	if (m_gpu_pipeline_statistics_supported)
 	{
-		const VkQueryPoolCreateInfo query_create_info = {
-			VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, nullptr, 0, VK_QUERY_TYPE_PIPELINE_STATISTICS, NUM_COMMAND_BUFFERS,
-			VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT };
+		VkQueryPoolCreateInfo query_create_info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+		query_create_info.queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS;
+		query_create_info.queryCount = NUM_COMMAND_BUFFERS;
+		query_create_info.pipelineStatistics =
+			VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT |
+			VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT;
 		res = vkCreateQueryPool(m_device, &query_create_info, nullptr, &m_pipeline_statistics_query_pool);
 		if (res != VK_SUCCESS)
 		{
@@ -1054,8 +1061,8 @@ VkCommandBuffer GSDeviceVK::GetCurrentInitCommandBuffer()
 	if (res.init_buffer_used)
 		return buf;
 
-	VkCommandBufferBeginInfo bi{
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr};
+	VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(buf, &bi);
 	res.init_buffer_used = true;
 	return buf;
@@ -1063,8 +1070,10 @@ VkCommandBuffer GSDeviceVK::GetCurrentInitCommandBuffer()
 
 VkDescriptorSet GSDeviceVK::AllocatePersistentDescriptorSet(VkDescriptorSetLayout set_layout)
 {
-	VkDescriptorSetAllocateInfo allocate_info = {
-		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, nullptr, m_global_descriptor_pool, 1, &set_layout};
+	VkDescriptorSetAllocateInfo allocate_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+	allocate_info.descriptorPool = m_global_descriptor_pool;
+	allocate_info.descriptorSetCount = 1;
+	allocate_info.pSetLayouts = &set_layout;
 
 	VkDescriptorSet descriptor_set;
 	VkResult res = vkAllocateDescriptorSets(m_device, &allocate_info, &descriptor_set);
@@ -1305,9 +1314,12 @@ void GSDeviceVK::SubmitCommandBuffer(VKSwapChain* present_swap_chain)
 
 	if (present_swap_chain)
 	{
-		const VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, nullptr, 1,
-			present_swap_chain->GetRenderingFinishedSemaphorePtr(), 1, present_swap_chain->GetSwapChainPtr(),
-			present_swap_chain->GetCurrentImageIndexPtr(), nullptr};
+		VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+		present_info.waitSemaphoreCount = 1;
+		present_info.pWaitSemaphores = present_swap_chain->GetRenderingFinishedSemaphorePtr();
+		present_info.swapchainCount = 1;
+		present_info.pSwapchains = present_swap_chain->GetSwapChainPtr();
+		present_info.pImageIndices = present_swap_chain->GetCurrentImageIndexPtr();
 
 		present_swap_chain->ResetImageAcquireResult();
 
@@ -1404,8 +1416,9 @@ void GSDeviceVK::ActivateCommandBuffer(u32 index)
 		LOG_VULKAN_ERROR(res, "vkResetCommandPool failed: ");
 
 	// Enable commands to be recorded to the two buffers again.
-	VkCommandBufferBeginInfo begin_info = {
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr};
+	VkCommandBufferBeginInfo begin_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	res = vkBeginCommandBuffer(resources.command_buffers[1], &begin_info);
 	if (res != VK_SUCCESS)
 		LOG_VULKAN_ERROR(res, "vkBeginCommandBuffer failed: ");
@@ -1548,13 +1561,16 @@ bool GSDeviceVK::EnableDebugUtils()
 		return false;
 	}
 
-	VkDebugUtilsMessengerCreateInfoEXT messenger_info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-		nullptr, 0,
-		VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+	VkDebugUtilsMessengerCreateInfoEXT messenger_info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+	messenger_info.messageSeverity =
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 			VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
-		VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
-			VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
-		DebugMessengerCallback, nullptr};
+	messenger_info.messageType =
+		VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+		VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
+		VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+	messenger_info.pfnUserCallback = DebugMessengerCallback;
 
 	const VkResult res =
 		vkCreateDebugUtilsMessengerEXT(m_instance, &messenger_info, nullptr, &m_debug_messenger_callback);
@@ -1958,8 +1974,8 @@ void GSDeviceVK::CalibrateSpinTimestamp()
 	if (!m_optional_extensions.vk_ext_calibrated_timestamps)
 		return;
 	VkCalibratedTimestampInfoEXT infos[2] = {
-		{VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, VK_TIME_DOMAIN_DEVICE_EXT},
-		{VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, m_calibrated_timestamp_type},
+		{.sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, .timeDomain = VK_TIME_DOMAIN_DEVICE_EXT},
+		{.sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, .timeDomain = m_calibrated_timestamp_type},
 	};
 	u64 timestamps[2];
 	u64 maxDeviation;
@@ -2011,8 +2027,10 @@ bool GSDeviceVK::AllocatePreinitializedGPUBuffer(u32 size, VkBuffer* gpu_buffer,
 	// Try to place the fixed index buffer in GPU local memory.
 	// Use the staging buffer to copy into it.
 
-	const VkBufferCreateInfo cpu_bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size,
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE};
+	VkBufferCreateInfo cpu_bci = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	cpu_bci.size = size;
+	cpu_bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	cpu_bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	const VmaAllocationCreateInfo cpu_aci = {VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_CPU_ONLY, 0, 0};
 	VkBuffer cpu_buffer;
 	VmaAllocation cpu_allocation;
@@ -2024,9 +2042,13 @@ bool GSDeviceVK::AllocatePreinitializedGPUBuffer(u32 size, VkBuffer* gpu_buffer,
 		return false;
 	}
 
-	const VkBufferCreateInfo gpu_bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, nullptr, 0, size,
-		VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE};
-	const VmaAllocationCreateInfo gpu_aci = {0, VMA_MEMORY_USAGE_GPU_ONLY, 0, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT};
+	VkBufferCreateInfo gpu_bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+	gpu_bci.size = size;
+	gpu_bci.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	gpu_bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VmaAllocationCreateInfo gpu_aci = {};
+	gpu_aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	gpu_aci.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	VmaAllocationInfo ai;
 	res = vmaCreateBuffer(m_allocator, &gpu_bci, &gpu_aci, gpu_buffer, gpu_allocation, &ai);
 	if (res != VK_SUCCESS)
@@ -2036,7 +2058,7 @@ bool GSDeviceVK::AllocatePreinitializedGPUBuffer(u32 size, VkBuffer* gpu_buffer,
 		return false;
 	}
 
-	const VkBufferCopy buf_copy = {0u, 0u, size};
+	const VkBufferCopy buf_copy = { .srcOffset = 0u, .dstOffset = 0u, .size = size};
 	fill_callback(cpu_ai.pMappedData);
 	vmaFlushAllocation(m_allocator, cpu_allocation, 0, size);
 	vkCmdCopyBuffer(GetCurrentInitCommandBuffer(), cpu_buffer, *gpu_buffer, 1, &buf_copy);
@@ -2488,10 +2510,9 @@ void GSDeviceVK::PushDebugGroup(const char* fmt, ...)
 		++s_debug_scope_depth, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 0.5f}, {0.8f, 0.90f, 0.30f});
 
 	const VkDebugUtilsLabelEXT label = {
-		VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
-		nullptr,
-		buf.c_str(),
-		{color[0], color[1], color[2], 1.0f},
+		.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+		.pLabelName = buf.c_str(),
+		.color = {color[0], color[1], color[2], 1.0f},
 	};
 	vkCmdBeginDebugUtilsLabelEXT(GetCurrentCommandBuffer(), &label);
 #endif
@@ -2531,9 +2552,12 @@ void GSDeviceVK::InsertDebugMessage(DebugMessageCategory category, const char* f
 		{0.0f, 0.2f, 0.0f} // Performance
 	};
 
-	const VkDebugUtilsLabelEXT label = {VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT, nullptr, buf.c_str(),
-		{colors[static_cast<int>(category)][0], colors[static_cast<int>(category)][1],
-			colors[static_cast<int>(category)][2], 1.0f}};
+	VkDebugUtilsLabelEXT label = { VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
+	label.pLabelName = buf.c_str();
+	label.color[0] = colors[static_cast<int>(category)][0];
+	label.color[1] = colors[static_cast<int>(category)][1];
+	label.color[2] = colors[static_cast<int>(category)][2];
+	label.color[3] = 1.0f;
 	vkCmdInsertDebugUtilsLabelEXT(GetCurrentCommandBuffer(), &label);
 #endif
 }
@@ -3233,8 +3257,13 @@ void GSDeviceVK::BlitRect(GSTexture* sTex, const GSVector4i& sRect, u32 sLevel, 
 	pxAssert(sTexVK->IsDepthStencil() == dTexVK->IsDepthStencil());
 	const VkImageAspectFlags aspect =
 		sTexVK->IsDepthStencil() ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-	const VkImageBlit ib{{aspect, sLevel, 0u, 1u}, {{sRect.left, sRect.top, 0}, {sRect.right, sRect.bottom, 1}},
-		{aspect, dLevel, 0u, 1u}, {{dRect.left, dRect.top, 0}, {dRect.right, dRect.bottom, 1}}};
+	VkImageBlit ib = {};
+	ib.srcSubresource = { .aspectMask = aspect, .mipLevel = sLevel, .baseArrayLayer = 0u, .layerCount = 1u };
+	ib.srcOffsets[0] = { .x = sRect.left, .y = sRect.top, .z = 0 };
+	ib.srcOffsets[1] = { .x = sRect.right, .y = sRect.bottom, .z = 1 };
+	ib.dstSubresource = {.aspectMask = aspect, .mipLevel = dLevel, .baseArrayLayer = 0u, .layerCount = 1u};
+	ib.dstOffsets[0] = { .x = dRect.left, .y = dRect.top, .z = 0 };
+	ib.dstOffsets[1] = { .x = dRect.right, .y = dRect.bottom, .z = 1 };
 
 	vkCmdBlitImage(GetCurrentCommandBuffer(), sTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		dTexVK->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ib,
@@ -3706,26 +3735,24 @@ VkSampler GSDeviceVK::GetSampler(GSHWDrawConfig::SamplerSelector ss)
 
 	// See https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkSamplerCreateInfo.html#_description
 	// for the reasoning behind 0.25f here.
-	const VkSamplerCreateInfo ci = {
-		VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, nullptr, 0,
-		ss.IsMagFilterLinear() ? VK_FILTER_LINEAR : VK_FILTER_NEAREST, // min
-		ss.IsMinFilterLinear() ? VK_FILTER_LINEAR : VK_FILTER_NEAREST, // mag
-		ss.IsMipFilterLinear() ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST, // mip
-		static_cast<VkSamplerAddressMode>(
-			ss.tau ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), // u
-		static_cast<VkSamplerAddressMode>(
-			ss.tav ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), // v
-		VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, // w
-		0.0f, // lod bias
-		VK_FALSE, // anisotropy enable
-		1.0f, // anisotropy
-		VK_FALSE, // compare enable
-		VK_COMPARE_OP_ALWAYS, // compare op
-		0.0f, // min lod
-		(ss.lodclamp || !ss.UseMipmapFiltering()) ? 0.25f : VK_LOD_CLAMP_NONE, // max lod
-		VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, // border
-		VK_FALSE // unnormalized coordinates
-	};
+	VkSamplerCreateInfo ci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+	ci.magFilter = ss.IsMagFilterLinear() ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+	ci.minFilter = ss.IsMinFilterLinear() ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+	ci.mipmapMode = ss.IsMipFilterLinear() ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	ci.addressModeU = static_cast<VkSamplerAddressMode>(
+		ss.tau ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+	ci.addressModeV = static_cast<VkSamplerAddressMode>(
+			ss.tav ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+	ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	ci.mipLodBias = 0.0f;
+	ci.anisotropyEnable = VK_FALSE;
+	ci.maxAnisotropy = 1.0f;
+	ci.compareEnable = VK_FALSE;
+	ci.compareOp = VK_COMPARE_OP_ALWAYS;
+	ci.minLod = 0.0f;
+	ci.maxLod = (ss.lodclamp || !ss.UseMipmapFiltering()) ? 0.25f : VK_LOD_CLAMP_NONE;
+	ci.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	ci.unnormalizedCoordinates = VK_FALSE;
 	VkSampler sampler = VK_NULL_HANDLE;
 	VkResult res = vkCreateSampler(m_device, &ci, nullptr, &sampler);
 	if (res != VK_SUCCESS)
