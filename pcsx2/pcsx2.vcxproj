@@ -219,7 +219,6 @@
     <None Include="..\bin\resources\shaders\vulkan\merge.glsl" />
     <None Include="..\bin\resources\shaders\vulkan\present.glsl" />
     <None Include="..\bin\resources\shaders\vulkan\shadeboost.glsl" />
-    <None Include="..\bin\resources\shaders\vulkan_opengl\tfx.glsl" />
     <None Include="..\bin\resources\shaders\dx\convert.fx" />
     <None Include="..\bin\resources\shaders\dx\imgui.fx" />
     <None Include="..\bin\resources\shaders\dx\interlace.fx" />
@@ -228,6 +227,7 @@
     <None Include="..\bin\resources\shaders\dx\shadeboost.fx" />
     <None Include="..\bin\resources\shaders\dx\tfx.fx" />
     <None Include="..\bin\resources\shaders\dx\cas.hlsl" />
+    <None Include="..\bin\resources\shaders\vulkan_opengl\tfx.glsl" />
     <None Include="GS\Renderers\Vulkan\VKEntryPoints.inl">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </None>

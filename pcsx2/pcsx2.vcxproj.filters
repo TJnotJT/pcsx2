@@ -289,6 +289,9 @@
     <Filter Include="System\Ps2\EmotionEngine\EE\Dynarec\arm64">
       <UniqueIdentifier>{cd8ec519-2196-43f7-86de-7faced2d4296}</UniqueIdentifier>
     </Filter>
+    <Filter Include="System\Ps2\GS\Shaders\VulkanOpenGL">
+      <UniqueIdentifier>{e434b266-807a-4303-8daf-6a1542a2d888}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="Docs\License.txt">
@@ -384,9 +387,6 @@
     <None Include="..\bin\resources\shaders\vulkan\shadeboost.glsl">
       <Filter>System\Ps2\GS\Shaders\Vulkan</Filter>
     </None>
-    <None Include="..\bin\resources\shaders\vulkan_opengl\tfx.glsl">
-      <Filter>System\Ps2\GS\Shaders\Vulkan</Filter>
-    </None>
     <None Include="..\bin\resources\shaders\dx\convert.fx">
       <Filter>System\Ps2\GS\Shaders\Direct3D</Filter>
     </None>
@@ -452,6 +452,9 @@
     </None>
     <None Include="..\bin\resources\shaders\common\tfx_vs.inc">
       <Filter>System\Ps2\GS\Shaders\Common</Filter>
+    </None>
+    <None Include="..\bin\resources\shaders\vulkan_opengl\tfx.glsl">
+      <Filter>System\Ps2\GS\Shaders\VulkanOpenGL</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
