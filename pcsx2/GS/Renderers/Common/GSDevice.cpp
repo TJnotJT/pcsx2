@@ -380,6 +380,7 @@ GSVector4i GSDevice::ProcessCopyArea(const GSVector4i& rtsize, const GSVector4i&
 #include "vulkan_present.cpp"
 #include "vulkan_shadeboost.cpp"
 #include "vulkan_tfx.cpp"
+#include "vulkan_tfx_uber.cpp"
 #include "opengl_cas.cpp"
 #include "opengl_convert.cpp"
 #include "opengl_imgui.cpp"
@@ -398,6 +399,7 @@ GSVector4i GSDevice::ProcessCopyArea(const GSVector4i& rtsize, const GSVector4i&
 #include "dx11_present.cpp"
 #include "dx11_shadeboost.cpp"
 #include "dx11_tfx.cpp"
+#include "dx11_tfx_uber.cpp"
 #endif
 
 static const std::map<std::string, const unsigned char*> s_baked_shaders = {
@@ -413,6 +415,7 @@ static const std::map<std::string, const unsigned char*> s_baked_shaders = {
 	{ "shaders/vulkan/present.glsl"    , vulkan_present },
 	{ "shaders/vulkan/shadeboost.glsl" , vulkan_shadeboost },
 	{ "shaders/vulkan/tfx.glsl"        , vulkan_tfx },
+	{ "shaders/vulkan/tfx_uber.glsl"   , vulkan_tfx_uber },
 	{ "shaders/opengl/cas.glsl"        , opengl_cas },
 	{ "shaders/opengl/convert.glsl"    , opengl_convert },
 	{ "shaders/opengl/imgui.glsl"      , opengl_imgui },
@@ -424,13 +427,14 @@ static const std::map<std::string, const unsigned char*> s_baked_shaders = {
 	{ "shaders/opengl/tfx_vgs.glsl"    , opengl_tfx_vgs },
 #ifdef _WIN32
 	{ "shaders/dx11/cas.hlsl"          , dx11_cas },
-	{ "shaders/direct3d/convert.fx"    , dx11_convert },
-	{ "shaders/direct3d/imgui.fx"      , dx11_imgui },
-	{ "shaders/direct3d/interlace.fx"  , dx11_interlace },
-	{ "shaders/direct3d/merge.fx"      , dx11_merge },
-	{ "shaders/direct3d/present.fx"    , dx11_present },
-	{ "shaders/direct3d/shadeboost.fx" , dx11_shadeboost },
-	{ "shaders/direct3d/tfx.fx"        , dx11_tfx },
+	{ "shaders/dx11/convert.fx"        , dx11_convert },
+	{ "shaders/dx11/imgui.fx"          , dx11_imgui },
+	{ "shaders/dx11/interlace.fx"      , dx11_interlace },
+	{ "shaders/dx11/merge.fx"          , dx11_merge },
+	{ "shaders/dx11/present.fx"        , dx11_present },
+	{ "shaders/dx11/shadeboost.fx"     , dx11_shadeboost },
+	{ "shaders/dx11/tfx.fx"            , dx11_tfx },
+	{ "shaders/dx11/tfx_uber.fx"       , dx11_tfx_uber },
 #endif
 };
 #endif
