@@ -673,6 +673,26 @@ set(pcsx2GSMetalShaders
 	GS/Renderers/Metal/fxaa.metal
 )
 
+set(pcsx2GSCommonShaders
+	../bin/resources/shaders/common/ffx_a.h
+	../bin/resources/shaders/common/ffx_cas.h
+	../bin/resources/shaders/common/fxaa.fx
+	../bin/resources/shaders/common/tfx_defs.inc
+	../bin/resources/shaders/common/tfx_ps_atst.inc
+	../bin/resources/shaders/common/tfx_ps_blend.inc
+	../bin/resources/shaders/common/tfx_ps_color.inc
+	../bin/resources/shaders/common/tfx_ps_fetch.inc
+	../bin/resources/shaders/common/tfx_ps_fog.inc
+	../bin/resources/shaders/common/tfx_ps_header.inc
+	../bin/resources/shaders/common/tfx_ps_main.inc
+	../bin/resources/shaders/common/tfx_ps_post.inc
+	../bin/resources/shaders/common/tfx_ps_sample.inc
+	../bin/resources/shaders/common/tfx_ps_sample_af.inc
+	../bin/resources/shaders/common/tfx_ps_tfx.inc
+	../bin/resources/shaders/common/tfx_ps_util.inc
+	../bin/resources/shaders/common/tfx_vs.inc
+)
+
 if(WIN32)
 	list(APPEND pcsx2DEV9Sources
 		DEV9/Win32/pcap_io_win32.cpp
@@ -1111,6 +1131,7 @@ target_sources(PCSX2 PRIVATE
 	${pcsx2InputHeaders}
 	${pcsx2ps2Sources}
 	${pcsx2ps2Headers}
+	${pcsx2GSCommonShaders}
 )
 
 # platform sources
@@ -1118,7 +1139,7 @@ if(LINUX)
 	target_sources(PCSX2 PRIVATE
 		${pcsx2LinuxSources}
 		${pcsx2LinuxHeaders}
-		)
+	)
 
 	target_link_libraries(PCSX2_FLAGS INTERFACE
 		PkgConfig::LIBUDEV
@@ -1263,6 +1284,9 @@ if (APPLE)
 		${AVFOUNDATION_LIBRARY}
 		${COREMEDIA_LIBRARY}
 	)
+	foreach(shader IN LISTS pcsx2GSCommonShaders)
+		set_source_files_properties(${shader} PROPERTIES XCODE_EXPLICIT_FILE_TYPE sourcecode.metal)
+	endforeach()
 endif()
 
 set_property(GLOBAL PROPERTY PCSX2_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})

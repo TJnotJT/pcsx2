@@ -414,6 +414,12 @@
     <None Include="..\bin\resources\shaders\dx\cas.hlsl">
       <Filter>System\Ps2\GS\Shaders\Direct3D</Filter>
     </None>
+    <None Include="..\bin\resources\shaders\common\ffx_a.h">
+      <Filter>System\Ps2\GS\Shaders\Common</Filter>
+    </None>
+    <None Include="..\bin\resources\shaders\common\ffx_cas.h">
+      <Filter>System\Ps2\GS\Shaders\Common</Filter>
+    </None>
     <None Include="..\bin\resources\shaders\common\tfx_defs.inc">
       <Filter>System\Ps2\GS\Shaders\Common</Filter>
     </None>
