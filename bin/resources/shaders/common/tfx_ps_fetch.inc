@@ -60,9 +60,9 @@ PS_STATIC float4 fetch_gXbY()
 	}
 	else
 	{
-		uint4 rt = uint4(fetch_raw_color() * 255.5f);
+		uint4 rt = uint4(fetch_raw_color() * 255.0f);
 		uint green = (rt.g >> ps_cb.channel_shuffle_green_shift) & ps_cb.channel_shuffle_green_mask;
-		uint blue  = (rt.b >> ps_cb.channel_shuffle_blue_shift)  & ps_cb.channel_shuffle_blue_mask;
+		uint blue  = (rt.b << ps_cb.channel_shuffle_blue_shift)  & ps_cb.channel_shuffle_blue_mask;
 		return float4_bcast(green | blue);
 	}
 }
