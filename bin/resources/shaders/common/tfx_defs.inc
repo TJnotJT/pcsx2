@@ -311,7 +311,6 @@ static bool any_nonzero(int3 val)
 	#define PS_TEX_IS_DEPTH (PS_DEPTH_FMT == 1 || PS_DEPTH_FMT == 2)
 
 	#define SW_BLEND (PS_BLEND_A != 0 || PS_BLEND_B != 0 || PS_BLEND_D != 0)
-	#define SW_BLEND_NEEDS_RT (SW_BLEND && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1 || PS_BLEND_D == 1))
 	#define SW_AD_TO_HW (PS_BLEND_C == 1 && PS_A_MASKED != FALSE)
 	#define NEEDS_RT_FOR_BLEND (((PS_BLEND_A != PS_BLEND_B) && (PS_BLEND_A == 1 || PS_BLEND_B == 1 || PS_BLEND_C == 1)) || PS_BLEND_D == 1 || SW_AD_TO_HW)
 	#define NEEDS_RT_EARLY (PS_TEX_IS_FB != FALSE || PS_DATE >= 5)
