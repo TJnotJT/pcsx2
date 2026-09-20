@@ -441,6 +441,7 @@ private:
 
 	D3D12ShaderCache m_shader_cache;
 	ComPtr<ID3DBlob> m_convert_vs;
+	std::string m_convert_source;
 	std::string m_tfx_source;
 
 	void LookupNativeFormat(GSTexture::Format format, DXGI_FORMAT* d3d_format, DXGI_FORMAT* srv_format,
@@ -463,7 +464,7 @@ private:
 
 	bool DoCAS(
 		GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) final;
-	bool PSTypeCAS() final { return false; }
+	bool PSTypeCAS() final { return true; }
 
 	bool GetSampler(D3D12DescriptorHandle* cpu_handle, GSHWDrawConfig::SamplerSelector ss);
 	void ClearSamplerCache() final;
@@ -485,12 +486,13 @@ private:
 	bool CreateBuffers();
 	bool CreateRootSignatures();
 
+	bool CompileUtilityVS();
+	bool CompileCASPipelines();
 	bool CompileConvertPipelines();
 	bool CompilePresentPipelines();
 	bool CompileInterlacePipelines();
 	bool CompileMergePipelines();
 	bool CompilePostProcessingPipelines();
-	bool CompileCASPipelines();
 
 	bool CompileImGuiPipeline();
 	void RenderImGui();

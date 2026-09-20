@@ -1027,15 +1027,26 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	if (!CreateBuffers())
 		return false;
 
+	std::optional<std::string> source = ReadShaderSource("shaders/dx11/convert.fx");
+	if (!source)
+	{
+		Host::ReportErrorAsync("GS", "Failed to read shaders/dx11/convert.fx.");
+		return false;
+	}
+	m_convert_source = *source;
+
+	if (!CompileUtilityVS())
+		return false;
+
+	if (!CompileCASPipelines())
+		return false;
+
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
 		!CompileMergePipelines() || !CompilePostProcessingPipelines())
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
 	}
-
-	if (!CompileCASPipelines())
-		return false;
 
 	if (!CompileImGuiPipeline())
 		return false;
@@ -2323,43 +2334,6 @@ void GSDevice12::DoFXAA(GSTexture* sTex, GSTexture* dTex)
 	static_cast<GSTexture12*>(dTex)->TransitionToState(GSTexture12::ResourceState::PixelShaderResource);
 }
 
-bool GSDevice12::CompileCASPipelines()
-{
-	D3D12::RootSignatureBuilder rsb;
-	rsb.Add32BitConstants(0, NUM_CAS_CONSTANTS, D3D12_SHADER_VISIBILITY_ALL);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1, D3D12_SHADER_VISIBILITY_ALL);
-	rsb.AddDescriptorTable(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1, D3D12_SHADER_VISIBILITY_ALL);
-	m_cas_root_signature = rsb.Create(false);
-	if (!m_cas_root_signature)
-		return false;
-
-	std::optional<std::string> cas_source = ReadShaderSource("shaders/dx11/cas.hlsl");
-	if (!cas_source.has_value() || !GetCASShaderSource(&cas_source.value()))
-		return false;
-
-	static constexpr D3D_SHADER_MACRO upscale_macros[] = {{"PS_CAS", "0"}, {nullptr, nullptr}};
-	static constexpr D3D_SHADER_MACRO sharpen_macros[] = {{"CAS_SHARPEN_ONLY", "1"}, {"PS_CAS", "0"}, {nullptr, nullptr}};
-
-	const ComPtr<ID3DBlob> cs_upscale(m_shader_cache.GetComputeShader(cas_source.value(), nullptr, "cs_main"));
-	const ComPtr<ID3DBlob> cs_sharpen(m_shader_cache.GetComputeShader(cas_source.value(), sharpen_macros, "cs_main"));
-	if (!cs_upscale || !cs_sharpen)
-		return false;
-
-	D3D12::ComputePipelineBuilder cpb;
-	cpb.SetRootSignature(m_cas_root_signature.get());
-	cpb.SetShader(cs_upscale->GetBufferPointer(), cs_upscale->GetBufferSize());
-	m_cas_upscale_pipeline = cpb.Create(m_device.get(), m_shader_cache, false);
-	cpb.SetShader(cs_sharpen->GetBufferPointer(), cs_sharpen->GetBufferSize());
-	m_cas_sharpen_pipeline = cpb.Create(m_device.get(), m_shader_cache, false);
-	if (!m_cas_upscale_pipeline || !m_cas_sharpen_pipeline)
-	{
-		Console.Error("D3D12: Failed to create CAS pipelines");
-		return false;
-	}
-
-	return true;
-}
-
 bool GSDevice12::CompileImGuiPipeline()
 {
 	const std::optional<std::string> hlsl = ReadShaderSource("shaders/dx11/imgui.fx");
@@ -2519,40 +2493,13 @@ bool GSDevice12::DoCAS(
 
 	EndRenderPass();
 
-	GSTexture12* const sTex12 = static_cast<GSTexture12*>(sTex);
-	GSTexture12* const dTex12 = static_cast<GSTexture12*>(dTex);
-	D3D12DescriptorHandle sTexDH, dTexDH;
-	if (!GetTextureGroupDescriptors(&sTexDH, &sTex12->GetSRVDescriptor(), 1) ||
-		!GetTextureGroupDescriptors(&dTexDH, &dTex12->GetUAVDescriptor(), 1))
-	{
-		ExecuteCommandList(false, "Ran out of descriptors for CAS");
-		if (!GetTextureGroupDescriptors(&sTexDH, &sTex12->GetSRVDescriptor(), 1) ||
-			!GetTextureGroupDescriptors(&dTexDH, &dTex12->GetUAVDescriptor(), 1))
-		{
-			Console.Error("D3D12: Failed to allocate CAS descriptors.");
-			return false;
-		}
-	}
+	SetUtilityRootSignature();
+	SetUtilityPushConstants(&constants, sizeof(constants));
 
-	const D3D12CommandList& cmdlist = GetCommandList();
-	const GSTexture12::ResourceState old_state = sTex12->GetResourceState();
-	sTex12->TransitionToState(cmdlist, GSTexture12::ResourceState::ComputeShaderResource);
-	dTex12->TransitionToState(cmdlist, GSTexture12::ResourceState::CASShaderUAV);
+	const GSVector4 dRect(dTex->GetRect());
+	const GSVector4 sRect(0.0f, 0.0f, 1.0f, 1.0f);
+	DoStretchRect(sTex, sRect, dTex, dRect, sharpen_only ? ShaderConvert::CAS_SHARPEN : ShaderConvert::CAS_UPSCALE, Nearest);
 
-	cmdlist.list4->SetComputeRootSignature(m_cas_root_signature.get());
-	cmdlist.list4->SetComputeRoot32BitConstants(
-		CAS_ROOT_SIGNATURE_PARAM_PUSH_CONSTANTS, NUM_CAS_CONSTANTS, constants.data(), 0);
-	cmdlist.list4->SetComputeRootDescriptorTable(CAS_ROOT_SIGNATURE_PARAM_SRC_TEXTURE, sTexDH);
-	cmdlist.list4->SetComputeRootDescriptorTable(CAS_ROOT_SIGNATURE_PARAM_DST_TEXTURE, dTexDH);
-	cmdlist.list4->SetPipelineState(sharpen_only ? m_cas_sharpen_pipeline.get() : m_cas_upscale_pipeline.get());
-	m_dirty_flags |= DIRTY_FLAG_PIPELINE;
-
-	static const int threadGroupWorkRegionDim = 16;
-	const int dispatchX = (dTex->GetWidth() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-	const int dispatchY = (dTex->GetHeight() + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-	cmdlist.list4->Dispatch(dispatchX, dispatchY, 1);
-
-	sTex12->TransitionToState(cmdlist, old_state);
 	return true;
 }
 
@@ -2860,19 +2807,57 @@ bool GSDevice12::CreateRootSignatures()
 	return true;
 }
 
-bool GSDevice12::CompileConvertPipelines()
+bool GSDevice12::CompileUtilityVS()
 {
-	std::optional<std::string> source = ReadShaderSource("shaders/dx11/convert.fx");
-	if (!source)
+	m_convert_vs = GetUtilityVertexShader(m_convert_source, "vs_main");
+
+	return m_convert_vs != nullptr;
+}
+
+bool GSDevice12::CompileCASPipelines()
+{
+	D3D12::GraphicsPipelineBuilder gpb;
+	gpb.SetRootSignature(m_utility_root_signature.get());
+	AddUtilityVertexAttributes(gpb);
+	gpb.SetNoCullRasterizationState();
+	gpb.SetNoBlendingState();
+	gpb.SetVertexShader(m_convert_vs.get());
+
+	std::optional<std::string> cas_source = ReadShaderSource("shaders/dx11/cas.hlsl");
+	if (!cas_source.has_value() || !GetCASShaderSource(&cas_source.value()))
+		return false;
+
+	static constexpr D3D_SHADER_MACRO upscale_macros[] = { {"PS_CAS", "1"}, {nullptr, nullptr} };
+	static constexpr D3D_SHADER_MACRO sharpen_macros[] = { {"CAS_SHARPEN_ONLY", "1"}, {"PS_CAS", "1"}, {nullptr, nullptr} };
+
+	const ComPtr<ID3DBlob> cs_upscale(m_shader_cache.GetPixelShader(cas_source.value(), upscale_macros, "ps_main"));
+	const ComPtr<ID3DBlob> cs_sharpen(m_shader_cache.GetPixelShader(cas_source.value(), sharpen_macros, "ps_main"));
+	if (!cs_upscale || !cs_sharpen)
+		return false;
+
+	gpb.SetRootSignature(m_utility_root_signature.get());
+	gpb.SetRenderTarget(0, DXGI_FORMAT_R8G8B8A8_UNORM);
+	gpb.SetNoDepthTestState();
+	gpb.SetNoStencilState();
+	gpb.SetBlendState(0, false, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO,
+		D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL);
+
+	gpb.SetPixelShader(cs_upscale.get());
+	m_cas_upscale_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+
+	gpb.SetPixelShader(cs_sharpen.get());
+	m_cas_sharpen_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+	if (!m_cas_upscale_pipeline || !m_cas_sharpen_pipeline)
 	{
-		Host::ReportErrorAsync("GS", "Failed to read shaders/dx11/convert.fx.");
+		Console.Error("D3D12: Failed to create CAS pipelines");
 		return false;
 	}
 
-	m_convert_vs = GetUtilityVertexShader(*source, "vs_main");
-	if (!m_convert_vs)
-		return false;
+	return true;
+}
 
+bool GSDevice12::CompileConvertPipelines()
+{
 	D3D12::GraphicsPipelineBuilder gpb;
 	gpb.SetRootSignature(m_utility_root_signature.get());
 	AddUtilityVertexAttributes(gpb);
@@ -2886,6 +2871,18 @@ bool GSDevice12::CompileConvertPipelines()
 	for (u32 i = 0; i < ShaderConvertSelector::NUM_TOTAL_SHADERS; i++)
 	{
 		const ShaderConvertSelector shader = ShaderConvertSelector::Get(i);
+
+		if (shader.Shader() == ShaderConvert::CAS_SHARPEN)
+		{
+			m_convert[i] = m_cas_sharpen_pipeline.get();
+			continue;
+		}
+
+		if (shader.Shader() == ShaderConvert::CAS_UPSCALE)
+		{
+			m_convert[i] = m_cas_upscale_pipeline.get();
+			continue;
+		}
 
 		GSTexture::Format format = shader.OutputFormat();
 		DXGI_FORMAT dxgi_format;
@@ -2932,7 +2929,7 @@ bool GSDevice12::CompileConvertPipelines()
 		sm.AddMacro("HAS_FLOAT32_OUTPUT", static_cast<int>(shader.Float32Output()));
 		sm.AddMacro(entry_point_macro.c_str(), 1);
 
-		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), shader.EntryPoint()));
+		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_convert_source, sm.GetPtr(), shader.EntryPoint()));
 		if (!ps)
 			return false;
 
@@ -2981,7 +2978,7 @@ bool GSDevice12::CompileConvertPipelines()
 		sm.AddMacro("PRIMID_MIN", GSShader::PRIMID_MIN);
 		sm.AddMacro(entry_point_macro.c_str(), "1");
 
-		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(*source, sm.GetPtr(), entry_point.c_str()));
+		ComPtr<ID3DBlob> ps(m_shader_cache.GetPixelShader(m_convert_source, sm.GetPtr(), entry_point.c_str()));
 		if (!ps)
 			return false;
 

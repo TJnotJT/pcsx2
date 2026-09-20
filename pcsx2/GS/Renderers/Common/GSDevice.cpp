@@ -56,7 +56,9 @@ const char* ShaderEntryPoint(ShaderConvert value)
 		case ShaderConvert::CLUT_4:                 return "ps_convert_clut_4";
 		case ShaderConvert::CLUT_8:                 return "ps_convert_clut_8";
 		case ShaderConvert::YUV:                    return "ps_yuv";
-		// clang-format on
+		case ShaderConvert::CAS_UPSCALE:            return "ps_main";
+		case ShaderConvert::CAS_SHARPEN:            return "ps_main";
+			// clang-format on
 		default:
 			pxAssert(0);
 			return "ShaderConvertUnknownShader";
@@ -910,6 +912,8 @@ GSTexture* GSDevice::CreateCompatible(GSTexture* tex, int w, int h, bool clear, 
 void GSDevice::DoStretchRectWithAssertions(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex,
 	const GSVector4& dRect, ShaderConvertSelector shader, Filter filter)
 {
+	// CAS shaders should only be called with DoCas()
+	pxAssert(shader.Shader() != ShaderConvert::CAS_SHARPEN && shader.Shader() != ShaderConvert::CAS_UPSCALE);
 	pxAssert((dTex && dTex->IsDepthLike()) == shader.Float32Output());
 	pxAssert(!(filter == Biln && shader.SupportsBilinear())); // Don't allow HW bilinear if SW bilinear is required.
 	GL_INS("StretchRect(%s) {%d,%d} %dx%d -> {%d,%d) %dx%d", ShaderConvertName(shader.Shader()),
