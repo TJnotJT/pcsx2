@@ -390,7 +390,7 @@ void ps_main(PS_INPUT input)
 		#endif
 	#elif PS_RETURN_COLOR_ROV
 		if (!ps_color_discarded)
-			RtTextureRov[state.psin.p.xy] = psout_gen.c0;
+			RtWrite(coord, psout_gen.c0);
 	#endif
 
 	// Depth write back
@@ -402,7 +402,7 @@ void ps_main(PS_INPUT input)
 		#endif
 	#elif PS_RETURN_DEPTH_ROV
 		if (!ps_depth_discarded)
-			DepthTextureRov[ps_in.p.xy] = psout_gen.depth;
+			DepthWrite(coord, psout_gen.depth);
 	#endif
 
 	#if (PS_RETURN_COLOR || PS_RETURN_DEPTH)

@@ -423,6 +423,20 @@ float DepthLoad(ivec2 xy)
 #endif
 }
 
+void RtWrite(int2 xy, float4 c)
+{
+#if PS_ROV_COLOR
+	imageStore(RtImageRov, xy, c);
+#endif
+}
+
+void DepthWrite(int2 xy, float d)
+{
+#if PS_ROV_DEPTH
+	imageStore(DepthImageRov, xy, vec4(d, 0, 0, 1.0f));
+#endif
+}
+
 // Get pixel shader constants for shared code.
 PSUniformsGeneric GetPSUniforms()
 {
@@ -486,7 +500,7 @@ void main()
 		#endif
 	#elif PS_RETURN_COLOR_ROV
 		if (!ps_color_discarded)
-			imageStore(RtImageRov, coord, psout.c0);
+			RtWrite(coord, psout.c0);
 	#endif
 	
 	// Writing back depth
@@ -501,7 +515,7 @@ void main()
 		#endif
 	#elif PS_RETURN_DEPTH_ROV
 		if (!ps_depth_discarded)
-			imageStore(DepthImageRov, coord, vec4(psout.depth, 0, 0, 1.0f));
+			DepthWrite(coord, psout.depth);
 	#endif
 
 	#if PS_ROV_COLOR || PS_ROV_DEPTH
