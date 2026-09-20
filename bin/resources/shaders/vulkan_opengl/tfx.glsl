@@ -403,7 +403,7 @@ vec4 RtLoad(ivec2 xy)
 float DepthLoad(ivec2 xy)
 {
 #if PCSX2_VULKAN
-	#if PS_ROV_COLOR
+	#if PS_ROV_DEPTH
 		return imageLoad(DepthImageRov, xy).r;
 	#elif SW_DEPTH && USE_FEEDBACK_SAMPLER
 		return texelFetch(DepthSampler, xy, 0).r;
