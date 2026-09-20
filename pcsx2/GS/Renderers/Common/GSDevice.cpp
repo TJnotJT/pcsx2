@@ -400,6 +400,7 @@ GSVector4i GSDevice::ProcessCopyArea(const GSVector4i& rtsize, const GSVector4i&
 #include "common_tfx_ps_sample.cpp"
 #include "common_tfx_ps_tfx.cpp"
 #include "common_tfx_ps_util.cpp"
+#include "common_tfx_ps.cpp"
 #include "common_tfx_vs.cpp"
 #ifdef _WIN32
 #include "dx_cas.cpp"
@@ -444,6 +445,7 @@ static const std::map<std::string, const unsigned char*> s_baked_shaders = {
 	{ "shaders/common/tfx_ps_sample.inc"    , common_tfx_ps_sample},
 	{ "shaders/common/tfx_ps_tfx.inc"       , common_tfx_ps_tfx},
 	{ "shaders/common/tfx_ps_util.inc"      , common_tfx_ps_util},
+	{ "shaders/common/tfx_ps.inc"           , common_tfx_ps},
 	{ "shaders/common/tfx_vs.inc"           , common_tfx_vs},
 #ifdef _WIN32
 	{ "shaders/dx/cas.hlsl"                 , dx_cas },

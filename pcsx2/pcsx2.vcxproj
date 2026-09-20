@@ -190,6 +190,9 @@
     <ShaderToCpp Include="..\bin\resources\shaders\common\tfx_ps_util.inc">
       <VarName>common_tfx_ps_util</VarName>
     </ShaderToCpp>
+    <ShaderToCpp Include="..\bin\resources\shaders\common\tfx_ps.inc">
+      <VarName>common_tfx_ps</VarName>
+    </ShaderToCpp>
     <ShaderToCpp Include="..\bin\resources\shaders\common\tfx_vs.inc">
       <VarName>common_tfx_vs</VarName>
     </ShaderToCpp>
