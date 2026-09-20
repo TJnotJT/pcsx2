@@ -1248,7 +1248,13 @@ void GSDevice::EndDSAsRT()
 #pragma GCC diagnostic pop
 #endif
 
-void GSDevice::ResolveShaderIncludes(std::string* source, std::span<const ShaderInclude> includes)
+struct ShaderInclude
+{
+	std::string_view file_name;
+	std::string file_source;
+};
+
+static void ResolveShaderIncludes(std::string* source, std::span<const ShaderInclude> includes)
 {
 	// String replace includes for shader compilers that don't support includes.
 	for (const ShaderInclude& include : includes)
@@ -1288,7 +1294,7 @@ bool GSDevice::GetTFXShaderSource(std::string* source)
 		std::optional<std::string> data = ReadShaderSource(tmp.c_str());
 		if (!data)
 			return false;
-		includes[i] = ShaderInclude(names[i], *data);
+		includes[i] = ShaderInclude(names[i], std::move(*data));
 	}
 
 	ResolveShaderIncludes(source, includes);
