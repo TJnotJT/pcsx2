@@ -26,7 +26,6 @@
 #define short4 int4
 
 // Builtin keywords/functions
-#define SELECT(COND, TRUE_VAL, FALSE_VAL) ((COND) ? (FALSE_VAL) : (TRUE_VAL))
 #define equal(X, Y) ((X) == (Y))
 #define greaterThanEqual(X, Y) ((X) >= (Y))
 #define lessThanEqual(X, Y) ((X) <= (Y))

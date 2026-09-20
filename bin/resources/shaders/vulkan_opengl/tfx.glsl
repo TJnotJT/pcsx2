@@ -44,7 +44,6 @@
 #define static
 #define ddx dFdx
 #define ddy dFdy
-#define SELECT(COND, TRUE_VAL, FALSE_VAL) mix((COND), (FALSE_VAL), (TRUE_VAL))
 #define rsqrt(X) inversesqrt(X)
 #define saturate(X) clamp((X), 0.0f, 1.0f)
 #define FLOAT_BITCAST_UINT(X) floatBitsToUint(X)
