@@ -306,11 +306,11 @@ struct MainVSOut
 // Convert VS constants for shared code.
 VSUniformsGeneric GetVSUniforms(constant GSMTLMainVSUniform& cb [[buffer(GSMTLBufferIndexHWUniforms)]])
 {
-  VSUniformsGeneric cb_gen;
+	VSUniformsGeneric cb_gen;
 	#define X(TYPE, NAME) cb_gen.NAME = cb.NAME;
 		VS_UNIFORMS(X)
 	#undef X
-  return cb_gen;
+	return cb_gen;
 }
 
 static VSInputGeneric load_vertex(device const GSMTLMainVertex* vertices, uint idx)
