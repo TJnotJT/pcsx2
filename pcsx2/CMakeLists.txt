@@ -690,6 +690,7 @@ set(pcsx2GSCommonShaders
 	../bin/resources/shaders/common/tfx_ps_sample_af.inc
 	../bin/resources/shaders/common/tfx_ps_tfx.inc
 	../bin/resources/shaders/common/tfx_ps_util.inc
+	../bin/resources/shaders/common/tfx_ps.inc
 	../bin/resources/shaders/common/tfx_vs.inc
 )
 

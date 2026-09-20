@@ -459,6 +459,9 @@
     <None Include="..\bin\resources\shaders\common\tfx_ps_util.inc">
       <Filter>System\Ps2\GS\Shaders\Common</Filter>
     </None>
+    <None Include="..\bin\resources\shaders\common\tfx_ps.inc">
+      <Filter>System\Ps2\GS\Shaders\Common</Filter>
+    </None>
     <None Include="..\bin\resources\shaders\common\tfx_vs.inc">
       <Filter>System\Ps2\GS\Shaders\Common</Filter>
     </None>

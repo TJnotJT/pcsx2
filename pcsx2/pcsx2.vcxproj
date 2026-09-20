@@ -209,6 +209,7 @@
     <None Include="..\bin\resources\shaders\common\tfx_ps_sample_af.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_tfx.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_ps_util.inc" />
+    <None Include="..\bin\resources\shaders\common\tfx_ps.inc" />
     <None Include="..\bin\resources\shaders\common\tfx_vs.inc" />
     <None Include="..\bin\resources\shaders\opengl\imgui.glsl" />
     <None Include="..\bin\resources\shaders\opengl\interlace.glsl" />

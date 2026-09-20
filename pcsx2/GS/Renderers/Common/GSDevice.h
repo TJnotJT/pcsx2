@@ -1511,8 +1511,8 @@ protected:
 
 	struct ShaderInclude
 	{
-		std::string_view file_name;
-		std::string_view file_source;
+		std::string file_name;
+		std::string file_source;
 	};
 
 	static void ResolveShaderIncludes(std::string* source, std::span<const ShaderInclude> includes);

@@ -421,18 +421,8 @@ struct PSMainState
 
 	PSMainState(const thread MainPSIn& ps_in, constant GSMTLMainPSUniform& ps_cb): ps_in(ps_in), ps_cb(ps_cb) {}
 
-	#include "../../../../bin/resources/shaders/common/tfx_ps_header.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_util.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_sample_af.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_fetch.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_sample.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_tfx.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_atst.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_fog.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_color.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_post.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_blend.inc"
-	#include "../../../../bin/resources/shaders/common/tfx_ps_main.inc"
+	// Include the common PS implementation code
+	#include "../../../../bin/resources/shaders/common/tfx_ps.inc"
 };
 
 fragment MainPSOut ps_main(

@@ -1261,6 +1261,7 @@ bool GSDevice::GetTFXShaderSource(std::string* source)
 	static constexpr const char* names[] = {
 		"tfx_defs.inc",
 		"tfx_vs.inc",
+		"tfx_ps.inc", // Must comes before other PS files since it includes them.
 		"tfx_ps_header.inc",
 		"tfx_ps_util.inc",
 		"tfx_ps_sample_af.inc",
@@ -1278,7 +1279,7 @@ bool GSDevice::GetTFXShaderSource(std::string* source)
 	std::array<ShaderInclude, std::size(names)> includes;
 
 	std::string tmp;
-	for (uint32_t i = 0; i < std::size(names); i++)
+	for (u32 i = 0; i < std::size(names); i++)
 	{
 		tmp.assign("shaders/common/");
 		tmp.append(names[i]);
