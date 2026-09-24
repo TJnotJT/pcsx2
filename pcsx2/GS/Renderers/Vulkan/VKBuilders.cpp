@@ -249,13 +249,13 @@ VkRenderPass Vulkan::RenderPassBuilder::Create(VkDevice device)
 	subpass.pColorAttachments = m_color_reference.data();
 	subpass.pDepthStencilAttachment = m_has_depth_attachment ? &m_depth_reference : nullptr;
 
-	VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2};
-  pass_info.attachmentCount = m_num_attachments;
-  pass_info.pAttachments = m_attachments.data();
-  pass_info.subpassCount = 1u;
-  pass_info.pSubpasses = &subpass;
-  pass_info.dependencyCount = m_num_subpass_dependencies;
-  pass_info.pDependencies = m_subpass_dependency.data();
+	VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+	pass_info.attachmentCount = m_num_attachments;
+	pass_info.pAttachments = m_attachments.data();
+	pass_info.subpassCount = 1u;
+	pass_info.pSubpasses = &subpass;
+	pass_info.dependencyCount = m_num_subpass_dependencies;
+	pass_info.pDependencies = m_subpass_dependency.data();
 
 	VkRenderPass pass;
 	const VkResult res = vkCreateRenderPass(device, &pass_info, nullptr, &pass);
