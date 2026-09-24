@@ -25,15 +25,6 @@
 
 class VKSwapChain;
 
-enum class VKFeedbackLoopFlags : u8
-{
-	None = 0,
-	RT = 1,
-	Depth = 2,
-};
-
-MARK_ENUM_AS_FLAGS(VKFeedbackLoopFlags);
-
 class GSDeviceVK final : public GSDevice
 {
 public:
@@ -319,8 +310,6 @@ private:
 	u32 m_max_framebuffer_width = 0;
 	u32 m_max_framebuffer_height = 0;
 public:
-	using FeedbackLoopFlags = VKFeedbackLoopFlags;
-
 	enum class ResourceType
 	{
 		SRV, // Shader resource view (read only)
@@ -340,6 +329,8 @@ public:
 		}
 	}
 
+	using FramebufferInfo = GSTextureVK::FramebufferInfo;
+
 	struct alignas(8) PipelineSelector
 	{
 		GSHWDrawConfig::PSSelector ps;
@@ -352,7 +343,8 @@ public:
 				u32 rt : 1;
 				u32 ds : 1;
 				u32 line_width : 1;
-				FeedbackLoopFlags feedback_loop_flags : 3;
+				u32 rt_feedback : 1;
+				u32 depth_feedback : 1;
 			};
 
 			u32 key;
@@ -368,9 +360,6 @@ public:
 		__fi bool operator!=(const PipelineSelector& p) const { return !BitEqual(*this, p); }
 
 		__fi PipelineSelector() { std::memset(this, 0, sizeof(*this)); }
-
-		__fi bool IsRTFeedbackLoop() const { return feedback_loop_flags & FeedbackLoopFlags::RT; }
-		__fi bool IsDepthFeedbackLoop() const { return feedback_loop_flags & FeedbackLoopFlags::Depth; }
 	};
 	static_assert(sizeof(PipelineSelector) == 32, "Pipeline selector is 32 bytes");
 
@@ -635,7 +624,9 @@ public:
 	void PSSetSampler(GSHWDrawConfig::SamplerSelector sel);
 
 	void OMSetRenderTargets(GSTexture* rt, GSTexture* ds, const GSVector4i& scissor,
-		FeedbackLoopFlags feedback_loop = FeedbackLoopFlags::None, const GSVector2i& viewport_size = {});
+		const GSVector2i& viewport_size = {});
+	void OMSetRenderTargets(FramebufferInfo info, const GSVector4i& scissor,
+		const GSVector2i& viewport_size = {});
 
 	void SetVSConstantBuffer(const GSHWDrawConfig::VSConstantBuffer& cb);
 	void SetPSConstantBuffer(const GSHWDrawConfig::PSConstantBuffer& cb);
@@ -659,7 +650,7 @@ public:
 public:
 	VkFormat LookupNativeFormat(GSTexture::Format format) const;
 
-	__fi VkFramebuffer GetCurrentFramebuffer() const { return m_current_framebuffer; }
+	__fi VkFramebuffer GetCurrentFramebuffer() const { return m_current_framebuffer.framebuffer; }
 
 	/// Ends any render pass, executes the command buffer, and invalidates cached state.
 	void ExecuteCommandBuffer(bool wait_for_completion);
@@ -751,14 +742,11 @@ private:
 
 	// Which bindings/state has to be updated before the next draw.
 	u32 m_dirty_flags = 0;
-	FeedbackLoopFlags m_current_framebuffer_feedback_loop = FeedbackLoopFlags::None;
 	bool m_warned_slow_spin = false;
 
 	VkBuffer m_index_buffer = VK_NULL_HANDLE;
 
-	GSTextureVK* m_current_render_target = nullptr;
-	GSTextureVK* m_current_depth_target = nullptr;
-	VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE;
+	FramebufferInfo m_current_framebuffer;
 	VkRenderPass m_current_render_pass = VK_NULL_HANDLE;
 	GSVector4i m_current_render_pass_area = GSVector4i::zero();
 
