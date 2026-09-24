@@ -1076,7 +1076,7 @@ bool GSDeviceVK::CreateGlobalDescriptorPool()
 	{
 		VkQueryPoolCreateInfo query_create_info = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
 		query_create_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    query_create_info.queryCount = VK_QUERY_TYPE_TIMESTAMP, NUM_COMMAND_BUFFERS * 4;
+		query_create_info.queryCount = NUM_COMMAND_BUFFERS * 4;
 		res = vkCreateQueryPool(m_device, &query_create_info, nullptr, &m_timestamp_query_pool);
 		if (res != VK_SUCCESS)
 		{
