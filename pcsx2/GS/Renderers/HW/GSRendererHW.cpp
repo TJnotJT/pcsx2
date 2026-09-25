@@ -9523,7 +9523,8 @@ __ri void GSRendererHW::DrawPrims(GSTextureCache::Target* rt, GSTextureCache::Ta
 
 	SetupIA(rtscale, vs_scale_x, vs_scale_y, m_channel_shuffle_width != 0, no_rt);
 
-	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV())
+	if (m_conf.ds && m_conf.ps.IsFeedbackLoopDepth() && !g_gs_device->Features().depth_feedback && !m_conf.ps.HasDepthROV() &&
+		!g_gs_device->Features().framebuffer_fetch_depth())
 	{
 		GL_PUSH("HW: Creating temporary R32 RT for depth feedback");
 

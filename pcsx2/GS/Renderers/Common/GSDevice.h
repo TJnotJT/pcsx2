@@ -1394,33 +1394,42 @@ public:
 		Performance
 	};
 
+	enum : u32
+	{
+		FB_FETCH_NONE  = 0,
+		FB_FETCH_COLOR = 1,
+		FB_FETCH_DEPTH = 2,
+	};
+
 	// clang-format off
 	struct FeatureSupport
 	{
-		bool broken_point_sampler : 1; ///< Issue with AMD cards, see tfx shader for details
-		bool vs_expand            : 1; ///< Supports expanding points/lines/sprites in the vertex shader
-		bool primitive_id         : 1; ///< Supports primitive ID for use with prim tracking destination alpha algorithm
-		bool texture_barrier      : 1; ///< Supports sampling rt and hopefully texture barrier
-		bool multidraw_fb_copy    : 1; ///< Replacement for texture barrier.
-		bool provoking_vertex_last: 1; ///< Supports using the last vertex in a primitive as the value for flat shading.
-		bool point_expand         : 1; ///< Supports point expansion in hardware.
-		bool line_expand          : 1; ///< Supports line expansion in hardware.
-		bool prefer_new_textures  : 1; ///< Allocate textures up to the pool size before reusing them, to avoid render pass restarts.
-		bool dxt_textures         : 1; ///< Supports DXTn texture compression, i.e. S3TC and BC1-3.
-		bool bptc_textures        : 1; ///< Supports BC6/7 texture compression.
-		bool framebuffer_fetch    : 1; ///< Can sample from the framebuffer without texture barriers.
-		bool stencil_buffer       : 1; ///< Supports stencil buffer, and can use for DATE.
-		bool cas_sharpening       : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
-		bool test_and_sample_depth: 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
-		bool depth_feedback       : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
-		bool aa1                  : 1; ///< Supports the GS AA1 feature.
-		bool rov                  : 1; ///< Supports rasterizer ordered views for both depth and color.
+		bool broken_point_sampler    : 1; ///< Issue with AMD cards, see tfx shader for details
+		bool vs_expand               : 1; ///< Supports expanding points/lines/sprites in the vertex shader
+		bool primitive_id            : 1; ///< Supports primitive ID for use with prim tracking destination alpha algorithm
+		bool texture_barrier         : 1; ///< Supports sampling rt and hopefully texture barrier
+		bool multidraw_fb_copy       : 1; ///< Replacement for texture barrier.
+		bool provoking_vertex_last   : 1; ///< Supports using the last vertex in a primitive as the value for flat shading.
+		bool point_expand            : 1; ///< Supports point expansion in hardware.
+		bool line_expand             : 1; ///< Supports line expansion in hardware.
+		bool prefer_new_textures     : 1; ///< Allocate textures up to the pool size before reusing them, to avoid render pass restarts.
+		bool dxt_textures            : 1; ///< Supports DXTn texture compression, i.e. S3TC and BC1-3.
+		bool bptc_textures           : 1; ///< Supports BC6/7 texture compression.
+		u32  framebuffer_fetch       : 2; ///< Can sample from the framebuffer target without texture barriers (1 = color, 2 = color and depth).
+		bool stencil_buffer          : 1; ///< Supports stencil buffer, and can use for DATE.
+		bool cas_sharpening          : 1; ///< Supports sufficient functionality for contrast adaptive sharpening.
+		bool test_and_sample_depth   : 1; ///< Supports concurrently binding the depth-stencil buffer for sampling and depth testing.
+		bool depth_feedback          : 1; ///< Depth feedback loops can be done with DS directly (otherwise need to copy to separate RT).  Implies `feedback_loops`.
+		bool aa1                     : 1; ///< Supports the GS AA1 feature.
+		bool rov                     : 1; ///< Supports rasterizer ordered views for both depth and color.
 		FeatureSupport()
 		{
 			memset(this, 0, sizeof(*this));
 		}
 		/// Supports feedback loops through either texture barriers or rt copies.
 		bool feedback_loops() const { return texture_barrier || multidraw_fb_copy; }
+		/// Supports fraembuffer fetch for depth textures directly (not color copy needed)
+		bool framebuffer_fetch_depth() const { return framebuffer_fetch >= FB_FETCH_DEPTH; }
 	};
 
 	struct MultiStretchRect
