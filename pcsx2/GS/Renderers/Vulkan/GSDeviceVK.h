@@ -352,7 +352,6 @@ public:
 				u32 line_width : 1;
 				u32 rt_feedback : 1;
 				u32 depth_feedback : 1;
-				u32 ds_as_rt_write : 1;
 			};
 
 			u32 key;

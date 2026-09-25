@@ -531,6 +531,7 @@ bool GSDeviceVK::SelectDeviceFeatures()
 	m_device_features.geometryShader = available_features.geometryShader;
 	m_device_features.fragmentStoresAndAtomics = available_features.fragmentStoresAndAtomics;
 	m_device_features.pipelineStatisticsQuery = available_features.pipelineStatisticsQuery;
+	m_device_features.independentBlend = available_features.independentBlend;
 
 	return true;
 }
@@ -1773,14 +1774,19 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 	const GSTextureVK::Layout color_layout =
 		key.color_feedback_loop ? GSTextureVK::Layout::FeedbackLoop : GSTextureVK::Layout::ColorAttachment;
 	
-	const GSTextureVK::Layout depth_layout =
-		key.depth_feedback_loop ?
+	const GSTextureVK::Layout depth_as_color_layout =
+		key.depth_feedback_loop ? GSTextureVK::Layout::FeedbackLoop : GSTextureVK::Layout::ColorAttachment;
+
+	// We sample from real depth only if we're not using depth as color.
+	const bool using_depth_as_color = key.depth_as_color_format != VK_FORMAT_UNDEFINED;
+	const bool sampling_real_depth = key.depth_feedback_loop && !using_depth_as_color;
+	const GSTextureVK::Layout depth_layout = sampling_real_depth ?
 			(m_features.depth_feedback ? GSTextureVK::Layout::FeedbackLoop : GSTextureVK::Layout::General) :
 			GSTextureVK::Layout::DepthStencilAttachment;
 
 	const VkDependencyFlags feedback_dependency = GetFeedbackBarrierDependencyFlags();
 
-	if (key.color_feedback_loop)
+	if (key.color_feedback_loop || (key.depth_feedback_loop && using_depth_as_color))
 	{
 		rpb.SetColorFeedbackBarrier(
 			s_color_feedback_src_stage, s_color_feedback_src_access,
@@ -1790,7 +1796,7 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_COLOR_ACCESS_BIT_EXT : 0);
 	}
 
-	if (key.depth_feedback_loop)
+	if (sampling_real_depth)
 	{
 		rpb.SetDepthFeedbackBarrier(
 			s_depth_feedback_src_stage, s_depth_feedback_src_access,
@@ -1810,6 +1816,18 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			!m_features.framebuffer_fetch);
 	}
 
+	if (key.depth_as_color_format != VK_FORMAT_UNDEFINED)
+	{
+		rpb.AddColorAttachment(
+			GSTextureVK::GetVkImageLayout(depth_as_color_layout),
+			static_cast<VkFormat>(key.depth_as_color_format),
+			static_cast<VkAttachmentLoadOp>(key.depth_as_color_load_op),
+			static_cast<VkAttachmentStoreOp>(key.depth_as_color_store_op),
+			key.depth_feedback_loop,
+			!UseFeedbackLoopLayout(),
+			!m_features.framebuffer_fetch);
+	}
+
 	if (key.depth_format != VK_FORMAT_UNDEFINED)
 	{
 		rpb.AddDepthStencilAttachment(
@@ -1819,7 +1837,7 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			static_cast<VkAttachmentStoreOp>(key.depth_store_op),
 			static_cast<VkAttachmentLoadOp>(key.stencil_load_op),
 			static_cast<VkAttachmentStoreOp>(key.stencil_store_op),
-			key.depth_feedback_loop,
+			sampling_real_depth,
 			!UseFeedbackLoopLayout(),
 			!m_features.framebuffer_fetch);
 	}
@@ -2923,7 +2941,7 @@ bool GSDeviceVK::CheckFeatures()
 	m_features.line_expand =
 		(m_device_features.wideLines && limits.lineWidthRange[0] <= f_upscale && limits.lineWidthRange[1] >= f_upscale);
 
-	m_features.depth_feedback = m_features.feedback_loops();
+	m_features.depth_feedback = false;// m_features.feedback_loops();
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
 
 	DevCon.WriteLn("Optional features:%s%s%s%s%s", m_features.primitive_id ? " primitive_id" : "",
@@ -3814,22 +3832,27 @@ void GSDeviceVK::OMSetRenderTargets(FramebufferInfo info, const GSVector4i& scis
 
 	if (!InRenderPass())
 	{
-		std::array<GSTextureVK*, 3> attachments = info.Attachments();
-		std::array<u32, 3> dirty_flags = {
+		std::array<GSTextureVK*, 3> attachments = {
+			info.rt,
+			info.ds_as_rt,
+			info.ds,
+		};
+		std::array<u32, 3> dirty_texture_flag = {
 			DIRTY_FLAG_TFX_TEXTURE_0 << TFX_TEXTURE_RT,
 			DIRTY_FLAG_TFX_TEXTURE_0 << TFX_TEXTURE_DEPTH,
-			DIRTY_FLAG_TFX_TEXTURE_0 << TFX_TEXTURE_DEPTH };
-		// FIXME: Figure out what are the correct flags to use here.
-		std::array<bool, 3> feedback_flags = {
-			info.rt_feedback,
-			info.depth_feedback,
-			info.depth_feedback };
+			DIRTY_FLAG_TFX_TEXTURE_0 << TFX_TEXTURE_DEPTH,
+		};
+		std::array<bool, 3> use_feedback = {
+			info.rt_feedback,                      // RT
+			info.depth_feedback && info.ds_as_rt,  // DS as RT
+			info.depth_feedback && !info.ds_as_rt, // DS
+		};
 
 		for (u32 i = 0; i < 3; i++)
 		{
 			GSTextureVK* tex = attachments[i];
-			const u32 dirty_flag = dirty_flags[i];
-			const bool feedback = feedback_flags[i];
+			const u32 dirty_flag = dirty_texture_flag[i];
+			const bool feedback = use_feedback[i];
 
 			if (tex)
 			{
@@ -5065,6 +5088,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	std::stringstream ss;
 	AddShaderHeader(ss);
 	AddShaderStageMacro(ss, false, false, true);
+	AddMacro(ss, "PS_DEPTH_FEEDBACK_SUPPORT", m_features.depth_feedback ? 1 : 2);
 	AddMacro(ss, "PS_FST", sel.fst);
 	AddMacro(ss, "PS_WMS", sel.wms);
 	AddMacro(ss, "PS_WMT", sel.wmt);
@@ -5251,12 +5275,12 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 
 	if (p.ds_as_rt)
 		gpb.SetBlendAttachment(p.rt ? 1 : 0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.ds_as_rt_write ? VK_COLOR_COMPONENT_R_BIT : 0);
+			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
 
 	// Tests have shown that it's faster to just enable rast order on the entire pass, rather than alternating
 	// between turning it on and off for different draws, and adding the required barrier between non-rast-order
 	// and rast-order draws.
-	if (m_features.framebuffer_fetch && p.rt_feedback)
+	if (m_features.framebuffer_fetch && (p.rt_feedback || p.depth_feedback))
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
 	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
@@ -6160,6 +6184,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	GSTextureVK* draw_ds_rov = config.ps.HasDepthROV() ? static_cast<GSTextureVK*>(config.ds) : nullptr;
 	GSTextureVK* draw_rt_clone = nullptr;
 	GSTextureVK* colclip_rt = static_cast<GSTextureVK*>(g_gs_device->GetColorClipTexture());
+	GSTextureVK* depth_feedback_tex = m_features.depth_feedback ? fb_info.ds : fb_info.ds_as_rt;
 
 	// stream buffer in first, in case we need to exec
 	SetVSConstantBuffer(config.cb_vs);
@@ -6429,12 +6454,12 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		PSSetShaderResource(TFX_TEXTURE_RT, nullptr, false);
 	}
 	
-	if (pipe.depth_feedback && fb_info.ds)
+	if (pipe.depth_feedback && depth_feedback_tex)
 	{
 		pxAssertMsg(m_features.texture_barrier, "Texture barriers enabled");
-		PSSetShaderResource(TFX_TEXTURE_DEPTH, fb_info.ds, false);
+		PSSetShaderResource(TFX_TEXTURE_DEPTH, depth_feedback_tex, false);
 
-		if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] == fb_info.ds)
+		if (m_tfx_textures[TFX_TEXTURE_DEPTH_ROV] == depth_feedback_tex)
 		{
 			// Unbind to avoid conflicts.
 			PSSetShaderResource(TFX_TEXTURE_DEPTH_ROV, nullptr, false);
@@ -6515,8 +6540,7 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// now we can do the actual draw
 	if (BindDrawPipeline(pipe))
-		// FIXME: Need to send DS as RT ?
-		SendHWDraw(config, pipe.rt_feedback ? fb_info.rt : nullptr, pipe.depth_feedback ? fb_info.ds : nullptr,
+		SendHWDraw(config, pipe.rt_feedback ? fb_info.rt : nullptr, pipe.depth_feedback ? depth_feedback_tex : nullptr,
 			config.require_one_barrier, config.require_full_barrier);
 
 	// blend second pass
@@ -6627,6 +6651,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelect
 	pipe.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
 	pipe.topology = static_cast<u32>(config.topology);
 	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
+	pipe.ds_as_rt = m_ds_as_rt != nullptr;
 	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
 	pipe.line_width = config.line_expand;
 
@@ -6712,10 +6737,19 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds)
 	if (ds)
 	{
 		VkImageMemoryBarrier2& barrier = barriers[num_barriers++] = barrier_template;
-		barrier.srcStageMask = s_depth_feedback_src_stage;
-		barrier.srcAccessMask = s_depth_feedback_src_access;
 		barrier.image = ds->GetImage();
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		if (ds->IsDepthStencil())
+		{
+			barrier.srcStageMask = s_depth_feedback_src_stage;
+			barrier.srcAccessMask = s_depth_feedback_src_access;
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+		else
+		{
+			barrier.srcStageMask = s_color_feedback_src_stage;
+			barrier.srcAccessMask = s_color_feedback_src_access;
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
 	}
 
 	VkDependencyInfo dependency = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
