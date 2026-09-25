@@ -144,6 +144,13 @@ static constexpr const char* s_required_device_extensions[] = {
 	VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 };
 
+static constexpr VkPipelineStageFlags2 s_color_feedback_src_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+static constexpr VkPipelineStageFlags2 s_color_feedback_src_access = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | 
+                                                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+static constexpr VkPipelineStageFlags2 s_depth_feedback_src_stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | 
+                                                                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+static constexpr VkPipelineStageFlags2 s_depth_feedback_src_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | 
+                                                                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 GSDeviceVK::GSDeviceVK()
 {
 #ifdef ENABLE_OGL_DEBUG
@@ -1776,10 +1783,8 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 	if (key.color_feedback_loop)
 	{
 		rpb.SetColorFeedbackBarrier(
-			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-			VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-			GetFeedbackLoopInputAccessFlags(),
+			s_color_feedback_src_stage, s_color_feedback_src_access,
+			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
 			feedback_dependency);
 		rpb.SetSubpassFlags(m_features.framebuffer_fetch ?
 			VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_COLOR_ACCESS_BIT_EXT : 0);
@@ -1788,10 +1793,8 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 	if (key.depth_feedback_loop)
 	{
 		rpb.SetDepthFeedbackBarrier(
-			VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-			VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-			GetFeedbackLoopInputAccessFlags(),
+			s_depth_feedback_src_stage, s_depth_feedback_src_access,
+			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
 			feedback_dependency);
 	}
 
@@ -6700,8 +6703,8 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds)
 	if (rt)
 	{
 		VkImageMemoryBarrier2& barrier = barriers[num_barriers++] = barrier_template;
-		barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-		barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+		barrier.srcStageMask = s_color_feedback_src_stage;
+		barrier.srcAccessMask = s_color_feedback_src_access;
 		barrier.image = rt->GetImage();
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	}
@@ -6709,8 +6712,8 @@ void GSDeviceVK::FeedbackBarrier(GSTextureVK* rt, GSTextureVK* ds)
 	if (ds)
 	{
 		VkImageMemoryBarrier2& barrier = barriers[num_barriers++] = barrier_template;
-		barrier.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-		barrier.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		barrier.srcStageMask = s_depth_feedback_src_stage;
+		barrier.srcAccessMask = s_depth_feedback_src_access;
 		barrier.image = ds->GetImage();
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 	}
