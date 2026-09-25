@@ -479,6 +479,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 	m_optional_extensions.vk_ext_calibrated_timestamps =
 		SupportsExtension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_rasterization_order_attachment_access =
+		m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth =
 		SupportsExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_attachment_feedback_loop_layout =
 		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
@@ -721,9 +722,13 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		line_rasterization_feature.bresenhamLines = VK_TRUE;
 		Vulkan::AddPointerToChain(&device_info, &line_rasterization_feature);
 	}
-	if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
+	if (m_optional_extensions.vk_ext_rasterization_order_attachment_access ||
+		m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth)
 	{
-		rasterization_order_access_feature.rasterizationOrderColorAttachmentAccess = VK_TRUE;
+		rasterization_order_access_feature.rasterizationOrderColorAttachmentAccess =
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access ? VK_TRUE : VK_FALSE;
+		rasterization_order_access_feature.rasterizationOrderDepthAttachmentAccess =
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth ? VK_TRUE : VK_FALSE;
 		Vulkan::AddPointerToChain(&device_info, &rasterization_order_access_feature);
 	}
 	if (m_optional_extensions.vk_ext_attachment_feedback_loop_layout)
@@ -832,7 +837,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		Vulkan::AddPointerToChain(&features2, &provoking_vertex_features);
 	if (m_optional_extensions.vk_ext_line_rasterization)
 		Vulkan::AddPointerToChain(&features2, &line_rasterization_feature);
-	if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
+	if (m_optional_extensions.vk_ext_rasterization_order_attachment_access ||
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth)
 		Vulkan::AddPointerToChain(&features2, &rasterization_order_access_feature);
 	if (m_optional_extensions.vk_ext_attachment_feedback_loop_layout)
 		Vulkan::AddPointerToChain(&features2, &attachment_feedback_loop_feature);
@@ -849,6 +855,8 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 	m_optional_extensions.vk_ext_provoking_vertex &= (provoking_vertex_features.provokingVertexLast == VK_TRUE);
 	m_optional_extensions.vk_ext_rasterization_order_attachment_access &=
 		(rasterization_order_access_feature.rasterizationOrderColorAttachmentAccess == VK_TRUE);
+	m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth &=
+		(rasterization_order_access_feature.rasterizationOrderDepthAttachmentAccess == VK_TRUE);
 	m_optional_extensions.vk_ext_attachment_feedback_loop_layout &=
 		(attachment_feedback_loop_feature.attachmentFeedbackLoopLayout == VK_TRUE);
 
@@ -927,8 +935,10 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		"VK_EXT_memory_budget is %s", m_optional_extensions.vk_ext_memory_budget ? "supported" : "NOT supported");
 	Console.WriteLn("VK_EXT_calibrated_timestamps is %s",
 		m_optional_extensions.vk_ext_calibrated_timestamps ? "supported" : "NOT supported");
-	Console.WriteLn("VK_EXT_rasterization_order_attachment_access is %s",
+	Console.WriteLn("VK_EXT_rasterization_order_attachment_access (color) is %s",
 		m_optional_extensions.vk_ext_rasterization_order_attachment_access ? "supported" : "NOT supported");
+	Console.WriteLn("VK_EXT_rasterization_order_attachment_access (depth) is %s",
+		m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth ? "supported" : "NOT supported");
 	Console.WriteLn("VK_%s_swapchain_maintenance1 is %s",
 		m_optional_extensions.vk_swapchain_maintenance1_is_khr ? "KHR" : "EXT",
 		m_optional_extensions.vk_swapchain_maintenance1 ? "supported" : "NOT supported");
@@ -1781,15 +1791,16 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 	const bool using_depth_as_color = key.depth_as_color_format != VK_FORMAT_UNDEFINED;
 	const bool sampling_real_depth = key.depth_feedback_loop && !using_depth_as_color;
 	const GSTextureVK::Layout depth_layout = sampling_real_depth ?
-			(m_features.depth_feedback ? GSTextureVK::Layout::FeedbackLoop : GSTextureVK::Layout::General) :
-			GSTextureVK::Layout::DepthStencilAttachment;
+		(m_features.depth_feedback ? GSTextureVK::Layout::FeedbackLoop : GSTextureVK::Layout::General) :
+		GSTextureVK::Layout::DepthStencilAttachment;
 
 	const VkDependencyFlags feedback_dependency = GetFeedbackBarrierDependencyFlags();
 
 	// With framebuffer fetch we don't need an explicit subpass self dependency
 	// (using the rasterization order subpass flag implies it).
 	// The exception is if we're sampling from a depth buffer directly (e.g. because it's read-only).
-	const bool subpass_self_dependency = !m_features.framebuffer_fetch || sampling_real_depth;
+	const bool subpass_self_dependency = !m_features.framebuffer_fetch ||
+		(sampling_real_depth && !m_features.framebuffer_fetch_depth());
 
 	if (key.color_feedback_loop || (key.depth_feedback_loop && using_depth_as_color))
 	{
@@ -1804,12 +1815,17 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_COLOR_ACCESS_BIT_EXT : 0);
 	}
 
-	if (sampling_real_depth && subpass_self_dependency)
+	if (sampling_real_depth)
 	{
-		rpb.SetDepthFeedbackBarrier(
-			s_depth_feedback_src_stage, s_depth_feedback_src_access,
-			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
-			feedback_dependency);
+		if (subpass_self_dependency)
+		{
+			rpb.SetDepthFeedbackBarrier(
+				s_depth_feedback_src_stage, s_depth_feedback_src_access,
+				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
+				feedback_dependency);
+		}
+		rpb.SetSubpassFlags(m_features.framebuffer_fetch_depth() ?
+			VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT : 0);
 	}
 
 	if (key.color_format != VK_FORMAT_UNDEFINED)
@@ -2909,8 +2925,22 @@ bool GSDeviceVK::CheckFeatures()
 	//const bool isAMD = (vendorID == 0x1002 || vendorID == 0x1022);
 	//const bool isNVIDIA = (vendorID == 0x10DE);
 
-	m_features.framebuffer_fetch =
-		m_optional_extensions.vk_ext_rasterization_order_attachment_access && !GSConfig.DisableFramebufferFetch;
+	if (!GSConfig.DisableFramebufferFetch)
+	{
+		if (m_optional_extensions.vk_ext_rasterization_order_attachment_access && 
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth)
+		{
+			m_features.framebuffer_fetch = FB_FETCH_COLOR;
+		}
+		else if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
+		{
+			m_features.framebuffer_fetch = FB_FETCH_DEPTH;
+		}
+		else
+		{
+			m_features.framebuffer_fetch = FB_FETCH_NONE;
+		}
+	}
 	m_features.texture_barrier = GSConfig.OverrideTextureBarriers != 0;
 	m_features.multidraw_fb_copy = false;
 	m_features.broken_point_sampler = false;
@@ -2934,7 +2964,8 @@ bool GSDeviceVK::CheckFeatures()
 	}
 
 	// Fbfetch is useless if we don't have barriers enabled.
-	m_features.framebuffer_fetch &= m_features.texture_barrier;
+	if (!m_features.texture_barrier)
+		m_features.framebuffer_fetch = FB_FETCH_NONE;
 
 	// Buggy drivers with broken barriers probably have no chance using GENERAL layout for depth either...
 	m_features.test_and_sample_depth = true;
@@ -5096,7 +5127,8 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	std::stringstream ss;
 	AddShaderHeader(ss);
 	AddShaderStageMacro(ss, false, false, true);
-	AddMacro(ss, "PS_DEPTH_FEEDBACK_SUPPORT", m_features.depth_feedback ? 1 : 2);
+	AddMacro(ss, "PS_DEPTH_FEEDBACK_SUPPORT",
+		(m_features.depth_feedback || m_features.framebuffer_fetch_depth()) ? 1 : 2);
 	AddMacro(ss, "PS_FST", sel.fst);
 	AddMacro(ss, "PS_WMS", sel.wms);
 	AddMacro(ss, "PS_WMT", sel.wmt);
