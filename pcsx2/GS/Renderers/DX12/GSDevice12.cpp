@@ -2375,10 +2375,10 @@ bool GSDevice12::CompileCASPipelines()
 		D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL);
 
 	gpb.SetPixelShader(cs_upscale.get());
-	m_cas_upscale_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+	m_cas_upscale_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 
 	gpb.SetPixelShader(cs_sharpen.get());
-	m_cas_sharpen_pipeline = gpb.Create(m_device.get(), m_shader_cache, false);
+	m_cas_sharpen_pipeline = gpb.Create(m_device.get(), m_shader_cache, false, false);
 	if (!m_cas_upscale_pipeline || !m_cas_sharpen_pipeline)
 	{
 		Console.Error("D3D12: Failed to create CAS pipelines");
