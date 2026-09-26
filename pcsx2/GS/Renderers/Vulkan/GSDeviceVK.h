@@ -50,7 +50,7 @@ public:
 		bool vk_khr_shader_non_semantic_info : 1;
 		bool vk_ext_attachment_feedback_loop_layout : 1;
 		bool vk_ext_fragment_shader_interlock : 1;
-		bool vk_ext_extended_dynamic_state_3 : 1;
+		bool vk_ext_extended_dynamic_state : 1;
 	};
 
 	// Global state accessors
@@ -67,6 +67,12 @@ public:
 	__fi bool UseFeedbackLoopLayout() const
 	{
 		return m_optional_extensions.vk_ext_attachment_feedback_loop_layout && !m_features.framebuffer_fetch;
+	}
+
+	// Only used with uber shader currently.
+	__fi bool UseExtendedDynamicState() const
+	{
+		return m_optional_extensions.vk_ext_extended_dynamic_state;
 	}
 
 	// Helpers for getting constants
