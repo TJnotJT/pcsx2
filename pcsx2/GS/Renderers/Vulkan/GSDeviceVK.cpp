@@ -434,7 +434,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_line_rasterization = SupportsExtension(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME, false);
 	m_optional_extensions.vk_khr_driver_properties = SupportsExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
-	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && GSConfig.ExtendedDynamicStateVK)
+	if (m_features.uber_shader && GSConfig.ExtendedDynamicStateVK)
 	{
 		m_optional_extensions.vk_ext_extended_dynamic_state =
 			SupportsExtension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, false) &&
@@ -2308,7 +2308,7 @@ bool GSDeviceVK::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
 		!CompileMergePipelines() || !CompilePostProcessingPipelines() || !InitSpinResources() ||
-		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileTFXUberPipelines()))
+		(m_features.uber_shader && !CompileTFXUberPipelines()))
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;

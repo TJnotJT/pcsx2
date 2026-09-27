@@ -1046,7 +1046,7 @@ bool GSDevice12::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 
 	if (!CompileConvertPipelines() || !CompilePresentPipelines() || !CompileInterlacePipelines() ||
 		!CompileMergePipelines() || !CompilePostProcessingPipelines() ||
-		(GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !CompileTFXUberPipelines()))
+		(m_features.uber_shader && !CompileTFXUberPipelines()))
 	{
 		Host::ReportErrorAsync("GS", "Failed to compile utility pipelines");
 		return false;
@@ -2432,7 +2432,7 @@ bool GSDevice12::CompileImGuiPipeline()
 
 bool GSDevice12::CompileTFXUberPipelines()
 {
-	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid)
+	if (m_features.uber_shader)
 	{
 		constexpr bool COMPILE_ASYNC = true; // Change to enable/disable async compile.
 		constexpr int SLEEP_MS = 100;
