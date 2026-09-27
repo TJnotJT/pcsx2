@@ -347,8 +347,6 @@ private:
 
 	GIFRegALPHA m_optimized_blend = {}; // Save for ROV setup
 
-	bool m_flat_expanded = false; // Whether we expanded vertices to accomodate flat shading.
-
 	GSHWDrawConfig m_conf = {};
 	HWCachedCtx m_cached_ctx;
 
