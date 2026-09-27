@@ -722,7 +722,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	DisableFramebufferFetch = false;
 	DisableVertexShaderExpand = false;
 	ReducedUberShaders = false;
-	ExtendedDynamicStateVK = false;
+	DisableExtendedDynamicStateVK = false;
 	SkipDuplicateFrames = true;
 	AdvancedFrameDisplay = false;
 	OsdMessagesPos = OsdOverlayPos::TopLeft;
@@ -932,7 +932,7 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(ShaderCacheType) &&
 		   OpEqu(HybridShaderCacheThreads) &&
 		   OpEqu(HybridShaderCacheLatencyMS) &&
-	       OpEqu(ExtendedDynamicStateVK);
+		   OpEqu(DisableExtendedDynamicStateVK);
 }
 
 void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
@@ -977,7 +977,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(DisableFramebufferFetch);
 	SettingsWrapBitBool(DisableVertexShaderExpand);
 	SettingsWrapBitBool(ReducedUberShaders);
-	SettingsWrapBitBool(ExtendedDynamicStateVK);
+	SettingsWrapBitBool(DisableExtendedDynamicStateVK);
 	SettingsWrapBitBool(SkipDuplicateFrames);
 	SettingsWrapBitBool(AdvancedFrameDisplay);
 	SettingsWrapBitBool(OsdShowSpeed);

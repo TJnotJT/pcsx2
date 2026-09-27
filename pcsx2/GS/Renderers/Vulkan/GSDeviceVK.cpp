@@ -434,7 +434,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_line_rasterization = SupportsExtension(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME, false);
 	m_optional_extensions.vk_khr_driver_properties = SupportsExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
-	if (m_features.uber_shader && GSConfig.ExtendedDynamicStateVK)
+	if (m_features.uber_shader && !GSConfig.DisableExtendedDynamicStateVK)
 	{
 		m_optional_extensions.vk_ext_extended_dynamic_state =
 			SupportsExtension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, false) &&
@@ -909,7 +909,7 @@ bool GSDeviceVK::ProcessDeviceExtensions()
 		m_optional_extensions.vk_ext_attachment_feedback_loop_layout ? "supported" : "NOT supported");
 	Console.WriteLn("VK_EXT_fragment_shader_interlock is %s",
 		m_optional_extensions.vk_ext_fragment_shader_interlock ? "supported" : "NOT supported");
-	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && GSConfig.ExtendedDynamicStateVK)
+	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !GSConfig.DisableExtendedDynamicStateVK)
 	{
 		Console.WriteLn("VK_EXT_extended_dynamic_state/VK_EXT_extended_dynamic_state_3 is %s",
 			m_optional_extensions.vk_ext_extended_dynamic_state ? "supported" : "NOT supported");
