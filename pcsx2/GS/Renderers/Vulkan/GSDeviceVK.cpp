@@ -1773,34 +1773,22 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 
 	const VkDependencyFlags feedback_dependency = GetFeedbackBarrierDependencyFlags();
 
-	// With framebuffer fetch we don't need an explicit subpass self dependency
-	// (using the rasterization order subpass flag implies it).
-	// The exception is if we're sampling from a depth buffer directly (e.g. because it's read-only).
-	const bool subpass_self_dependency = !m_features.framebuffer_fetch ||
-		(sampling_real_depth && !m_features.framebuffer_fetch_depth());
-
 	if (key.color_feedback_loop || (key.depth_feedback_loop && using_depth_as_color))
 	{
-		if (subpass_self_dependency)
-		{
-			rpb.SetColorFeedbackBarrier(
-				s_color_feedback_src_stage, s_color_feedback_src_access,
-				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
-				feedback_dependency);
-		}
+		rpb.SetColorFeedbackBarrier(
+			s_color_feedback_src_stage, s_color_feedback_src_access,
+			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
+			feedback_dependency);
 		if (m_features.framebuffer_fetch)
 			rpb.AddSubpassFlags(VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_COLOR_ACCESS_BIT_EXT);
 	}
 
 	if (sampling_real_depth)
 	{
-		if (subpass_self_dependency)
-		{
-			rpb.SetDepthFeedbackBarrier(
-				s_depth_feedback_src_stage, s_depth_feedback_src_access,
-				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
-				feedback_dependency);
-		}
+		rpb.SetDepthFeedbackBarrier(
+			s_depth_feedback_src_stage, s_depth_feedback_src_access,
+			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, GetFeedbackLoopInputAccessFlags(),
+			feedback_dependency);
 		if (m_features.framebuffer_fetch)
 			rpb.AddSubpassFlags(VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT);
 	}
@@ -1814,7 +1802,7 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			static_cast<VkAttachmentStoreOp>(key.color_store_op),
 			key.color_feedback_loop,
 			!UseFeedbackLoopLayout(),
-			subpass_self_dependency);
+			!m_features.framebuffer_fetch);
 	}
 
 	if (key.depth_as_color_format != VK_FORMAT_UNDEFINED)
@@ -1826,7 +1814,7 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			static_cast<VkAttachmentStoreOp>(key.depth_as_color_store_op),
 			key.depth_feedback_loop,
 			!UseFeedbackLoopLayout(),
-			subpass_self_dependency);
+			!m_features.framebuffer_fetch);
 	}
 
 	if (key.depth_format != VK_FORMAT_UNDEFINED)
@@ -1840,7 +1828,7 @@ VkRenderPass GSDeviceVK::CreateCachedRenderPass(RenderPassCacheKey key)
 			static_cast<VkAttachmentStoreOp>(key.stencil_store_op),
 			sampling_real_depth,
 			!UseFeedbackLoopLayout(),
-			subpass_self_dependency);
+			!(m_features.framebuffer_fetch && m_features.depth_feedback));
 	}
 
 	VkRenderPass pass = rpb.Create(m_device);
@@ -2913,19 +2901,10 @@ bool GSDeviceVK::CheckFeatures()
 
 	if (!GSConfig.DisableFramebufferFetch)
 	{
-		if (m_optional_extensions.vk_ext_rasterization_order_attachment_access && 
-			m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth)
-		{
-			m_features.framebuffer_fetch = FB_FETCH_COLOR;
-		}
-		else if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
-		{
-			m_features.framebuffer_fetch = FB_FETCH_DEPTH;
-		}
-		else
-		{
-			m_features.framebuffer_fetch = FB_FETCH_NONE;
-		}
+		m_features.framebuffer_fetch = m_optional_extensions.vk_ext_rasterization_order_attachment_access;
+		m_features.depth_feedback =
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access &&
+			m_optional_extensions.vk_ext_rasterization_order_attachment_access_depth;
 	}
 	m_features.texture_barrier = GSConfig.OverrideTextureBarriers != 0;
 	m_features.multidraw_fb_copy = false;
@@ -2951,7 +2930,7 @@ bool GSDeviceVK::CheckFeatures()
 
 	// Fbfetch is useless if we don't have barriers enabled.
 	if (!m_features.texture_barrier)
-		m_features.framebuffer_fetch = FB_FETCH_NONE;
+		m_features.framebuffer_fetch = false;
 
 	// Buggy drivers with broken barriers probably have no chance using GENERAL layout for depth either...
 	m_features.test_and_sample_depth = true;
@@ -2966,9 +2945,9 @@ bool GSDeviceVK::CheckFeatures()
 	m_features.line_expand =
 		(m_device_features.wideLines && limits.lineWidthRange[0] <= f_upscale && limits.lineWidthRange[1] >= f_upscale);
 
-	m_features.depth_feedback = (GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Auto ||
-	                            GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Depth) &&
-	                            !m_features.framebuffer_fetch;
+	if (!m_features.framebuffer_fetch)
+		m_features.depth_feedback = (GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Auto ||
+		                            GSConfig.DepthFeedbackMode == GSDepthFeedbackMode::Depth);
 	m_features.aa1 = GSConfig.HWAA1 && m_features.vs_expand && m_features.feedback_loops();
 
 	DevCon.WriteLn("Optional features:%s%s%s%s%s", m_features.primitive_id ? " primitive_id" : "",
@@ -5175,8 +5154,7 @@ VkShaderModule GSDeviceVK::GetTFXFragmentShader(const GSHWDrawConfig::PSSelector
 	std::stringstream ss;
 	AddShaderHeader(ss);
 	AddShaderStageMacro(ss, false, false, true);
-	AddMacro(ss, "PS_DEPTH_FEEDBACK_SUPPORT",
-		(m_features.depth_feedback || m_features.framebuffer_fetch_depth()) ? 1 : 2);
+	AddMacro(ss, "PS_DEPTH_FEEDBACK_SUPPORT", m_features.depth_feedback ? 1 : 2);
 	AddMacro(ss, "PS_FST", sel.fst);
 	AddMacro(ss, "PS_WMS", sel.wms);
 	AddMacro(ss, "PS_WMT", sel.wmt);
@@ -5370,7 +5348,7 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	// and rast-order draws.
 	if (m_features.framebuffer_fetch && (p.IsRTFeedbackLoop() || (p.ds_as_rt && p.IsDepthFeedbackLoop())))
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
-	if (m_features.framebuffer_fetch_depth() && p.IsDepthFeedbackLoop())
+	if (m_features.framebuffer_fetch && m_features.depth_feedback && p.IsTestingAndSamplingDepth())
 		gpb.AddDepthStencilFlags(VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT);
 
 	VkPipeline pipeline = gpb.Create(m_device, g_vulkan_shader_cache->GetPipelineCache(true));
