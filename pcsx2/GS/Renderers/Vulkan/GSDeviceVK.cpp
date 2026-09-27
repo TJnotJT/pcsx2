@@ -4830,18 +4830,6 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 								if (!ps_sel.CompatibleWithAttachments(rt, ds))
 									continue;
 
-								if (!UseExtendedDynamicState())
-								{
-									// Don't bother making non-ROV pipelines as they will likely have
-									// to be remade anyway when the colormask, blend equation, etc. changes.
-									if (ps_sel.HasColor() && !ps_sel.HasColorROV())
-										continue;
-
-									// Same with dual source blend or DATE variations.
-									if (ps_sel.color1 || ps_sel.date_init)
-										continue;
-								}
-
 								selector.uber_shader = true;
 								selector.uber_vs = static_cast<GSHWDrawConfig::UberVSSelector>(vs_sel);
 								selector.uber_ps = ps_sel;
