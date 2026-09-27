@@ -4770,7 +4770,6 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 		for (u32 stage = 0; stage < (COMPILE_ASYNC ? 2 : 1); stage++)
 		{
 			// Vertex shaders
-			size_t num_vs = 0;
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
 				if (stage == 0)
@@ -4780,11 +4779,9 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 					if (!IsValidShaderModule(vs))
 						return false; // failed
 				}
-				num_vs++;
 			}
 
 			// Fragment shaders
-			size_t num_ps = 0;
 			for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
 			{
 				if (stage == 0)
@@ -4807,10 +4804,8 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 						std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_MS));
 					}
 				}
-				num_ps++;
 			}
 
-			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
 			selector.SetReducedUberDefaults();
@@ -4861,7 +4856,6 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 										std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_MS));
 									}
 								}
-								num_pipelines++;
 							}
 						}
 					}
@@ -4870,7 +4864,10 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 
 			if (stage == (COMPILE_ASYNC ? 1 : 0))
 				Console.WriteLn("Compiled %u uber pipelines (%u vertex shaders, %u fragment shaders) in %.2f seconds",
-					num_pipelines, num_vs, num_ps, timer.GetTimeSecondsAndReset());
+					static_cast<u32>(m_tfx_pipelines.size()),
+					static_cast<u32>(m_tfx_uber_vertex_shaders.size()),
+					static_cast<u32>(m_tfx_uber_fragment_shaders.size()),
+					timer.GetTimeSecondsAndReset());
 		}
 	}
 

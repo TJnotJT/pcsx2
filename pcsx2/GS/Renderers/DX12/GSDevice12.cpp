@@ -2443,7 +2443,6 @@ bool GSDevice12::CompileTFXUberPipelines()
 		for (u32 stage = 0; stage < (COMPILE_ASYNC ? 2 : 1); stage++)
 		{
 			// Vertex shaders
-			size_t num_vs = 0;
 			for (u32 vs_sel = 0; vs_sel < 2; vs_sel++)
 			{
 				if (stage == 0)
@@ -2453,11 +2452,9 @@ bool GSDevice12::CompileTFXUberPipelines()
 					if (!IsValidShaderBlob(vs))
 						return false; // failed
 				}
-				num_vs++;
 			}
 
 			// Pixel shaders
-			size_t num_ps = 0;
 			for (const UberPSSelector& ps_sel : UberPSSelector::GetValidSelectors())
 			{
 				if (stage == 0)
@@ -2480,12 +2477,10 @@ bool GSDevice12::CompileTFXUberPipelines()
 						std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_MS));
 					}
 				}
-				num_ps++;
 			}
 
 			// Compile a subset of the needed uber pipelines.
 			// Most combinations cannot be compiled since they require blend/depth/stencil/color mask state.
-			size_t num_pipelines = 0;
 			PipelineSelector selector;
 			std::memset(&selector, 0, sizeof(selector));
 			selector.SetReducedUberDefaults();
@@ -2533,7 +2528,6 @@ bool GSDevice12::CompileTFXUberPipelines()
 										std::this_thread::sleep_for(std::chrono::milliseconds(100));
 									}
 								}
-								num_pipelines++;
 							}
 						}
 					}
@@ -2542,7 +2536,10 @@ bool GSDevice12::CompileTFXUberPipelines()
 
 			if (stage == (COMPILE_ASYNC ? 1 : 0))
 				Console.WriteLn("Compiled %u uber pipelines (%u vertex shaders, %u pixel shaders) in %.2f seconds",
-					num_pipelines, num_vs, num_ps, timer.GetTimeSecondsAndReset());
+					static_cast<u32>(m_tfx_pipelines.size()),
+					static_cast<u32>(m_tfx_uber_vertex_shaders.size()),
+					static_cast<u32>(m_tfx_uber_pixel_shaders.size()),
+					timer.GetTimeSecondsAndReset());
 		}
 	}
 
