@@ -1065,9 +1065,9 @@ struct alignas(16) GSHWDrawConfig
 
 		__fi constexpr bool CompatibleWithAttachments(TFX_RT rt, TFX_DS ds) const
 		{
-			if ((rt == TFX_RT::None) && (color != Color::None))
+			if ((rt == TFX_RT::None) && !(color == Color::None || color == Color::ROV))
 				return false;
-			if ((ds == TFX_DS::None) && (depth != Depth::None))
+			if ((ds == TFX_DS::None) && !(depth == Depth::None || depth == Depth::ROV))
 				return false;
 			if (static_cast<bool>(date_init) != (rt == TFX_RT::PrimID))
 				return false;
