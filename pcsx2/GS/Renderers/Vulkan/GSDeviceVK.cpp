@@ -434,7 +434,7 @@ bool GSDeviceVK::SelectDeviceExtensions(ExtensionList* extension_list, bool enab
 		SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
 	m_optional_extensions.vk_ext_line_rasterization = SupportsExtension(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME, false);
 	m_optional_extensions.vk_khr_driver_properties = SupportsExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
-	if (m_features.uber_shader && !GSConfig.DisableExtendedDynamicStateVK)
+	if (GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid && !GSConfig.DisableExtendedDynamicStateVK)
 	{
 		m_optional_extensions.vk_ext_extended_dynamic_state =
 			SupportsExtension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, false) &&
