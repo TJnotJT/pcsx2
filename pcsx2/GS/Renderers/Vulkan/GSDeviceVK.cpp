@@ -5632,7 +5632,8 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	{
 		bool valid = p.uber_ps.IsValid();
 		Console.Warning("Warning: Creating an uber pipeline %016" PRIX64 " synchronously!", pipeline_hash);
-		// Console.Warning("ps=%08X vs=%08x key=%08x", p.uber_ps.key, (u32)p.uber_vs, p.key); // FIXME: DELETE AFTER DEBUGGING
+		Console.Warning("ps=%08X vs=%08x key=%08x cms=%X bs=%X dss=%X top=%d", p.uber_ps.key, (u32)p.uber_vs, p.key,
+			p.cms.key, p.bs.key, p.dss.key, p.topology); // FIXME: DELETE AFTER DEBUGGING
 	}
 
 	VKCachedPipeline pipeline = g_vulkan_shader_cache->GetGraphicsPipeline(m_device, vs_key, fs_key, rp.key.key,
