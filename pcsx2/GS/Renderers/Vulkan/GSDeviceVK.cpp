@@ -5628,7 +5628,7 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 		}
 	}
 
-	if (p.uber_shader && !g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, p.uber_shader))
+	if (p.uber_shader /*&& !g_vulkan_shader_cache->HasGraphicsPipeline(pipeline_key, p.uber_shader)*/)
 	{
 		bool valid = p.uber_ps.IsValid();
 		Console.Warning("Warning: Creating an uber pipeline %016" PRIX64 " synchronously!", pipeline_hash);
