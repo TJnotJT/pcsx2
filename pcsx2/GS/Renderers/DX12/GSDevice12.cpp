@@ -5,6 +5,7 @@
 #include "GS/GSGL.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
+#include "GS/GSState.h"
 #include "GS/Renderers/DX11/D3D.h"
 #include "GS/Renderers/DX12/GSDevice12.h"
 #include "GS/Renderers/DX12/D3D12Builders.h"
@@ -3648,6 +3649,12 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 
 	D3D12ShaderBlobOrJob vs = p.uber_shader ? GetTFXUberVertexShader(p.uber_vs) : GetTFXVertexShader(p.vs, async);
 	D3D12ShaderBlobOrJob ps = p.uber_shader ? GetTFXUberPixelShader(p.uber_ps, async) : GetTFXPixelShader(pps, async);
+
+	if (IsNullShaderBlob(ps))
+	{
+		Console.ErrorFmt("FAILED TO COMPILE: draw={} uber={} ps={:016X}_{:016X} uber_ps={:02X}",
+			GSState::s_n, p.uber_shader, p.ps.key_hi, p.ps.key_lo, p.uber_ps.key);
+	}
 
 	if (IsNullShaderBlob(vs) || IsNullShaderBlob(ps))
 		return nullptr; // Failed
