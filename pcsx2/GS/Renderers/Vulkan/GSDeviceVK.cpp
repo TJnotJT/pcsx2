@@ -3278,6 +3278,49 @@ void GSDeviceVK::DoMultiStretchRects(
 		DrawIndexedPrimitive();
 }
 
+void GSDeviceVK::BeginTFXRenderPass(const GSHWDrawConfig& config, GSTextureVK* rt, GSTextureVK* ds, const GSVector2i& rtsize)
+{
+	const PipelineSelector& pipe = m_pipeline_selector;
+
+	const VkAttachmentLoadOp rt_op = GetLoadOpForTexture(rt);
+	const VkAttachmentLoadOp ds_op = GetLoadOpForTexture(ds);
+	const VKCachedRenderPass rp = GetTFXRenderPass(pipe.HasRT(), pipe.HasDS(), pipe.ps.colclip_hw,
+		config.destination_alpha == GSHWDrawConfig::DestinationAlphaMode::Stencil, pipe.IsRTFeedbackLoop(),
+		pipe.IsTestingAndSamplingDepth(), rt_op, ds_op);
+	const bool is_clearing_rt = (rt_op == VK_ATTACHMENT_LOAD_OP_CLEAR || ds_op == VK_ATTACHMENT_LOAD_OP_CLEAR);
+
+	// Only draw to the active area of the colclip hw target. Except when depth is cleared, we need to use the full
+	// buffer size, otherwise it'll only clear the draw part of the depth buffer.
+	const bool use_drawarea =
+		pipe.ps.colclip_hw &&
+		(config.colclip_mode == GSHWDrawConfig::ColClipMode::ConvertAndResolve) &&
+		ds_op != VK_ATTACHMENT_LOAD_OP_CLEAR;
+	const GSVector4i render_area = use_drawarea ? config.drawarea : GSVector4i::loadh(rtsize);
+
+	if (is_clearing_rt)
+	{
+		// when we're clearing, we set the draw area to the whole fb, otherwise part of it will be undefined
+		alignas(16) VkClearValue cvs[2];
+		u32 cv_count = 0;
+		if (rt)
+		{
+			constexpr GSVector4 colclip_factor =
+				GSVector4::cxpr(255.0f / 65535.0f, 255.0f / 65535.0f, 255.0f / 65535.0f, 1.0f);
+			const GSVector4 clear_color = pipe.ps.colclip_hw ?
+				GSVector4::rgba32(rt->GetClearColor()) * colclip_factor : rt->GetClearForFormat();
+			GSVector4::store<true>(&cvs[cv_count++].color, clear_color);
+		}
+		if (ds)
+			cvs[cv_count++].depthStencil = { ds->GetClearDepth(), 0 };
+
+		BeginClearRenderPass(rp, render_area, cvs, cv_count);
+	}
+	else
+	{
+		BeginRenderPass(rp, render_area);
+	}
+}
+
 void GSDeviceVK::BeginRenderPassForStretchRect(
 	GSTextureVK* dTex, const GSVector4i& dtex_rc, const GSVector4i& dst_rc, bool allow_discard)
 {
@@ -7034,7 +7077,15 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		UpdateHWPipelineSelector(config, DrawPass::AlphaSecond, pipe, true);
+		UpdateHWPipelineSelector(config, DrawPass::AlphaSecond, pipe, !config.uber_shader);
+
+		if (config.uber_shader)
+		{
+			// Uber shader might require a render pass restart to avoid creating a new pipeline.
+			OMSetRenderTargets(draw_rt, draw_ds, config.scissor, static_cast<FeedbackLoopFlag>(pipe.feedback_loop_flags), rtsize);
+			if (!InRenderPass())
+				BeginTFXRenderPass(config, draw_rt, draw_ds, rtsize);
+		}
 		
 		if (BindDrawPipeline(pipe))
 		{

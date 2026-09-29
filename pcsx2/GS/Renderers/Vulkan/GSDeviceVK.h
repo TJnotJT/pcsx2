@@ -709,6 +709,7 @@ public:
 		const MultiStretchRect* rects, u32 num_rects, GSTexture* dTex, ShaderConvertSelector shader) override;
 	void DoMultiStretchRects(const MultiStretchRect* rects, u32 num_rects, GSTextureVK* dTex, ShaderConvertSelector shader);
 
+	void BeginTFXRenderPass(const GSHWDrawConfig& config, GSTextureVK* rt, GSTextureVK* ds, const GSVector2i& rtsize);
 	void BeginRenderPassForStretchRect(
 		GSTextureVK* dTex, const GSVector4i& dtex_rc, const GSVector4i& dst_rc, bool allow_discard = true);
 	void DoStretchRect(GSTextureVK* sTex, const GSVector4& sRect, GSTextureVK* dTex, const GSVector4& dRect,
