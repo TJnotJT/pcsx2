@@ -3768,7 +3768,7 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 		}
 	}
 
-	if (p.uber_shader /*&& !m_shader_cache.HasPipelineState(gpb.GetDesc(), p.uber_shader)*/)
+	if (p.uber_shader && !async/*&& !m_shader_cache.HasPipelineState(gpb.GetDesc(), p.uber_shader)*/)
 	{
 		Console.Warning("Warning: Creating an uber pipeline synchronously!");
 		Console.Warning("ps=%08X vs=%08x key=%08x cms=%X bs=%X dss=%X top=%d", p.uber_ps.key, (u32)p.uber_vs, p.key,
