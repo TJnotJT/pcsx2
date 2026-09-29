@@ -6021,6 +6021,40 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 {
+	if (config.tex &&
+		((config.rt == config.tex && config.colormask.wrgba != 0 && !config.ps.no_color) ||
+		(config.ds == config.tex && config.depth.zwe)) &&
+		!config.ps.tex_is_fb)
+	{
+		// End render pass and do barrier when sampling and writing RT or DS,
+		// as feedback barrier (with BY_REGION) and FB fetch only guarantee same pixel ordering
+		// within the render pass.
+		GL_INS("VK: End render pass and barrier due to sample/write from RT or DS.");
+		EndRenderPass();
+
+		if (config.rt == config.tex)
+		{
+			g_perfmon.Put(GSPerfMon::Barriers, 1);
+			GSTextureVK* rtVk = static_cast<GSTextureVK*>(config.rt);
+			rtVk->TransitionSubresourcesToLayout(
+				GetCurrentCommandBuffer(), 0, 1, rtVk->GetLayout(), rtVk->GetLayout());
+
+			if (!(config.ds && config.IsFeedbackLoopDepth(config.ps)))
+				config.require_one_barrier = false; // We don't need another barrier for depth.
+		}
+
+		if (config.ds == config.tex)
+		{
+			g_perfmon.Put(GSPerfMon::Barriers, 1);
+			GSTextureVK* dsVk = static_cast<GSTextureVK*>(config.ds);
+			dsVk->TransitionSubresourcesToLayout(
+				GetCurrentCommandBuffer(), 0, 1, dsVk->GetLayout(), dsVk->GetLayout());
+
+			if (!(config.rt && config.IsFeedbackLoopDepth(config.ps)))
+				config.require_one_barrier = false; // We don't need another barrier for RT.
+		}
+	}
+	
 	const GSVector2i rtsize(config.rt ? config.rt->GetSize() : config.ds->GetSize());
 	GSTextureVK* draw_rt = config.ps.HasColorROV() ? nullptr : static_cast<GSTextureVK*>(config.rt);
 	GSTextureVK* draw_ds = config.ps.HasDepthROV() ? nullptr : static_cast<GSTextureVK*>(config.ds);
