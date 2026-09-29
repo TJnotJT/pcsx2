@@ -7144,8 +7144,6 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 	pipe.cms.key = ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : cms.key;
 	pipe.topology = static_cast<u32>(config.topology);
 
-	pipe.line_width = config.line_expand;
-
 	// enable point size in the vertex shader if we're rendering points regardless of upscaling.
 	pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
 

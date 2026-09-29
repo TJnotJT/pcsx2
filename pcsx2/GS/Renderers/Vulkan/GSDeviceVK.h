@@ -384,7 +384,6 @@ public:
 				u32 topology : 2;
 				TFX_RT rt : 2;
 				TFX_DS ds : 2;
-				u32 line_width : 1;
 				u32 feedback_loop_flags : 3;
 				u32 uber_shader : 1;
 			};
