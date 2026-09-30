@@ -2510,7 +2510,7 @@ bool GSDevice12::CompileTFXUberPipelines()
 								selector.ds = ds;
 								selector.ds_as_rt = ps_sel.HasDepthFeedback();
 
-								selector.cms.wrgba = ps_sel.HasColor() ? 0xF : 0;
+								selector.cms.wrgba = 0xF;
 
 								if (stage == 0)
 								{
@@ -3777,6 +3777,8 @@ GSDevice12::D3D12PipelineOrJob GSDevice12::CreateTFXPipeline(const PipelineSelec
 
 	if (p.uber_shader && !async/*&& !m_shader_cache.HasPipelineState(gpb.GetDesc(), p.uber_shader)*/)
 	{
+		bool valid = p.uber_ps.IsValid();
+		bool compatible = p.uber_ps.CompatibleWithAttachments(p.rt, p.ds);
 		Console.Warning("Warning: Creating an uber pipeline synchronously!");
 		Console.Warning("ps=%08X vs=%08x key=%08x cms=%X bs=%X dss=%X top=%d", p.uber_ps.key, (u32)p.uber_vs, p.key,
 			p.cms.key, p.bs.key, p.dss.key, p.topology); // FIXME: DELETE AFTER DEBUGGING
