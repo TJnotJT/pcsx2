@@ -5637,6 +5637,10 @@ GSDeviceVK::VKPipelineOrJob GSDeviceVK::CreateTFXPipeline(const PipelineSelector
 	if (m_features.framebuffer_fetch && p.IsRTFeedbackLoop())
 		gpb.AddBlendFlags(VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT);
 
+	// Disable optimization on uber pipelines to speed them up.
+	if (p.uber_shader)
+		gpb.AddPipelineFlags(VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);
+
 	const VKShaderCache::GraphicsPipelineCacheIndexKey pipeline_key = (IsShaderModule(vs) && IsShaderModule(fs))
 		? g_vulkan_shader_cache->GetGraphicsPipelineCacheKey(vs_key, fs_key, rp.key.key, gpb.GetCI())
 		: VKShaderCache::GraphicsPipelineCacheIndexKey{};

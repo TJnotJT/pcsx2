@@ -375,6 +375,11 @@ VkPipeline Vulkan::GraphicsPipelineBuilder::Create(
 	return pipeline;
 }
 
+void Vulkan::GraphicsPipelineBuilder::AddPipelineFlags(u32 flags)
+{
+	m_ci.flags |= flags;
+}
+
 void Vulkan::GraphicsPipelineBuilder::SetShaderStage(
 	VkShaderStageFlagBits stage, VkShaderModule module, const char* entry_point)
 {
