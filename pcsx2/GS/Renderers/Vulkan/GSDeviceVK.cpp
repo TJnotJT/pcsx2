@@ -6613,14 +6613,6 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	PipelineSelector& pipe = m_pipeline_selector;
 	UpdateHWPipelineSelector(config, DrawPass::PrimID, pipe);
-	pipe.dss.zwe = false;
-	pipe.cms.wrgba = 0;
-	pipe.bs = {};
-	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-	pipe.rt = TFX_RT::PrimID;
-	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
-	pipe.ps.no_color = false;
-	pipe.ps.no_color1 = true;
 	if (BindDrawPipeline(pipe))
 		Draw(config, DrawPass::PrimID);
 
@@ -7215,10 +7207,20 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 		}
 	}
 
+	// PrimID setup
+	if (pass == DrawPass::PrimID)
+	{
+		pipe.dss.zwe = false;
+		pipe.cms.wrgba = 0;
+		pipe.bs = {};
+		pipe.feedback_loop_flags = FeedbackLoopFlag_None;
+		pipe.rt = TFX_RT::PrimID;
+	}
+
+	pipe.uber_shader = config.uber_shader;
+
 	if (config.uber_shader)
 	{
-		pipe.uber_shader = true;
-
 		pipe.vs.key = 0;
 		pipe.ps.key_lo = 0;
 		pipe.ps.key_hi = 0;
@@ -7275,7 +7277,7 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 		pipe.uber_ps.zwrite = ps.HasDepthOutput();
 
 		// DATE primid init
-		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date);
+		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date) && (pass == DrawPass::PrimID);
 
 		pxAssert(pipe.uber_ps.IsValid());
 

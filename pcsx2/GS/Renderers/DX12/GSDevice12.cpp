@@ -4717,15 +4717,7 @@ GSTexture12* GSDevice12::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config, Pipe
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	UpdateHWPipelineSelector(config, DrawPass::PrimID);
-	PipelineSelector init_pipe(m_pipeline_selector);
-	init_pipe.dss.zwe = false;
-	init_pipe.cms.wrgba = 0;
-	init_pipe.bs = {};
-	init_pipe.rt = TFX_RT::PrimID;
-	init_pipe.ps.blend_a = init_pipe.ps.blend_b = init_pipe.ps.blend_c = init_pipe.ps.blend_d = false;
-	init_pipe.ps.no_color = false;
-	init_pipe.ps.no_color1 = true;
-	if (BindDrawPipeline(init_pipe))
+	if (BindDrawPipeline(m_pipeline_selector))
 		Draw(config, DrawPass::PrimID);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
@@ -5296,6 +5288,15 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 	pipe.cms.key = ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : cms.key;
 	pipe.topology = static_cast<u32>(config.topology);
 
+	// PrimID setup
+	if (pass == DrawPass::PrimID)
+	{
+		pipe.dss.zwe = false;
+		pipe.cms.wrgba = 0;
+		pipe.bs = {};
+		pipe.rt = TFX_RT::PrimID;
+	}
+
 	pipe.uber_shader = config.uber_shader;
 
 	if (config.uber_shader)
@@ -5342,7 +5343,7 @@ void GSDevice12::UpdateHWPipelineSelector(const GSHWDrawConfig& config, GSHWDraw
 		pipe.uber_ps.zwrite = ps.HasDepthOutput();
 
 		// DATE primid init
-		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date);
+		pipe.uber_ps.date_init = IsDATEModePrimIDInit(ps.date) && (pass == DrawPass::PrimID);
 
 		if (!pipe.HasDS())
 			pipe.dss = GSHWDrawConfig::DepthStencilSelector::ReducedUberDefault();

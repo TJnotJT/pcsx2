@@ -1688,7 +1688,14 @@ struct alignas(16) GSHWDrawConfig
 				ps_blend.dither = blend_multi_pass.dither;
 				return ps_blend;
 			}
-			case DrawPass::PrimID: return ps;
+			case DrawPass::PrimID:
+			{
+				PSSelector ps_primid = ps;
+				ps_primid.blend_a = ps_primid.blend_b = ps_primid.blend_c = ps_primid.blend_d = false;
+				ps_primid.no_color = false;
+				ps_primid.no_color1 = true;
+				return ps_primid;
+			}
 		}
 	}
 
