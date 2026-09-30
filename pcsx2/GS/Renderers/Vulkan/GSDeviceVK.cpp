@@ -4876,11 +4876,13 @@ bool GSDeviceVK::CompileTFXUberPipelines()
 								selector.rt = rt;
 								selector.ds = ds;
 
+								// Just keep RT feedback flags enabled to reduce pipeline combinations.
 								selector.feedback_loop_flags = FeedbackLoopFlag_None;
-								if (ps_sel.HasColorFeedback())
+								if (rt != TFX_RT::None)
 									selector.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
 								if (ps_sel.HasDepthFeedback())
-									selector.feedback_loop_flags |= (FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth);
+									selector.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth |
+									                                FeedbackLoopFlag_ReadDepth;
 
 								if (stage == 0)
 								{
@@ -7285,12 +7287,12 @@ void GSDeviceVK::UpdateHWPipelineSelector(const GSHWDrawConfig& config, DrawPass
 
 		pxAssert(pipe.uber_ps.IsValid());
 
-		// Feedback loop flags
-		if (!preserve_feedback_flags)
-		{
-			if (pipe.feedback_loop_flags & (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth))
-				pipe.feedback_loop_flags |= (FeedbackLoopFlag_ReadDepth | FeedbackLoopFlag_ReadAndWriteDepth);
-		}
+		// Just keep RT feedback flags enabled to reduce pipeline combinations.
+		if (pipe.HasRT())
+			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
+		if (pipe.uber_ps.HasDepthFeedback())
+			pipe.feedback_loop_flags |=
+				FeedbackLoopFlag_ReadAndWriteDepth | FeedbackLoopFlag_ReadDepth;
 	}
 	else
 	{
