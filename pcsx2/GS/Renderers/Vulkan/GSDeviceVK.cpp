@@ -2949,7 +2949,7 @@ bool GSDeviceVK::CheckFeatures()
 	                 has_rov_storage_flags &&
 	                 !m_features.framebuffer_fetch;
 
-	m_features.uber_shader = m_features.vs_expand && GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid;
+	m_features.uber_shader = GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid;
 
 	return true;
 }

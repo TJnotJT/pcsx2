@@ -1624,7 +1624,7 @@ bool GSDevice12::CheckFeatures(const u32& vendor_id)
 
 	Console.WriteLnFmt("D3D12: Tight Alignment: {}", m_allocator->IsTightAlignmentSupported() ? "Supported" : "Not Supported");
 
-	m_features.uber_shader = m_features.vs_expand;
+	m_features.uber_shader = GSConfig.ShaderCacheType >= GSShaderCacheType::Hybrid;
 
 	return true;
 }
