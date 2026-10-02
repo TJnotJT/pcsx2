@@ -6389,6 +6389,7 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 
 	if (UseExtendedDynamicState() && m_uber_dynamic_state.enabled)
 	{
+		flags |= DIRTY_TFX_UBER_STATE; // FIXME: HACK REMOVE!
 		if (flags & DIRTY_FLAG_TFX_UBER_COLOR_BLEND)
 		{
 			if (m_uber_dynamic_state.date_primid_init)
