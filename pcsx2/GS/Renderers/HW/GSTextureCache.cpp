@@ -9,11 +9,13 @@
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
 #include "GS/GSXXH.h"
+#include "GS/GSDebugWriter.h"
 
 #include "common/Console.h"
 #include "common/BitUtils.h"
 #include "common/HashCombine.h"
 #include "common/SmallString.h"
+#include "common/FileSystem.h"
 
 #include "fmt/format.h"
 
@@ -8691,6 +8693,141 @@ void GSTextureCache::InjectHashCacheTexture(const HashCacheKey& key, GSTexture* 
 	m_src.SwapTexture(it->second.texture, tex);
 	g_gs_device->Recycle(it->second.texture);
 	it->second.texture = tex;
+}
+
+static void DumpSurface(GSDebugWriter& writer, GSTextureCache::Surface* s)
+{
+	writer.WriteLn("- m_TEX0: {{TBP0: {:#04X}, TBW: {}, PSM: {}, TW: {}, TH: {}, TCC: {}, TFX: {}, CBP: {:#04X}, CPSM: {}, CSM: {}, CSA: {}, CLD: {}}}",
+		s->m_TEX0.TBP0,
+		s->m_TEX0.TBW,
+		GSUtil::GetPSMName(s->m_TEX0.PSM),
+		s->m_TEX0.TW,
+		s->m_TEX0.TH,
+		GSUtil::GetTCCName(s->m_TEX0.TCC),
+		GSUtil::GetTFXName(s->m_TEX0.TFX),
+		s->m_TEX0.CBP,
+		GSUtil::GetPSMName(s->m_TEX0.CPSM),
+		s->m_TEX0.CSM,
+		s->m_TEX0.CSA,
+		s->m_TEX0.CLD);
+	writer.WriteLn("  m_TEXA: {{TA0: {}, TA1: {}, AEM: {}}}", s->m_TEXA.TA0, s->m_TEXA.TA1, s->m_TEXA.AEM);
+	writer.WriteVector2("  m_unscaled_size", s->m_unscaled_size);
+	writer.WriteLn("  other_surface_fields: {{m_scale: {}, m_age: {}, m_end_block: {:#04X}, m_32_bits_fmt: {}, m_was_dst_matched: {}, m_shared_texture: {}}}", s->m_scale, s->m_age, s->m_end_block, s->m_32_bits_fmt, s->m_was_dst_matched, s->m_shared_texture);
+}
+
+static void DumpTarget(GSDebugWriter& writer, GSTextureCache::Target* t)
+{
+	DumpSurface(writer, t);
+
+	writer.WriteVector4("  m_valid", t->m_valid);
+	writer.WriteVector4("  m_drawn_since_read", t->m_drawn_since_read);
+	
+	writer.WriteLn("  other_target_fields: {{m_dirty_size: {}, m_type: {}, m_alpha_max: {}, m_alpha_min: {}, m_alpha_range: {}, m_valid_alpha_low: {}, m_valid_alpha_high: {}, m_valid_rgb: {}, m_rt_alpha_scale: {}, m_downscaled: {}, m_last_draw: {}, m_is_frame: {}, m_used: {}, OffsetHack_modxy: {}, readbacks_since_draw: {}}}",
+		t->m_dirty.size(), t->m_type, t->m_alpha_max, t->m_alpha_min, t->m_alpha_range, t->m_valid_alpha_low, t->m_valid_alpha_high, t->m_valid_rgb, t->m_rt_alpha_scale, t->m_downscaled, t->m_last_draw, t->m_is_frame, t->m_used, t->OffsetHack_modxy, t->readbacks_since_draw);
+}
+
+static void DumpSource(GSDebugWriter& writer, GSTextureCache::Source* s)
+{
+	/*
+	m_valid_hashes, m_complete_layers, m_target, m_target_direct, m_repeating, m_valid_alpha_minmax
+	std::pair<u8, u8> m_alpha_minmax = { 0u, 255u };*/
+	DumpSurface(writer, s);
+	writer.WriteVector4("  m_valid_rect", s->m_valid_rect);
+	writer.WriteVector2("  m_lod", s->m_lod);
+	writer.WriteVector4("  m_region", GSVector4i(
+		s->m_region.GetMinX(), s->m_region.GetMinY(),
+		s->m_region.GetMaxX(), s->m_region.GetMaxY()));
+	writer.WriteLn("  other_source_fields: {{m_valid_hashes: {}, m_complete_layers: {}, m_target: {}, m_target_direct: {}, m_repeating: {}, m_valid_alpha_minmax: {}, m_alpha_minmax: [{},{}]}}",
+		s->m_valid_hashes, s->m_complete_layers, s->m_target, s->m_target_direct, s->m_repeating, s->m_valid_alpha_minmax, s->m_alpha_minmax.first, s->m_alpha_minmax.second);
+}
+
+void GSTextureCache::Dump(const std::string& filename)
+{
+	GSDebugWriter writer;
+
+	for (u32 i = 0; i < 2; i++)
+	{
+		if (!m_dst[i].empty())
+		{
+			writer.WriteLn("{}:", i == 0 ? "rt" : "ds");
+			{
+				auto indent = writer.WithIndent();
+				bool first = true;
+				for (Target* t : m_dst[i])
+				{
+					if (!first)
+					{
+						writer.WriteLn("");
+					}
+					DumpTarget(writer, t);
+					first = false;
+				}
+			}
+			writer.WriteLn("");
+		}
+	}
+
+	writer.WriteLn("src:");
+	{
+		auto indent = writer.WithIndent();
+		// Sort to avoid non-deterministic iteration order.
+		std::vector<Source*> src_sorted(m_src.m_surfaces.begin(), m_src.m_surfaces.end());
+		std::sort(
+			src_sorted.begin(), src_sorted.end(),
+			[](Source* a, Source* b) {
+				return std::make_pair<u32, u64>(a->m_TEX0.TBP0, reinterpret_cast<u64>(a)) <
+					std::make_pair<u32, u64>(b->m_TEX0.TBP0, reinterpret_cast<u64>(b));
+			});
+		bool first = true;
+		for (Source* s : src_sorted)
+		{
+			if (!first)
+			{
+				writer.WriteLn("");
+			}
+			DumpSource(writer, s);
+			first = false;
+		}
+	}
+	writer.WriteLn("");
+
+	writer.WriteLn("target_heights:");
+	{
+		auto indent = writer.WithIndent();
+		for (const TargetHeightElem& height : m_target_heights)
+		{
+			writer.WriteLn("- {{bp: {:#04X}, fbw: {}, psm: {}, width: {}, height: {}, age: {}}}",
+				height.bp, height.fbw, GSUtil::GetPSMName(height.psm), height.width, height.height, height.age);
+		}
+	}
+	writer.WriteLn("");
+
+	writer.WriteLn("m_expected_src_bp: {}", m_expected_src_bp);
+	writer.WriteLn("m_remembered_src_bp: {}", m_remembered_src_bp);
+	writer.WriteLn("m_expected_dst_bp: {}", m_expected_dst_bp);
+	writer.WriteLn("m_remembered_dst_bp: {}", m_remembered_dst_bp);
+
+	if (m_temporary_source)
+	{
+		writer.WriteLn("m_temporary_source:");
+		{
+			auto indent = writer.WithIndent();
+			DumpSource(writer, m_temporary_source);
+		}
+		writer.WriteLn("");
+	}
+
+	if (m_temporary_z)
+	{
+		writer.WriteLn("m_temporary_z_info: {{ZBP: {:#0X}, offset: {}, rt_offset: {}, rect_since: [{}, {}, {}, {}]}}",
+			m_temporary_z_info.ZBP, m_temporary_z_info.offset, m_temporary_z_info.rt_offset,
+			m_temporary_z_info.rect_since.x, m_temporary_z_info.rect_since.y, m_temporary_z_info.rect_since.z, m_temporary_z_info.rect_since.w);
+	}
+
+	if (FileSystem::ManagedCFilePtr file = FileSystem::OpenManagedCFile(filename.c_str(), "w"))
+	{
+		fwrite(writer.buffer.data(), 1, writer.buffer.size(), file.get());
+	}
 }
 
 // GSTextureCache::Palette

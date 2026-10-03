@@ -5087,6 +5087,11 @@ void GSRendererHW::Draw()
 			else if (ds->m_texture)
 				ds->m_texture->Save(s);
 		}
+
+		if (GSConfig.SaveTextureCache)
+		{
+			g_texture_cache->Dump(GetDrawDumpPath("%05lld_f%05lld_texture_cache.txt", s_n, frame));
+		}
 	}
 
 	if (m_oi && !m_oi(*this, rt ? rt->m_texture : nullptr, ds ? ds->m_texture : nullptr, src))
@@ -5289,6 +5294,11 @@ void GSRendererHW::Draw()
 				g_texture_cache->GetTemporaryZ()->Save(s);
 			else
 				ds->m_texture->Save(s);
+		}
+
+		if (GSConfig.SaveTextureCache)
+		{
+			g_texture_cache->Dump(GetDrawDumpPath("%05lld_f%05lld_texture_cache.txt", s_n, frame));
 		}
 	}
 
