@@ -5969,6 +5969,8 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_tfx_pipeline_layout, TFX_DESCRIPTOR_SET_TEXTURES);
 	}
 
+	ApplyBaseState(flags, cmdbuf);
+
 	if (UseExtendedDynamicState())
 	{
 		if (flags & DIRTY_FLAG_TFX_EDS_COLOR_BLEND)
@@ -6041,7 +6043,6 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 		}
 	}
 
-	ApplyBaseState(flags, cmdbuf);
 	return true;
 }
 
