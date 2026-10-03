@@ -4483,7 +4483,7 @@ void GSDevice12::RenderHW(GSHWDrawConfig& config)
 		else
 		{
 			draw_rt = colclip_rt;
-			config.ps.colclip_hw = 1;
+			config.ps.colclip_hw = true;
 			UpdateHWPipelineSelector(main_pass);
 		}
 	}
