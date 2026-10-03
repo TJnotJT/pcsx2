@@ -550,8 +550,8 @@ public:
 	void DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_indexing, int vs_indexing_expansion);
 
 	// Main GS primitive draws.
-	void Draw(const GSHWDrawConfig& config);
-	void Draw(const GSHWDrawConfig& config, int offset, int count);
+	void Draw(const DrawPassConfig& config);
+	void Draw(const DrawPassConfig& config, int offset, int count);
 
 	std::unique_ptr<GSDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GSTexture::Format format) override;
 
@@ -595,11 +595,10 @@ public:
 	bool BindDrawPipeline(const PipelineSelector& p);
 
 	void RenderHW(GSHWDrawConfig& config) override;
-	void SendHWDraw(const PipelineSelector& pipe, const GSHWDrawConfig& config, GSTexture12* draw_rt,
-		GSTexture12* draw_ds, GSTexture12* draw_rt_rov, GSTexture12* draw_ds_rov,
-		const bool feedback_rt, const bool feedback_depth, const bool one_barrier, const bool full_barrier);
+	void SendHWDraw(const PipelineSelector& pipe, const DrawPassConfig& config,
+		GSTexture12* draw_rt, GSTexture12* draw_ds);
 
-	void UpdateHWPipelineSelector(GSHWDrawConfig& config);
+	void UpdateHWPipelineSelector(const DrawPassConfig& config);
 	void UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config);
 
 public:
