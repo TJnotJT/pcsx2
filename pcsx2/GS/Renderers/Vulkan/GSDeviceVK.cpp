@@ -2940,12 +2940,13 @@ void GSDeviceVK::DrawIndexedPrimitiveVSExpand(int offset, int count, bool vs_ind
 	}
 }
 
-void GSDeviceVK::Draw(const GSHWDrawConfig& config, int offset, int count)
+void GSDeviceVK::Draw(const DrawPassConfig& config, int offset, int count)
 {
-	if (config.vs.expand != GSHWDrawConfig::VSExpand::None)
+	const GSHWDrawConfig::VSSelector& vs = config.vs();
+	if (vs.expand != GSHWDrawConfig::VSExpand::None)
 	{
-		const bool vs_indexing = config.vs.UseVSExpandIndexBuffer();
-		const u32 vs_indexing_expansion = GetExpansionFactor(config.vs.expand);
+		const bool vs_indexing = vs.UseVSExpandIndexBuffer();
+		const u32 vs_indexing_expansion = GetExpansionFactor(vs.expand);
 		DrawIndexedPrimitiveVSExpand(offset, count, vs_indexing, vs_indexing_expansion);
 	}
 	else
@@ -2954,7 +2955,7 @@ void GSDeviceVK::Draw(const GSHWDrawConfig& config, int offset, int count)
 	}
 }
 
-void GSDeviceVK::Draw(const GSHWDrawConfig& config)
+void GSDeviceVK::Draw(const DrawPassConfig& config)
 {
 	Draw(config, 0, m_index.count);
 }
@@ -5998,17 +5999,10 @@ GSTextureVK* GSDeviceVK::SetupPrimitiveTrackingDATE(GSHWDrawConfig& config)
 
 	// cut down the configuration for the prepass, we don't need blending or any feedback loop
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, pipe);
-	pipe.dss.zwe = false;
-	pipe.cms.wrgba = 0;
-	pipe.bs = {};
-	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-	pipe.rt = true;
-	pipe.ps.blend_a = pipe.ps.blend_b = pipe.ps.blend_c = pipe.ps.blend_d = false;
-	pipe.ps.no_color = false;
-	pipe.ps.no_color1 = true;
+	const DrawPassConfig primid_pass = config.GetDrawPassConfig(DrawPass::PrimID);
+	UpdateHWPipelineSelector(primid_pass, pipe);
 	if (BindDrawPipeline(pipe))
-		Draw(config);
+		Draw(primid_pass);
 
 	// image is initialized/prepass is done, so finish up and get ready to do the "real" draw
 	EndRenderPass();
@@ -6075,7 +6069,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 
 	// figure out the pipeline
 	PipelineSelector& pipe = m_pipeline_selector;
-	UpdateHWPipelineSelector(config, pipe);
+	const DrawPassConfig main_pass = config.GetDrawPassConfig(DrawPass::Main);
+	UpdateHWPipelineSelector(main_pass, pipe);
 
 	// now blit the colclip texture back to the original target
 	if (colclip_rt)
@@ -6127,7 +6122,8 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		}
 		else
 		{
-			pipe.ps.colclip_hw = 1;
+			pipe.ps.colclip_hw = true;
+			UpdateHWPipelineSelector(main_pass, pipe);
 			draw_rt = colclip_rt;
 		}
 	}
@@ -6393,10 +6389,12 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	if (!date_image || colclip_rt)
 		UploadHWDrawVerticesAndIndices(config);
 
+	GSTextureVK* rt_for_feedback = pipe.IsRTFeedbackLoop() ? draw_rt : nullptr;
+	GSTextureVK* ds_for_feedback = pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr;
+
 	// now we can do the actual draw
 	if (BindDrawPipeline(pipe))
-		SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-			config.require_one_barrier, config.require_full_barrier);
+		SendHWDraw(main_pass, rt_for_feedback, ds_for_feedback);
 
 	// blend second pass
 	if (config.blend_multi_pass.enable)
@@ -6404,14 +6402,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 		if (config.blend_multi_pass.blend.constant_enable)
 			SetBlendConstants(config.blend_multi_pass.blend.constant);
 
-		pipe.bs = config.blend_multi_pass.blend;
-		pipe.ps.no_color1 = config.blend_multi_pass.no_color1;
-		pipe.ps.blend_hw = config.blend_multi_pass.blend_hw;
-		pipe.ps.dither = config.blend_multi_pass.dither;
+		const DrawPassConfig blend_pass = config.GetDrawPassConfig(DrawPass::Blend);
+		UpdateHWPipelineSelector(blend_pass, pipe);
+
 		if (BindDrawPipeline(pipe))
 		{
 			// TODO: This probably should have barriers, in case we want to use it conditionally.
-			Draw(config);
+			Draw(blend_pass);
 		}
 	}
 
@@ -6425,14 +6422,13 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 			SetPSConstantBuffer(config.cb_ps);
 		}
 
-		pipe.ps = config.alpha_second_pass.ps;
-		pipe.cms = config.alpha_second_pass.colormask;
-		pipe.dss = config.alpha_second_pass.depth;
-		pipe.bs = config.blend;
+		const DrawPassConfig alpha_pass = config.GetDrawPassConfig(DrawPass::AlphaSecond);
+
+		UpdateHWPipelineSelector(alpha_pass, pipe);
+
 		if (BindDrawPipeline(pipe))
 		{
-			SendHWDraw(config, pipe.IsRTFeedbackLoop() ? draw_rt : nullptr, pipe.IsDepthFeedbackLoop() ? draw_ds : nullptr,
-				config.alpha_second_pass.require_one_barrier, config.alpha_second_pass.require_full_barrier);
+			SendHWDraw(alpha_pass, rt_for_feedback, ds_for_feedback);
 		}
 	}
 
@@ -6495,34 +6491,100 @@ void GSDeviceVK::RenderHW(GSHWDrawConfig& config)
 	config.colclip_mode = GSHWDrawConfig::ColClipMode::NoModify;
 }
 
-void GSDeviceVK::UpdateHWPipelineSelector(GSHWDrawConfig& config, PipelineSelector& pipe)
+void GSDeviceVK::UpdateHWPipelineSelector(const DrawPassConfig& config, PipelineSelector& pipe)
 {
-	pipe.vs.key = config.vs.key;
-	pipe.ps.key_hi = config.ps.key_hi;
-	pipe.ps.key_lo = config.ps.key_lo;
-	pipe.dss.key = config.ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : config.depth.key;
-	pipe.bs.key = config.ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : config.blend.key;
-	pipe.bs.constant = 0; // don't dupe states with different alpha values
-	pipe.cms.key = config.ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : config.colormask.key;
-	pipe.topology = static_cast<u32>(config.topology);
-	pipe.rt = config.rt != nullptr && !config.ps.HasColorROV();
-	pipe.ds = config.ds != nullptr && !config.ps.HasDepthROV();
-	pipe.feedback_loop_flags = FeedbackLoopFlag_None;
-	if (m_features.texture_barrier && (config.require_one_barrier || config.require_full_barrier))
-	{
-		if (config.IsFeedbackLoopRT(config.ps))
-			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
+	GSHWDrawConfig::Topology topology = config.topology();
+	GSTexture* rt = config.rt();
+	GSTexture* ds = config.ds();
+	GSTexture* tex = config.tex();
+	const GSHWDrawConfig::VSSelector vs = config.vs();
+	const GSHWDrawConfig::PSSelector ps = config.ps();
+	const GSHWDrawConfig::ColorMaskSelector colormask = config.colormask();
+	const GSHWDrawConfig::DepthStencilSelector depth = config.depth();
+	const GSHWDrawConfig::BlendState blend = config.blend();
+	const bool one_barrier = config.one_barrier();
+	const bool full_barrier = config.full_barrier();
 
-		if (config.IsFeedbackLoopDepth(config.ps))
-			pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
-	}
-	if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
+	pipe.vs.key = vs.key;
+	pipe.ps.key_hi = ps.key_hi;
+	pipe.ps.key_lo = ps.key_lo;
+	pipe.dss.key = ps.HasDepthROV() ? GSHWDrawConfig::DepthStencilSelector::NoDepth().key : depth.key;
+	pipe.bs.key = ps.HasColorROV() ? GSHWDrawConfig::BlendState().key : blend.key;
+	pipe.bs.constant = 0; // don't dupe states with different alpha values
+	pipe.cms.key = ps.HasColorROV() ? GSHWDrawConfig::ColorMaskSelector().key : colormask.key;
+	pipe.topology = static_cast<u32>(topology);
+	pipe.rt = rt != nullptr && !ps.HasColorROV();
+	pipe.ds = ds != nullptr && !ps.HasDepthROV();
+	// The blend pass and alpha second pass do not restart the render pass so
+	// me must preseve the feedback loop flags.
+	if (config.GetPass() != DrawPass::Blend && config.GetPass() != DrawPass::AlphaSecond)
 	{
-		pipe.feedback_loop_flags |= (config.tex && config.tex == config.ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
+		pipe.feedback_loop_flags = FeedbackLoopFlag_None;
+		if (m_features.texture_barrier && (one_barrier || full_barrier))
+		{
+			if (config.IsFeedbackLoopRT())
+				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteRT;
+
+			if (config.IsFeedbackLoopDepth())
+				pipe.feedback_loop_flags |= FeedbackLoopFlag_ReadAndWriteDepth;
+		}
+		if (pipe.ds && !(pipe.feedback_loop_flags & FeedbackLoopFlag_ReadAndWriteDepth))
+		{
+			pipe.feedback_loop_flags |= (tex && tex == ds) ? FeedbackLoopFlag_ReadDepth : FeedbackLoopFlag_None;
+		}
 	}
 
 	// enable point size in the vertex shader if we're rendering points regardless of upscaling.
-	pipe.vs.point_size |= (config.topology == GSHWDrawConfig::Topology::Point);
+	pipe.vs.point_size |= (topology == GSHWDrawConfig::Topology::Point);
+
+	// PrimID setup
+	if (config.GetPass() == DrawPass::PrimID)
+	{
+		pipe.dss.zwe = false;
+		pipe.cms.wrgba = 0;
+		pipe.bs = {};
+		pipe.feedback_loop_flags = FeedbackLoopFlag_None;
+	}
+}
+
+void GSDeviceVK::SetTFXExtendedDynamicState(
+	const GSHWDrawConfig::DepthStencilSelector& dss, const GSHWDrawConfig::BlendState& bs,
+	const GSHWDrawConfig::ColorMaskSelector& cms, bool date_primid_init)
+{
+	// Stencil
+	if (m_tfx_extended_dynamic_state.dss.date != dss.date ||
+		m_tfx_extended_dynamic_state.dss.date_one != dss.date_one)
+	{
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_STENCIL;
+	}
+
+	// Depth
+	if (m_tfx_extended_dynamic_state.dss.ztst != dss.ztst ||
+		m_tfx_extended_dynamic_state.dss.zwe != dss.zwe)
+	{
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_DEPTH;
+		m_tfx_extended_dynamic_state.dss.key = dss.key;
+	}
+
+	// Blending
+	if (m_tfx_extended_dynamic_state.date_primid_init != date_primid_init)
+	{
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_COLOR_BLEND;
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_COLOR_MASK;
+		m_tfx_extended_dynamic_state.date_primid_init = date_primid_init;
+	}
+	if (m_tfx_extended_dynamic_state.bs.key != bs.key)
+	{
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_COLOR_BLEND;
+		m_tfx_extended_dynamic_state.bs.key = bs.key;
+	}
+
+	// Color mask
+	if (m_tfx_extended_dynamic_state.cms.key != cms.key)
+	{
+		m_dirty_flags |= DIRTY_FLAG_TFX_EDS_COLOR_MASK;
+		m_tfx_extended_dynamic_state.cms.key = cms.key;
+	}
 }
 
 void GSDeviceVK::UploadHWDrawVerticesAndIndices(GSHWDrawConfig& config)
@@ -6575,8 +6637,7 @@ VkDependencyFlags GSDeviceVK::GetFeedbackBarrierDependencyFlags() const
 	                                 VK_DEPENDENCY_BY_REGION_BIT;
 }
 
-void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds,
-	bool one_barrier, bool full_barrier)
+void GSDeviceVK::SendHWDraw(const DrawPassConfig& config, GSTextureVK* draw_rt, GSTextureVK* draw_ds)
 {
 	if (!m_features.texture_barrier) [[unlikely]]
 	{
@@ -6584,8 +6645,11 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		return;
 	}
 
+	const bool one_barrier = config.one_barrier();
+	const bool full_barrier = config.full_barrier();
+
 #ifdef PCSX2_DEVBUILD
-	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT(m_pipeline_selector.ps) || config.IsFeedbackLoopDepth(m_pipeline_selector.ps))) [[unlikely]]
+	if ((one_barrier || full_barrier) && !(config.IsFeedbackLoopRT() || config.IsFeedbackLoopDepth())) [[unlikely]]
 		Console.Warning("VK: Possible unnecessary barrier detected.");
 #endif
 	VkDependencyFlags barrier_flags = GetFeedbackBarrierDependencyFlags();
@@ -6623,10 +6687,10 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 
 	if (full_barrier)
 	{
-		pxAssert(config.drawlist && !config.drawlist->empty());
+		pxAssert(config.drawlist() && !config.drawlist()->empty());
 
-		const u32 indices_per_prim = config.indices_per_prim;
-		const u32 draw_list_size = static_cast<u32>(config.drawlist->size());
+		const u32 indices_per_prim = config.indices_per_prim();
+		const u32 draw_list_size = static_cast<u32>(config.drawlist()->size());
 
 		GL_PUSH("Split the draw");
 		g_perfmon.Put(GSPerfMon::Barriers, n_barriers * static_cast<u32>(draw_list_size));
@@ -6635,7 +6699,7 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 		{
 			IssueBarriers();
 
-			const u32 count = config.drawlist->at(n) * indices_per_prim;
+			const u32 count = config.drawlist()->at(n) * indices_per_prim;
 			Draw(config, p, count);
 			p += count;
 		}
@@ -6651,6 +6715,6 @@ void GSDeviceVK::SendHWDraw(const GSHWDrawConfig& config, GSTextureVK* draw_rt, 
 
 	Draw(config);
 
-	if (config.ps.HasColorROV() || config.ps.HasDepthROV())
+	if (config.HasColorROV() || config.HasDepthROV())
 		g_perfmon.Put(GSPerfMon::DrawCallsROV, 1);
 }
