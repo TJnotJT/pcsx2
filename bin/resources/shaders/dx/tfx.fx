@@ -225,9 +225,9 @@ Texture2D<float> PrimMinTexture : register(t3);
 
 // Pixel shader constant buffer.
 #if PCSX2_DX12
-ConstantBuffer<PSUniform> ps_cb : register(b1);
+ConstantBuffer<PSUniform> cb : register(b1);
 #elif PCSX2_DX11
-cbuffer cb1 : register(b0) { PSUniform ps_cb; };
+cbuffer cb1 : register(b0) { PSUniform cb; };
 #endif
 
 static float4 sample_tex(float2 uv)

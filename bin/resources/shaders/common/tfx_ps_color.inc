@@ -50,7 +50,7 @@ PS_STATIC float4 ps_color()
 			T.a = float(denorm_c_before.g & 0x80u);
 		}
 		
-		T.a = (T.a >= 127.5 ? ps_cb.ta.y : PS_AEM == 0 || any_nonzero(int3(T.rgb) & int(0xF8)) ? ps_cb.ta.x : 0.f) * 255.f;
+		T.a = (T.a >= 127.5 ? cb.ta.y : PS_AEM == 0 || any_nonzero(int3(T.rgb) & int(0xF8)) ? cb.ta.x : 0.f) * 255.f;
 	}
 
 	float4 C = tfx(T, ps_in.c);
