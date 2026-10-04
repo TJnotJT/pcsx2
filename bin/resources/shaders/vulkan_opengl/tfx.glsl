@@ -131,6 +131,8 @@ readonly buffer VertexBuffer
 	{
 		uint index_buffer[];
 	};
+#else
+	uint index_buffer[1];
 #endif
 
 #endif // VS_EXPAND_TYPE
@@ -209,8 +211,7 @@ VSInput GetVSInput()
 void main()
 {
 	VSInput vin = GetVSInput();
-	VSUniformsGeneric cb = GetVSUniforms();
-	VSOutputGeneric vout = vs_main_impl(vin, cb);
+	VSOutputGeneric vout = vs_main_impl(vin);
 	WriteVSOutput(vout);
 }
 
@@ -223,8 +224,7 @@ void main()
 	#elif PCSX2_OPENGL
 		uint vid = uint(gl_VertexID);
 	#endif
-	VSUniformsGeneric cb = GetVSUniforms();
-	VSOutputGeneric vout = vs_expand_impl(vid, 0, cb, 0);
+	VSOutputGeneric vout = vs_expand_impl(vid);
 	WriteVSOutput(vout);
 }
 
