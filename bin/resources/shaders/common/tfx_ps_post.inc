@@ -7,7 +7,7 @@ PS_STATIC void ps_fbmask(IN_OUT_PARAM(float4, C))
 		float4 RT = ps_current_color;
 		RT.rgb = trunc(RT.rgb * multi_rgb + splat3(0.1f));
 		RT.a = round(RT.a * multi_a);
-		C = float4((uint4(int4(C)) & ~ps_cb.fbmask) | (uint4(RT) & ps_cb.fbmask));
+		C = float4((uint4(int4(C)) & ~cb.fbmask) | (uint4(RT) & cb.fbmask));
 	}
 }
 
@@ -19,14 +19,14 @@ PS_STATIC void ps_dither(IN_OUT_PARAM(float4, C), float As)
 	if (PS_DITHER == 2)
 		fpos = ushort2(ps_in.p.xy);
 	else
-		fpos = ushort2(ps_in.p.xy * splat2(ps_cb.scale_factor.y));
-	float value = MAT_GET(ps_cb.dither_matrix, fpos.x & 3u, fpos.y & 3u);
+		fpos = ushort2(ps_in.p.xy * splat2(cb.scale_factor.y));
+	float value = MAT_GET(cb.dither_matrix, fpos.x & 3u, fpos.y & 3u);
 
 	// The idea here is we add on the dither amount adjusted by the alpha before it goes to the hw blend
 	// so after the alpha blend the resulting value should be the same as (Cs - Cd) * As + Cd + Dither.
 	if (PS_DITHER_ADJUST != 0)
 	{
-		float Alpha = PS_BLEND_C == 2 ? ps_cb.alpha_fix : As;
+		float Alpha = PS_BLEND_C == 2 ? cb.alpha_fix : As;
 		value *= Alpha > 0.f ? min(1.f / Alpha, 1.f) : 1.f;
 	}
 

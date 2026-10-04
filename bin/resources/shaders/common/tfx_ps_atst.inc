@@ -6,13 +6,13 @@ PS_STATIC bool atst(float4 C)
 		case PS_ATST_NONE:
 			return true; // Nothing to do
 		case PS_ATST_LEQUAL:
-			return a <= ps_cb.aref;
+			return a <= cb.aref;
 		case PS_ATST_GEQUAL:
-			return a >= ps_cb.aref;
+			return a >= cb.aref;
 		case PS_ATST_EQUAL:
-			return abs(a - ps_cb.aref) <= 0.5f;
+			return abs(a - cb.aref) <= 0.5f;
 		case PS_ATST_NOTEQUAL:
-			return abs(a - ps_cb.aref) >= 0.5f;
+			return abs(a - cb.aref) >= 0.5f;
 	}
 	return true;
 }

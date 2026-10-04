@@ -67,7 +67,7 @@ layout(std140, binding = 0) uniform cb21
 	float _pad2;
 }
 #ifdef PCSX2_GLSL
-ps_cb
+cb
 #endif
 ;
 #endif // defined(FRAGMENT_SHADER) || defined(PIXEL_SHADER)

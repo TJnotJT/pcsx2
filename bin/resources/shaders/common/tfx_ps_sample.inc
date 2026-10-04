@@ -1,9 +1,9 @@
 PS_STATIC float manual_lod(float uv_w)
 {
-	float K = ps_cb.lod_params.x;
-	float L = ps_cb.lod_params.y;
-	float bias = ps_cb.lod_params.z;
-	float max_lod = ps_cb.lod_params.w;
+	float K = cb.lod_params.x;
+	float L = cb.lod_params.y;
+	float bias = cb.lod_params.z;
+	float max_lod = cb.lod_params.w;
 	float gs_lod = K - log2(abs(uv_w)) * L;
 	return min(gs_lod, max_lod) - bias;
 }
@@ -22,23 +22,23 @@ PS_STATIC float4 sample_c(float2 uv)
 		// I'm manually adjusting coordinates to the centre of texels here,
 		// though the centre is just paranoia, the top left corner works fine.
 		// As of 2018 this issue is still present.
-		uv = (trunc(uv * ps_cb.wh.zw) + float2(0.5, 0.5)) / ps_cb.wh.zw;
+		uv = (trunc(uv * cb.wh.zw) + float2(0.5, 0.5)) / cb.wh.zw;
 	}
 
 	if (PS_ADJS == 0 && PS_ADJT == 0)
 	{
-		uv *= ps_cb.st_scale;
+		uv *= cb.st_scale;
 	}
 	else
 	{
 		if (PS_ADJS != 0)
-			uv.x = (uv.x - ps_cb.st_range.x) * ps_cb.st_range.z;
+			uv.x = (uv.x - cb.st_range.x) * cb.st_range.z;
 		else
-			uv.x = uv.x * ps_cb.st_scale.x;
+			uv.x = uv.x * cb.st_scale.x;
 		if (PS_ADJT != 0)
-			uv.y = (uv.y - ps_cb.st_range.y) * ps_cb.st_range.w;
+			uv.y = (uv.y - cb.st_range.y) * cb.st_range.w;
 		else
-			uv.y = uv.y * ps_cb.st_scale.y;
+			uv.y = uv.y * cb.st_scale.y;
 	}
 
 	if (PS_SW_ANISO > 1)
@@ -58,7 +58,7 @@ PS_STATIC float4 sample_p_norm(float u)
 
 PS_STATIC float4 clamp_wrap_uv(float4 uv)
 {
-	float4 tex_size = ps_cb.wh.xyxy;
+	float4 tex_size = cb.wh.xyxy;
 
 	if (PS_WMS == PS_WMT)
 	{
@@ -72,7 +72,7 @@ PS_STATIC float4 clamp_wrap_uv(float4 uv)
 		}
 		else if (PS_WMS == 2)
 		{
-			uv = clamp(uv, ps_cb.uv_min_max.xyxy, ps_cb.uv_min_max.zwzw);
+			uv = clamp(uv, cb.uv_min_max.xyxy, cb.uv_min_max.zwzw);
 		}
 		else if (PS_WMS == 3)
 		{
@@ -81,7 +81,7 @@ PS_STATIC float4 clamp_wrap_uv(float4 uv)
 			if (PS_FST == 0)
 				uv = frac(uv);
 
-			uint4 uv_msk_fix = asuint(ps_cb.uv_min_max);
+			uint4 uv_msk_fix = asuint(cb.uv_min_max);
 			uv = float4((ushort4(uv * tex_size) & ushort4(uv_msk_fix.xyxy)) | ushort4(uv_msk_fix.zwzw)) / tex_size;
 		}
 	}
@@ -97,14 +97,14 @@ PS_STATIC float4 clamp_wrap_uv(float4 uv)
 		}
 		else if (PS_WMS == 2)
 		{
-			uv.xz = clamp(uv.xz, ps_cb.uv_min_max.xx, ps_cb.uv_min_max.zz);
+			uv.xz = clamp(uv.xz, cb.uv_min_max.xx, cb.uv_min_max.zz);
 		}
 		else if (PS_WMS == 3)
 		{
 			if (PS_FST == 0)
 				uv.xz = frac(uv.xz);
 
-			uint4 uv_msk_fix = asuint(ps_cb.uv_min_max);
+			uint4 uv_msk_fix = asuint(cb.uv_min_max);
 			uv.xz = float2((ushort2(uv.xz * tex_size.xx) & ushort2(uv_msk_fix.xx)) | ushort2(uv_msk_fix.zz)) / tex_size.xx;
 		}
 
@@ -118,14 +118,14 @@ PS_STATIC float4 clamp_wrap_uv(float4 uv)
 		}
 		else if (PS_WMT == 2)
 		{
-			uv.yw = clamp(uv.yw, ps_cb.uv_min_max.yy, ps_cb.uv_min_max.ww);
+			uv.yw = clamp(uv.yw, cb.uv_min_max.yy, cb.uv_min_max.ww);
 		}
 		else if (PS_WMT == 3)
 		{
 			if (PS_FST == 0)
 				uv.yw = frac(uv.yw);
 
-			uint4 uv_msk_fix = asuint(ps_cb.uv_min_max);
+			uint4 uv_msk_fix = asuint(cb.uv_min_max);
 			uv.yw = float2((ushort2(uv.yw * tex_size.yy) & ushort2(uv_msk_fix.yy)) | ushort2(uv_msk_fix.ww)) / tex_size.yy;
 		}
 	}
@@ -133,7 +133,7 @@ PS_STATIC float4 clamp_wrap_uv(float4 uv)
 	if (PS_REGION_RECT != 0)
 	{
 		// Normalized -> Integer Coordinates.
-		uv = clamp(uv * ps_cb.wh.zwzw + ps_cb.st_range.xyxy, ps_cb.st_range.xyxy, ps_cb.st_range.zwzw);
+		uv = clamp(uv * cb.wh.zwzw + cb.st_range.xyxy, cb.st_range.xyxy, cb.st_range.zwzw);
 	}
 
 	return uv;
@@ -195,7 +195,7 @@ PS_STATIC float4x4 sample_4p(uint4 u)
 PS_STATIC float4 sample_color(float2 st)
 {
 	if (PS_TCOFFSETHACK != 0)
-		st += ps_cb.tc_offset;
+		st += cb.tc_offset;
 
 	float4 t;
 	float4x4 c;
@@ -210,8 +210,8 @@ PS_STATIC float4 sample_color(float2 st)
 		float4 uv;
 		if (PS_LTF != 0)
 		{
-			uv = st.xyxy + ps_cb.half_texel;
-			dd = frac(uv.xy * ps_cb.wh.zw);
+			uv = st.xyxy + cb.half_texel;
+			dd = frac(uv.xy * cb.wh.zw);
 			if (PS_FST == 0)
 			{
 				// Background in Shin Megami Tensei Lucifers
@@ -236,9 +236,9 @@ PS_STATIC float4 sample_color(float2 st)
 	for (int i = 0; i < 4; i++)
 	{
 		if (PS_AEM_FMT == FMT_24)
-			c[i].a = (PS_AEM == 0 || any_nonzero(c[i].rgb)) ? ps_cb.ta.x : 0.f;
+			c[i].a = (PS_AEM == 0 || any_nonzero(c[i].rgb)) ? cb.ta.x : 0.f;
 		else if (PS_AEM_FMT == FMT_16)
-			c[i].a = c[i].a >= 0.5 ? ps_cb.ta.y : PS_AEM == 0 || any_nonzero(int3(c[i].rgb * 255.0f) & int(0xF8)) ? ps_cb.ta.x : 0.f;
+			c[i].a = c[i].a >= 0.5 ? cb.ta.y : PS_AEM == 0 || any_nonzero(int3(c[i].rgb * 255.0f) & int(0xF8)) ? cb.ta.x : 0.f;
 	}
 
 	if (PS_LTF != 0)
@@ -261,7 +261,7 @@ PS_STATIC ushort2 clamp_wrap_uv_depth(ushort2 uv)
 	ushort2 uv_out = uv;
 	// Keep the full precision
 	// It allow to multiply the ScalingFactor before the 1/16 coeff
-	uint4 uv_msk_fix = asuint(ps_cb.uv_min_max);
+	uint4 uv_msk_fix = asuint(cb.uv_min_max);
 	ushort4 mask = ushort4(uv_msk_fix << 4);
 
 	if (PS_WMS == PS_WMT)
@@ -289,10 +289,10 @@ PS_STATIC ushort2 clamp_wrap_uv_depth(ushort2 uv)
 
 PS_STATIC float4 sample_depth(float2 st)
 {
-	float2 uv_f = float2(clamp_wrap_uv_depth(ushort2(st))) * splat2(ps_cb.scale_factor.x);
+	float2 uv_f = float2(clamp_wrap_uv_depth(ushort2(st))) * splat2(cb.scale_factor.x);
 
 	if (PS_REGION_RECT != 0)
-		uv_f = clamp(uv_f + ps_cb.st_range.xy, ps_cb.st_range.xy, ps_cb.st_range.zw);
+		uv_f = clamp(uv_f + cb.st_range.xy, cb.st_range.xy, cb.st_range.zw);
 
 	uint2 uv = uint2(uv_f);
 	float4 t = splat4(0.0f);
@@ -338,9 +338,9 @@ PS_STATIC float4 sample_depth(float2 st)
 	}
 
 	if (PS_AEM_FMT == FMT_24)
-		t.a = (PS_AEM == 0 || any_nonzero(t.rgb)) ? 255.f * ps_cb.ta.x : 0.f;
+		t.a = (PS_AEM == 0 || any_nonzero(t.rgb)) ? 255.f * cb.ta.x : 0.f;
 	else if (PS_AEM_FMT == FMT_16)
-		t.a = t.a >= 128.f ? 255.f * ps_cb.ta.y : (PS_AEM == 0 || any_nonzero(t.rgb)) ? 255.f * ps_cb.ta.x : 0.f;
+		t.a = t.a >= 128.f ? 255.f * cb.ta.y : (PS_AEM == 0 || any_nonzero(t.rgb)) ? 255.f * cb.ta.x : 0.f;
 	else if (PS_PAL_FMT != 0 && PS_TALES_OF_ABYSS_HLE == 0 && PS_URBAN_CHAOS_HLE == 0)
 		t = trunc(sample_4p(uint4(t.aaaa))[0] * 255.0f + 0.05f);
 	
