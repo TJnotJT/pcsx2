@@ -82,6 +82,12 @@ struct VSInput
 	float4 f : COLOR1;
 };
 
+// VS Constant Buffer
+cbuffer cb0 : register(b0)
+{
+	VSUniform cb;
+};
+
 // VS constants for determining base vertex/index in expand shader.
 #if PCSX2_DX12
 cbuffer cb2 : register(b2)
@@ -102,7 +108,7 @@ StructuredBuffer<VSRawVertex> VertexBuffer : register(t0);
 StructuredBuffer<uint> IndexBuffer : register(t5);
 #endif // VS_EXPAND_TYPE
 
-// Note: vertex/index buffers must be defined before common code is included.
+// Note: constant/vertex/index buffers must be defined before common code is included.
 #include "tfx_vs.inc"
 
 struct VSOutput
@@ -119,12 +125,6 @@ struct VSOutput
 
 	float inv_cov : COLOR1; // We use the inverse to make it simpler to interpolate.
 	nointerpolation uint interior : COLOR2; // 1 for triangle interior; 0 for edge;
-};
-
-// VS Constant Buffer
-cbuffer cb0 : register(b0)
-{
-	VSUniforms cb;
 };
 
 // Convert VS outputs from generic outputs to real outputs.
@@ -225,9 +225,9 @@ Texture2D<float> PrimMinTexture : register(t3);
 
 // Pixel shader constant buffer.
 #if PCSX2_DX12
-ConstantBuffer<PSUniforms> ps_cb : register(b1);
+ConstantBuffer<PSUniform> ps_cb : register(b1);
 #elif PCSX2_DX11
-cbuffer cb1 : register(b0) { PSUniforms ps_cb; };
+cbuffer cb1 : register(b0) { PSUniform ps_cb; };
 #endif
 
 static float4 sample_tex(float2 uv)

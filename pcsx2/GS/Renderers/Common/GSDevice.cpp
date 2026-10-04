@@ -388,6 +388,7 @@ GSVector4i GSDevice::ProcessCopyArea(const GSVector4i& rtsize, const GSVector4i&
 #include "opengl_present.cpp"
 #include "opengl_shadeboost.cpp"
 #include "common_tfx_defs.cpp"
+#include "common_tfx_uniforms.cpp"
 #include "common_tfx_ps_atst.cpp"
 #include "common_tfx_ps_blend.cpp"
 #include "common_tfx_ps_color.cpp"
