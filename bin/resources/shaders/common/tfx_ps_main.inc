@@ -32,7 +32,7 @@ PS_STATIC void ps_shuffle(IN_OUT_PARAM(float4, C))
 		else if (PS_READ16_SRC != 0)
 		{
 			uint4 denorm_c = uint4(C);
-			uint2 denorm_TA = uint2(ps_cb.ta * 255.5f);
+			uint2 denorm_TA = uint2(cb.ta * 255.5f);
 			
 			C.rb = splat2(float((denorm_c.r >> 3) | (((denorm_c.g >> 3) & 0x7u) << 5)));
 			C.ga = splat2(float((denorm_c.g >> 6) | ((denorm_c.b >> 3) << 2) | (denorm_TA.x & 0x80u)));
@@ -115,7 +115,7 @@ PS_STATIC PSOutputGeneric ps_main_impl()
 	if (PS_AA1 != PS_AA1_NONE)
 	{
 		float cov = PS_AA1 == PS_AA1_LINE
-			? saturate(ps_cb.line_cov_scale * (1.f - abs(ps_in.inv_cov))) // Blur only outer part of the line by scaling coverage.
+			? saturate(cb.line_cov_scale * (1.f - abs(ps_in.inv_cov))) // Blur only outer part of the line by scaling coverage.
 			: saturate(1.f - abs(ps_in.inv_cov));
 		if (PS_ABE == 0 || floor(C.a) == 128.f) // The coverage is only used if the fragment alpha is 128.
 			C.a = 128.f * cov;
@@ -181,7 +181,7 @@ PS_STATIC PSOutputGeneric ps_main_impl()
 		psout.c1 = alpha_blend;
 
 	if (PS_ZCLAMP != 0)
-		input_z = min(input_z, ps_cb.max_depth_ps);
+		input_z = min(input_z, cb.max_depth_ps);
 
 	if (PS_AA1 == PS_AA1_TRIANGLE_SW_Z && ps_in.interior == 0)
 		discard_depth(input_z); // No depth update for triangle edges.

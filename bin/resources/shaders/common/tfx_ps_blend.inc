@@ -55,7 +55,7 @@ PS_STATIC void ps_blend(IN_OUT_PARAM(float4, Color), IN_OUT_PARAM(float4, As_rgb
 
 		float3 A = PICK3(PS_BLEND_A, Cs, Cd, splat3(0.0f));
 		float3 B = PICK3(PS_BLEND_B, Cs, Cd, splat3(0.0f));
-		float  C = PICK3(PS_BLEND_C, As, Ad, ps_cb.alpha_fix);
+		float  C = PICK3(PS_BLEND_C, As, Ad, cb.alpha_fix);
 		float3 D = PICK3(PS_BLEND_D, Cs, Cd, splat3(0.0f));
 
 		// As/Af clamp alpha for Blend mix
@@ -114,7 +114,7 @@ PS_STATIC void ps_blend(IN_OUT_PARAM(float4, Color), IN_OUT_PARAM(float4, As_rgb
 	}
 	else
 	{
-		float Alpha = PS_BLEND_C == 2 ? ps_cb.alpha_fix : As;
+		float Alpha = PS_BLEND_C == 2 ? cb.alpha_fix : As;
 
 		if (PS_BLEND_HW == 1)
 		{
