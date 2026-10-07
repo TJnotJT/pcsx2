@@ -5921,6 +5921,90 @@ __ri void GSDeviceVK::ApplyBaseState(u32 flags, VkCommandBuffer cmdbuf)
 
 	if (flags & DIRTY_FLAG_LINE_WIDTH)
 		vkCmdSetLineWidth(cmdbuf, m_current_line_width);
+
+	if (UseExtendedDynamicState() && m_current_pipeline_layout == PipelineLayout::TFX)
+	{
+		if (UseExtendedDynamicStateColorBlend())
+		{
+			if (flags & DIRTY_FLAG_TFX_EDS_COLOR_BLEND)
+			{
+				if (m_tfx_extended_dynamic_state.date_primid_init)
+				{
+					VkColorBlendEquationEXT vk_blend_eqn = { VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
+						VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
+					VkBool32 vk_enable = true;
+					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
+					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
+				}
+				else if (m_tfx_extended_dynamic_state.bs.enable)
+				{
+					const GSHWDrawConfig::BlendState& bs = m_tfx_extended_dynamic_state.bs;
+					VkColorBlendEquationEXT vk_blend_eqn = { s_vk_blend_factors[bs.src_factor], s_vk_blend_factors[bs.dst_factor],
+						s_vk_blend_ops[bs.op], s_vk_blend_factors[bs.src_factor_alpha], s_vk_blend_factors[bs.dst_factor_alpha],
+						VK_BLEND_OP_ADD };
+					VkBool32 vk_enable = true;
+					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
+					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
+				}
+				else
+				{
+					VkColorBlendEquationEXT vk_blend_eqn = { VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
+						VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
+					VkBool32 vk_enable = false;
+					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
+					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
+				}
+			}
+		}
+
+		if (UseExtendedDynamicStateColorMask())
+		{
+			if (flags & DIRTY_FLAG_TFX_EDS_COLOR_MASK)
+			{
+				if (m_tfx_extended_dynamic_state.date_primid_init)
+				{
+					VkColorComponentFlags vk_color_mask = VK_COLOR_COMPONENT_R_BIT;
+					vkCmdSetColorWriteMaskEXT(cmdbuf, 0, 1, &vk_color_mask);
+				}
+				else
+				{
+					VkColorComponentFlags vk_color_mask =
+						static_cast<VkColorComponentFlags>(m_tfx_extended_dynamic_state.cms.wrgba);
+					vkCmdSetColorWriteMaskEXT(cmdbuf, 0, 1, &vk_color_mask);
+				}
+			}
+		}
+
+		if (UseExtendedDynamicStateDepth())
+		{
+			if (flags & DIRTY_FLAG_TFX_EDS_DEPTH)
+			{
+				vkCmdSetDepthTestEnableEXT(cmdbuf, true);
+				vkCmdSetDepthCompareOpEXT(cmdbuf, s_vk_compare_ops[m_tfx_extended_dynamic_state.dss.ztst]);
+				vkCmdSetDepthWriteEnableEXT(cmdbuf, m_tfx_extended_dynamic_state.dss.zwe);
+			}
+		}
+
+		if (UseExtendedDynamicStateStencil())
+		{
+			if (flags & DIRTY_FLAG_TFX_EDS_STENCIL)
+			{
+				if (m_tfx_extended_dynamic_state.dss.date)
+				{
+					const VkStencilOpState& sos = GetDATEStencilOpState(m_tfx_extended_dynamic_state.dss.date_one);
+					vkCmdSetStencilOpEXT(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, sos.failOp, sos.passOp, sos.depthFailOp, sos.compareOp);
+					vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
+					vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
+					vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
+					vkCmdSetStencilTestEnableEXT(cmdbuf, true);
+				}
+				else
+				{
+					vkCmdSetStencilTestEnableEXT(cmdbuf, false);
+				}
+			}
+		}
+	}
 }
 
 bool GSDeviceVK::ApplyTFXState(bool already_execed)
@@ -6058,90 +6142,6 @@ bool GSDeviceVK::ApplyTFXState(bool already_execed)
 		}
 
 		dsub.PushUpdate(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_tfx_pipeline_layout, TFX_DESCRIPTOR_SET_TEXTURES);
-	}
-
-	if (UseExtendedDynamicState())
-	{
-		if (UseExtendedDynamicStateColorBlend())
-		{
-			if (flags & DIRTY_FLAG_TFX_EDS_COLOR_BLEND)
-			{
-				if (m_tfx_extended_dynamic_state.date_primid_init)
-				{
-					VkColorBlendEquationEXT vk_blend_eqn = { VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
-						VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
-					VkBool32 vk_enable = true;
-					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
-					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
-				}
-				else if (m_tfx_extended_dynamic_state.bs.enable)
-				{
-					const GSHWDrawConfig::BlendState& bs = m_tfx_extended_dynamic_state.bs;
-					VkColorBlendEquationEXT vk_blend_eqn = { s_vk_blend_factors[bs.src_factor], s_vk_blend_factors[bs.dst_factor],
-						s_vk_blend_ops[bs.op], s_vk_blend_factors[bs.src_factor_alpha], s_vk_blend_factors[bs.dst_factor_alpha],
-						VK_BLEND_OP_ADD };
-					VkBool32 vk_enable = true;
-					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
-					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
-				}
-				else
-				{
-					VkColorBlendEquationEXT vk_blend_eqn = { VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-						VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
-					VkBool32 vk_enable = false;
-					vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
-					vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
-				}
-			}
-		}
-
-		if (UseExtendedDynamicStateColorMask())
-		{
-			if (flags & DIRTY_FLAG_TFX_EDS_COLOR_MASK)
-			{
-				if (m_tfx_extended_dynamic_state.date_primid_init)
-				{
-					VkColorComponentFlags vk_color_mask = VK_COLOR_COMPONENT_R_BIT;
-					vkCmdSetColorWriteMaskEXT(cmdbuf, 0, 1, &vk_color_mask);
-				}
-				else
-				{
-					VkColorComponentFlags vk_color_mask =
-						static_cast<VkColorComponentFlags>(m_tfx_extended_dynamic_state.cms.wrgba);
-					vkCmdSetColorWriteMaskEXT(cmdbuf, 0, 1, &vk_color_mask);
-				}
-			}
-		}
-
-		if (UseExtendedDynamicStateDepth())
-		{
-			if (flags & DIRTY_FLAG_TFX_EDS_DEPTH)
-			{
-				vkCmdSetDepthTestEnableEXT(cmdbuf, true);
-				vkCmdSetDepthCompareOpEXT(cmdbuf, s_vk_compare_ops[m_tfx_extended_dynamic_state.dss.ztst]);
-				vkCmdSetDepthWriteEnableEXT(cmdbuf, m_tfx_extended_dynamic_state.dss.zwe);
-			}
-		}
-
-		if (UseExtendedDynamicStateStencil())
-		{
-			if (flags & DIRTY_FLAG_TFX_EDS_STENCIL)
-			{
-				if (m_tfx_extended_dynamic_state.dss.date)
-				{
-					const VkStencilOpState& sos = GetDATEStencilOpState(m_tfx_extended_dynamic_state.dss.date_one);
-					vkCmdSetStencilOpEXT(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, sos.failOp, sos.passOp, sos.depthFailOp, sos.compareOp);
-					vkCmdSetStencilCompareMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
-					vkCmdSetStencilWriteMask(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
-					vkCmdSetStencilReference(cmdbuf, VK_STENCIL_FACE_FRONT_AND_BACK, 1);
-					vkCmdSetStencilTestEnableEXT(cmdbuf, true);
-				}
-				else
-				{
-					vkCmdSetStencilTestEnableEXT(cmdbuf, false);
-				}
-			}
-		}
 	}
 
 	ApplyBaseState(flags, cmdbuf);	
