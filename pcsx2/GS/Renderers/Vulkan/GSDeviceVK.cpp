@@ -5308,22 +5308,25 @@ VkPipeline GSDeviceVK::CreateTFXPipeline(const PipelineSelector& p)
 	}
 
 	// Blending
-	if (IsDATEModePrimIDInit(p.ps.date))
+	if (!(UseExtendedDynamicStateColorBlend() && UseExtendedDynamicStateColorMask()))
 	{
-		// image DATE prepass
-		gpb.SetBlendAttachment(0, true, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE,
-			VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
-	}
-	else if (p.bs.enable)
-	{
-		gpb.SetBlendAttachment(0, true, s_vk_blend_factors[p.bs.src_factor], s_vk_blend_factors[p.bs.dst_factor],
-			s_vk_blend_ops[p.bs.op], s_vk_blend_factors[p.bs.src_factor_alpha], s_vk_blend_factors[p.bs.dst_factor_alpha],
-			VK_BLEND_OP_ADD, p.cms.wrgba);
-	}
-	else
-	{
-		gpb.SetBlendAttachment(0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-			VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.cms.wrgba);
+		if (IsDATEModePrimIDInit(p.ps.date))
+		{
+			// image DATE prepass
+			gpb.SetBlendAttachment(0, true, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE,
+				VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT);
+		}
+		else if (p.bs.enable)
+		{
+			gpb.SetBlendAttachment(0, true, s_vk_blend_factors[p.bs.src_factor], s_vk_blend_factors[p.bs.dst_factor],
+				s_vk_blend_ops[p.bs.op], s_vk_blend_factors[p.bs.src_factor_alpha], s_vk_blend_factors[p.bs.dst_factor_alpha],
+				VK_BLEND_OP_ADD, p.cms.wrgba);
+		}
+		else
+		{
+			gpb.SetBlendAttachment(0, false, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
+				VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, p.cms.wrgba);
+		}
 	}
 
 	// Tests have shown that it's faster to just enable rast order on the entire pass, rather than alternating
