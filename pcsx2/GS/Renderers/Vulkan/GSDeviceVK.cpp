@@ -69,16 +69,35 @@ static constexpr std::array<VkCompareOp, 4> s_vk_compare_ops = {
 
 static VkStencilOpState GetDATEStencilOpState(const bool date_one)
 {
-	return VkStencilOpState{ VK_STENCIL_OP_KEEP, date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP,
-		VK_STENCIL_OP_KEEP, VK_COMPARE_OP_EQUAL, 1u, 1u, 1u };
+	VkStencilOpState sos = {};
+	sos.failOp = VK_STENCIL_OP_KEEP;
+	sos.passOp = date_one ? VK_STENCIL_OP_ZERO : VK_STENCIL_OP_KEEP;
+	sos.depthFailOp = VK_STENCIL_OP_KEEP;
+	sos.compareOp = VK_COMPARE_OP_EQUAL;
+	sos.compareMask = 1u;
+	sos.writeMask = 1u;
+	sos.reference = 1u;
+	return sos;
 }
 
 static constexpr VkStencilOpState s_vk_date_stencil_init_sos = {
-	VK_STENCIL_OP_KEEP, VK_STENCIL_OP_REPLACE, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 1u, 1u, 1u };
+	.failOp = VK_STENCIL_OP_KEEP,
+	.passOp = VK_STENCIL_OP_REPLACE,
+	.depthFailOp = VK_STENCIL_OP_KEEP,
+	.compareOp = VK_COMPARE_OP_ALWAYS,
+	.compareMask = 1u,
+	.writeMask = 1u,
+	.reference = 1u,
+};
 
 static constexpr VkColorBlendEquationEXT s_vk_date_primid_init_blend = {
-	VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_MIN, VK_BLEND_FACTOR_ONE,
-	VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
+	.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.colorBlendOp = VK_BLEND_OP_MIN,
+	.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+	.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+	.alphaBlendOp = VK_BLEND_OP_ADD,
+};
 
 static constexpr GSHWDrawConfig::BlendState s_standard_blend =
 	GSHWDrawConfig::BlendState(true, GSDevice::SRC_ALPHA, GSDevice::INV_SRC_ALPHA,
@@ -5978,26 +5997,34 @@ __ri void GSDeviceVK::ApplyBaseState(u32 flags, VkCommandBuffer cmdbuf)
 		{
 			if (m_extended_dynamic_state.date_init == DATEInitMethod::PrimID)
 			{
-				VkBool32 vk_enable = true;
+				VkBool32 vk_enable = VK_TRUE;
 				vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &s_vk_date_primid_init_blend);
 				vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
 			}
 			else if (m_extended_dynamic_state.bs.enable)
 			{
-				// FIXME: FIX FORMATTING!
 				const GSHWDrawConfig::BlendState& bs = m_extended_dynamic_state.bs;
-				VkColorBlendEquationEXT vk_blend_eqn = { s_vk_blend_factors[bs.src_factor], s_vk_blend_factors[bs.dst_factor],
-					s_vk_blend_ops[bs.op], s_vk_blend_factors[bs.src_factor_alpha], s_vk_blend_factors[bs.dst_factor_alpha],
-					VK_BLEND_OP_ADD };
-				VkBool32 vk_enable = true;
+				VkColorBlendEquationEXT vk_blend_eqn = {};
+				vk_blend_eqn.srcColorBlendFactor = s_vk_blend_factors[bs.src_factor];
+				vk_blend_eqn.dstColorBlendFactor = s_vk_blend_factors[bs.dst_factor];
+				vk_blend_eqn.colorBlendOp = s_vk_blend_ops[bs.op];
+				vk_blend_eqn.srcAlphaBlendFactor = s_vk_blend_factors[bs.src_factor_alpha];
+				vk_blend_eqn.dstAlphaBlendFactor = s_vk_blend_factors[bs.dst_factor_alpha];
+				vk_blend_eqn.alphaBlendOp = VK_BLEND_OP_ADD;
+				VkBool32 vk_enable = VK_TRUE;
 				vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
 				vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
 			}
 			else
 			{
-				VkColorBlendEquationEXT vk_blend_eqn = { VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD,
-					VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD };
-				VkBool32 vk_enable = false;
+				VkColorBlendEquationEXT vk_blend_eqn = {};
+				vk_blend_eqn.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				vk_blend_eqn.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+				vk_blend_eqn.colorBlendOp = VK_BLEND_OP_ADD;
+				vk_blend_eqn.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				vk_blend_eqn.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+				vk_blend_eqn.alphaBlendOp = VK_BLEND_OP_ADD;
+				VkBool32 vk_enable = VK_FALSE;
 				vkCmdSetColorBlendEquationEXT(cmdbuf, 0, 1, &vk_blend_eqn);
 				vkCmdSetColorBlendEnableEXT(cmdbuf, 0, 1, &vk_enable);
 			}
