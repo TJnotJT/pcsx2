@@ -68,10 +68,15 @@ public:
 		return m_optional_extensions.vk_ext_attachment_feedback_loop_layout && !m_features.framebuffer_fetch;
 	}
 
-	__fi bool UseExtendedDynamicState() const
+	__fi bool UseExtendedDynamicStateTFX() const
 	{
 		return m_optional_extensions.vk_ext_extended_dynamic_state &&
 			m_optional_extensions.vk_ext_extended_dynamic_state3;
+	}
+
+	__fi bool UseExtendedDynamicStateUtility() const
+	{
+		return UseExtendedDynamicStateTFX() && m_extended_dynamic_state_full;
 	}
 
 	// Helpers for getting constants
@@ -297,6 +302,8 @@ private:
 	GPUPipelineStatistics m_accumulated_gpu_pipeline_statistics{};
 	bool m_gpu_pipeline_statistics_enabled = false;
 	bool m_gpu_pipeline_statistics_supported = false;
+
+	bool m_extended_dynamic_state_full = false;
 
 	std::array<FrameResources, NUM_COMMAND_BUFFERS> m_frame_resources;
 	u64 m_next_fence_counter = 1;
@@ -757,7 +764,7 @@ private:
 		DIRTY_BASE_STATE = DIRTY_FLAG_INDEX_BUFFER | DIRTY_FLAG_PIPELINE | DIRTY_FLAG_VIEWPORT | DIRTY_FLAG_SCISSOR |
 		                   DIRTY_FLAG_BLEND_CONSTANTS | DIRTY_FLAG_LINE_WIDTH,
 		DIRTY_TFX_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_TFX_TEXTURES | DIRTY_EDS_STATE,
-		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_UTILITY_TEXTURE,
+		DIRTY_UTILITY_STATE = DIRTY_BASE_STATE | DIRTY_FLAG_UTILITY_TEXTURE | DIRTY_EDS_STATE,
 		DIRTY_CONSTANT_BUFFER_STATE = DIRTY_FLAG_VS_CONSTANT_BUFFER | DIRTY_FLAG_PS_CONSTANT_BUFFER | DIRTY_FLAG_VS_PUSH_CONSTANTS,
 		ALL_DIRTY_STATE = DIRTY_BASE_STATE | DIRTY_TFX_STATE | DIRTY_UTILITY_STATE | DIRTY_CONSTANT_BUFFER_STATE,
 	};

@@ -760,7 +760,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	HWROV = false;
 	HWROVLogging = false;
 	HWROVBarriersVK = false;
-	ExtendedDynamicStateVK = false;
+	ExtendedDynamicStateVK = GSExtendedDynamicStateModeVK::Off;
 
 	ManualUserHacks = false;
 	UserHacks_AlignSpriteX = false;
@@ -1065,7 +1065,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(HWROV);
 	SettingsWrapBitBool(HWROVLogging);
 	SettingsWrapBitBool(HWROVBarriersVK);
-	SettingsWrapBitBool(ExtendedDynamicStateVK);
+	SettingsWrapIntEnumEx(ExtendedDynamicStateVK, "ExtendedDynamicStateVK");
 	SettingsWrapIntEnumEx(AccurateBlendingUnit, "accurate_blending_unit");
 	SettingsWrapIntEnumEx(TextureFiltering, "filter");
 	SettingsWrapIntEnumEx(TexturePreloading, "texture_preloading");
