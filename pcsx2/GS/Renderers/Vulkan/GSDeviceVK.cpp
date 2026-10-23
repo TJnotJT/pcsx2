@@ -3040,7 +3040,8 @@ bool GSDeviceVK::CheckFeatures()
 	m_extended_dynamic_state_full =
 		m_optional_extensions.vk_ext_extended_dynamic_state &&
 		m_optional_extensions.vk_ext_extended_dynamic_state3 &&
-		(IsDeviceNVIDIA() || GSConfig.ExtendedDynamicStateVK == GSExtendedDynamicStateModeVK::Full);
+		((IsDeviceNVIDIA() && GSConfig.ExtendedDynamicStateFullVK == GSExtendedDynamicStateFullModeVK::Auto) ||
+		(GSConfig.ExtendedDynamicStateFullVK == GSExtendedDynamicStateFullModeVK::Always));
 
 	return true;
 }

@@ -479,9 +479,15 @@ enum class GSDepthFeedbackMode : u8
 
 enum class GSExtendedDynamicStateModeVK : u8
 {
-	Off     = 0,
-	Enabled = 1,
-	Full    = 2,
+	Off    = 0,
+	Always = 1,
+};
+
+enum class GSExtendedDynamicStateFullModeVK : u8
+{
+	Off    = 0,
+	Auto   = 1,
+	Always = 2,
 };
 
 enum class AchievementOverlayPosition : u8
@@ -907,6 +913,7 @@ struct Pcsx2Config
 		s8 OverrideTextureBarriers = -1;
 		GSDepthFeedbackMode DepthFeedbackMode = GSDepthFeedbackMode::Auto;
 		GSExtendedDynamicStateModeVK ExtendedDynamicStateVK = GSExtendedDynamicStateModeVK::Off;
+		GSExtendedDynamicStateFullModeVK ExtendedDynamicStateFullVK = GSExtendedDynamicStateFullModeVK::Off;
 
 		u8 CAS_Sharpness = 50;
 		u8 ShadeBoost_Brightness = DEFAULT_SHADEBOOST_BRIGHTNESS;
