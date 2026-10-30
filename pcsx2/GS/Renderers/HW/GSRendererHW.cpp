@@ -4633,10 +4633,8 @@ void GSRendererHW::Draw()
 
 						if (tgt->m_TEX0.TBP0 != MIP_TEX0.TBP0)
 						{
-							GSVector4i offset = GSVector4i::zero();
-							g_texture_cache->TranslateAlignedRectByPage(tgt, MIP_TEX0.TBP0, MIP_TEX0.PSM, MIP_TEX0.TBW, tgt_rect, false);
+							GSVector4i offset = g_texture_cache->TranslateAlignedRectByPage(tgt, MIP_TEX0.TBP0, MIP_TEX0.PSM, MIP_TEX0.TBW, tgt_rect, false);
 							target_offsets[layer] = GSVector2i(offset.x * tgt->GetScale(), offset.y * tgt->GetScale());
-							
 						}
 					}
 					else
