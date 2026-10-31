@@ -4597,7 +4597,6 @@ void GSRendererHW::Draw()
 				target_levels[0] = src->m_texture;
 				layer_levels.x = 1;
 				layer_levels.y = m_context->TEX1.MXL;
-
 			}
 
 			bool has_target_mips = true;

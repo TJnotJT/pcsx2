@@ -598,14 +598,15 @@ void GSTextureVK::GenerateMipmap(GSTexture* target_list[], GSVector2i offsets_li
 
 	for (int dst_level = 1; dst_level < m_mipmap_levels; dst_level++)
 	{
-		const bool has_target_layer = target_list && target_list[dst_level] != nullptr;
-		int src_level = has_target_layer ? 0 : (dst_level - 1);
+		GSTextureVK* target_tex = static_cast<GSTextureVK*>(target_list[dst_level]);
+		const bool has_target_layer = target_list && target_tex != nullptr;
+		int src_level = has_target_layer ? std::min(target_tex->m_mipmap_levels, dst_level) : (dst_level - 1);
 		const int src_width = std::max<int>(m_size.x >> src_level, 1);
 		const int src_height = std::max<int>(m_size.y >> src_level, 1);
 		const int dst_width = std::max<int>(m_size.x >> dst_level, 1);
 		const int dst_height = std::max<int>(m_size.y >> dst_level, 1);
 
-		GSTextureVK* src_tex = has_target_layer ? static_cast<GSTextureVK*>(target_list[dst_level]) : this;
+		GSTextureVK* src_tex = has_target_layer ? target_tex : this;
 
 		src_tex->TransitionSubresourcesToLayout(cmdbuf, src_level, 1, src_tex->m_layout, Layout::BlitSrc);
 		TransitionSubresourcesToLayout(cmdbuf, dst_level, 1, m_layout, Layout::BlitDst);
