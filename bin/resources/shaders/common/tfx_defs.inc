@@ -118,6 +118,20 @@ static float4 convert_depth16_rgba8(float value)
 }
 #endif
 
+#if defined(PCSX2_GLSL)
+
+static float4 splat4(float f) { return float4(f, f, f, f); }
+static float3 splat3(float f) { return float3(f, f, f); }
+static float2 splat2(float f) { return float2(f, f); }
+static int4 splat4(int f) { return int4(f, f, f, f); }
+static int3 splat3(int f) { return int3(f, f, f); }
+static int2 splat2(int f) { return int2(f, f); }
+static uint4 splat4(uint f) { return uint4(f, f, f, f); }
+static uint3 splat3(uint f) { return uint3(f, f, f); }
+static uint2 splat2(uint f) { return uint2(f, f); }
+
+#endif
+
 static bool any_nonzero(float3 val)
 {
 	return any(notEqual(val, splat3(0.0f)));

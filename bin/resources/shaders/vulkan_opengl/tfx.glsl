@@ -45,9 +45,6 @@
 #define MAT_GET(MAT, X, Y) MAT[Y][X]
 #define frac(X) fract(X)
 #define lerp mix
-#define splat2(X) (X).xx
-#define splat3(X) (X).xxx
-#define splat4(X) (X).xxxx
 #define IN_PARAM(TYPE, NAME) TYPE NAME
 #define IN_OUT_PARAM(TYPE, NAME) inout TYPE NAME
 #define IS_NAN_OR_INF_4(X) bool4(int4(isinf(X)) | int4(isnan(X)))
