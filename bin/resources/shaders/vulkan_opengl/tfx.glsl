@@ -447,12 +447,12 @@ PSInputGeneric GetPSInput()
 
 // Pixel shader global state
 PSInputGeneric ps_in = PSInputGeneric(
-		vec4(0, 0, 0, 0), // p
-		vec4(0, 0, 0, 0), // t
-		vec4(0, 0, 0, 0), // ti
-		vec4(0, 0, 0, 0), // c
-		0,                // inv_cov
-		0u                // interior
+	vec4(0, 0, 0, 0), // p
+	vec4(0, 0, 0, 0), // t
+	vec4(0, 0, 0, 0), // ti
+	vec4(0, 0, 0, 0), // c
+	0,                // inv_cov
+	0u                // interior
 );
 vec4 current_color = vec4(0, 0, 0, 0);
 float current_depth = 0;
