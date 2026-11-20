@@ -1390,6 +1390,21 @@ static void ResolveShaderIncludes(std::string* source, std::span<const ShaderInc
 	}
 }
 
+static void ReplaceShaderStaticBranches(std::string* source)
+{
+	// Comment out the dynamic branch definitions.
+	StringUtil::ReplaceAll(source, "#define __IF__", "//");
+	StringUtil::ReplaceAll(source, "#define __ELIF__", "//");
+	StringUtil::ReplaceAll(source, "#define __ELSE__", "//");
+	StringUtil::ReplaceAll(source, "#define __ENDIF__", "//");
+
+	// Replace the macros with preprocessor branches.
+	StringUtil::ReplaceAll(source, "__IF__", "#if");
+	StringUtil::ReplaceAll(source, "__ELIF__", "#elif");
+	StringUtil::ReplaceAll(source, "__ELSE__", "#else");
+	StringUtil::ReplaceAll(source, "__ENDIF__", "#endif");
+}
+
 bool GSDevice::GetTFXShaderSource(std::string* source)
 {
 	static constexpr const char* names[] = {
@@ -1425,6 +1440,13 @@ bool GSDevice::GetTFXShaderSource(std::string* source)
 	}
 
 	ResolveShaderIncludes(source, includes);
+
+	// Current only Metal uses dynamic branches for spec. constants.
+	if (GSGetCurrentRenderer() != GSRendererType::Metal)
+	{
+		ReplaceShaderStaticBranches(source);
+	}
+
 	return true;
 }
 
