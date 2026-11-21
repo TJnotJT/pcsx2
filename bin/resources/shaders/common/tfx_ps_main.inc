@@ -5,8 +5,7 @@ PS_STATIC void ps_shuffle(IN_OUT_PARAM(float4, C))
 {
 	__IF__ (PS_SHUFFLE != 0)
 	{
-		__IF__ ((PS_SHUFFLE_SAME == 0) && (PS_READ16_SRC == 0) && \
-			!(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE))
+		__IF__ ((PS_SHUFFLE_SAME == 0) && (PS_READ16_SRC == 0) && !(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE))
 		{
 			uint4 denorm_c_after = uint4(C);
 			__IF__ ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
