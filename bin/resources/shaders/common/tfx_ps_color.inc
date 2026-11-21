@@ -36,8 +36,7 @@ PS_STATIC float4 ps_color()
 		T = sample_color(st);
 	__ENDIF__
 
-	__IF__ (PS_SHUFFLE != 0 && PS_SHUFFLE_SAME == 0 && PS_READ16_SRC == 0 && \
-		!(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE))
+	__IF__ (PS_SHUFFLE != 0 && PS_SHUFFLE_SAME == 0 && PS_READ16_SRC == 0 && !(PS_PROCESS_BA == SHUFFLE_READWRITE && PS_PROCESS_RG == SHUFFLE_READWRITE))
 	{
 		uint4 denorm_c_before = uint4(T);
 		__IF__ ((PS_PROCESS_BA & SHUFFLE_READ) != 0)
